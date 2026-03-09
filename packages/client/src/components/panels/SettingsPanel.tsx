@@ -195,10 +195,7 @@ function AppearanceSettings() {
       document.head.appendChild(style);
     }
     style.textContent = customFonts
-      .map(
-        (f) =>
-          `@font-face { font-family: "${f.family}"; src: url("${f.url}"); font-display: swap; }`,
-      )
+      .map((f) => `@font-face { font-family: "${f.family}"; src: url("${f.url}"); font-display: swap; }`)
       .join("\n");
   }, [customFonts]);
 
@@ -277,12 +274,12 @@ function AppearanceSettings() {
         </select>
         {(!customFonts || customFonts.length === 0) && (
           <p className="text-[10px] text-[var(--muted-foreground)]">
-            Drop font files (.ttf, .otf, .woff, .woff2) into the <span className="font-medium">data/fonts/</span>{" "}
-            folder to add custom fonts.
+            Drop font files (.ttf, .otf, .woff, .woff2) into the <span className="font-medium">data/fonts/</span> folder
+            to add custom fonts.
           </p>
         )}
         <button
-          onClick={() => api.post("/api/fonts/open-folder").catch(() => {})}
+          onClick={() => api.post("/fonts/open-folder").catch(() => {})}
           className="mt-1 inline-flex items-center gap-1.5 self-start rounded-lg bg-[var(--secondary)] px-3 py-1.5 text-[11px] font-medium text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
         >
           <FolderOpen size={12} />
@@ -697,7 +694,9 @@ function ThemesSettings() {
       document.head.appendChild(style);
     }
     style.textContent = themeCss;
-    return () => { style!.textContent = ""; };
+    return () => {
+      style!.textContent = "";
+    };
   }, [editorOpen, livePreview, themeCss]);
 
   const openNewTheme = useCallback(() => {
@@ -825,19 +824,32 @@ function ThemesSettings() {
           </summary>
           <div className="border-t border-[var(--border)] px-3 py-2 font-mono text-[10px] leading-relaxed text-[var(--muted-foreground)]">
             <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-              <span>--background</span><span className="text-white/40">Page background</span>
-              <span>--foreground</span><span className="text-white/40">Main text</span>
-              <span>--primary</span><span className="text-white/40">Accent / buttons</span>
-              <span>--primary-foreground</span><span className="text-white/40">Text on primary</span>
-              <span>--secondary</span><span className="text-white/40">Cards / inputs</span>
-              <span>--card</span><span className="text-white/40">Card background</span>
-              <span>--border</span><span className="text-white/40">Borders</span>
-              <span>--muted-foreground</span><span className="text-white/40">Dimmed text</span>
-              <span>--sidebar</span><span className="text-white/40">Sidebar bg</span>
-              <span>--sidebar-border</span><span className="text-white/40">Sidebar border</span>
-              <span>--destructive</span><span className="text-white/40">Error / delete</span>
-              <span>--popover</span><span className="text-white/40">Dropdown bg</span>
-              <span>--accent</span><span className="text-white/40">Hover highlights</span>
+              <span>--background</span>
+              <span className="text-white/40">Page background</span>
+              <span>--foreground</span>
+              <span className="text-white/40">Main text</span>
+              <span>--primary</span>
+              <span className="text-white/40">Accent / buttons</span>
+              <span>--primary-foreground</span>
+              <span className="text-white/40">Text on primary</span>
+              <span>--secondary</span>
+              <span className="text-white/40">Cards / inputs</span>
+              <span>--card</span>
+              <span className="text-white/40">Card background</span>
+              <span>--border</span>
+              <span className="text-white/40">Borders</span>
+              <span>--muted-foreground</span>
+              <span className="text-white/40">Dimmed text</span>
+              <span>--sidebar</span>
+              <span className="text-white/40">Sidebar bg</span>
+              <span>--sidebar-border</span>
+              <span className="text-white/40">Sidebar border</span>
+              <span>--destructive</span>
+              <span className="text-white/40">Error / delete</span>
+              <span>--popover</span>
+              <span className="text-white/40">Dropdown bg</span>
+              <span>--accent</span>
+              <span className="text-white/40">Hover highlights</span>
             </div>
           </div>
         </details>
@@ -1221,9 +1233,7 @@ function ImportButton({
       let res: Response;
 
       // "auto" mode: send binary files (PNG) as multipart, JSON files as JSON body
-      const effectiveMode = mode === "auto"
-        ? (file.name.toLowerCase().endsWith(".json") ? "json" : "file")
-        : mode;
+      const effectiveMode = mode === "auto" ? (file.name.toLowerCase().endsWith(".json") ? "json" : "file") : mode;
 
       if (effectiveMode === "json") {
         const text = await file.text();

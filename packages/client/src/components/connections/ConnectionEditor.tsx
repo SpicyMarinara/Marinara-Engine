@@ -502,9 +502,10 @@ export function ConnectionEditor() {
               <p className="mt-1.5 flex items-start gap-1 text-[10px] text-sky-400/80">
                 <AlertCircle size={10} className="mt-px shrink-0" />
                 <span>
-                  <strong>Windows users:</strong> If your proxy or local server isn't detected, Windows Defender Firewall
-                  may be blocking the connection. Open <em>Windows Security → Firewall & network protection →
-                  Allow an app through firewall</em> and add Node.js or your proxy application.
+                  <strong>Windows users:</strong> If your proxy or local server isn't detected, Windows Defender
+                  Firewall may be blocking the connection. Open{" "}
+                  <em>Windows Security → Firewall & network protection → Allow an app through firewall</em> and add
+                  Node.js or your proxy application.
                 </span>
               </p>
             )}
@@ -514,9 +515,11 @@ export function ConnectionEditor() {
           <FieldGroup
             label={localProvider === "image_generation" ? "Service" : "Model"}
             icon={<Server size={14} className="text-sky-400" />}
-            help={localProvider === "image_generation"
-              ? "Select the image generation service you want to use. Each service has different capabilities, styles, and pricing."
-              : "The specific AI model to use. Larger models are smarter but slower and more expensive. Smaller models are faster and cheaper."}
+            help={
+              localProvider === "image_generation"
+                ? "Select the image generation service you want to use. Each service has different capabilities, styles, and pricing."
+                : "The specific AI model to use. Larger models are smarter but slower and more expensive. Smaller models are faster and cheaper."
+            }
           >
             {localProvider === "image_generation" ? (
               <div className="space-y-2">
@@ -551,238 +554,242 @@ export function ConnectionEditor() {
                 </div>
               </div>
             ) : (
-            <>
-            <div className="relative">
-              <div
-                onClick={() => setShowModelDropdown(!showModelDropdown)}
-                className={cn(
-                  "flex cursor-pointer items-center gap-2 rounded-xl bg-[var(--secondary)] px-3 py-2.5 ring-1 ring-[var(--border)] transition-all hover:ring-[var(--ring)]",
-                  showModelDropdown && "ring-sky-400/50",
-                )}
-              >
-                <Search size={13} className="shrink-0 text-[var(--muted-foreground)]" />
-                {showModelDropdown ? (
-                  <input
-                    value={modelSearch}
-                    onChange={(e) => setModelSearch(e.target.value)}
-                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--muted-foreground)]"
-                    placeholder="Search models…"
-                    autoFocus
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                ) : (
-                  <span className={cn("flex-1 text-sm", !localModel && "text-[var(--muted-foreground)]")}>
-                    {localModel
-                      ? selectedModelInfo
-                        ? `${selectedModelInfo.name} (${selectedModelInfo.id})`
-                        : localModel
-                      : "Select a model…"}
-                  </span>
-                )}
-                <ChevronDown
-                  size={14}
-                  className={cn(
-                    "shrink-0 text-[var(--muted-foreground)] transition-transform",
-                    showModelDropdown && "rotate-180",
-                  )}
-                />
-              </div>
-
-              {showModelDropdown && (
-                <>
+              <>
+                <div className="relative">
                   <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => {
-                      setShowModelDropdown(false);
-                      setModelSearch("");
-                    }}
-                  />
-                  <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-80 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl">
-                    {/* Fetch from API button */}
-                    <div className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--card)] p-2">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleFetchModels();
-                        }}
-                        disabled={fetchModels.isPending}
-                        className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-sky-400/10 px-3 py-2 text-xs font-medium text-sky-400 transition-all hover:bg-sky-400/20 active:scale-[0.98] disabled:opacity-50"
-                      >
-                        {fetchModels.isPending ? <Loader2 size={12} className="animate-spin" /> : <Globe size={12} />}
-                        {fetchModels.isPending ? "Fetching…" : "Fetch Models from API"}
-                      </button>
-                      {fetchError && <p className="mt-1.5 text-[10px] text-[var(--destructive)]">{fetchError}</p>}
-                      {remoteModels.length > 0 && !fetchError && (
-                        <p className="mt-1 text-[10px] text-emerald-400">
-                          {remoteModels.length} model{remoteModels.length !== 1 ? "s" : ""} available from API
-                        </p>
-                      )}
-                    </div>
-
-                    {localProvider === "custom" ? (
-                      <div className="p-3">
-                        <p className="mb-2 text-[10px] text-[var(--muted-foreground)]">
-                          Custom endpoints: type the model ID or fetch from API above.
-                        </p>
-                        <input
-                          value={localModel}
-                          onChange={(e) => {
-                            setLocalModel(e.target.value);
-                            markDirty();
-                          }}
-                          className="w-full rounded-lg bg-[var(--secondary)] px-3 py-2 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-sky-400/50"
-                          placeholder="model-name-or-path"
-                          autoFocus
-                        />
-                        {/* Show fetched models for custom provider */}
-                        {remoteModels.length > 0 && (
-                          <div className="mt-2 max-h-48 overflow-y-auto">
-                            {remoteModels
-                              .filter(
-                                (m) =>
-                                  !modelSearch.trim() ||
-                                  m.id.toLowerCase().includes(modelSearch.toLowerCase()) ||
-                                  m.name.toLowerCase().includes(modelSearch.toLowerCase()),
-                              )
-                              .map((m) => (
-                                <button
-                                  key={m.id}
-                                  onClick={() => selectModel({ id: m.id })}
-                                  className={cn(
-                                    "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-[var(--accent)]",
-                                    localModel === m.id && "bg-sky-400/5",
-                                  )}
-                                >
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-sm font-medium">{m.name}</span>
-                                      {localModel === m.id && <Check size={12} className="text-sky-400" />}
-                                    </div>
-                                    <span className="text-[10px] text-[var(--muted-foreground)]">{m.id}</span>
-                                  </div>
-                                  <span className="shrink-0 rounded-md bg-sky-400/10 px-1.5 py-0.5 text-[9px] font-medium text-sky-400">
-                                    API
-                                  </span>
-                                </button>
-                              ))}
-                          </div>
-                        )}
-                        <button
-                          onClick={() => {
-                            setShowModelDropdown(false);
-                            setModelSearch("");
-                          }}
-                          className="mt-2 w-full rounded-lg bg-sky-400/10 px-3 py-1.5 text-xs font-medium text-sky-400 hover:bg-sky-400/20"
-                        >
-                          Done
-                        </button>
-                      </div>
-                    ) : filteredModels.length === 0 ? (
-                      <div className="p-4 text-center text-xs text-[var(--muted-foreground)]">
-                        No models found. Try a different search or type the model ID below.
-                        <input
-                          value={localModel}
-                          onChange={(e) => {
-                            setLocalModel(e.target.value);
-                            markDirty();
-                          }}
-                          className="mt-2 w-full rounded-lg bg-[var(--secondary)] px-3 py-2 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-sky-400/50"
-                          placeholder="Custom model ID…"
-                        />
-                      </div>
+                    onClick={() => setShowModelDropdown(!showModelDropdown)}
+                    className={cn(
+                      "flex cursor-pointer items-center gap-2 rounded-xl bg-[var(--secondary)] px-3 py-2.5 ring-1 ring-[var(--border)] transition-all hover:ring-[var(--ring)]",
+                      showModelDropdown && "ring-sky-400/50",
+                    )}
+                  >
+                    <Search size={13} className="shrink-0 text-[var(--muted-foreground)]" />
+                    {showModelDropdown ? (
+                      <input
+                        value={modelSearch}
+                        onChange={(e) => setModelSearch(e.target.value)}
+                        className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--muted-foreground)]"
+                        placeholder="Search models…"
+                        autoFocus
+                        onClick={(e) => e.stopPropagation()}
+                      />
                     ) : (
-                      filteredModels.map((m) => (
-                        <button
-                          key={m.id}
-                          onClick={() => selectModel(m)}
-                          className={cn(
-                            "flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--accent)]",
-                            localModel === m.id && "bg-sky-400/5",
-                          )}
-                        >
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium">{m.name}</span>
-                              {m.isRemote && (
-                                <span className="rounded-md bg-sky-400/10 px-1.5 py-0.5 text-[9px] font-medium text-sky-400">
-                                  API
-                                </span>
-                              )}
-                              {localModel === m.id && <Check size={12} className="text-sky-400" />}
-                            </div>
-                            <span className="text-[10px] text-[var(--muted-foreground)]">{m.id}</span>
-                          </div>
-                          <div className="shrink-0 text-right">
-                            {m.context > 0 && (
-                              <div className="text-[10px] font-medium text-sky-400">{formatContext(m.context)}</div>
+                      <span className={cn("flex-1 text-sm", !localModel && "text-[var(--muted-foreground)]")}>
+                        {localModel
+                          ? selectedModelInfo
+                            ? `${selectedModelInfo.name} (${selectedModelInfo.id})`
+                            : localModel
+                          : "Select a model…"}
+                      </span>
+                    )}
+                    <ChevronDown
+                      size={14}
+                      className={cn(
+                        "shrink-0 text-[var(--muted-foreground)] transition-transform",
+                        showModelDropdown && "rotate-180",
+                      )}
+                    />
+                  </div>
+
+                  {showModelDropdown && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-40"
+                        onClick={() => {
+                          setShowModelDropdown(false);
+                          setModelSearch("");
+                        }}
+                      />
+                      <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-80 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl">
+                        {/* Fetch from API button */}
+                        <div className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--card)] p-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleFetchModels();
+                            }}
+                            disabled={fetchModels.isPending}
+                            className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-sky-400/10 px-3 py-2 text-xs font-medium text-sky-400 transition-all hover:bg-sky-400/20 active:scale-[0.98] disabled:opacity-50"
+                          >
+                            {fetchModels.isPending ? (
+                              <Loader2 size={12} className="animate-spin" />
+                            ) : (
+                              <Globe size={12} />
                             )}
-                            {m.maxOutput > 0 && (
-                              <div className="text-[9px] text-[var(--muted-foreground)]">
-                                {formatContext(m.maxOutput)} out
+                            {fetchModels.isPending ? "Fetching…" : "Fetch Models from API"}
+                          </button>
+                          {fetchError && <p className="mt-1.5 text-[10px] text-[var(--destructive)]">{fetchError}</p>}
+                          {remoteModels.length > 0 && !fetchError && (
+                            <p className="mt-1 text-[10px] text-emerald-400">
+                              {remoteModels.length} model{remoteModels.length !== 1 ? "s" : ""} available from API
+                            </p>
+                          )}
+                        </div>
+
+                        {localProvider === "custom" ? (
+                          <div className="p-3">
+                            <p className="mb-2 text-[10px] text-[var(--muted-foreground)]">
+                              Custom endpoints: type the model ID or fetch from API above.
+                            </p>
+                            <input
+                              value={localModel}
+                              onChange={(e) => {
+                                setLocalModel(e.target.value);
+                                markDirty();
+                              }}
+                              className="w-full rounded-lg bg-[var(--secondary)] px-3 py-2 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-sky-400/50"
+                              placeholder="model-name-or-path"
+                              autoFocus
+                            />
+                            {/* Show fetched models for custom provider */}
+                            {remoteModels.length > 0 && (
+                              <div className="mt-2 max-h-48 overflow-y-auto">
+                                {remoteModels
+                                  .filter(
+                                    (m) =>
+                                      !modelSearch.trim() ||
+                                      m.id.toLowerCase().includes(modelSearch.toLowerCase()) ||
+                                      m.name.toLowerCase().includes(modelSearch.toLowerCase()),
+                                  )
+                                  .map((m) => (
+                                    <button
+                                      key={m.id}
+                                      onClick={() => selectModel({ id: m.id })}
+                                      className={cn(
+                                        "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-[var(--accent)]",
+                                        localModel === m.id && "bg-sky-400/5",
+                                      )}
+                                    >
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-sm font-medium">{m.name}</span>
+                                          {localModel === m.id && <Check size={12} className="text-sky-400" />}
+                                        </div>
+                                        <span className="text-[10px] text-[var(--muted-foreground)]">{m.id}</span>
+                                      </div>
+                                      <span className="shrink-0 rounded-md bg-sky-400/10 px-1.5 py-0.5 text-[9px] font-medium text-sky-400">
+                                        API
+                                      </span>
+                                    </button>
+                                  ))}
                               </div>
                             )}
+                            <button
+                              onClick={() => {
+                                setShowModelDropdown(false);
+                                setModelSearch("");
+                              }}
+                              className="mt-2 w-full rounded-lg bg-sky-400/10 px-3 py-1.5 text-xs font-medium text-sky-400 hover:bg-sky-400/20"
+                            >
+                              Done
+                            </button>
                           </div>
-                        </button>
-                      ))
-                    )}
+                        ) : filteredModels.length === 0 ? (
+                          <div className="p-4 text-center text-xs text-[var(--muted-foreground)]">
+                            No models found. Try a different search or type the model ID below.
+                            <input
+                              value={localModel}
+                              onChange={(e) => {
+                                setLocalModel(e.target.value);
+                                markDirty();
+                              }}
+                              className="mt-2 w-full rounded-lg bg-[var(--secondary)] px-3 py-2 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-sky-400/50"
+                              placeholder="Custom model ID…"
+                            />
+                          </div>
+                        ) : (
+                          filteredModels.map((m) => (
+                            <button
+                              key={m.id}
+                              onClick={() => selectModel(m)}
+                              className={cn(
+                                "flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--accent)]",
+                                localModel === m.id && "bg-sky-400/5",
+                              )}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-medium">{m.name}</span>
+                                  {m.isRemote && (
+                                    <span className="rounded-md bg-sky-400/10 px-1.5 py-0.5 text-[9px] font-medium text-sky-400">
+                                      API
+                                    </span>
+                                  )}
+                                  {localModel === m.id && <Check size={12} className="text-sky-400" />}
+                                </div>
+                                <span className="text-[10px] text-[var(--muted-foreground)]">{m.id}</span>
+                              </div>
+                              <div className="shrink-0 text-right">
+                                {m.context > 0 && (
+                                  <div className="text-[10px] font-medium text-sky-400">{formatContext(m.context)}</div>
+                                )}
+                                {m.maxOutput > 0 && (
+                                  <div className="text-[9px] text-[var(--muted-foreground)]">
+                                    {formatContext(m.maxOutput)} out
+                                  </div>
+                                )}
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Manual model ID input below dropdown */}
+                {localProvider !== "custom" && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      value={localModel}
+                      onChange={(e) => {
+                        setLocalModel(e.target.value);
+                        markDirty();
+                      }}
+                      className="flex-1 rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs ring-1 ring-[var(--border)] focus:outline-none focus:ring-[var(--ring)]"
+                      placeholder="Or type model ID directly…"
+                    />
                   </div>
-                </>
-              )}
-            </div>
+                )}
 
-            {/* Manual model ID input below dropdown */}
-            {localProvider !== "custom" && (
-              <div className="mt-2 flex items-center gap-2">
-                <input
-                  value={localModel}
-                  onChange={(e) => {
-                    setLocalModel(e.target.value);
-                    markDirty();
-                  }}
-                  className="flex-1 rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs ring-1 ring-[var(--border)] focus:outline-none focus:ring-[var(--ring)]"
-                  placeholder="Or type model ID directly…"
-                />
-              </div>
-            )}
-
-            {/* Context display */}
-            {selectedModelInfo && (
-              <div className="mt-2 flex items-center gap-4 rounded-lg bg-sky-400/5 px-3 py-2 text-[11px]">
-                <span className="text-[var(--muted-foreground)]">
-                  Context: <strong className="text-sky-400">{formatContext(selectedModelInfo.context)}</strong>
-                </span>
-                <span className="text-[var(--muted-foreground)]">
-                  Max Output: <strong className="text-sky-400">{formatContext(selectedModelInfo.maxOutput)}</strong>
-                </span>
-              </div>
-            )}
-            </>
+                {/* Context display */}
+                {selectedModelInfo && (
+                  <div className="mt-2 flex items-center gap-4 rounded-lg bg-sky-400/5 px-3 py-2 text-[11px]">
+                    <span className="text-[var(--muted-foreground)]">
+                      Context: <strong className="text-sky-400">{formatContext(selectedModelInfo.context)}</strong>
+                    </span>
+                    <span className="text-[var(--muted-foreground)]">
+                      Max Output: <strong className="text-sky-400">{formatContext(selectedModelInfo.maxOutput)}</strong>
+                    </span>
+                  </div>
+                )}
+              </>
             )}
           </FieldGroup>
 
           {/* ── Max Context ── */}
           {localProvider !== "image_generation" && (
-          <FieldGroup
-            label="Max Context Window"
-            icon={<Zap size={14} className="text-sky-400" />}
-            help="The maximum number of tokens this model can process at once (your messages + its reply). This is auto-set when you pick a model from the list."
-          >
-            <div className="flex items-center gap-3">
-              <input
-                type="number"
-                value={localMaxContext}
-                onChange={(e) => {
-                  setLocalMaxContext(Number(e.target.value) || 128000);
-                  markDirty();
-                }}
-                className="w-40 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-              />
-              <span className="text-xs text-[var(--muted-foreground)]">{formatContext(localMaxContext)} tokens</span>
-            </div>
-            <p className="mt-1 text-[10px] text-[var(--muted-foreground)]">
-              This is auto-set when selecting a model from the list. Override manually if needed.
-            </p>
-          </FieldGroup>
+            <FieldGroup
+              label="Max Context Window"
+              icon={<Zap size={14} className="text-sky-400" />}
+              help="The maximum number of tokens this model can process at once (your messages + its reply). This is auto-set when you pick a model from the list."
+            >
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  value={localMaxContext}
+                  onChange={(e) => {
+                    setLocalMaxContext(Number(e.target.value) || 128000);
+                    markDirty();
+                  }}
+                  className="w-40 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                />
+                <span className="text-xs text-[var(--muted-foreground)]">{formatContext(localMaxContext)} tokens</span>
+              </div>
+              <p className="mt-1 text-[10px] text-[var(--muted-foreground)]">
+                This is auto-set when selecting a model from the list. Override manually if needed.
+              </p>
+            </FieldGroup>
           )}
 
           {/* ── Prompt Caching (Anthropic only) ── */}
@@ -817,52 +824,52 @@ export function ConnectionEditor() {
 
           {/* ── Test Section ── */}
           {localProvider !== "image_generation" && (
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 space-y-4">
-            <h3 className="text-sm font-semibold">Connection Tests</h3>
-            <div className="flex gap-2">
-              <button
-                onClick={handleTestConnection}
-                disabled={testConnection.isPending}
-                className="flex items-center gap-1.5 rounded-xl bg-sky-400/10 px-4 py-2.5 text-xs font-medium text-sky-400 ring-1 ring-sky-400/20 transition-all hover:bg-sky-400/20 active:scale-[0.98] disabled:opacity-50"
-              >
-                {testConnection.isPending ? <Loader2 size={13} className="animate-spin" /> : <Wifi size={13} />}
-                Test Connection
-              </button>
-              <button
-                onClick={handleTestMessage}
-                disabled={testMessage.isPending || !localModel}
-                className="flex items-center gap-1.5 rounded-xl bg-emerald-400/10 px-4 py-2.5 text-xs font-medium text-emerald-400 ring-1 ring-emerald-400/20 transition-all hover:bg-emerald-400/20 active:scale-[0.98] disabled:opacity-50"
-              >
-                {testMessage.isPending ? <Loader2 size={13} className="animate-spin" /> : <MessageSquare size={13} />}
-                Send Test Message
-              </button>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 space-y-4">
+              <h3 className="text-sm font-semibold">Connection Tests</h3>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleTestConnection}
+                  disabled={testConnection.isPending}
+                  className="flex items-center gap-1.5 rounded-xl bg-sky-400/10 px-4 py-2.5 text-xs font-medium text-sky-400 ring-1 ring-sky-400/20 transition-all hover:bg-sky-400/20 active:scale-[0.98] disabled:opacity-50"
+                >
+                  {testConnection.isPending ? <Loader2 size={13} className="animate-spin" /> : <Wifi size={13} />}
+                  Test Connection
+                </button>
+                <button
+                  onClick={handleTestMessage}
+                  disabled={testMessage.isPending || !localModel}
+                  className="flex items-center gap-1.5 rounded-xl bg-emerald-400/10 px-4 py-2.5 text-xs font-medium text-emerald-400 ring-1 ring-emerald-400/20 transition-all hover:bg-emerald-400/20 active:scale-[0.98] disabled:opacity-50"
+                >
+                  {testMessage.isPending ? <Loader2 size={13} className="animate-spin" /> : <MessageSquare size={13} />}
+                  Send Test Message
+                </button>
+              </div>
+
+              <p className="text-[10px] text-[var(--muted-foreground)]">
+                <strong>Test Connection</strong> verifies your API key works. <strong>Send Test Message</strong> sends
+                "hi" to the model and shows the response.
+              </p>
+
+              {/* Connection test result */}
+              {testResult && (
+                <TestResultCard label="Connection Test" success={testResult.success} latencyMs={testResult.latencyMs}>
+                  {testResult.message}
+                </TestResultCard>
+              )}
+
+              {/* Message test result */}
+              {msgResult && (
+                <TestResultCard label="Test Message" success={msgResult.success} latencyMs={msgResult.latencyMs}>
+                  {msgResult.success ? (
+                    <div className="mt-1.5 rounded-lg bg-[var(--secondary)] p-2.5 text-xs leading-relaxed">
+                      {msgResult.response}
+                    </div>
+                  ) : (
+                    <span className="text-[var(--destructive)]">{msgResult.error || "No response received"}</span>
+                  )}
+                </TestResultCard>
+              )}
             </div>
-
-            <p className="text-[10px] text-[var(--muted-foreground)]">
-              <strong>Test Connection</strong> verifies your API key works. <strong>Send Test Message</strong> sends
-              "hi" to the model and shows the response.
-            </p>
-
-            {/* Connection test result */}
-            {testResult && (
-              <TestResultCard label="Connection Test" success={testResult.success} latencyMs={testResult.latencyMs}>
-                {testResult.message}
-              </TestResultCard>
-            )}
-
-            {/* Message test result */}
-            {msgResult && (
-              <TestResultCard label="Test Message" success={msgResult.success} latencyMs={msgResult.latencyMs}>
-                {msgResult.success ? (
-                  <div className="mt-1.5 rounded-lg bg-[var(--secondary)] p-2.5 text-xs leading-relaxed">
-                    {msgResult.response}
-                  </div>
-                ) : (
-                  <span className="text-[var(--destructive)]">{msgResult.error || "No response received"}</span>
-                )}
-              </TestResultCard>
-            )}
-          </div>
           )}
         </div>
       </div>

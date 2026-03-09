@@ -1,6 +1,6 @@
 # 🍝 Marinara Engine
 
-### Release 1.1.0
+### Release 1.2.0
 
 **An AI-powered chat & roleplay engine** — with conversation, roleplay, and visual novel modes, a full character & sprite system, 18 built-in AI agents, turn-based combat, lorebooks, and more.
 
@@ -12,34 +12,25 @@ Everything runs locally. No accounts, no cloud, no telemetry. Connect to any Ope
 
 ## Changelog
 
-### v1.1.0
+### v1.2.0
 
 **New Features:**
-- **Gallery System** — A per-chat image gallery for storing and viewing generated/uploaded images. Accessible via a dedicated Gallery button on the chat bar.
-- **Image Generation Provider** — New provider type supporting 10 sources (OpenAI DALL-E, Stability AI, Together AI, NovelAI, Pollinations, Stable Horde, AUTOMATIC1111/Forge, ComfyUI, Draw Things, Block Entropy).
-- **Auto-Update Launcher** — The start scripts now automatically pull the latest version from Git on every launch. No more manual `git pull`.
-- **Version Indicator** — Current version displayed at the bottom of the sidebar.
+- **Pinned Gallery Images** — Pin generated images to the chat area as draggable, resizable floating overlays that persist even when the gallery drawer is closed.
+- **Agent Activity Button** — New Sparkles button in the chat header (both roleplay and conversation modes) shows agent results grouped by phase (Pre-Generation, Parallel, Post-Processing) with a badge count.
+- **Agent Error Toasts** — Generation failures and individual agent errors now show toast notifications instead of silently failing.
+- **Agent Auto-Retry** — Failed agents are automatically retried once during generation. If they still fail, a manual Retry button appears in the chat header.
+- **Tracker Widgets in Conversation Mode** — The RoleplayHUD tracker widgets (location, time, weather, inventory, quests, etc.) now appear in conversation mode too when agents are enabled.
 
 **Improvements:**
-- **Agent Prompt Rewrite** — All 18 built-in agent prompts rewritten with improved clarity, tighter instructions, and consistent style.
-- **Font System** — Custom font selection for the chat UI.
-- **Chat Sorting** — Sort chats by name, date, or mode with persistent sort labels.
-- **Chat Message Editing** — Full-width edit mode for chat messages.
-- **V3 Character Card Import** — Support for the latest character card specification.
-- **Bulk Import Progress** — Progress indicator when importing multiple characters.
-- **HTML Rendering** — Inline HTML/CSS/JS rendering in chat messages for immersive elements.
-- **Typewriter Speed Control** — Adjustable streaming text speed.
-- **Agent Data Toggle** — Show/hide agent data panels per chat.
+- **Connection Moved Up** — The Connection selector in Chat Settings is now the first thing after Chat Name for faster setup.
+- **Toggle Styling Fix** — Fixed all 4 toggle switches in Chat Settings (Enable Tools, Enable Agents, Color Dialogues, Context Limit) — the knob no longer overflows the track.
+- **Open Fonts Folder Fix** — Fixed the "Open Fonts Folder" button in Settings not working due to a double `/api` prefix.
 
 **Bug Fixes:**
-- Fixed stop/pause generation button not actually stopping the stream.
-- Fixed SillyTavern character and chat import failures.
-- Fixed persona import not loading correctly.
-- Fixed preset save errors when creating new presets.
-- Fixed font color override not applying in some themes.
-- Fixed streaming toggle not persisting across sessions.
-- Fixed regeneration producing duplicate messages.
-- Fixed server restart leaving stale connections.
+- Fixed generation errors being silently swallowed — now shows error toasts via Sonner.
+- Fixed `requestAnimationFrame` type error in the streaming code.
+- Fixed gallery images disappearing when the gallery drawer was closed (moved to Zustand store).
+- Fixed chat Settings drawer not showing the Connection selector in a prominent position.
 
 ---
 
@@ -110,7 +101,7 @@ All agents are disabled by default — enable only the ones you want. You can al
 
 ### Windows Installer (Recommended)
 
-Download **[Marinara-Engine-Installer-1.1.0.exe](https://github.com/SpicyMarinara/Marinara-Engine/releases/download/v1.1.0/Marinara-Engine-Installer-1.1.0.exe)** from the [Releases](https://github.com/SpicyMarinara/Marinara-Engine/releases) page and run it. The installer checks for Node.js and Git, clones the repo, installs everything, and creates a desktop shortcut.
+Download **[Marinara-Engine-Installer-1.2.0.exe](https://github.com/SpicyMarinara/Marinara-Engine/releases/download/v1.2.0/Marinara-Engine-Installer-1.2.0.exe)** from the [Releases](https://github.com/SpicyMarinara/Marinara-Engine/releases) page and run it. The installer checks for Node.js and Git, clones the repo, installs everything, and creates a desktop shortcut.
 
 You still need **Node.js** and **Git** installed first (the installer will tell you if they're missing).
 

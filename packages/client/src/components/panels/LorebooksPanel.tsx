@@ -3,7 +3,19 @@
 // Category tabs, search, click-to-edit, AI generate
 // ──────────────────────────────────────────────
 import { useState, useMemo } from "react";
-import { Plus, Upload, Sparkles, BookOpen, Search, Globe, Users, UserRound, ScrollText, Layers, ArrowUpDown } from "lucide-react";
+import {
+  Plus,
+  Upload,
+  Sparkles,
+  BookOpen,
+  Search,
+  Globe,
+  Users,
+  UserRound,
+  ScrollText,
+  Layers,
+  ArrowUpDown,
+} from "lucide-react";
 import { useUIStore } from "../../stores/ui.store";
 import { useLorebooks, useDeleteLorebook } from "../../hooks/use-lorebooks";
 import type { Lorebook, LorebookCategory } from "@marinara-engine/shared";
@@ -131,7 +143,10 @@ export function LorebooksPanel() {
             <option value="oldest">Oldest</option>
             <option value="tokens">Token Budget</option>
           </select>
-          <ArrowUpDown size={10} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)]" />
+          <ArrowUpDown
+            size={10}
+            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)]"
+          />
         </div>
       </div>
 

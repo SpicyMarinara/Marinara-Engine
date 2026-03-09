@@ -19,11 +19,7 @@ export interface CreateChatImageInput {
 export function createGalleryStorage(db: DB) {
   return {
     async listByChatId(chatId: string) {
-      return db
-        .select()
-        .from(chatImages)
-        .where(eq(chatImages.chatId, chatId))
-        .orderBy(desc(chatImages.createdAt));
+      return db.select().from(chatImages).where(eq(chatImages.chatId, chatId)).orderBy(desc(chatImages.createdAt));
     },
 
     async getById(id: string) {

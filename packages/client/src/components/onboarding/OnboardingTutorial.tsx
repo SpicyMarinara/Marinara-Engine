@@ -202,7 +202,9 @@ function TourCardContent({
           <span key={i}>
             {line.split(/(\*\*[^*]+\*\*)/).map((part, j) =>
               part.startsWith("**") && part.endsWith("**") ? (
-                <strong key={j} className="font-semibold text-[var(--foreground)]">{part.slice(2, -2)}</strong>
+                <strong key={j} className="font-semibold text-[var(--foreground)]">
+                  {part.slice(2, -2)}
+                </strong>
               ) : (
                 <span key={j}>{part}</span>
               ),
@@ -414,7 +416,7 @@ function OnboardingTutorialInner() {
             left: targetRect.left - PAD,
             width: targetRect.width + PAD * 2,
             height: targetRect.height + PAD * 2,
-            boxShadow: '0 0 16px 4px color-mix(in srgb, var(--primary) 40%, transparent)',
+            boxShadow: "0 0 16px 4px color-mix(in srgb, var(--primary) 40%, transparent)",
           }}
         />
       )}

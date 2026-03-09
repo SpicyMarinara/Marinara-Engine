@@ -402,7 +402,9 @@ export function CharacterEditor() {
               <AdvancedTab formData={formData} updateField={updateField} updateExtension={updateExtension} />
             )}
             {activeTab === "sprites" && characterId && <SpritesTab characterId={characterId} />}
-            {activeTab === "colors" && <ColorsTab formData={formData} updateExtension={updateExtension} avatarUrl={avatarPreview} />}
+            {activeTab === "colors" && (
+              <ColorsTab formData={formData} updateExtension={updateExtension} avatarUrl={avatarPreview} />
+            )}
             {activeTab === "stats" && <StatsTab formData={formData} updateExtension={updateExtension} />}
             {activeTab === "lorebook" && <LorebookTab formData={formData} />}
           </div>
@@ -1276,7 +1278,10 @@ function extractColorsFromImage(imgSrc: string): Promise<[string, string, string
       // Collect non-transparent, non-near-black/white pixels
       const pixels: [number, number, number][] = [];
       for (let i = 0; i < data.length; i += 4) {
-        const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+        const r = data[i],
+          g = data[i + 1],
+          b = data[i + 2],
+          a = data[i + 3];
         if (a < 128) continue;
         const lum = 0.299 * r + 0.587 * g + 0.114 * b;
         if (lum < 15 || lum > 240) continue;
@@ -1287,10 +1292,11 @@ function extractColorsFromImage(imgSrc: string): Promise<[string, string, string
       // Simple median-cut quantization to find 3 dominant colors
       const buckets = medianCut(pixels, 3);
       const colors = buckets.map((bucket) => {
-        const avg = bucket.reduce(
-          (acc, p) => [acc[0] + p[0], acc[1] + p[1], acc[2] + p[2]],
-          [0, 0, 0] as [number, number, number],
-        );
+        const avg = bucket.reduce((acc, p) => [acc[0] + p[0], acc[1] + p[1], acc[2] + p[2]], [0, 0, 0] as [
+          number,
+          number,
+          number,
+        ]);
         return [
           Math.round(avg[0] / bucket.length),
           Math.round(avg[1] / bucket.length),
@@ -1300,7 +1306,8 @@ function extractColorsFromImage(imgSrc: string): Promise<[string, string, string
 
       // Sort by saturation desc — most vibrant first
       const sat = ([r, g, b]: [number, number, number]) => {
-        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        const max = Math.max(r, g, b),
+          min = Math.min(r, g, b);
         return max === 0 ? 0 : (max - min) / max;
       };
       colors.sort((a, b) => sat(b) - sat(a));
@@ -1323,18 +1330,19 @@ function extractColorsFromImage(imgSrc: string): Promise<[string, string, string
 function medianCut(pixels: [number, number, number][], depth: number): [number, number, number][][] {
   if (depth <= 1 || pixels.length < 2) return [pixels];
   // Find channel with widest range
-  let maxRange = 0, splitCh = 0;
+  let maxRange = 0,
+    splitCh = 0;
   for (let ch = 0; ch < 3; ch++) {
     const vals = pixels.map((p) => p[ch]);
     const range = Math.max(...vals) - Math.min(...vals);
-    if (range > maxRange) { maxRange = range; splitCh = ch; }
+    if (range > maxRange) {
+      maxRange = range;
+      splitCh = ch;
+    }
   }
   pixels.sort((a, b) => a[splitCh] - b[splitCh]);
   const mid = Math.floor(pixels.length / 2);
-  return [
-    ...medianCut(pixels.slice(0, mid), depth - 1),
-    ...medianCut(pixels.slice(mid), depth - 1),
-  ];
+  return [...medianCut(pixels.slice(0, mid), depth - 1), ...medianCut(pixels.slice(mid), depth - 1)];
 }
 
 function ColorsTab({

@@ -257,6 +257,32 @@ export function ChatSettingsDrawer({ chat, open, onClose }: ChatSettingsDrawerPr
             )}
           </Section>
 
+          {/* Connection */}
+          <Section
+            label="Connection"
+            icon={<Plug size={14} />}
+            help="Which AI provider and model to use for this chat. 'Random' picks a different connection each time from your random pool."
+          >
+            <select
+              value={chat.connectionId ?? ""}
+              onChange={(e) => setConnection(e.target.value || null)}
+              className="w-full rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs outline-none ring-1 ring-transparent transition-shadow focus:ring-[var(--primary)]/40"
+            >
+              <option value="">None</option>
+              <option value="random">🎲 Random</option>
+              {((connections ?? []) as Array<{ id: string; name: string }>).map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            {chat.connectionId === "random" && (
+              <p className="mt-1.5 text-[10px] text-amber-400/80">
+                Each generation will randomly pick from connections marked for the random pool.
+              </p>
+            )}
+          </Section>
+
           {/* Persona */}
           <Section
             label="Persona"
@@ -510,14 +536,14 @@ export function ChatSettingsDrawer({ chat, open, onClose }: ChatSettingsDrawerPr
                     </div>
                     <div
                       className={cn(
-                        "h-5 w-9 rounded-full p-0.5 transition-colors",
+                        "h-5 w-9 overflow-hidden rounded-full p-0.5 transition-colors",
                         metadata.groupSpeakerColors ? "bg-[var(--primary)]" : "bg-[var(--muted-foreground)]/30",
                       )}
                     >
                       <div
                         className={cn(
                           "h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
-                          metadata.groupSpeakerColors && "translate-x-4",
+                          metadata.groupSpeakerColors && "translate-x-3.5",
                         )}
                       />
                     </div>
@@ -680,32 +706,6 @@ export function ChatSettingsDrawer({ chat, open, onClose }: ChatSettingsDrawerPr
             </div>
           </Section>
 
-          {/* Connection */}
-          <Section
-            label="Connection"
-            icon={<Plug size={14} />}
-            help="Which AI provider and model to use for this chat. 'Random' picks a different connection each time from your random pool."
-          >
-            <select
-              value={chat.connectionId ?? ""}
-              onChange={(e) => setConnection(e.target.value || null)}
-              className="w-full rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs outline-none ring-1 ring-transparent transition-shadow focus:ring-[var(--primary)]/40"
-            >
-              <option value="">None</option>
-              <option value="random">🎲 Random</option>
-              {((connections ?? []) as Array<{ id: string; name: string }>).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            {chat.connectionId === "random" && (
-              <p className="mt-1.5 text-[10px] text-amber-400/80">
-                Each generation will randomly pick from connections marked for the random pool.
-              </p>
-            )}
-          </Section>
-
           {/* Function Calling / Tool Use */}
           <Section
             label="Function Calling"
@@ -732,14 +732,14 @@ export function ChatSettingsDrawer({ chat, open, onClose }: ChatSettingsDrawerPr
                 </div>
                 <div
                   className={cn(
-                    "h-5 w-9 rounded-full p-0.5 transition-colors",
+                    "h-5 w-9 overflow-hidden rounded-full p-0.5 transition-colors",
                     metadata.enableTools ? "bg-[var(--primary)]" : "bg-[var(--muted-foreground)]/30",
                   )}
                 >
                   <div
                     className={cn(
                       "h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
-                      metadata.enableTools && "translate-x-4",
+                      metadata.enableTools && "translate-x-3.5",
                     )}
                   />
                 </div>
@@ -778,14 +778,14 @@ export function ChatSettingsDrawer({ chat, open, onClose }: ChatSettingsDrawerPr
                 </div>
                 <div
                   className={cn(
-                    "h-5 w-9 rounded-full p-0.5 transition-colors",
+                    "h-5 w-9 overflow-hidden rounded-full p-0.5 transition-colors",
                     metadata.enableAgents ? "bg-[var(--primary)]" : "bg-[var(--muted-foreground)]/30",
                   )}
                 >
                   <div
                     className={cn(
                       "h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
-                      metadata.enableAgents && "translate-x-4",
+                      metadata.enableAgents && "translate-x-3.5",
                     )}
                   />
                 </div>
@@ -828,14 +828,14 @@ export function ChatSettingsDrawer({ chat, open, onClose }: ChatSettingsDrawerPr
                 </div>
                 <div
                   className={cn(
-                    "h-5 w-9 rounded-full p-0.5 transition-colors",
+                    "h-5 w-9 overflow-hidden rounded-full p-0.5 transition-colors",
                     metadata.contextMessageLimit ? "bg-[var(--primary)]" : "bg-[var(--muted-foreground)]/30",
                   )}
                 >
                   <div
                     className={cn(
                       "h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
-                      metadata.contextMessageLimit && "translate-x-4",
+                      metadata.contextMessageLimit && "translate-x-3.5",
                     )}
                   />
                 </div>

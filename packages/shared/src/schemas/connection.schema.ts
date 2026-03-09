@@ -3,7 +3,16 @@
 // ──────────────────────────────────────────────
 import { z } from "zod";
 
-export const apiProviderSchema = z.enum(["openai", "anthropic", "google", "mistral", "cohere", "openrouter", "custom", "image_generation"]);
+export const apiProviderSchema = z.enum([
+  "openai",
+  "anthropic",
+  "google",
+  "mistral",
+  "cohere",
+  "openrouter",
+  "custom",
+  "image_generation",
+]);
 
 export const createConnectionSchema = z.object({
   name: z.string().min(1).max(200),

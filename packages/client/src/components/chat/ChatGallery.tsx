@@ -1,108 +1,15 @@
 // ──────────────────────────────────────────────
 // Chat Gallery — Image grid for per-chat generated images
 // ──────────────────────────────────────────────
-import { useState, useRef, useCallback, useEffect } from "react";
-import { ImagePlus, Trash2, X, ZoomIn, Download, Sparkles, Move, Minimize2 } from "lucide-react";
-import { useGalleryImages, useUploadGalleryImage, useDeleteGalleryImage, type ChatImage } from "../../hooks/use-gallery";
-import { cn } from "../../lib/utils";
-
-// ── Draggable floating image viewer ──
-function FloatingViewer({ image, onClose }: { image: ChatImage; onClose: () => void }) {
-  const [pos, setPos] = useState({ x: 80, y: 80 });
-  const [size, setSize] = useState({ w: 400, h: 400 });
-  const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
-  const resizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number } | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // Center on mount
-  useEffect(() => {
-    setPos({ x: Math.max(40, (window.innerWidth - 400) / 2), y: Math.max(40, (window.innerHeight - 400) / 2) });
-  }, []);
-
-  const onDragStart = useCallback((e: React.PointerEvent) => {
-    e.preventDefault();
-    dragRef.current = { startX: e.clientX, startY: e.clientY, origX: pos.x, origY: pos.y };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, [pos]);
-
-  const onDragMove = useCallback((e: React.PointerEvent) => {
-    if (!dragRef.current) return;
-    const dx = e.clientX - dragRef.current.startX;
-    const dy = e.clientY - dragRef.current.startY;
-    setPos({ x: dragRef.current.origX + dx, y: dragRef.current.origY + dy });
-  }, []);
-
-  const onDragEnd = useCallback(() => { dragRef.current = null; }, []);
-
-  const onResizeStart = useCallback((e: React.PointerEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    resizeRef.current = { startX: e.clientX, startY: e.clientY, origW: size.w, origH: size.h };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, [size]);
-
-  const onResizeMove = useCallback((e: React.PointerEvent) => {
-    if (!resizeRef.current) return;
-    const dx = e.clientX - resizeRef.current.startX;
-    const dy = e.clientY - resizeRef.current.startY;
-    setSize({ w: Math.max(200, resizeRef.current.origW + dx), h: Math.max(200, resizeRef.current.origH + dy) });
-  }, []);
-
-  const onResizeEnd = useCallback(() => { resizeRef.current = null; }, []);
-
-  return (
-    <div
-      ref={containerRef}
-      className="fixed z-[110] flex flex-col rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl"
-      style={{ left: pos.x, top: pos.y, width: size.w, height: size.h }}
-    >
-      {/* Title bar — draggable */}
-      <div
-        className="flex shrink-0 cursor-grab items-center gap-2 rounded-t-xl border-b border-[var(--border)] bg-[var(--secondary)] px-3 py-1.5 active:cursor-grabbing select-none"
-        onPointerDown={onDragStart}
-        onPointerMove={onDragMove}
-        onPointerUp={onDragEnd}
-      >
-        <Move size={12} className="text-[var(--muted-foreground)]" />
-        <span className="flex-1 truncate text-[11px] font-medium">{image.prompt || "Gallery Image"}</span>
-        <a
-          href={image.url}
-          download
-          className="rounded p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <Download size={12} />
-        </a>
-        <button
-          onClick={onClose}
-          className="rounded p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)]"
-        >
-          <X size={12} />
-        </button>
-      </div>
-      {/* Image content */}
-      <div className="relative flex-1 overflow-hidden rounded-b-xl">
-        <img
-          src={image.url}
-          alt={image.prompt || "Gallery image"}
-          className="h-full w-full object-contain"
-          draggable={false}
-        />
-      </div>
-      {/* Resize handle */}
-      <div
-        className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize"
-        onPointerDown={onResizeStart}
-        onPointerMove={onResizeMove}
-        onPointerUp={onResizeEnd}
-      >
-        <svg viewBox="0 0 16 16" className="h-full w-full text-[var(--muted-foreground)]/40">
-          <path d="M14 14L8 14L14 8Z" fill="currentColor" />
-        </svg>
-      </div>
-    </div>
-  );
-}
+import { useState, useRef } from "react";
+import { ImagePlus, Trash2, X, ZoomIn, Download, Sparkles, Pin, Minimize2 } from "lucide-react";
+import {
+  useGalleryImages,
+  useUploadGalleryImage,
+  useDeleteGalleryImage,
+  type ChatImage,
+} from "../../hooks/use-gallery";
+import { useGalleryStore } from "../../stores/gallery.store";
 
 interface ChatGalleryProps {
   chatId: string;
@@ -114,8 +21,8 @@ export function ChatGallery({ chatId }: ChatGalleryProps) {
   const remove = useDeleteGalleryImage(chatId);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [lightbox, setLightbox] = useState<ChatImage | null>(null);
-  const [floatingImages, setFloatingImages] = useState<ChatImage[]>([]);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const pinImage = useGalleryStore((s) => s.pinImage);
 
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -143,18 +50,10 @@ export function ChatGallery({ chatId }: ChatGalleryProps) {
         <ImagePlus size={16} />
         {upload.isPending ? "Uploading…" : "Upload Image"}
       </button>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        onChange={handleUpload}
-        className="hidden"
-      />
+      <input ref={fileInputRef} type="file" accept="image/*" onChange={handleUpload} className="hidden" />
 
       {/* Loading state */}
-      {isLoading && (
-        <p className="text-center text-xs text-[var(--muted-foreground)]">Loading gallery…</p>
-      )}
+      {isLoading && <p className="text-center text-xs text-[var(--muted-foreground)]">Loading gallery…</p>}
 
       {/* Empty state */}
       {!isLoading && (!images || images.length === 0) && (
@@ -169,7 +68,10 @@ export function ChatGallery({ chatId }: ChatGalleryProps) {
       {images && images.length > 0 && (
         <div className="grid grid-cols-2 gap-2">
           {images.map((img) => (
-            <div key={img.id} className="group relative overflow-hidden rounded-lg bg-[var(--secondary)] ring-1 ring-transparent transition-all hover:ring-[var(--primary)]/40 hover:shadow-lg">
+            <div
+              key={img.id}
+              className="group relative overflow-hidden rounded-lg bg-[var(--secondary)] ring-1 ring-transparent transition-all hover:ring-[var(--primary)]/40 hover:shadow-lg"
+            >
               <img
                 src={img.url}
                 alt={img.prompt || "Gallery image"}
@@ -189,11 +91,11 @@ export function ChatGallery({ chatId }: ChatGalleryProps) {
                       <ZoomIn size={12} />
                     </button>
                     <button
-                      onClick={() => setFloatingImages((prev) => prev.some((f) => f.id === img.id) ? prev : [...prev, img])}
+                      onClick={() => pinImage(img)}
                       className="rounded-md bg-white/20 p-1.5 text-white transition-colors hover:bg-white/30"
-                      title="Float image (drag around)"
+                      title="Pin to chat"
                     >
-                      <Move size={12} />
+                      <Pin size={12} />
                     </button>
                   </div>
                   <button
@@ -254,11 +156,11 @@ export function ChatGallery({ chatId }: ChatGalleryProps) {
             <div className="absolute right-2 top-2 flex gap-2">
               <button
                 onClick={() => {
-                  setFloatingImages((prev) => prev.some((f) => f.id === lightbox.id) ? prev : [...prev, lightbox]);
+                  pinImage(lightbox);
                   setLightbox(null);
                 }}
                 className="rounded-lg bg-black/60 p-2 text-white transition-colors hover:bg-black/80"
-                title="Float image (drag around)"
+                title="Pin to chat"
               >
                 <Minimize2 size={14} />
               </button>
@@ -282,7 +184,8 @@ export function ChatGallery({ chatId }: ChatGalleryProps) {
                 {lightbox.prompt && <p className="text-xs">{lightbox.prompt}</p>}
                 {lightbox.provider && (
                   <p className="mt-1 text-[10px] text-white/60">
-                    {lightbox.provider}{lightbox.model ? ` · ${lightbox.model}` : ""}
+                    {lightbox.provider}
+                    {lightbox.model ? ` · ${lightbox.model}` : ""}
                   </p>
                 )}
               </div>
@@ -290,15 +193,6 @@ export function ChatGallery({ chatId }: ChatGalleryProps) {
           </div>
         </div>
       )}
-
-      {/* Floating image viewers */}
-      {floatingImages.map((img) => (
-        <FloatingViewer
-          key={img.id}
-          image={img}
-          onClose={() => setFloatingImages((prev) => prev.filter((f) => f.id !== img.id))}
-        />
-      ))}
     </div>
   );
 }

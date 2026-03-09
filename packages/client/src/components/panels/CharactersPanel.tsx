@@ -94,9 +94,7 @@ export function CharactersPanel() {
     let list = parsedCharacters;
     // Filter by active tag
     if (activeTag) {
-      list = list.filter((c) =>
-        (c.parsed.tags ?? []).some((t: string) => t === activeTag),
-      );
+      list = list.filter((c) => (c.parsed.tags ?? []).some((t: string) => t === activeTag));
     }
     // Filter by search text
     if (search.trim()) {
@@ -227,7 +225,10 @@ export function CharactersPanel() {
             <option value="oldest">Oldest</option>
             <option value="favorites">Favorites</option>
           </select>
-          <ArrowUpDown size={10} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)]" />
+          <ArrowUpDown
+            size={10}
+            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)]"
+          />
         </div>
       </div>
 
@@ -601,7 +602,10 @@ export function CharactersPanel() {
                     {charTags.slice(0, 3).map((tag) => (
                       <span
                         key={tag}
-                        onClick={(e) => { e.stopPropagation(); setActiveTag(activeTag === tag ? null : tag); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveTag(activeTag === tag ? null : tag);
+                        }}
                         className="cursor-pointer rounded-full bg-[var(--primary)]/8 px-1.5 py-px text-[8px] font-medium text-[var(--primary)]/70 transition-all hover:bg-[var(--primary)]/15 hover:text-[var(--primary)]"
                       >
                         {tag}

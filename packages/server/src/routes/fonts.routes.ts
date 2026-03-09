@@ -28,18 +28,20 @@ function ensureDir() {
 /** Derive a display name from a font filename: "Roboto-Regular.woff2" → "Roboto" */
 function fontDisplayName(filename: string): string {
   const name = basename(filename, extname(filename));
-  return name
-    // Strip common weight/style suffixes
-    .replace(/[-_](Regular|Bold|Italic|Light|Medium|SemiBold|ExtraBold|Thin|Black|BoldItalic|Variable.*)/gi, "")
-    // Split camelCase: "OpenSans" → "Open Sans"
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    // Split acronym + word: "EBGaramond" → "EB Garamond", "NotoSans" stays as "Noto Sans"
-    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
-    // Split number→letter and letter→number: "Source3" → "Source 3"
-    .replace(/([a-zA-Z])(\d)/g, "$1 $2")
-    .replace(/(\d)([a-zA-Z])/g, "$1 $2")
-    .replace(/[-_]/g, " ")
-    .trim();
+  return (
+    name
+      // Strip common weight/style suffixes
+      .replace(/[-_](Regular|Bold|Italic|Light|Medium|SemiBold|ExtraBold|Thin|Black|BoldItalic|Variable.*)/gi, "")
+      // Split camelCase: "OpenSans" → "Open Sans"
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      // Split acronym + word: "EBGaramond" → "EB Garamond", "NotoSans" stays as "Noto Sans"
+      .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+      // Split number→letter and letter→number: "Source3" → "Source 3"
+      .replace(/([a-zA-Z])(\d)/g, "$1 $2")
+      .replace(/(\d)([a-zA-Z])/g, "$1 $2")
+      .replace(/[-_]/g, " ")
+      .trim()
+  );
 }
 
 export async function fontsRoutes(app: FastifyInstance) {

@@ -1153,7 +1153,42 @@ export async function generateRoutes(app: FastifyInstance) {
       if (hasPostAgents && combinedResponse) {
         reply.raw.write(`data: ${JSON.stringify({ type: "agent_start", data: { phase: "post_generation" } })}\n\n`);
 
-        const postResults = await pipeline.postGenerate(combinedResponse);
+        let postResults = await pipeline.postGenerate(combinedResponse);
+
+        // ── Auto-retry failed agents once ──
+        const failedResults = postResults.filter((r) => !r.success);
+        if (failedResults.length > 0) {
+          const retryResults: AgentResult[] = [];
+          for (const failed of failedResults) {
+            const agentCfg = pipelineAgents.find((a) => a.type === failed.agentType);
+            if (!agentCfg) continue;
+            try {
+              const retryCtx: AgentContext = { ...agentContext, mainResponse: combinedResponse };
+              const retried = await executeAgent(agentCfg, retryCtx, agentCfg.provider, agentCfg.model);
+              sendAgentEvent(retried);
+              retryResults.push(retried);
+            } catch {
+              retryResults.push(failed);
+            }
+          }
+          // Replace original failed results with retry outcomes
+          postResults = postResults.map((r) => {
+            if (r.success) return r;
+            const retried = retryResults.find((rr) => rr.agentType === r.agentType);
+            return retried ?? r;
+          });
+
+          // Notify client about agents that still failed after retry
+          const stillFailed = retryResults.filter((r) => !r.success);
+          if (stillFailed.length > 0) {
+            reply.raw.write(
+              `data: ${JSON.stringify({
+                type: "agents_retry_failed",
+                data: stillFailed.map((r) => ({ agentType: r.agentType, error: r.error })),
+              })}\n\n`,
+            );
+          }
+        }
 
         // Persist agent runs to DB + handle game state updates
         const messageId = (lastSavedMsg as any)?.id ?? "";
@@ -1328,6 +1363,212 @@ export async function generateRoutes(app: FastifyInstance) {
       reply.raw.write(`data: ${JSON.stringify({ type: "done", data: "" })}\n\n`);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Generation failed";
+      reply.raw.write(`data: ${JSON.stringify({ type: "error", data: message })}\n\n`);
+    } finally {
+      reply.raw.end();
+    }
+  });
+
+  // ──────────────────────────────────────────────
+  // POST /retry-agents — Re-run failed agents manually
+  // ──────────────────────────────────────────────
+  app.post<{
+    Body: { chatId: string; agentTypes: string[] };
+  }>("/retry-agents", async (request, reply) => {
+    const { chatId, agentTypes } = request.body;
+    if (!chatId || !agentTypes?.length) {
+      return reply.status(400).send({ error: "chatId and agentTypes are required" });
+    }
+
+    // SSE setup
+    reply.raw.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+
+    try {
+      const chats = createChatsStorage(app.db);
+      const conns = createConnectionsStorage(app.db);
+      const chars = createCharactersStorage(app.db);
+      const agentsStore = createAgentsStorage(app.db);
+      const gameStateStore = createGameStateStorage(app.db);
+
+      const chat = await chats.getById(chatId);
+      if (!chat) throw new Error("Chat not found");
+
+      const chatMeta = parseExtra(chat.metadata);
+
+      // Get the last assistant message for context
+      const recentMessages = await chats.listMessages(chatId);
+      const lastAssistant = recentMessages.find((m: any) => m.role === "assistant");
+      const mainResponse = lastAssistant?.content ?? "";
+
+      // Resolve agents
+      const configs = await agentsStore.list();
+      const enabledConfigs = configs.filter((c: any) => c.enabled === "true" && agentTypes.includes(c.type));
+
+      // Resolve connection
+      const connId = chat.connectionId;
+      const conn = connId ? await conns.getWithKey(connId) : null;
+      if (!conn) throw new Error("No connection configured");
+
+      const baseUrl = resolveBaseUrl(conn);
+      if (!baseUrl) throw new Error("Cannot resolve provider URL");
+      const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey);
+
+      // Resolve character info
+      const characterIds: string[] =
+        typeof chat.characterIds === "string" ? JSON.parse(chat.characterIds) : (chat.characterIds ?? []);
+      const charInfo: Array<{ id: string; name: string; description: string }> = [];
+      for (const cid of characterIds) {
+        const charRow = await chars.getById(cid);
+        if (charRow) {
+          const charData = JSON.parse(charRow.data as string);
+          charInfo.push({
+            id: cid,
+            name: charData.name ?? "Unknown",
+            description: charData.description ?? "",
+          });
+        }
+      }
+
+      // Build agent context
+      const agentContext: AgentContext = {
+        chatId,
+        chatMode: (chat as any).mode ?? "conversation",
+        recentMessages: recentMessages.map((m: any) => ({
+          role: m.role,
+          content: m.content,
+          characterId: m.characterId ?? undefined,
+        })),
+        mainResponse,
+        gameState: null,
+        characters: charInfo,
+        persona: { name: "User", description: "" },
+        activatedLorebookEntries: null,
+        writableLorebookIds: null,
+        memory: {},
+      };
+
+      // Load game state
+      const latestGS = await gameStateStore.getLatestCommitted(chatId);
+      if (latestGS) {
+        agentContext.gameState = parseGameStateRow(latestGS as Record<string, unknown>);
+      }
+
+      reply.raw.write(`data: ${JSON.stringify({ type: "agent_start", data: { phase: "retry" } })}\n\n`);
+
+      // Resolve and execute each agent
+      const results: AgentResult[] = [];
+      for (const cfg of enabledConfigs) {
+        let agentProvider = provider;
+        let agentModel = conn.model;
+
+        if (cfg.connectionId) {
+          const agentConn = await conns.getWithKey(cfg.connectionId as string);
+          if (agentConn) {
+            const agentBaseUrl = resolveBaseUrl(agentConn);
+            if (agentBaseUrl) {
+              agentProvider = createLLMProvider(agentConn.provider, agentBaseUrl, agentConn.apiKey);
+              agentModel = agentConn.model;
+            }
+          }
+        }
+
+        const resolved: ResolvedAgent = {
+          id: cfg.id,
+          type: cfg.type,
+          name: cfg.name,
+          phase: cfg.phase as string,
+          promptTemplate: cfg.promptTemplate as string,
+          connectionId: cfg.connectionId as string | null,
+          settings: typeof cfg.settings === "string" ? JSON.parse(cfg.settings) : (cfg.settings ?? {}),
+          provider: agentProvider,
+          model: agentModel,
+        };
+
+        try {
+          const result = await executeAgent(resolved, agentContext, agentProvider, agentModel);
+          // Send result to client
+          const ev = {
+            type: "agent_result",
+            data: {
+              agentType: result.agentType,
+              agentName: cfg.name,
+              resultType: result.type,
+              data: result.data,
+              success: result.success,
+              error: result.error,
+              durationMs: result.durationMs,
+            },
+          };
+          reply.raw.write(`data: ${JSON.stringify(ev)}\n\n`);
+          results.push(result);
+
+          // Persist run
+          try {
+            const messageId = lastAssistant?.id ?? "";
+            await agentsStore.saveRun({
+              agentConfigId: result.agentId,
+              chatId,
+              messageId,
+              result,
+            });
+          } catch {
+            /* Non-critical */
+          }
+        } catch (agentErr) {
+          const errMsg = agentErr instanceof Error ? agentErr.message : "Agent execution failed";
+          const ev = {
+            type: "agent_result",
+            data: {
+              agentType: cfg.type,
+              agentName: cfg.name,
+              resultType: "error",
+              data: null,
+              success: false,
+              error: errMsg,
+              durationMs: 0,
+            },
+          };
+          reply.raw.write(`data: ${JSON.stringify(ev)}\n\n`);
+        }
+      }
+
+      // Handle game state updates from retry results
+      for (const result of results) {
+        if (result.success && result.type === "game_state_update" && result.data && typeof result.data === "object") {
+          try {
+            const gs = result.data as Record<string, unknown>;
+            reply.raw.write(`data: ${JSON.stringify({ type: "game_state", data: gs })}\n\n`);
+          } catch {
+            /* Non-critical */
+          }
+        }
+        if (
+          result.success &&
+          result.type === "character_tracker_update" &&
+          result.data &&
+          typeof result.data === "object"
+        ) {
+          try {
+            const ctData = result.data as Record<string, unknown>;
+            const chars = (ctData.presentCharacters as any[]) ?? [];
+            if (chars.length > 0) {
+              reply.raw.write(
+                `data: ${JSON.stringify({ type: "game_state_patch", data: { presentCharacters: chars } })}\n\n`,
+              );
+            }
+          } catch {
+            /* Non-critical */
+          }
+        }
+      }
+
+      reply.raw.write(`data: ${JSON.stringify({ type: "done", data: "" })}\n\n`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Agent retry failed";
       reply.raw.write(`data: ${JSON.stringify({ type: "error", data: message })}\n\n`);
     } finally {
       reply.raw.end();

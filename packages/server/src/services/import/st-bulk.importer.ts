@@ -41,7 +41,9 @@ function extractCharaFromPng(buf: Buffer): Record<string, unknown> | null {
           try {
             const json = Buffer.from(b64, "base64").toString("utf-8");
             found.set(keyword, JSON.parse(json));
-          } catch { /* skip malformed */ }
+          } catch {
+            /* skip malformed */
+          }
         }
       }
     } else if (type === "iTXt") {
@@ -61,7 +63,9 @@ function extractCharaFromPng(buf: Buffer): Record<string, unknown> | null {
                 try {
                   const decoded = Buffer.from(text, "base64").toString("utf-8");
                   found.set(keyword, JSON.parse(decoded));
-                } catch { /* skip */ }
+                } catch {
+                  /* skip */
+                }
               }
             }
           }

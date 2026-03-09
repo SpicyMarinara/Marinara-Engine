@@ -54,16 +54,16 @@ function pickFolder(): Promise<string | null> {
         "-NoProfile",
         "-Command",
         `Add-Type -AssemblyName System.Windows.Forms;` +
-        `$f = New-Object System.Windows.Forms.Form;` +
-        `$f.TopMost = $true;` +
-        `$f.WindowState = 'Minimized';` +
-        `$f.ShowInTaskbar = $false;` +
-        `$f.Show();` +
-        `$f.Hide();` +
-        `$d = New-Object System.Windows.Forms.FolderBrowserDialog;` +
-        `$d.Description = 'Select your SillyTavern folder';` +
-        `if ($d.ShowDialog($f) -eq 'OK') { $d.SelectedPath } else { '' };` +
-        `$f.Dispose()`,
+          `$f = New-Object System.Windows.Forms.Form;` +
+          `$f.TopMost = $true;` +
+          `$f.WindowState = 'Minimized';` +
+          `$f.ShowInTaskbar = $false;` +
+          `$f.Show();` +
+          `$f.Hide();` +
+          `$d = New-Object System.Windows.Forms.FolderBrowserDialog;` +
+          `$d.Description = 'Select your SillyTavern folder';` +
+          `if ($d.ShowDialog($f) -eq 'OK') { $d.SelectedPath } else { '' };` +
+          `$f.Dispose()`,
       ];
       execFile("powershell.exe", ps, (err, stdout) => {
         cleanup();
@@ -77,7 +77,10 @@ function pickFolder(): Promise<string | null> {
         "zenity",
         ["--file-selection", "--directory", "--title=Select your SillyTavern folder"],
         (err, stdout) => {
-          if (!err && stdout.trim()) { cleanup(); return done(stdout.trim()); }
+          if (!err && stdout.trim()) {
+            cleanup();
+            return done(stdout.trim());
+          }
           execFile(
             "kdialog",
             ["--getexistingdirectory", ".", "--title", "Select your SillyTavern folder"],
@@ -117,7 +120,9 @@ function extractCharaFromPng(buf: Buffer): Record<string, unknown> | null {
           try {
             const json = Buffer.from(b64, "base64").toString("utf-8");
             found.set(keyword, JSON.parse(json));
-          } catch { /* skip malformed */ }
+          } catch {
+            /* skip malformed */
+          }
         }
       }
     } else if (type === "iTXt") {
@@ -141,7 +146,9 @@ function extractCharaFromPng(buf: Buffer): Record<string, unknown> | null {
                   try {
                     const decoded = Buffer.from(text, "base64").toString("utf-8");
                     found.set(keyword, JSON.parse(decoded));
-                  } catch { /* skip */ }
+                  } catch {
+                    /* skip */
+                  }
                 }
               }
             }
@@ -197,7 +204,10 @@ export async function importRoutes(app: FastifyInstance) {
         // Extract character data from PNG tEXt chunk
         const charData = extractCharaFromPng(buf);
         if (!charData) {
-          return { success: false, error: "No character data found in PNG. Make sure this is a valid character card with embedded metadata." };
+          return {
+            success: false,
+            error: "No character data found in PNG. Make sure this is a valid character card with embedded metadata.",
+          };
         }
 
         // Attach the PNG itself as avatar data URL
@@ -212,7 +222,10 @@ export async function importRoutes(app: FastifyInstance) {
         const json = JSON.parse(buf.toString("utf-8"));
         return importSTCharacter(json, app.db);
       } catch {
-        return { success: false, error: "Invalid file format. Expected a JSON character card or a PNG with embedded character data." };
+        return {
+          success: false,
+          error: "Invalid file format. Expected a JSON character card or a PNG with embedded character data.",
+        };
       }
     }
 

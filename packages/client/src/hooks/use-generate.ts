@@ -3,6 +3,7 @@
 // ──────────────────────────────────────────────
 import { useCallback } from "react";
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { api } from "../lib/api-client";
 import { useChatStore } from "../stores/chat.store";
 import { useAgentStore } from "../stores/agent.store";
@@ -21,8 +22,16 @@ export function useGenerate() {
   const qc = useQueryClient();
   const { setStreaming, setStreamBuffer, clearStreamBuffer, setRegenerateMessageId, setStreamingCharacterId } =
     useChatStore();
-  const { setProcessing, addResult, addThoughtBubble, clearThoughtBubbles, addEchoMessage, clearEchoMessages } =
-    useAgentStore();
+  const {
+    setProcessing,
+    addResult,
+    addThoughtBubble,
+    clearThoughtBubbles,
+    addEchoMessage,
+    clearEchoMessages,
+    setFailedAgentTypes,
+    clearFailedAgentTypes,
+  } = useAgentStore();
   const setGameState = useGameStateStore((s) => s.setGameState);
 
   const generate = useCallback(
@@ -42,6 +51,7 @@ export function useGenerate() {
       clearStreamBuffer();
       clearThoughtBubbles();
       clearEchoMessages();
+      clearFailedAgentTypes();
       setRegenerateMessageId(params.regenerateMessageId ?? null);
 
       // Optimistically show the user message in the chat immediately
@@ -151,6 +161,11 @@ export function useGenerate() {
                 success: result.success,
                 error: result.error,
               });
+
+              // Notify on agent failure
+              if (!result.success && result.error) {
+                toast.error(`Agent "${result.agentName}" failed: ${result.error}`);
+              }
 
               // Display as thought bubble for informational agents
               if (result.success && result.data) {
@@ -303,6 +318,22 @@ export function useGenerate() {
               setProcessing(false);
               break;
             }
+
+            case "error": {
+              const errorMsg = (event.data as string) || "Generation failed";
+              toast.error(errorMsg);
+              break;
+            }
+
+            case "agents_retry_failed": {
+              const failedList = event.data as Array<{ agentType: string; error: string | null }>;
+              const types = failedList.map((f) => f.agentType);
+              setFailedAgentTypes(types);
+              toast.error(
+                `${types.length} agent${types.length > 1 ? "s" : ""} failed after retry. Use the retry button in the chat header to try again.`,
+              );
+              break;
+            }
           }
         }
 
@@ -339,7 +370,7 @@ export function useGenerate() {
         });
         // Wait one frame so React renders the fetched messages before
         // removing the streaming overlay — prevents a visible flash.
-        await new Promise<void>((r) => requestAnimationFrame(r));
+        await new Promise<void>((r) => requestAnimationFrame(() => r()));
         setStreaming(false);
         setProcessing(false);
         clearStreamBuffer();
@@ -361,11 +392,92 @@ export function useGenerate() {
       clearThoughtBubbles,
       addEchoMessage,
       clearEchoMessages,
+      clearFailedAgentTypes,
+      setFailedAgentTypes,
       setGameState,
     ],
   );
 
-  return { generate };
+  const retryAgents = useCallback(
+    async (chatId: string, agentTypes: string[]) => {
+      setProcessing(true);
+      clearFailedAgentTypes();
+
+      try {
+        for await (const event of api.streamEvents("/retry-agents", { chatId, agentTypes })) {
+          switch (event.type) {
+            case "agent_result": {
+              const result = event.data as {
+                agentType: string;
+                agentName: string;
+                resultType: string;
+                data: unknown;
+                success: boolean;
+                error: string | null;
+                durationMs: number;
+              };
+              addResult(result.agentType, {
+                agentId: result.agentType,
+                agentType: result.agentType,
+                type: result.resultType as any,
+                data: result.data,
+                tokensUsed: 0,
+                durationMs: result.durationMs,
+                success: result.success,
+                error: result.error,
+              });
+              if (result.success && result.data) {
+                const bubble = formatAgentBubble(result.agentType, result.agentName, result.data);
+                if (bubble) addThoughtBubble(result.agentType, result.agentName, bubble);
+                if (result.agentType === "echo-chamber") {
+                  const d = result.data as Record<string, unknown>;
+                  const reactions = (d.reactions as Array<{ characterName: string; reaction: string }>) ?? [];
+                  for (const r of reactions) addEchoMessage(r.characterName, r.reaction);
+                }
+                if (result.resultType === "background_change") {
+                  const bg = result.data as { chosen?: string | null };
+                  if (bg.chosen) {
+                    useUIStore.getState().setChatBackground(`/api/backgrounds/file/${encodeURIComponent(bg.chosen)}`);
+                  }
+                }
+              }
+              if (!result.success && result.error) {
+                toast.error(`Agent "${result.agentName}" failed: ${result.error}`);
+              }
+              break;
+            }
+            case "game_state": {
+              setGameState(event.data as any);
+              break;
+            }
+            case "game_state_patch": {
+              const patch = event.data as Record<string, unknown>;
+              const current = useGameStateStore.getState().current;
+              if (current) setGameState({ ...current, ...patch } as any);
+              break;
+            }
+            case "error": {
+              toast.error((event.data as string) || "Agent retry failed");
+              break;
+            }
+            case "done": {
+              break;
+            }
+          }
+        }
+        toast.success("Agent retry completed");
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        const msg = error instanceof Error ? error.message : "Agent retry failed";
+        toast.error(msg);
+      } finally {
+        setProcessing(false);
+      }
+    },
+    [addResult, addThoughtBubble, addEchoMessage, clearFailedAgentTypes, setProcessing, setGameState],
+  );
+
+  return { generate, retryAgents };
 }
 
 /**

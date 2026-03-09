@@ -3,7 +3,15 @@
 // ──────────────────────────────────────────────
 
 /** Supported API providers. */
-export type APIProvider = "openai" | "anthropic" | "google" | "mistral" | "cohere" | "openrouter" | "custom" | "image_generation";
+export type APIProvider =
+  | "openai"
+  | "anthropic"
+  | "google"
+  | "mistral"
+  | "cohere"
+  | "openrouter"
+  | "custom"
+  | "image_generation";
 
 /** An API connection configuration. */
 export interface APIConnection {

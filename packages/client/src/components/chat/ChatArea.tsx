@@ -31,6 +31,7 @@ import { useGameStateStore } from "../../stores/game-state.store";
 import { SpriteOverlay } from "./SpriteOverlay";
 import { SpriteSidebar } from "./SpriteSidebar";
 import { AgentThoughtBubbles } from "../agents/AgentThoughtBubbles";
+import { PinnedImageOverlay } from "./PinnedImageOverlay";
 import {
   MessageSquare,
   BookOpen,
@@ -44,8 +45,11 @@ import {
   ScrollText,
   FlipHorizontal2,
   HelpCircle,
+  RefreshCw,
+  Sparkles,
 } from "lucide-react";
 import { useUIStore } from "../../stores/ui.store";
+import { useAgentStore } from "../../stores/agent.store";
 import { cn } from "../../lib/utils";
 import { EncounterModal } from "./EncounterModal";
 import { useEncounter } from "../../hooks/use-encounter";
@@ -106,9 +110,11 @@ export function ChatArea() {
   const peekPrompt = usePeekPrompt();
   const createChat = useCreateChat();
   const branchChat = useBranchChat();
-  const { generate } = useGenerate();
+  const { generate, retryAgents } = useGenerate();
   const setActiveSwipe = useSetActiveSwipe(activeChatId);
   const setActiveChatId = useChatStore((s) => s.setActiveChatId);
+  const failedAgentTypes = useAgentStore((s) => s.failedAgentTypes);
+  const agentProcessing = useAgentStore((s) => s.isProcessing);
 
   const setShouldOpenSettings = useChatStore((s) => s.setShouldOpenSettings);
 
@@ -257,11 +263,20 @@ export function ChatArea() {
   const handleRegenerate = useCallback(
     async (messageId: string) => {
       if (!activeChatId || isStreaming) return;
-      // Regenerate as a new swipe on the existing message
-      await generate({ chatId: activeChatId, connectionId: null, regenerateMessageId: messageId });
+      try {
+        // Regenerate as a new swipe on the existing message
+        await generate({ chatId: activeChatId, connectionId: null, regenerateMessageId: messageId });
+      } catch {
+        // Error toast is shown by the generate hook
+      }
     },
     [activeChatId, isStreaming, generate],
   );
+
+  const handleRetryAgents = useCallback(async () => {
+    if (!activeChatId || isStreaming || agentProcessing || failedAgentTypes.length === 0) return;
+    await retryAgents(activeChatId, failedAgentTypes);
+  }, [activeChatId, isStreaming, agentProcessing, failedAgentTypes, retryAgents]);
 
   const handleSetActiveSwipe = useCallback(
     (messageId: string, index: number) => {
@@ -496,9 +511,7 @@ export function ChatArea() {
             Replay Tutorial
           </button>
 
-          <p className="mt-2 text-[10px] tracking-wide text-[var(--muted-foreground)]/30">
-            v{APP_VERSION}
-          </p>
+          <p className="mt-2 text-[10px] tracking-wide text-[var(--muted-foreground)]/30">v{APP_VERSION}</p>
         </div>
       </div>
     );
@@ -582,6 +595,19 @@ export function ChatArea() {
               >
                 <Image size={16} />
               </button>
+              {chatMeta.enableAgents && enabledAgentTypes.size > 0 && (
+                <AgentsHeaderButton agentConfigs={agentConfigs as AgentConfigRow[] | undefined} variant="roleplay" />
+              )}
+              {failedAgentTypes.length > 0 && (
+                <button
+                  onClick={handleRetryAgents}
+                  disabled={agentProcessing}
+                  className="rounded-lg p-1.5 text-amber-400/80 transition-all hover:bg-white/10 hover:text-amber-300 disabled:opacity-50"
+                  title="Retry failed agents"
+                >
+                  <RefreshCw size={16} className={agentProcessing ? "animate-spin" : ""} />
+                </button>
+              )}
               <button
                 onClick={() => setSettingsOpen(true)}
                 className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
@@ -733,6 +759,9 @@ export function ChatArea() {
           />
         )}
 
+        {/* Pinned gallery images */}
+        <PinnedImageOverlay />
+
         {/* Peek Prompt Modal */}
         {peekPromptData && <PeekPromptModal data={peekPromptData} onClose={() => setPeekPromptData(null)} />}
       </div>
@@ -819,6 +848,19 @@ export function ChatArea() {
             >
               <Image size={16} />
             </button>
+            {chatMeta.enableAgents && enabledAgentTypes.size > 0 && (
+              <AgentsHeaderButton agentConfigs={agentConfigs as AgentConfigRow[] | undefined} variant="conversation" />
+            )}
+            {failedAgentTypes.length > 0 && (
+              <button
+                onClick={handleRetryAgents}
+                disabled={agentProcessing}
+                className="rounded-lg p-1.5 text-amber-500 transition-all hover:bg-[var(--accent)] hover:text-amber-400 disabled:opacity-50"
+                title="Retry failed agents"
+              >
+                <RefreshCw size={16} className={agentProcessing ? "animate-spin" : ""} />
+              </button>
+            )}
             <button
               onClick={() => setSettingsOpen(true)}
               className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-all hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
@@ -828,6 +870,13 @@ export function ChatArea() {
             </button>
           </div>
         </div>
+
+        {/* HUD overlay — tracker widgets (when agents enabled) */}
+        {chat && chatMeta.enableAgents && (
+          <div className="relative z-30 h-0 overflow-visible">
+            <RoleplayHUD chatId={chat.id} characterCount={chatCharIds.length} layout="top" />
+          </div>
+        )}
 
         {/* Combat Encounter Modal */}
         {encounterActive && <EncounterModal />}
@@ -955,6 +1004,9 @@ export function ChatArea() {
       {/* Agent thought bubbles */}
       <AgentThoughtBubbles />
 
+      {/* Pinned gallery images */}
+      <PinnedImageOverlay />
+
       {/* Peek Prompt Modal */}
       {peekPromptData && <PeekPromptModal data={peekPromptData} onClose={() => setPeekPromptData(null)} />}
     </div>
@@ -1029,6 +1081,165 @@ function QuickStartCard({
 }
 
 /** Summary button with popover — lives in the chat header */
+/** Agents header button — shows agent activity grouped by phase */
+function AgentsHeaderButton({
+  agentConfigs,
+  variant,
+}: {
+  agentConfigs: AgentConfigRow[] | undefined;
+  variant: "roleplay" | "conversation";
+}) {
+  const [open, setOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const thoughtBubbles = useAgentStore((s) => s.thoughtBubbles);
+  const isProcessing = useAgentStore((s) => s.isProcessing);
+  const clearThoughtBubbles = useAgentStore((s) => s.clearThoughtBubbles);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  // Build phase map from agentConfigs
+  const phaseMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (agentConfigs) {
+      for (const a of agentConfigs) {
+        map.set(a.type, a.phase);
+      }
+    }
+    return map;
+  }, [agentConfigs]);
+
+  // Group thought bubbles by phase
+  const grouped = useMemo(() => {
+    const groups: Record<string, typeof thoughtBubbles> = {
+      pre_generation: [],
+      parallel: [],
+      post_processing: [],
+    };
+    for (const b of thoughtBubbles) {
+      const phase = phaseMap.get(b.agentId) ?? "parallel";
+      (groups[phase] ??= []).push(b);
+    }
+    return groups;
+  }, [thoughtBubbles, phaseMap]);
+
+  const phaseLabels: Record<string, string> = {
+    pre_generation: "Pre-Generation",
+    parallel: "Parallel",
+    post_processing: "Post-Processing",
+  };
+
+  const isRP = variant === "roleplay";
+  const btnBase = "rounded-lg p-1.5 transition-all";
+  const btnIdle = isRP
+    ? "text-purple-400/60 hover:bg-white/10 hover:text-purple-300"
+    : "text-purple-500/60 hover:bg-[var(--accent)] hover:text-purple-400";
+  const btnActive = isRP ? "bg-white/15 text-purple-300" : "bg-[var(--accent)] text-purple-400";
+  const dropdownBg = isRP ? "border-white/10 bg-black/80 backdrop-blur-xl" : "border-[var(--border)] bg-[var(--card)]";
+  const textMuted = isRP ? "text-white/40" : "text-[var(--muted-foreground)]";
+  const bubbleBg = isRP ? "bg-white/5" : "bg-[var(--primary)]/8";
+  const badgeBg = isRP ? "bg-purple-500/80" : "bg-purple-500";
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <button onClick={() => setOpen(!open)} className={cn(btnBase, open ? btnActive : btnIdle)} title="Agent activity">
+        <Sparkles size={16} className={isProcessing ? "animate-pulse" : ""} />
+        {thoughtBubbles.length > 0 && (
+          <span
+            className={cn(
+              "absolute -right-0.5 -top-0.5 flex h-3.5 min-w-[0.875rem] items-center justify-center rounded-full px-0.5 text-[8px] font-bold text-white",
+              badgeBg,
+            )}
+          >
+            {thoughtBubbles.length}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div
+          className={cn(
+            "absolute right-0 top-full mt-1 w-80 max-h-80 overflow-y-auto rounded-xl border shadow-xl z-50 animate-message-in",
+            dropdownBg,
+          )}
+        >
+          {/* Processing indicator */}
+          {isProcessing && (
+            <div className="flex items-center gap-2 border-b border-white/5 px-3 py-2">
+              <Sparkles size={12} className="text-purple-400 animate-pulse" />
+              <span className={cn("text-[10px]", textMuted)}>Agents thinking…</span>
+            </div>
+          )}
+
+          {/* Empty state */}
+          {thoughtBubbles.length === 0 && !isProcessing && (
+            <div className={cn("px-3 py-4 text-center text-[10px]", textMuted)}>No agent activity yet</div>
+          )}
+
+          {/* Grouped results */}
+          {thoughtBubbles.length > 0 && (
+            <>
+              <div
+                className={cn(
+                  "flex items-center justify-between border-b px-3 py-1.5",
+                  isRP ? "border-white/5" : "border-[var(--border)]",
+                )}
+              >
+                <span className={cn("text-[10px]", textMuted)}>
+                  {thoughtBubbles.length} result{thoughtBubbles.length !== 1 ? "s" : ""}
+                </span>
+                <button
+                  onClick={clearThoughtBubbles}
+                  className={cn(
+                    "text-[10px] transition-colors",
+                    textMuted,
+                    isRP ? "hover:text-white/60" : "hover:text-[var(--foreground)]",
+                  )}
+                >
+                  Clear all
+                </button>
+              </div>
+              <div className="p-2 flex flex-col gap-2">
+                {(["pre_generation", "parallel", "post_processing"] as const).map((phase) => {
+                  const items = grouped[phase];
+                  if (!items || items.length === 0) return null;
+                  return (
+                    <div key={phase}>
+                      <div className={cn("text-[9px] font-semibold uppercase tracking-wider px-1 mb-1", textMuted)}>
+                        {phaseLabels[phase]}
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        {items.map((bubble, i) => (
+                          <div
+                            key={`${bubble.agentId}-${bubble.timestamp}-${i}`}
+                            className={cn("rounded-lg p-2 text-[10px]", bubbleBg)}
+                          >
+                            <span className="font-semibold text-purple-400">{bubble.agentName}</span>
+                            <p className={cn("mt-0.5 whitespace-pre-wrap leading-relaxed", textMuted)}>
+                              {bubble.content}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SummaryButton({ chatId, summary }: { chatId: string | null; summary: string | null }) {
   const [open, setOpen] = useState(false);
   if (!chatId) return null;

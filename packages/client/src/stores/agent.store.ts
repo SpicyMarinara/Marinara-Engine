@@ -8,6 +8,8 @@ interface AgentState {
   activeAgents: string[];
   lastResults: Map<string, AgentResult>;
   isProcessing: boolean;
+  /** Agent types that failed even after auto-retry — manual retry available */
+  failedAgentTypes: string[];
   thoughtBubbles: Array<{
     agentId: string;
     agentName: string;
@@ -24,6 +26,8 @@ interface AgentState {
   setActiveAgents: (agents: string[]) => void;
   setProcessing: (processing: boolean) => void;
   addResult: (agentId: string, result: AgentResult) => void;
+  setFailedAgentTypes: (types: string[]) => void;
+  clearFailedAgentTypes: () => void;
   addThoughtBubble: (agentId: string, agentName: string, content: string) => void;
   dismissThoughtBubble: (index: number) => void;
   clearThoughtBubbles: () => void;
@@ -36,6 +40,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   activeAgents: [],
   lastResults: new Map(),
   isProcessing: false,
+  failedAgentTypes: [],
   thoughtBubbles: [],
   echoMessages: [],
 
@@ -53,6 +58,9 @@ export const useAgentStore = create<AgentState>((set) => ({
       }
       return { lastResults: results };
     }),
+
+  setFailedAgentTypes: (types) => set({ failedAgentTypes: types }),
+  clearFailedAgentTypes: () => set({ failedAgentTypes: [] }),
 
   addThoughtBubble: (agentId, agentName, content) =>
     set((s) => ({
@@ -78,6 +86,7 @@ export const useAgentStore = create<AgentState>((set) => ({
       activeAgents: [],
       lastResults: new Map(),
       isProcessing: false,
+      failedAgentTypes: [],
       thoughtBubbles: [],
       echoMessages: [],
     }),

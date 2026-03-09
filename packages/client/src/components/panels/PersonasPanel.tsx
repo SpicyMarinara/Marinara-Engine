@@ -127,7 +127,10 @@ export function PersonasPanel() {
             <option value="oldest">Oldest</option>
             <option value="tokens">Tokens</option>
           </select>
-          <ArrowUpDown size={10} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)]" />
+          <ArrowUpDown
+            size={10}
+            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)]"
+          />
         </div>
       </div>
 

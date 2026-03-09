@@ -103,6 +103,8 @@ export function ChatInput({ mode = "conversation", characterNames = [] }: ChatIn
         userMessage: message,
       });
     } catch (error) {
+      const msg = error instanceof Error ? error.message : "Generation failed";
+      toast.error(msg);
       console.error("Send failed:", error);
     }
   }, [activeChatId, isStreaming, generate, applyToUserInput, buildContext]);
@@ -243,10 +245,7 @@ export function ChatInput({ mode = "conversation", characterNames = [] }: ChatIn
         className={cn(
           "relative flex items-center gap-2 rounded-2xl border-2 px-4 py-3 transition-all duration-200",
           isRP
-            ? cn(
-                "bg-black/40",
-                hasInput ? "border-blue-400/30 shadow-md shadow-blue-500/5" : "border-white/10",
-              )
+            ? cn("bg-black/40", hasInput ? "border-blue-400/30 shadow-md shadow-blue-500/5" : "border-white/10")
             : cn(
                 "bg-[var(--secondary)]",
                 hasInput
