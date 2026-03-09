@@ -1409,7 +1409,13 @@ export async function generateRoutes(app: FastifyInstance) {
       const enabledConfigs = configs.filter((c: any) => c.enabled === "true" && agentTypes.includes(c.type));
 
       // Resolve connection
-      const connId = chat.connectionId;
+      let connId = chat.connectionId;
+      if (connId === "random") {
+        const pool = await conns.listRandomPool();
+        if (!pool.length) throw new Error("No connections are marked for the random pool");
+        const picked = pool[Math.floor(Math.random() * pool.length)];
+        connId = picked.id;
+      }
       const conn = connId ? await conns.getWithKey(connId) : null;
       if (!conn) throw new Error("No connection configured");
 
