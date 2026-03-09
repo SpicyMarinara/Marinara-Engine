@@ -162,11 +162,6 @@ export function useGenerate() {
                 error: result.error,
               });
 
-              // Notify on agent failure
-              if (!result.success && result.error) {
-                toast.error(`Agent "${result.agentName}" failed: ${result.error}`);
-              }
-
               // Display as thought bubble for informational agents
               if (result.success && result.data) {
                 const bubble = formatAgentBubble(result.agentType, result.agentName, result.data);
@@ -441,9 +436,15 @@ export function useGenerate() {
                   }
                 }
               }
-              if (!result.success && result.error) {
-                toast.error(`Agent "${result.agentName}" failed: ${result.error}`);
-              }
+              break;
+            }
+            case "agents_retry_failed": {
+              const failedList = event.data as Array<{ agentType: string; error: string | null }>;
+              const types = failedList.map((f) => f.agentType);
+              setFailedAgentTypes(types);
+              toast.error(
+                `${types.length} agent${types.length > 1 ? "s" : ""} failed after retry. Use the retry button in the chat header to try again.`,
+              );
               break;
             }
             case "game_state": {
