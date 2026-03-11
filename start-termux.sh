@@ -83,6 +83,22 @@ if [ ! -d "node_modules" ]; then
     pnpm install
 fi
 
+# ── Ensure better-sqlite3 native binary is built ──
+# @libsql/client has no Android ARM64 binary, so we need better-sqlite3.
+# pnpm install may skip native compilation if build tools were missing.
+BS3_NODE=$(find node_modules -path "*/better-sqlite3/build/Release/better_sqlite3.node" 2>/dev/null | head -1)
+if [ -z "$BS3_NODE" ]; then
+    echo "  [..] Building better-sqlite3 native module..."
+    echo "       (requires build-essential — may take a minute)"
+    pnpm rebuild better-sqlite3 2>&1 || {
+        echo "  [ERR] Failed to build better-sqlite3."
+        echo "        Run: pkg install build-essential"
+        echo "        Then: pnpm rebuild better-sqlite3"
+        exit 1
+    }
+    echo "  [OK] better-sqlite3 native module built"
+fi
+
 # ── Build if needed ──
 if [ ! -d "packages/shared/dist" ]; then
     echo "  [..] Building shared types..."
