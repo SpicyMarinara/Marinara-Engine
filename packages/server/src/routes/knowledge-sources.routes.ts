@@ -3,7 +3,7 @@
 // ──────────────────────────────────────────────
 import type { FastifyInstance } from "fastify";
 import { join, extname, basename } from "path";
-import { mkdir, readdir, readFile, unlink, writeFile, stat } from "fs/promises";
+import { mkdir, readFile, unlink, writeFile, stat } from "fs/promises";
 import { createWriteStream, existsSync, mkdirSync, readFileSync } from "fs";
 import { pipeline } from "stream/promises";
 import { nanoid } from "nanoid";
