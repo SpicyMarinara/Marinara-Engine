@@ -433,21 +433,43 @@ export function ChatArea() {
   }, [shouldOpenSettings, shouldOpenWizard, activeChatId, setShouldOpenSettings]);
 
   // Auto-scroll on new messages / streaming (but not on "load more")
-  // Only scroll if user is already near the bottom (within 150px)
+  // Only scroll if user is already near the bottom (within 150px).
+  // During streaming, if the user scrolls up (breaks away), stop auto-scrolling
+  // until they manually scroll back to the bottom — so they can read at their own pace.
   const isNearBottomRef = useRef(true);
+  const userScrolledAwayRef = useRef(false);
+  const lastScrollTopRef = useRef(0);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const onScroll = () => {
-      isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      const nearBottom = distFromBottom < 150;
+
+      // Detect intentional upward scroll during streaming
+      if (isStreaming && el.scrollTop < lastScrollTopRef.current - 10) {
+        userScrolledAwayRef.current = true;
+      }
+      // Re-engage auto-scroll when the user returns to the bottom
+      if (nearBottom) {
+        userScrolledAwayRef.current = false;
+      }
+
+      lastScrollTopRef.current = el.scrollTop;
+      isNearBottomRef.current = nearBottom;
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, []);
+  }, [isStreaming]);
+
+  // Reset scroll-away flag when streaming ends
+  useEffect(() => {
+    if (!isStreaming) userScrolledAwayRef.current = false;
+  }, [isStreaming]);
 
   const newestMsgId = msgData?.pages[0]?.[msgData.pages[0].length - 1]?.id;
   useEffect(() => {
-    if (!isLoadingMoreRef.current && isNearBottomRef.current) {
+    if (!isLoadingMoreRef.current && isNearBottomRef.current && !userScrolledAwayRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [newestMsgId, streamBuffer, isStreaming]);

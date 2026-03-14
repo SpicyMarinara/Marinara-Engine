@@ -40,9 +40,9 @@ export interface ChatMetadata {
   enableAgents: boolean;
   /** Per-agent enable overrides (agentId → boolean) */
   agentOverrides: Record<string, boolean>;
-  /** Agent IDs assigned to this chat (when enableAgents is on, only these agents run) */
+  /** Agent IDs scoped to this chat. Non-empty = only these agents run; empty = use globally-enabled agents. */
   activeAgentIds: string[];
-  /** Tool/function IDs assigned to this chat (when enableTools is on, only these tools are sent) */
+  /** Tool/function IDs scoped to this chat. Non-empty = only these tools are sent; empty = use all enabled tools. */
   activeToolIds: string[];
   /** Per-chat variable selections for preset variables (variableName → value or values) */
   presetChoices: Record<string, string | string[]>;

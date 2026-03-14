@@ -31,14 +31,15 @@ NODE_PLAT=$(node -e "process.stdout.write(process.platform)" 2>/dev/null || echo
 if [ "$NODE_PLAT" = "android" ]; then
     NPMRC_MARKER="# termux-supported-architectures"
     if ! grep -q "$NPMRC_MARKER" .npmrc 2>/dev/null; then
-        echo "  [OK] Detected Android/Termux — enabling Linux ARM64 binaries"
-        cat >> .npmrc <<EOF
-$NPMRC_MARKER
-supportedArchitectures.os[]=current
-supportedArchitectures.os[]=linux
-supportedArchitectures.cpu[]=current
-supportedArchitectures.cpu[]=arm64
-EOF
+        NODE_ARCH=$(node -e "process.stdout.write(process.arch)" 2>/dev/null || echo "")
+        echo "  [OK] Detected Android/Termux (${NODE_ARCH:-unknown}) — enabling Linux binaries"
+        {
+            echo "$NPMRC_MARKER"
+            echo "supportedArchitectures.os[]=current"
+            echo "supportedArchitectures.os[]=linux"
+            echo "supportedArchitectures.cpu[]=current"
+            [ -n "$NODE_ARCH" ] && echo "supportedArchitectures.cpu[]=$NODE_ARCH"
+        } >> .npmrc
         # Force pnpm to re-resolve optional deps on next install
         TERMUX_FORCE_INSTALL=1
     fi
