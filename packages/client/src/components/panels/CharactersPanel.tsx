@@ -641,16 +641,18 @@ export function CharactersPanel() {
               {/* Avatar */}
               <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-pink-400 to-rose-500 text-white shadow-sm">
                 {avatarUrl ? (
-                  <img
-                    src={avatarUrl}
-                    alt={charName}
-                    className="h-full w-full rounded-xl object-cover"
-                    style={getAvatarCropStyle(
-                      char.parsed.extensions?.avatarCrop as
-                        | { zoom: number; offsetX: number; offsetY: number }
-                        | undefined,
-                    )}
-                  />
+                  <div className="absolute inset-0 overflow-hidden rounded-xl">
+                    <img
+                      src={avatarUrl}
+                      alt={charName}
+                      className="h-full w-full object-cover"
+                      style={getAvatarCropStyle(
+                        char.parsed.extensions?.avatarCrop as
+                          | { zoom: number; offsetX: number; offsetY: number }
+                          | undefined,
+                      )}
+                    />
+                  </div>
                 ) : (
                   <User size="1rem" />
                 )}
