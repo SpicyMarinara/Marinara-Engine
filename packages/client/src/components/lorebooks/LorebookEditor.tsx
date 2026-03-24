@@ -956,7 +956,7 @@ export function LorebookEditor() {
                         e.stopPropagation();
                         handleDeleteEntry(entry.id);
                       }}
-                      className="rounded-lg p-1.5 opacity-0 transition-all hover:bg-[var(--destructive)]/15 group-hover:opacity-100"
+                      className="rounded-lg p-1.5 opacity-0 transition-all hover:bg-[var(--destructive)]/15 group-hover:opacity-100 max-md:opacity-100"
                     >
                       <Trash2 size="0.75rem" className="text-[var(--destructive)]" />
                     </button>
