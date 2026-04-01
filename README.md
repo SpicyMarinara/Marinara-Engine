@@ -170,14 +170,16 @@ The Termux launcher handles everything automatically — it downloads a prebuilt
 
 > **Tip:** Install the PWA — tap the browser menu and "Add to Home Screen" for a native app feel.
 
-The start script will:
+The shell launchers will:
 
 1. **Auto-update** from Git (if a `.git` folder is detected)
 2. Check that Node.js and pnpm are installed
 3. Install all dependencies (first run only)
 4. Build the application
 5. Initialize the database
-6. Start the server and open `http://localhost:7860` in your browser
+6. Start the server and open `http://localhost:7860` in your browser by default
+
+Set `AUTO_OPEN_BROWSER=false` in `.env` to skip the automatic browser launch. This applies to the shell launchers (`start.bat`, `start.sh`, and `start-termux.sh`) only. The Android wrapper uses its own WebView.
 
 ### Manual Setup
 
@@ -355,6 +357,7 @@ Copy `.env.example` to `.env` to customize:
 | ---------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `PORT`           | `7860`                           | Server port                                                                                                                                                   |
 | `HOST`           | `0.0.0.0`                        | Bind address                                                                                                                                                  |
+| `AUTO_OPEN_BROWSER` | `true`                        | Whether the shell launchers auto-open the local app URL. Set to `false`, `0`, `no`, or `off` to disable. Does not apply to the Android WebView wrapper. |
 | `DATABASE_URL`   | `file:./data/marinara-engine.db` | SQLite database path                                                                                                                                          |
 | `ENCRYPTION_KEY` | _(empty)_                        | AES key for API key encryption (generate with `openssl rand -hex 32`)                                                                                         |
 | `LOG_LEVEL`      | `info`                           | Logging verbosity                                                                                                                                             |

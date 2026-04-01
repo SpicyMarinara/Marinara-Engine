@@ -97,6 +97,14 @@ if not defined HOST set HOST=0.0.0.0
 set PROTOCOL=http
 if defined SSL_CERT if defined SSL_KEY set PROTOCOL=https
 
+set "AUTO_OPEN_BROWSER_ENABLED=1"
+if defined AUTO_OPEN_BROWSER (
+    if /I "%AUTO_OPEN_BROWSER%"=="0" set "AUTO_OPEN_BROWSER_ENABLED="
+    if /I "%AUTO_OPEN_BROWSER%"=="false" set "AUTO_OPEN_BROWSER_ENABLED="
+    if /I "%AUTO_OPEN_BROWSER%"=="no" set "AUTO_OPEN_BROWSER_ENABLED="
+    if /I "%AUTO_OPEN_BROWSER%"=="off" set "AUTO_OPEN_BROWSER_ENABLED="
+)
+
 echo.
 echo  ==========================================
 echo    Starting Marinara Engine on %PROTOCOL%://localhost:%PORT%
@@ -105,7 +113,11 @@ echo  ==========================================
 echo.
 
 :: Open browser after a short delay (use explorer.exe as fallback)
-start "" cmd /c "timeout /t 4 /nobreak >nul && start %PROTOCOL%://localhost:%PORT% || explorer %PROTOCOL%://localhost:%PORT%"
+if defined AUTO_OPEN_BROWSER_ENABLED (
+    start "" cmd /c "timeout /t 4 /nobreak >nul && start %PROTOCOL%://localhost:%PORT% || explorer %PROTOCOL%://localhost:%PORT%"
+) else (
+    echo  [OK] Auto-open disabled ^(AUTO_OPEN_BROWSER=%AUTO_OPEN_BROWSER%^)
+)
 
 :: Start server
 cd packages\server

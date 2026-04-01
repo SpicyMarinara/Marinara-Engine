@@ -219,9 +219,17 @@ export HOST=${HOST:-0.0.0.0}
 # DATABASE_DRIVER was set above during SQLite driver detection
 export DATABASE_DRIVER=${DATABASE_DRIVER:-sql.js}
 
+AUTO_OPEN_BROWSER_VALUE="${AUTO_OPEN_BROWSER:-true}"
+case "${AUTO_OPEN_BROWSER_VALUE,,}" in
+  0|false|no|off) AUTO_OPEN_BROWSER_ENABLED=0 ;;
+  *) AUTO_OPEN_BROWSER_ENABLED=1 ;;
+esac
+
 # Open in Termux browser if available (no-op if not)
-if command -v termux-open-url &> /dev/null; then
+if [ "$AUTO_OPEN_BROWSER_ENABLED" = "1" ] && command -v termux-open-url &> /dev/null; then
     (sleep 3 && termux-open-url "http://localhost:7860") &
+elif [ "$AUTO_OPEN_BROWSER_ENABLED" != "1" ]; then
+    echo "  [OK] Auto-open disabled (AUTO_OPEN_BROWSER=${AUTO_OPEN_BROWSER_VALUE})"
 fi
 
 # Start server

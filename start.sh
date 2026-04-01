@@ -100,6 +100,12 @@ else
   PROTOCOL=http
 fi
 
+AUTO_OPEN_BROWSER_VALUE="${AUTO_OPEN_BROWSER:-true}"
+case "${AUTO_OPEN_BROWSER_VALUE,,}" in
+  0|false|no|off) AUTO_OPEN_BROWSER_ENABLED=0 ;;
+  *) AUTO_OPEN_BROWSER_ENABLED=1 ;;
+esac
+
 echo ""
 echo "  ══════════════════════════════════════════"
 echo "    Starting Marinara Engine on ${PROTOCOL}://localhost:$PORT"
@@ -108,7 +114,11 @@ echo "  ════════════════════════
 echo ""
 
 # Open browser after a short delay
-(sleep 3 && open "${PROTOCOL}://localhost:$PORT" 2>/dev/null || xdg-open "${PROTOCOL}://localhost:$PORT" 2>/dev/null) &
+if [ "$AUTO_OPEN_BROWSER_ENABLED" = "1" ]; then
+  (sleep 3 && open "${PROTOCOL}://localhost:$PORT" 2>/dev/null || xdg-open "${PROTOCOL}://localhost:$PORT" 2>/dev/null) &
+else
+  echo "  [OK] Auto-open disabled (AUTO_OPEN_BROWSER=${AUTO_OPEN_BROWSER_VALUE})"
+fi
 
 # Start server
 cd packages/server
