@@ -128,7 +128,6 @@ export function useGenerate() {
       // Conversation mode: always disable streaming — messages appear complete.
       const isConversationMode = useChatStore.getState().activeChat?.mode === "conversation";
       const streamingEnabled = isConversationMode ? false : useUIStore.getState().enableStreaming;
-      const speed = useUIStore.getState().streamingSpeed; // 1 (very slow) – 100 (instant)
       let fullBuffer = ""; // What the user sees (or accumulates silently when streaming is off)
       let pendingText = ""; // Tokens waiting to be typed out
       let receivedContent = false; // Whether any actual message content was received
@@ -151,20 +150,29 @@ export function useGenerate() {
       let thinkTagName = "think"; // Which variant was matched ("think" or "thinking")
       const THINK_OPEN_RE = /^(\s*)<(think(?:ing)?)>/i;
 
-      // Derive typewriter parameters from speed (1–100)
+      // Compute charsPerTick from the user's streamingSpeed setting (1–100).
+      // Read per-tick so changes to the slider take effect immediately.
       // Uses an exponential curve so each notch on the slider feels perceptibly different.
       // speed 1   → 1 char/tick  → ~60 chars/sec   (slow typewriter effect)
       // speed 50  → 22 chars/tick → ~1300 chars/sec (fast but visible)
       // speed 100 → flush instantly (no typewriter)
-      //
-      // All ticks use rAF (~16ms intervals) for smooth rendering; only charsPerTick varies.
-      const charsPerTick =
-        speed >= 100 ? Infinity : Math.max(1, Math.round(Math.exp((Math.log(500) / 98) * (speed - 1))));
+      const EXP_RATE = Math.log(500) / 98;
+      const getCharsPerTick = () => {
+        const speed = useUIStore.getState().streamingSpeed;
+        return speed >= 100 ? Infinity : Math.max(1, Math.round(Math.exp(EXP_RATE * (speed - 1))));
+      };
 
       // Adaptive catch-up: when the queue gets very long, temporarily increase
       // chars-per-tick to prevent the typewriter lagging far behind real completion.
       const CATCHUP_THRESHOLD = 300;
       const CATCHUP_MULTIPLIER = 4;
+
+      console.log(
+        "[Typewriter] streaming=%s, speed=%d, charsPerTick=%d",
+        streamingEnabled,
+        useUIStore.getState().streamingSpeed,
+        getCharsPerTick(),
+      );
 
       const flushTypewriterBuffer = () => {
         cancelAnimationFrame(rafId);
@@ -186,6 +194,8 @@ export function useGenerate() {
             }
             return;
           }
+          // Read speed per-tick so the slider has immediate effect
+          const charsPerTick = getCharsPerTick();
           // Catch-up: if the pending queue is very long, increase speed to avoid
           // the typewriter still running long after the model finished.
           const effective = pendingText.length > CATCHUP_THRESHOLD ? charsPerTick * CATCHUP_MULTIPLIER : charsPerTick;

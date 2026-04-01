@@ -136,7 +136,12 @@ function GeneralSettings() {
       />
 
       {/* Streaming Speed */}
-      <label className="flex flex-col gap-1.5 rounded-lg p-1 transition-colors hover:bg-[var(--secondary)]/50">
+      <label
+        className={cn(
+          "flex flex-col gap-1.5 rounded-lg p-1 transition-colors",
+          enableStreaming ? "hover:bg-[var(--secondary)]/50" : "opacity-40 pointer-events-none",
+        )}
+      >
         <div className="flex items-center gap-2">
           <span className="text-xs">Streaming speed</span>
           <span className="text-xs tabular-nums text-[var(--muted-foreground)]">{streamingSpeed}</span>
