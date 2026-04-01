@@ -77,7 +77,7 @@ export function getNodeEnv() {
 }
 
 export function getLogLevel() {
-  return normalizeEnvValue(process.env.LOG_LEVEL) ?? "info";
+  return normalizeEnvValue(process.env.LOG_LEVEL) ?? "warn";
 }
 
 export function getServerProtocol() {
