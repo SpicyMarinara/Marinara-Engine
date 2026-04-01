@@ -1,5 +1,0 @@
-{
-  "name": "Hello World Test",
-  "description": "Tests that JS extensions work",
-  "js": "marinara.addStyle('body::after { content: \"JS Extensions Work!\"; position: fixed; bottom: 10px; left: 10px; background: #22c55e; color: white; padding: 8px 16px; border-radius: 8px; font-size: 14px; font-weight: bold; z-index: 99999; }');"
-}
