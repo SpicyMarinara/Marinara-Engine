@@ -38,7 +38,7 @@ import type { LLMToolDefinition, ChatMessage, LLMUsage } from "../services/llm/b
 import { executeToolCalls } from "../services/tools/tool-executor.js";
 import { createAgentPipeline, type ResolvedAgent } from "../services/agents/agent-pipeline.js";
 import { DATA_DIR } from "../utils/data-dir.js";
-import { executeAgent, executeAgentBatch } from "../services/agents/agent-executor.js";
+import { executeAgent } from "../services/agents/agent-executor.js";
 import {
   parseCharacterCommands,
   parseDuration,
@@ -76,6 +76,8 @@ import {
   wrapFields,
   type SimpleMessage,
 } from "./generate/generate-route-utils.js";
+import { registerRetryAgentsRoute } from "./generate/retry-agents-route.js";
+import { sendSseEvent, startSseReply, trySendSseEvent } from "./generate/sse.js";
 
 export async function generateRoutes(app: FastifyInstance) {
   const chats = createChatsStorage(app.db);
@@ -165,12 +167,7 @@ export async function generateRoutes(app: FastifyInstance) {
     }
 
     // Set up SSE headers
-    reply.raw.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-    });
+    startSseReply(reply, { "X-Accel-Buffering": "no" });
 
     // ── Abort controller: cancel agents when client disconnects ──
     const abortController = new AbortController();
@@ -179,11 +176,7 @@ export async function generateRoutes(app: FastifyInstance) {
 
     // ── SSE progress helper: tells the client what phase we're in ──
     const sendProgress = (phase: string) => {
-      try {
-        reply.raw.write(`data: ${JSON.stringify({ type: "progress", data: { phase } })}\n\n`);
-      } catch {
-        /* stream closed */
-      }
+      trySendSseEvent(reply, { type: "progress", data: { phase } });
     };
 
     try {
@@ -2512,23 +2505,18 @@ export async function generateRoutes(app: FastifyInstance) {
       // otherwise Promise.allSettled in executePhase silently drops the
       // entire group's results, causing agents to appear as "not triggered".
       const sendAgentEvent = (result: AgentResult) => {
-        try {
-          const ev = {
-            type: "agent_result",
-            data: {
-              agentType: result.agentType,
-              agentName: resolvedAgents.find((a) => a.type === result.agentType)?.name ?? result.agentType,
-              resultType: result.type,
-              data: result.data,
-              success: result.success,
-              error: result.error,
-              durationMs: result.durationMs,
-            },
-          };
-          reply.raw.write(`data: ${JSON.stringify(ev)}\n\n`);
-        } catch {
-          // Stream already closed — swallow the write error
-        }
+        trySendSseEvent(reply, {
+          type: "agent_result",
+          data: {
+            agentType: result.agentType,
+            agentName: resolvedAgents.find((a) => a.type === result.agentType)?.name ?? result.agentType,
+            resultType: result.type,
+            data: result.data,
+            success: result.success,
+            error: result.error,
+            durationMs: result.durationMs,
+          },
+        });
       };
 
       // Create the pipeline (exclude editor — it runs last, after all other agents)
@@ -2896,7 +2884,7 @@ export async function generateRoutes(app: FastifyInstance) {
       const onThinking = showThoughts
         ? (chunk: string) => {
             fullThinking += chunk;
-            reply.raw.write(`data: ${JSON.stringify({ type: "thinking", data: chunk })}\n\n`);
+            trySendSseEvent(reply, { type: "thinking", data: chunk });
           }
         : undefined;
 
@@ -2906,7 +2894,7 @@ export async function generateRoutes(app: FastifyInstance) {
         for (let i = 0; i < text.length; i += CHUNK_SIZE) {
           const chunk = text.slice(i, i + CHUNK_SIZE);
           fullResponse += chunk;
-          reply.raw.write(`data: ${JSON.stringify({ type: "token", data: chunk })}\n\n`);
+          trySendSseEvent(reply, { type: "token", data: chunk });
         }
       };
 
@@ -5108,7 +5096,7 @@ export async function generateRoutes(app: FastifyInstance) {
       }
 
       // Signal completion
-      reply.raw.write(`data: ${JSON.stringify({ type: "done", data: "" })}\n\n`);
+      sendSseEvent(reply, { type: "done", data: "" });
 
       // ── Background: chunk & embed new messages for memory recall ──
       // Always chunk (so memories are available if the user enables recall later)
@@ -5128,590 +5116,12 @@ export async function generateRoutes(app: FastifyInstance) {
             ? `${err.message}: ${(err as { cause?: Error }).cause!.message}`
             : err.message
           : "Generation failed";
-      reply.raw.write(`data: ${JSON.stringify({ type: "error", data: message })}\n\n`);
+      sendSseEvent(reply, { type: "error", data: message });
     } finally {
       req.raw.off("close", onClose);
       reply.raw.end();
     }
   });
 
-  // ──────────────────────────────────────────────
-  // POST /retry-agents — Re-run failed agents manually
-  // ──────────────────────────────────────────────
-  app.post<{
-    Body: { chatId: string; agentTypes: string[] };
-  }>("/retry-agents", async (request, reply) => {
-    const { chatId, agentTypes } = request.body;
-    if (!chatId || !agentTypes?.length) {
-      return reply.status(400).send({ error: "chatId and agentTypes are required" });
-    }
-
-    // SSE setup
-    reply.raw.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    });
-
-    try {
-      const chats = createChatsStorage(app.db);
-      const conns = createConnectionsStorage(app.db);
-      const chars = createCharactersStorage(app.db);
-
-      const chat = await chats.getById(chatId);
-      if (!chat) throw new Error("Chat not found");
-
-      const chatMeta = parseExtra(chat.metadata);
-
-      // Get the last assistant message for context
-      const recentMessages = await chats.listMessages(chatId);
-      const lastAssistant = [...recentMessages].reverse().find((m: any) => m.role === "assistant");
-      const mainResponse = lastAssistant?.content ?? "";
-
-      // Resolve agents
-      const configs = await agentsStore.list();
-      const agentTypeSet = new Set(agentTypes);
-      // Include DB rows that match the requested types (per-chat overrides mean we
-      // don't require enabled === "true" — the client already filtered by activeAgentIds).
-      const enabledConfigs = configs.filter((c: any) => agentTypeSet.has(c.type));
-      // Built-in agents with no DB row — use defaults (mirrors main pipeline fallback)
-      const resolvedTypeSet = new Set(enabledConfigs.map((c: any) => c.type));
-      const builtInFallbackConfigs = BUILT_IN_AGENTS.filter(
-        (a) => agentTypeSet.has(a.id) && !resolvedTypeSet.has(a.id),
-      );
-
-      // Resolve connection
-      let connId = chat.connectionId;
-      if (connId === "random") {
-        const pool = await conns.listRandomPool();
-        if (!pool.length) throw new Error("No connections are marked for the random pool");
-        const picked = pool[Math.floor(Math.random() * pool.length)];
-        connId = picked.id;
-      }
-      const conn = connId ? await conns.getWithKey(connId) : null;
-      if (!conn) throw new Error("No connection configured");
-
-      const baseUrl = resolveBaseUrl(conn);
-      if (!baseUrl) throw new Error("Cannot resolve provider URL");
-      const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey);
-
-      // Resolve character info
-      const characterIds: string[] =
-        typeof chat.characterIds === "string" ? JSON.parse(chat.characterIds) : (chat.characterIds ?? []);
-      const charInfo: Array<{ id: string; name: string; description: string }> = [];
-      for (const cid of characterIds) {
-        const charRow = await chars.getById(cid);
-        if (charRow) {
-          const charData = JSON.parse(charRow.data as string);
-          charInfo.push({
-            id: cid,
-            name: charData.name ?? "Unknown",
-            description: charData.description ?? "",
-          });
-        }
-      }
-
-      // Resolve persona — same logic as main pipeline
-      let personaName = "User";
-      let personaDescription = "";
-      let retryPersonaFields: { personality?: string; scenario?: string; backstory?: string; appearance?: string } = {};
-      let retryPersonaStats: any = null;
-      let retryRpgStats: any = null;
-      {
-        const allPersonas = await chars.listPersonas();
-        const persona =
-          (chat.personaId ? allPersonas.find((p: any) => p.id === chat.personaId) : null) ??
-          allPersonas.find((p: any) => p.isActive === "true");
-        if (persona) {
-          personaName = persona.name;
-          personaDescription = persona.description;
-          retryPersonaFields = {
-            personality: persona.personality ?? "",
-            scenario: persona.scenario ?? "",
-            backstory: persona.backstory ?? "",
-            appearance: persona.appearance ?? "",
-          };
-          if (persona.altDescriptions) {
-            try {
-              const altDescs = JSON.parse(persona.altDescriptions as string) as Array<{
-                active: boolean;
-                content: string;
-              }>;
-              for (const ext of altDescs) {
-                if (ext.active && ext.content) {
-                  personaDescription += "\n" + ext.content;
-                }
-              }
-            } catch {
-              /* ignore malformed JSON */
-            }
-          }
-          if (persona.personaStats) {
-            try {
-              const pStats =
-                typeof persona.personaStats === "string" ? JSON.parse(persona.personaStats) : persona.personaStats;
-              if (pStats?.enabled) retryPersonaStats = pStats;
-              if (pStats?.rpgStats?.enabled) retryRpgStats = pStats.rpgStats;
-            } catch {
-              /* ignore malformed personaStats JSON */
-            }
-          }
-        }
-      }
-
-      // Build agent context
-      // Compute context size the same way the main pipeline does
-      const agentContextSize =
-        enabledConfigs.length > 0
-          ? Math.max(
-              ...enabledConfigs.map((c: any) => {
-                const s = typeof c.settings === "string" ? JSON.parse(c.settings) : (c.settings ?? {});
-                return (s.contextSize as number) || 5;
-              }),
-            )
-          : 5;
-      const agentSlice = recentMessages.slice(-agentContextSize);
-
-      // Batch-fetch committed game state snapshots for assistant messages
-      const retryAssistantMsgIds = agentSlice
-        .filter((m: any) => m.role === "assistant")
-        .map((m: any) => m.id as string);
-      const retryCommittedSnapshots = await gameStateStore.getCommittedForMessages(retryAssistantMsgIds);
-
-      const agentContext: AgentContext = {
-        chatId,
-        chatMode: (chat as any).mode ?? "conversation",
-        recentMessages: agentSlice.map((m: any) => {
-          const msg: AgentContext["recentMessages"][number] = {
-            role: m.role,
-            content: m.content,
-            characterId: m.characterId ?? undefined,
-          };
-          if (m.role === "assistant") {
-            const snapRow = retryCommittedSnapshots.get(m.id as string);
-            if (snapRow) {
-              msg.gameState = parseGameStateRow(snapRow as Record<string, unknown>);
-            }
-          }
-          return msg;
-        }),
-        mainResponse,
-        gameState: null,
-        characters: charInfo,
-        persona:
-          personaName !== "User"
-            ? {
-                name: personaName,
-                description: personaDescription,
-                personality: retryPersonaFields.personality || undefined,
-                backstory: retryPersonaFields.backstory || undefined,
-                appearance: retryPersonaFields.appearance || undefined,
-                scenario: retryPersonaFields.scenario || undefined,
-                ...(retryPersonaStats ? { personaStats: retryPersonaStats } : {}),
-                ...(retryRpgStats ? { rpgStats: retryRpgStats } : {}),
-              }
-            : null,
-        activatedLorebookEntries: null,
-        writableLorebookIds: null,
-        chatSummary: ((chatMeta.summary as string) ?? "").trim() || null,
-        memory: {},
-      };
-
-      // Populate writable lorebook IDs for lorebook-keeper retries
-      {
-        const enabledBooks = await lorebooksStore.list();
-        const enabledIds = enabledBooks
-          .filter((b: any) => b.enabled === true || b.enabled === "true")
-          .map((b: any) => b.id);
-        agentContext.writableLorebookIds = enabledIds;
-      }
-
-      // Load game state
-      const latestGS = await gameStateStore.getLatestCommitted(chatId);
-      if (latestGS) {
-        agentContext.gameState = parseGameStateRow(latestGS as Record<string, unknown>);
-      }
-
-      reply.raw.write(`data: ${JSON.stringify({ type: "agent_start", data: { phase: "retry" } })}\n\n`);
-
-      // Resolve per-agent connections up front, then run all agents in parallel
-      const resolvedAgents: Array<{
-        cfg: (typeof enabledConfigs)[0];
-        resolved: ResolvedAgent;
-        agentProvider: any;
-        agentModel: string;
-      }> = [];
-      for (const cfg of enabledConfigs) {
-        let agentProvider = provider;
-        let agentModel = conn.model;
-
-        if (cfg.connectionId) {
-          const agentConn = await conns.getWithKey(cfg.connectionId as string);
-          if (agentConn) {
-            const agentBaseUrl = resolveBaseUrl(agentConn);
-            if (agentBaseUrl) {
-              agentProvider = createLLMProvider(agentConn.provider, agentBaseUrl, agentConn.apiKey);
-              agentModel = agentConn.model;
-            }
-          }
-        }
-
-        const resolved: ResolvedAgent = {
-          id: cfg.id,
-          type: cfg.type,
-          name: cfg.name,
-          phase: cfg.phase as string,
-          promptTemplate: cfg.promptTemplate as string,
-          connectionId: cfg.connectionId as string | null,
-          settings: typeof cfg.settings === "string" ? JSON.parse(cfg.settings) : (cfg.settings ?? {}),
-          provider: agentProvider,
-          model: agentModel,
-        };
-        resolvedAgents.push({ cfg, resolved, agentProvider, agentModel });
-      }
-
-      // Add built-in fallbacks (agents with no DB row)
-      for (const builtIn of builtInFallbackConfigs) {
-        const resolved: ResolvedAgent = {
-          id: `builtin:${builtIn.id}`,
-          type: builtIn.id,
-          name: builtIn.name,
-          phase: builtIn.phase,
-          promptTemplate: "",
-          connectionId: null,
-          settings: {},
-          provider,
-          model: conn.model,
-        };
-        resolvedAgents.push({
-          cfg: { id: `builtin:${builtIn.id}`, type: builtIn.id, name: builtIn.name } as any,
-          resolved,
-          agentProvider: provider,
-          agentModel: conn.model,
-        });
-      }
-
-      // Group agents by provider+model and batch them (same as main pipeline)
-      const providerModelGroups = new Map<
-        string,
-        {
-          agents: typeof resolvedAgents;
-          provider: any;
-          model: string;
-        }
-      >();
-      for (const entry of resolvedAgents) {
-        const key = `${entry.agentProvider.constructor.name}::${entry.agentModel}`;
-        if (!providerModelGroups.has(key)) {
-          providerModelGroups.set(key, { agents: [], provider: entry.agentProvider, model: entry.agentModel });
-        }
-        providerModelGroups.get(key)!.agents.push(entry);
-      }
-
-      // Run each group as a batch (groups with different providers run in parallel)
-      const groupSettled = await Promise.allSettled(
-        [...providerModelGroups.values()].map(async (group) => {
-          const configs = group.agents.map((a) => a.resolved);
-          return executeAgentBatch(configs, agentContext, group.provider, group.model);
-        }),
-      );
-
-      // Collect results and stream back to client
-      const results: AgentResult[] = [];
-      for (const outcome of groupSettled) {
-        if (outcome.status === "fulfilled") {
-          for (const result of outcome.value) {
-            const cfg = resolvedAgents.find((a) => a.resolved.type === result.agentType)?.cfg;
-            const ev = {
-              type: "agent_result",
-              data: {
-                agentType: result.agentType,
-                agentName: cfg?.name ?? result.agentType,
-                resultType: result.type,
-                data: result.data,
-                success: result.success,
-                error: result.error,
-                durationMs: result.durationMs,
-              },
-            };
-            reply.raw.write(`data: ${JSON.stringify(ev)}\n\n`);
-            results.push(result);
-          }
-        } else {
-          console.error(`[retry-agents] Group failed:`, outcome.reason);
-        }
-      }
-      // Persist agent runs
-      const messageId = lastAssistant?.id ?? "";
-      for (const result of results) {
-        try {
-          await agentsStore.saveRun({
-            agentConfigId: result.agentId,
-            chatId,
-            messageId,
-            result,
-          });
-        } catch {
-          /* Non-critical */
-        }
-      }
-
-      // Handle game state updates from retry results
-      // Sort so game_state_update is processed before dependent types
-      const sortedRetryResults = [...results].sort(
-        (a, b) => (a.type === "game_state_update" ? 0 : 1) - (b.type === "game_state_update" ? 0 : 1),
-      );
-      const retryMessageId = lastAssistant?.id ?? "";
-      const retrySwipeIndex = lastAssistant?.activeSwipeIndex ?? 0;
-      for (const result of sortedRetryResults) {
-        if (result.success && result.type === "game_state_update" && result.data && typeof result.data === "object") {
-          try {
-            const gs = result.data as Record<string, unknown>;
-            // Only send the 5 world-state fields — avoid clobbering other state from batch cross-contamination
-            const worldStatePatch: Record<string, unknown> = {};
-            if (gs.date != null) worldStatePatch.date = gs.date as string;
-            if (gs.time != null) worldStatePatch.time = gs.time as string;
-            if (gs.location != null) worldStatePatch.location = gs.location as string;
-            if (gs.weather != null) worldStatePatch.weather = gs.weather as string;
-            if (gs.temperature != null) worldStatePatch.temperature = gs.temperature as string;
-            // Persist to DB so data survives page refresh
-            if (Object.keys(worldStatePatch).length > 0) {
-              await gameStateStore.updateByMessage(retryMessageId, retrySwipeIndex, chatId, worldStatePatch as any);
-            }
-            reply.raw.write(`data: ${JSON.stringify({ type: "game_state_patch", data: worldStatePatch })}\n\n`);
-          } catch {
-            /* Non-critical */
-          }
-        }
-        if (
-          result.success &&
-          result.type === "character_tracker_update" &&
-          result.data &&
-          typeof result.data === "object"
-        ) {
-          try {
-            const ctData = result.data as Record<string, unknown>;
-            const chars = (ctData.presentCharacters as any[]) ?? [];
-            // Persist to DB so data survives page refresh
-            await gameStateStore.updateByMessage(retryMessageId, retrySwipeIndex, chatId, {
-              presentCharacters: chars,
-            });
-            reply.raw.write(
-              `data: ${JSON.stringify({ type: "game_state_patch", data: { presentCharacters: chars } })}\n\n`,
-            );
-          } catch {
-            /* Non-critical */
-          }
-        }
-        if (
-          result.success &&
-          result.type === "persona_stats_update" &&
-          result.data &&
-          typeof result.data === "object"
-        ) {
-          try {
-            const psData = result.data as Record<string, unknown>;
-            const bars = (psData.stats as any[]) ?? [];
-            const status = (psData.status as string) ?? "";
-            const inventory = (psData.inventory as any[]) ?? [];
-            const latest =
-              (await gameStateStore.getByMessage(retryMessageId, retrySwipeIndex)) ??
-              (await gameStateStore.getLatest(chatId));
-            if (latest) {
-              const updates: Record<string, unknown> = {};
-              if (bars.length > 0) updates.personaStats = JSON.stringify(bars);
-              const existingPS = latest.playerStats
-                ? typeof latest.playerStats === "string"
-                  ? JSON.parse(latest.playerStats)
-                  : latest.playerStats
-                : { stats: [], attributes: null, skills: {}, inventory: [], activeQuests: [], status: "" };
-              const mergedPS = { ...existingPS };
-              if (status) mergedPS.status = status;
-              if (inventory.length > 0) mergedPS.inventory = inventory;
-              updates.playerStats = JSON.stringify(mergedPS);
-              await app.db
-                .update(gameStateSnapshotsTable)
-                .set(updates)
-                .where(eq(gameStateSnapshotsTable.id, latest.id));
-            }
-            const patchData: Record<string, unknown> = {};
-            if (bars.length > 0) patchData.personaStats = bars;
-            if (status || inventory.length > 0) {
-              patchData.playerStats = {
-                status: status || undefined,
-                inventory: inventory.length > 0 ? inventory : undefined,
-              };
-            }
-            reply.raw.write(`data: ${JSON.stringify({ type: "game_state_patch", data: patchData })}\n\n`);
-          } catch {
-            /* Non-critical */
-          }
-        }
-        // Lorebook Keeper agent → persist entries on retry
-        if (result.success && result.type === "lorebook_update" && result.data && typeof result.data === "object") {
-          try {
-            const lkData = result.data as Record<string, unknown>;
-            const retryUpdates = (lkData.updates as any[]) ?? [];
-            if (retryUpdates.length > 0) {
-              let targetLorebookId: string | null = null;
-              if (agentContext.writableLorebookIds && agentContext.writableLorebookIds.length > 0) {
-                targetLorebookId = agentContext.writableLorebookIds[0] ?? null;
-              } else {
-                const created = await lorebooksStore.create({
-                  name: `Auto-generated (${(chat as any).name || chatId})`,
-                  description: "Automatically created by the Lorebook Keeper agent",
-                  category: "uncategorized",
-                  chatId: chatId ?? null,
-                  enabled: true,
-                  generatedBy: "agent",
-                  sourceAgentId: "lorebook-keeper",
-                });
-                if (created) targetLorebookId = (created as any).id;
-              }
-              if (targetLorebookId) {
-                const existingEntries = await lorebooksStore.listEntries(targetLorebookId);
-                const entryByName = new Map(existingEntries.map((e: any) => [e.name?.toLowerCase(), e]));
-                for (const u of retryUpdates) {
-                  const name = (u.entryName as string) ?? "";
-                  const content = (u.content as string) ?? "";
-                  const keys = (u.keys as string[]) ?? [];
-                  const tag = (u.tag as string) ?? "";
-                  const action = (u.action as string) ?? "create";
-                  const existing = entryByName.get(name.toLowerCase());
-
-                  // Skip locked entries
-                  if (existing && (existing.locked === true || existing.locked === "true")) {
-                    continue;
-                  }
-
-                  // Skip duplicate creates — update instead if name already exists
-                  if (action === "create" && existing) {
-                    await lorebooksStore.updateEntry(existing.id, { content, keys, tag });
-                  } else if (action === "update" && existing) {
-                    await lorebooksStore.updateEntry(existing.id, { content, keys, tag });
-                  } else {
-                    await lorebooksStore.createEntry({
-                      lorebookId: targetLorebookId,
-                      name,
-                      content,
-                      keys,
-                      tag,
-                      enabled: true,
-                    });
-                  }
-                }
-              }
-            }
-          } catch {
-            /* Non-critical */
-          }
-        }
-        if (result.success && result.type === "quest_update" && result.data && typeof result.data === "object") {
-          try {
-            const qData = result.data as Record<string, unknown>;
-            const updates = (qData.updates as any[]) ?? [];
-            console.log(
-              `[retry-agents] Quest agent result — updates: ${updates.length}, data keys: ${Object.keys(qData).join(",")}`,
-              JSON.stringify(qData).slice(0, 500),
-            );
-            if (updates.length > 0) {
-              const snap =
-                (await gameStateStore.getByMessage(retryMessageId, retrySwipeIndex)) ??
-                (await gameStateStore.getLatest(chatId));
-              const existingPS = snap?.playerStats
-                ? typeof snap.playerStats === "string"
-                  ? JSON.parse(snap.playerStats)
-                  : snap.playerStats
-                : { stats: [], attributes: null, skills: {}, inventory: [], activeQuests: [], status: "" };
-              const originalQuests: any[] = existingPS.activeQuests ?? [];
-              const quests: any[] = [...originalQuests];
-              for (const u of updates) {
-                const idx = quests.findIndex((q: any) => q.name === u.questName);
-                if (u.action === "create" && idx === -1) {
-                  quests.push({
-                    questEntryId: u.questName,
-                    name: u.questName,
-                    currentStage: 0,
-                    objectives: u.objectives ?? [],
-                    completed: false,
-                  });
-                } else if (idx !== -1) {
-                  if (u.action === "update") {
-                    if (u.objectives) quests[idx].objectives = u.objectives;
-                  } else if (u.action === "complete") {
-                    quests[idx].completed = true;
-                    if (u.objectives) quests[idx].objectives = u.objectives;
-                  } else if (u.action === "fail") {
-                    quests.splice(idx, 1);
-                  }
-                }
-              }
-              // Only persist + send if quests actually changed
-              const changed = JSON.stringify(quests) !== JSON.stringify(originalQuests);
-              if (changed) {
-                const mergedPS = { ...existingPS, activeQuests: quests };
-                if (snap) {
-                  await app.db
-                    .update(gameStateSnapshotsTable)
-                    .set({ playerStats: JSON.stringify(mergedPS) })
-                    .where(eq(gameStateSnapshotsTable.id, snap.id));
-                }
-                reply.raw.write(
-                  `data: ${JSON.stringify({ type: "game_state_patch", data: { playerStats: { activeQuests: quests } } })}\n\n`,
-                );
-              }
-            }
-          } catch {
-            /* Non-critical */
-          }
-        }
-        // Custom Tracker agent → merge custom fields on retry
-        if (
-          result.success &&
-          result.type === "custom_tracker_update" &&
-          result.data &&
-          typeof result.data === "object"
-        ) {
-          try {
-            const ctData = result.data as Record<string, unknown>;
-            const fields = (ctData.fields as any[]) ?? [];
-            if (fields.length > 0) {
-              const snap =
-                (await gameStateStore.getByMessage(retryMessageId, retrySwipeIndex)) ??
-                (await gameStateStore.getLatest(chatId));
-              if (snap) {
-                const existingPS = snap.playerStats
-                  ? typeof snap.playerStats === "string"
-                    ? JSON.parse(snap.playerStats)
-                    : snap.playerStats
-                  : { stats: [], attributes: null, skills: {}, inventory: [], activeQuests: [], status: "" };
-                const mergedPS = { ...existingPS, customTrackerFields: fields };
-                await app.db
-                  .update(gameStateSnapshotsTable)
-                  .set({ playerStats: JSON.stringify(mergedPS) })
-                  .where(eq(gameStateSnapshotsTable.id, snap.id));
-              }
-              reply.raw.write(
-                `data: ${JSON.stringify({ type: "game_state_patch", data: { playerStats: { customTrackerFields: fields } } })}\n\n`,
-              );
-            }
-          } catch {
-            /* Non-critical */
-          }
-        }
-      }
-
-      reply.raw.write(`data: ${JSON.stringify({ type: "done", data: "" })}\n\n`);
-    } catch (err) {
-      const message =
-        err instanceof Error
-          ? (err as { cause?: unknown }).cause instanceof Error
-            ? `${err.message}: ${(err as { cause?: Error }).cause!.message}`
-            : err.message
-          : "Agent retry failed";
-      reply.raw.write(`data: ${JSON.stringify({ type: "error", data: message })}\n\n`);
-    } finally {
-      reply.raw.end();
-    }
-  });
+  await registerRetryAgentsRoute(app);
 }
