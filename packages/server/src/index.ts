@@ -2,10 +2,11 @@
 // Server Entry Point
 // ──────────────────────────────────────────────
 import { buildApp } from "./app.js";
-import { getHost, getPort, getServerProtocol, loadTlsOptions } from "./config/runtime-config.js";
+import { getHost, getPort, getServerProtocol, loadTlsOptions, logStorageDiagnostics } from "./config/runtime-config.js";
 
 async function main() {
   const tls = loadTlsOptions();
+  logStorageDiagnostics();
   const app = await buildApp(tls ?? undefined);
   const protocol = tls ? "https" : getServerProtocol();
   const port = getPort();

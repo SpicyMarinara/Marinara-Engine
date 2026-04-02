@@ -1,5 +1,5 @@
 import dotenv from "dotenv";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,14 +7,16 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const SERVER_ROOT = resolve(__dirname, "../..");
-const MONOREPO_ROOT = resolve(__dirname, "../../..");
+const MONOREPO_ROOT = resolve(__dirname, "../../../..");
 const DEFAULT_PORT = 7860;
 const DEFAULT_HOST = "127.0.0.1";
-const DEFAULT_DATA_DIR = resolve(MONOREPO_ROOT, "data");
-const LEGACY_DATA_DIR = resolve(SERVER_ROOT, "data");
+const DEFAULT_DATA_DIR = resolve(SERVER_ROOT, "data");
+const REGRESSION_DATA_DIR = resolve(MONOREPO_ROOT, "data");
+const DEFAULT_DATABASE_FILE = "marinara-engine.db";
+const DEFAULT_DATABASE_PATH = resolve(DEFAULT_DATA_DIR, DEFAULT_DATABASE_FILE);
+const REGRESSION_DATABASE_PATH = resolve(REGRESSION_DATA_DIR, DEFAULT_DATABASE_FILE);
 
 let envLoaded = false;
-let legacyDataDirWarned = false;
 
 export function loadRuntimeEnv() {
   if (envLoaded) return;
@@ -41,14 +43,9 @@ function resolveFromRepoRoot(targetPath: string) {
   return resolve(MONOREPO_ROOT, targetPath);
 }
 
-function directoryHasContent(targetPath: string) {
-  if (!existsSync(targetPath)) return false;
-
-  try {
-    return readdirSync(targetPath).length > 0;
-  } catch {
-    return false;
-  }
+function resolveFromServerRoot(targetPath: string) {
+  if (isAbsolute(targetPath)) return targetPath;
+  return resolve(SERVER_ROOT, targetPath);
 }
 
 function isDisabledFlag(value: string | undefined | null) {
@@ -86,22 +83,7 @@ export function getServerProtocol() {
 
 export function getDataDir() {
   const raw = normalizeEnvValue(process.env.DATA_DIR);
-  if (raw) return resolveFromRepoRoot(raw);
-
-  const defaultHasContent = directoryHasContent(DEFAULT_DATA_DIR);
-  const legacyHasContent = directoryHasContent(LEGACY_DATA_DIR);
-
-  if (!defaultHasContent && legacyHasContent) {
-    if (!legacyDataDirWarned) {
-      console.warn(
-        `[config] Using legacy data directory at ${LEGACY_DATA_DIR}. ` +
-          `Set DATA_DIR explicitly or move data into ${DEFAULT_DATA_DIR} to adopt the repo-root default.`,
-      );
-      legacyDataDirWarned = true;
-    }
-    return LEGACY_DATA_DIR;
-  }
-
+  if (raw) return resolveFromServerRoot(raw);
   return DEFAULT_DATA_DIR;
 }
 
@@ -124,7 +106,7 @@ export function getDatabaseUrl() {
     return raw;
   }
 
-  return `file:${resolveFromRepoRoot(rawPath)}`;
+  return `file:${resolveFromServerRoot(rawPath)}`;
 }
 
 export function getDatabaseFilePath() {
@@ -220,4 +202,39 @@ export function loadTlsOptions() {
 
 export function isAutoOpenBrowserDisabled(value = process.env.AUTO_OPEN_BROWSER) {
   return isDisabledFlag(value);
+}
+
+export function logStorageDiagnostics(logger: Pick<Console, "info" | "warn"> = console) {
+  const dataDir = getDataDir();
+  const dbPath = getDatabaseFilePath();
+
+  logger.info(`[storage] DATA_DIR=${dataDir}`);
+  if (dbPath) {
+    logger.info(`[storage] DATABASE_FILE=${dbPath}`);
+  } else {
+    logger.info(`[storage] DATABASE_URL=${getDatabaseUrl()}`);
+  }
+
+  if (existsSync(DEFAULT_DATABASE_PATH) && existsSync(REGRESSION_DATABASE_PATH)) {
+    if (dbPath === DEFAULT_DATABASE_PATH) {
+      logger.warn(
+        `[storage] Both database locations exist: ${DEFAULT_DATABASE_PATH} and ${REGRESSION_DATABASE_PATH}. ` +
+          `Using ${DEFAULT_DATABASE_PATH} for compatibility. The repo-root database may contain data written during the recent path regression. ` +
+          `Do not delete either file until recovery is confirmed.`,
+      );
+      return;
+    }
+
+    logger.warn(
+      `[storage] Both database locations exist: ${DEFAULT_DATABASE_PATH} and ${REGRESSION_DATABASE_PATH}. ` +
+        `The current database resolves to ${dbPath ?? getDatabaseUrl()}. Do not delete either file until recovery is confirmed.`,
+    );
+  }
+
+  if (dbPath === DEFAULT_DATABASE_PATH && !existsSync(DEFAULT_DATABASE_PATH) && existsSync(REGRESSION_DATABASE_PATH)) {
+    logger.warn(
+      `[storage] Found a repo-root database at ${REGRESSION_DATABASE_PATH}, but the current compatibility path resolves to ${DEFAULT_DATABASE_PATH}. ` +
+        `If data appears missing, inspect both locations and do not delete either file until recovery is confirmed.`,
+    );
+  }
 }

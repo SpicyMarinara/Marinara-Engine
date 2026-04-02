@@ -342,7 +342,7 @@ Copy `.env.example` to `.env` to customize:
 | `PORT` | `7860` | Server port. Keep Android builds, launchers, Docker, and Termux on the same value. |
 | `HOST` | `127.0.0.1` (`pnpm start`) / `0.0.0.0` (shell launchers) | Bind address |
 | `AUTO_OPEN_BROWSER` | `true` | Whether the shell launchers auto-open the local app URL. Set to `false`, `0`, `no`, or `off` to disable. Does not apply to the Android WebView wrapper. |
-| `DATABASE_URL` | `file:./data/marinara-engine.db` | SQLite database path. Relative file paths resolve from the repo root. |
+| `DATABASE_URL` | `file:./data/marinara-engine.db` | SQLite database path. Relative file paths resolve from `packages/server` for compatibility with existing local installs. |
 | `ENCRYPTION_KEY` | _(empty)_ | AES key for API key encryption (generate with `openssl rand -hex 32`) |
 | `LOG_LEVEL` | `info` | Logging verbosity |
 | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Allowed CORS origins. Set `*` for allow-all without credentials; explicit origin lists keep credentialed CORS support. |
@@ -393,6 +393,17 @@ If you see an error like `EPERM: operation not permitted, open 'C:\Program Files
 1. **Run as Administrator** — Right-click your terminal (CMD or PowerShell), select "Run as administrator", then run `start.bat` again.
 2. **Install pnpm manually** — Run `npm install -g pnpm`, then run `start.bat` again.
 3. **Update corepack** — Run `npm install -g corepack`, `corepack enable`, and `corepack prepare pnpm@10.30.3 --activate` in an Administrator terminal.
+
+### Data Seems Missing After A Recent Update
+
+If your chats or presets appear to be missing after updating, do not delete any data folders yet. Recent path changes can make the app open a different SQLite file without erasing the old one.
+
+Check both local data locations:
+
+1. `packages/server/data/`
+2. `data/`
+
+Look for `marinara-engine.db` plus any `-wal` and `-shm` companion files. The server now logs the resolved `DATA_DIR` and database path on startup to help identify which one is active.
 
 ---
 

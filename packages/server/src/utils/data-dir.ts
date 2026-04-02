@@ -7,7 +7,7 @@
 //
 //  Priority:
 //    1. DATA_DIR environment variable  (explicit override)
-//    2. <monorepo-root>/data           (deterministic default)
+//    2. <server-package-root>/data     (compatibility default)
 // ──────────────────────────────────────────────
 import { getDataDir as getConfiguredDataDir } from "../config/runtime-config.js";
 
