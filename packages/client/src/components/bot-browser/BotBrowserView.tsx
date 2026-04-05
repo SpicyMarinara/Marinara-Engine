@@ -1345,10 +1345,13 @@ export function BotBrowserView() {
       } else {
         let cardDetail = detail;
         if (!cardDetail) cardDetail = await provider.fetchDetail(card);
+        // For extracted JanitorAI data, description contains the full personality definition
+        const descriptionText = cardDetail?.description || "";
+        const personalityText = cardDetail?.personality || "";
         const v2: Record<string, unknown> = {
           name: card.name,
-          description: cardDetail?.description || "",
-          personality: cardDetail?.personality || "",
+          description: descriptionText || personalityText,
+          personality: personalityText && descriptionText ? personalityText : "",
           scenario: cardDetail?.scenario || "",
           first_mes: cardDetail?.firstMessage || "",
           mes_example: cardDetail?.exampleDialogs || "",
@@ -1793,6 +1796,7 @@ export function BotBrowserView() {
                 setDetail(null);
               }}
               onImport={handleImport}
+              onDetailUpdate={setDetail}
             />
           ) : (
             <div className="flex flex-col gap-4">
@@ -2559,6 +2563,7 @@ function DetailView({
   provider,
   onBack,
   onImport,
+  onDetailUpdate,
 }: {
   card: BrowseCard;
   detail: CardDetail | null;
@@ -2567,6 +2572,7 @@ function DetailView({
   provider: ProviderConfig;
   onBack: () => void;
   onImport: (card: BrowseCard) => void;
+  onDetailUpdate?: (detail: CardDetail) => void;
 }) {
   const [imgError, setImgError] = useState(false);
   const [extracting, setExtracting] = useState(false);
@@ -2602,6 +2608,7 @@ function DetailView({
         creatorNotes: detail?.creatorNotes || undefined,
       };
       setExtractedDetail(extracted);
+      onDetailUpdate?.(extracted);
       toast.success("Hidden definitions extracted successfully!");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Extraction failed");
