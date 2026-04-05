@@ -214,7 +214,7 @@ podman compose up -d
 Or:
 
 ```bash
-podman run -d -p 7860:7860 -v marinara-data:/app/data ghcr.io/spicymarinara/marinara-engine:latest
+podman run -d -p 7860:7860 -v marinara-data:/app/data ghcr.io/pasta-devs/marinara-engine:latest
 ```
 
 > **Note:** `podman compose` requires the [`podman-compose`](https://github.com/containers/podman-compose/) plugin. On most distributions you can install it with `sudo dnf install podman-compose` (Fedora), `sudo apt install podman-compose` (Debian/Ubuntu), or `pip install podman-compose`.
