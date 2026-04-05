@@ -160,10 +160,10 @@ jobs:
         run: |
           tags=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           image="${{ env.REGISTRY }}/${{ steps.lower.outputs.image }}"
-          digests=$(printf '${image}@sha256:%s ' *)
+          digests=$(printf "${image}@sha256:%s " *)
           docker buildx imagetools create $tags $digests
-          # Get the digest of the pushed manifest list
-          digest=$(docker buildx imagetools inspect "$image:${{ steps.meta.outputs.version }}" --format '{{.Digest}}')
+          # Get the digest of the pushed manifest list using raw format
+          digest=$(docker buildx imagetools inspect "$image:${{ steps.meta.outputs.version }}" --raw | sha256sum | cut -d' ' -f1 | sed 's/^/sha256:/')
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Inspect image
