@@ -170,6 +170,7 @@ export function ConversationView({
   const isNearBottomRef = useRef(true);
   const userScrolledAwayRef = useRef(false);
   const lastScrollTopRef = useRef(0);
+  const userScrolledAtRef = useRef(0);
 
   // ── Scroll tracking ──
   useEffect(() => {
@@ -181,18 +182,29 @@ export function ConversationView({
       if (isStreaming && el.scrollTop < lastScrollTopRef.current - 10) {
         userScrolledAwayRef.current = true;
       }
-      if (nearBottom) userScrolledAwayRef.current = false;
+      // Re-engage auto-scroll when the user returns to the bottom,
+      // but only if enough time has passed since their last wheel/touch
+      // input. Without this cooldown, in-flight smooth-scroll animations
+      // fire scroll events that immediately re-engage auto-scroll.
+      if (nearBottom && Date.now() - userScrolledAtRef.current > 300) {
+        userScrolledAwayRef.current = false;
+      }
       lastScrollTopRef.current = el.scrollTop;
       isNearBottomRef.current = nearBottom;
     };
     el.addEventListener("scroll", onScroll, { passive: true });
-    const onWheel = () => {
-      if (isStreaming && !userScrolledAwayRef.current) userScrolledAwayRef.current = true;
+    const onUserScroll = () => {
+      if (isStreaming) {
+        userScrolledAwayRef.current = true;
+        userScrolledAtRef.current = Date.now();
+      }
     };
-    el.addEventListener("wheel", onWheel, { passive: true });
+    el.addEventListener("wheel", onUserScroll, { passive: true });
+    el.addEventListener("touchmove", onUserScroll, { passive: true });
     return () => {
       el.removeEventListener("scroll", onScroll);
-      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("wheel", onUserScroll);
+      el.removeEventListener("touchmove", onUserScroll);
     };
   }, [isStreaming]);
 

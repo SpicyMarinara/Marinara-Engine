@@ -587,6 +587,7 @@ export function ChatArea() {
   const isNearBottomRef = useRef(true);
   const userScrolledAwayRef = useRef(false);
   const lastScrollTopRef = useRef(0);
+  const userScrolledAtRef = useRef(0);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -598,8 +599,11 @@ export function ChatArea() {
       if (isStreaming && el.scrollTop < lastScrollTopRef.current - 10) {
         userScrolledAwayRef.current = true;
       }
-      // Re-engage auto-scroll when the user returns to the bottom
-      if (nearBottom) {
+      // Re-engage auto-scroll when the user returns to the bottom,
+      // but only if enough time has passed since their last wheel/touch
+      // input. Without this cooldown, in-flight smooth-scroll animations
+      // fire scroll events that immediately re-engage auto-scroll.
+      if (nearBottom && Date.now() - userScrolledAtRef.current > 300) {
         userScrolledAwayRef.current = false;
       }
 
@@ -610,8 +614,9 @@ export function ChatArea() {
     // Wheel / touch: immediately disengage auto-scroll during streaming
     // so the user can read without being dragged to the bottom.
     const onUserScroll = () => {
-      if (isStreaming && !userScrolledAwayRef.current) {
+      if (isStreaming) {
         userScrolledAwayRef.current = true;
+        userScrolledAtRef.current = Date.now();
       }
     };
 
