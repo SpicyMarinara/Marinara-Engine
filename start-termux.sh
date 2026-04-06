@@ -92,28 +92,37 @@ echo "  [OK] pnpm ${PNPM_VERSION} ready"
 if [ -d ".git" ]; then
     echo "  [..] Checking for updates..."
     OLD_HEAD=$(git rev-parse HEAD 2>/dev/null)
-    # Stash any local changes (e.g. pnpm install modifying package.json) so pull doesn't fail
-    STASHED=0
-    if ! git diff --quiet 2>/dev/null; then
-        git stash push -q -m "auto-stash before update" 2>/dev/null && STASHED=1
-    fi
-    if git pull 2>/dev/null; then
-        NEW_HEAD=$(git rev-parse HEAD 2>/dev/null)
-        if [ "$OLD_HEAD" != "$NEW_HEAD" ]; then
-            echo "  [OK] Updated to $(git log -1 --format='%h %s' 2>/dev/null)"
-            echo "  [..] Reinstalling dependencies..."
-            pnpm install
-            rm -rf packages/shared/dist packages/server/dist packages/client/dist
-            rm -f packages/shared/tsconfig.tsbuildinfo packages/server/tsconfig.tsbuildinfo packages/client/tsconfig.tsbuildinfo
-        else
-            echo "  [OK] Already up to date"
-        fi
-    else
+    if ! git fetch origin main --quiet 2>/dev/null; then
         echo "  [WARN] Could not check for updates (no internet?). Continuing with current version."
-    fi
-    # Restore stashed changes
-    if [ "$STASHED" = "1" ]; then
-        git stash pop -q 2>/dev/null || true
+    elif [ "$OLD_HEAD" = "$(git rev-parse origin/main 2>/dev/null || true)" ]; then
+        echo "  [OK] Already up to date"
+    else
+        TARGET_HEAD=$(git rev-parse origin/main 2>/dev/null || true)
+        # Stash any tracked local changes (e.g. pnpm install modifying package.json) so the fast-forward update doesn't fail
+        STASHED=0
+        if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+            git stash push -q -m "auto-stash before update" 2>/dev/null && STASHED=1
+        fi
+        if git merge --ff-only origin/main 2>/dev/null; then
+            NEW_HEAD=$(git rev-parse HEAD 2>/dev/null)
+            if [ "$STASHED" = "1" ]; then
+                git stash pop -q 2>/dev/null || true
+            fi
+            if [ "$NEW_HEAD" != "$TARGET_HEAD" ]; then
+                echo "  [WARN] Update did not land on origin/main. Continuing with current version."
+            else
+                echo "  [OK] Updated to $(git log -1 --format='%h %s' 2>/dev/null)"
+                echo "  [..] Reinstalling dependencies..."
+                pnpm install
+                rm -rf packages/shared/dist packages/server/dist packages/client/dist
+                rm -f packages/shared/tsconfig.tsbuildinfo packages/server/tsconfig.tsbuildinfo packages/client/tsconfig.tsbuildinfo
+            fi
+        else
+            echo "  [WARN] Could not fast-forward to origin/main. Continuing with current version."
+            if [ "$STASHED" = "1" ]; then
+                git stash pop -q 2>/dev/null || true
+            fi
+        fi
     fi
 fi
 
@@ -121,8 +130,17 @@ fi
 if [ -f "packages/shared/dist/constants/defaults.js" ]; then
     SOURCE_VER=$(node -p "require('./package.json').version" 2>/dev/null || true)
     DIST_VER=$(node -e "try{const m=require('./packages/shared/dist/constants/defaults.js');console.log(m.APP_VERSION)}catch{}" 2>/dev/null || true)
+    SOURCE_COMMIT=$(git rev-parse --short=12 HEAD 2>/dev/null || true)
+    DIST_COMMIT=$(node -e "try{const m=require('./packages/server/dist/config/build-meta.json');console.log(m.commit || '')}catch{}" 2>/dev/null || true)
     if [ -n "$SOURCE_VER" ] && [ -n "$DIST_VER" ] && [ "$SOURCE_VER" != "$DIST_VER" ]; then
         echo "  [WARN] Version mismatch: source v$SOURCE_VER but dist has v$DIST_VER"
+        echo "  [..] Forcing rebuild to apply update..."
+        pnpm install
+        rm -rf packages/shared/dist packages/server/dist packages/client/dist
+        rm -f packages/shared/tsconfig.tsbuildinfo packages/server/tsconfig.tsbuildinfo packages/client/tsconfig.tsbuildinfo
+    fi
+    if [ -n "$SOURCE_COMMIT" ] && [ "$SOURCE_COMMIT" != "$DIST_COMMIT" ]; then
+        echo "  [WARN] Build commit mismatch: source $SOURCE_COMMIT but dist has ${DIST_COMMIT:-<missing>}"
         echo "  [..] Forcing rebuild to apply update..."
         pnpm install
         rm -rf packages/shared/dist packages/server/dist packages/client/dist

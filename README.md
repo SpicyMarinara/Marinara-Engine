@@ -244,7 +244,8 @@ Go to **Settings → Advanced → Updates** and click **Check for Updates**. If 
 If you use a git checkout without the shell launchers or the in-app updater:
 
 ```bash
-git pull
+git fetch origin main
+git merge --ff-only origin/main
 pnpm install
 pnpm build
 pnpm db:push

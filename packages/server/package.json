@@ -6,7 +6,7 @@
   "main": "./dist/index.js",
   "scripts": {
     "dev": "tsx watch --ignore ./data src/index.ts",
-    "build": "tsc && node -e \"require('fs').cpSync('src/db/default-preset.json','dist/db/default-preset.json')\"",
+    "build": "tsc && node ./scripts/write-build-meta.mjs && node -e \"require('fs').cpSync('src/db/default-preset.json','dist/db/default-preset.json')\"",
     "start": "node dist/index.js",
     "clean": "node -e \"const fs=require('fs');['dist','*.tsbuildinfo'].forEach(p=>{try{fs.rmSync(p,{recursive:true,force:true})}catch{}})\"",
     "lint": "tsc -b ../shared && tsc --noEmit",

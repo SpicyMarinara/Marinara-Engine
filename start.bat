@@ -52,21 +52,36 @@ if errorlevel 1 (
 if not exist ".git" goto :skip_update
 echo  [..] Checking for updates...
 for /f "tokens=*" %%i in ('git rev-parse HEAD 2^>nul') do set "OLD_HEAD=%%i"
-:: Stash any local changes so pull doesn't fail
-set "STASHED=0"
-git diff --quiet >nul 2>&1
+git fetch origin main --quiet >nul 2>&1
 if errorlevel 1 (
-    git stash push -q -m "auto-stash before update" >nul 2>&1 && set "STASHED=1"
-)
-git pull >nul 2>&1
-if errorlevel 1 (
-    if "!STASHED!"=="1" git stash pop -q >nul 2>&1
     echo  [WARN] Could not check for updates. Continuing with current version.
     goto :skip_update
 )
-for /f "tokens=*" %%i in ('git rev-parse HEAD 2^>nul') do set "NEW_HEAD=%%i"
-if "!OLD_HEAD!"=="!NEW_HEAD!" (
+for /f "tokens=*" %%i in ('git rev-parse origin/main 2^>nul') do set "TARGET_HEAD=%%i"
+if /I "!OLD_HEAD!"=="!TARGET_HEAD!" (
     echo  [OK] Already up to date
+    goto :skip_update
+)
+:: Stash any tracked local changes so the fast-forward update doesn't fail
+set "STASHED=0"
+set "DIRTY=0"
+git diff --quiet >nul 2>&1
+if errorlevel 1 set "DIRTY=1"
+git diff --cached --quiet >nul 2>&1
+if errorlevel 1 set "DIRTY=1"
+if "!DIRTY!"=="1" (
+    git stash push -q -m "auto-stash before update" >nul 2>&1 && set "STASHED=1"
+)
+git merge --ff-only origin/main >nul 2>&1
+if errorlevel 1 (
+    if "!STASHED!"=="1" git stash pop -q >nul 2>&1
+    echo  [WARN] Could not fast-forward to origin/main. Continuing with current version.
+    goto :skip_update
+)
+for /f "tokens=*" %%i in ('git rev-parse HEAD 2^>nul') do set "NEW_HEAD=%%i"
+if /I not "!NEW_HEAD!"=="!TARGET_HEAD!" (
+    if "!STASHED!"=="1" git stash pop -q >nul 2>&1
+    echo  [WARN] Update did not land on origin/main. Continuing with current version.
     goto :skip_update
 )
 if "!STASHED!"=="1" git stash pop -q >nul 2>&1
@@ -89,8 +104,21 @@ echo  [OK] pnpm %PNPM_VERSION% ready
 if not exist "packages\shared\dist\constants\defaults.js" goto :skip_version_check
 for /f "usebackq delims=" %%i in (`node -p "require('./package.json').version" 2^>nul`) do set "SOURCE_VER=%%i"
 for /f "usebackq delims=" %%i in (`node -e "try{const m=require('./packages/shared/dist/constants/defaults.js');console.log(m.APP_VERSION)}catch{}" 2^>nul`) do set "DIST_VER=%%i"
+for /f "usebackq delims=" %%i in (`git rev-parse --short=12 HEAD 2^>nul`) do set "SOURCE_COMMIT=%%i"
+for /f "usebackq delims=" %%i in (`node -e "try{const m=require('./packages/server/dist/config/build-meta.json');console.log(m.commit || '')}catch{}" 2^>nul`) do set "DIST_COMMIT=%%i"
 if not "!SOURCE_VER!"=="" if not "!DIST_VER!"=="" if not "!SOURCE_VER!"=="!DIST_VER!" (
     echo  [WARN] Version mismatch: source v!SOURCE_VER! but dist has v!DIST_VER!
+    echo  [..] Forcing rebuild to apply update...
+    call pnpm install
+    if exist "packages\shared\dist" rmdir /s /q "packages\shared\dist"
+    if exist "packages\server\dist" rmdir /s /q "packages\server\dist"
+    if exist "packages\client\dist" rmdir /s /q "packages\client\dist"
+    del /q "packages\shared\tsconfig.tsbuildinfo" 2>nul
+    del /q "packages\server\tsconfig.tsbuildinfo" 2>nul
+    del /q "packages\client\tsconfig.tsbuildinfo" 2>nul
+)
+if not "!SOURCE_COMMIT!"=="" if /I not "!SOURCE_COMMIT!"=="!DIST_COMMIT!" (
+    echo  [WARN] Build commit mismatch: source !SOURCE_COMMIT! but dist has !DIST_COMMIT!
     echo  [..] Forcing rebuild to apply update...
     call pnpm install
     if exist "packages\shared\dist" rmdir /s /q "packages\shared\dist"

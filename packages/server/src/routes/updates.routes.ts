@@ -17,6 +17,9 @@ const GITHUB_REPO_URL = `https://github.com/${GITHUB_REPO}`;
 const GITHUB_API_BASE = `https://api.github.com/repos/${GITHUB_REPO}`;
 const GITHUB_TAGS_API = `${GITHUB_API_BASE}/git/matching-refs/tags/v`;
 const GITHUB_RELEASE_BY_TAG_API = (tag: string) => `${GITHUB_API_BASE}/releases/tags/${tag}`;
+const UPDATE_REMOTE = "origin";
+const UPDATE_BRANCH = "main";
+const UPDATE_REF = `${UPDATE_REMOTE}/${UPDATE_BRANCH}`;
 
 // ── Cached release info (15-min TTL) ──
 let cachedRelease: {
@@ -39,14 +42,63 @@ function isGitInstall(): boolean {
   return existsSync(resolve(monorepoRoot, ".git"));
 }
 
+async function fetchUpdateRef(root: string) {
+  await execFileAsync("git", ["fetch", UPDATE_REMOTE, UPDATE_BRANCH, "--quiet"], {
+    cwd: root,
+    timeout: 15_000,
+  });
+}
+
+async function resolveGitRef(root: string, ref: string, shortLength?: number): Promise<string | null> {
+  const args = ["rev-parse"];
+  if (shortLength != null) {
+    args.push(`--short=${shortLength}`);
+  }
+  args.push(ref);
+
+  try {
+    const { stdout } = await execFileAsync("git", args, {
+      cwd: root,
+      timeout: 5_000,
+    });
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function getCurrentBranch(root: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync("git", ["branch", "--show-current"], {
+      cwd: root,
+      timeout: 5_000,
+    });
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function hasTrackedChanges(root: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync("git", ["status", "--short", "--untracked-files=no"], {
+      cwd: root,
+      timeout: 5_000,
+    });
+    return stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 /** Check how many commits behind origin/main the local HEAD is. Returns 0 if up to date, null on error. */
 async function getCommitsBehind(): Promise<number | null> {
   if (!isGitInstall()) return null;
   const root = getMonorepoRoot();
   try {
-    // Fetch latest refs from origin (lightweight, no checkout)
-    await execFileAsync("git", ["fetch", "origin", "--quiet"], { cwd: root, timeout: 15_000 });
-    const { stdout } = await execFileAsync("git", ["rev-list", "--count", "HEAD..origin/main"], {
+    // Fetch the tracked auto-update target (no checkout).
+    await fetchUpdateRef(root);
+    const { stdout } = await execFileAsync("git", ["rev-list", "--count", `HEAD..${UPDATE_REF}`], {
       cwd: root,
       timeout: 5_000,
     });
@@ -228,7 +280,7 @@ export async function updatesRoutes(app: FastifyInstance) {
 
   // ── Apply update (git installs only) ──
   // POST /api/updates/apply
-  // Runs git pull, pnpm install, rebuild, then signals the process to restart.
+  // Fast-forwards to origin/main, installs, rebuilds, then signals the process to restart.
   app.post("/apply", async (_req, reply) => {
     if (!isGitInstall()) {
       return reply.status(400).send({
@@ -241,14 +293,22 @@ export async function updatesRoutes(app: FastifyInstance) {
     const root = getMonorepoRoot();
 
     try {
-      // Step 0: stash local changes (pnpm install can modify package.json on some platforms)
+      const currentBranch = await getCurrentBranch(root);
+      const oldHead = await resolveGitRef(root, "HEAD");
+      if (!oldHead) {
+        throw new Error("Could not read the current git commit.");
+      }
+
+      await fetchUpdateRef(root);
+      const targetHead = await resolveGitRef(root, UPDATE_REF);
+      if (!targetHead) {
+        throw new Error(`Could not resolve ${UPDATE_REF}.`);
+      }
+
+      // Step 0: stash local tracked changes so the fast-forward does not fail.
       let stashed = false;
       try {
-        const { stdout: diffOut } = await execFileAsync("git", ["diff", "--quiet"], {
-          cwd: root,
-          timeout: 5_000,
-        }).catch(() => ({ stdout: "dirty" }));
-        if (diffOut === "dirty") {
+        if (await hasTrackedChanges(root)) {
           await execFileAsync("git", ["stash", "push", "-q", "-m", "auto-stash before update"], {
             cwd: root,
             timeout: 10_000,
@@ -259,18 +319,19 @@ export async function updatesRoutes(app: FastifyInstance) {
         /* clean tree — nothing to stash */
       }
 
-      // Step 1: git pull
-      let pullOut: string;
-      try {
-        const result = await execFileAsync("git", ["pull"], {
-          cwd: root,
-          timeout: 60_000,
-        });
-        pullOut = result.stdout;
-      } catch (pullErr) {
-        // Restore stash before re-throwing
-        if (stashed) await execFileAsync("git", ["stash", "pop", "-q"], { cwd: root, timeout: 10_000 }).catch(() => {});
-        throw pullErr;
+      // Step 1: fast-forward to the latest origin/main commit.
+      if (oldHead !== targetHead) {
+        try {
+          await execFileAsync("git", ["merge", "--ff-only", UPDATE_REF], {
+            cwd: root,
+            timeout: 60_000,
+          });
+        } catch (mergeErr) {
+          if (stashed) await execFileAsync("git", ["stash", "pop", "-q"], { cwd: root, timeout: 10_000 }).catch(() => {});
+          const branchLabel = currentBranch ? ` branch "${currentBranch}"` : " current checkout";
+          const message = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
+          throw new Error(`Could not fast-forward the${branchLabel} to ${UPDATE_REF}: ${message}`);
+        }
       }
 
       // Restore stashed changes after successful pull
@@ -278,23 +339,22 @@ export async function updatesRoutes(app: FastifyInstance) {
         await execFileAsync("git", ["stash", "pop", "-q"], { cwd: root, timeout: 10_000 }).catch(() => {});
       }
 
-      const alreadyUpToDate = pullOut.includes("Already up to date");
+      const newHead = await resolveGitRef(root, "HEAD");
+      if (!newHead) {
+        throw new Error("Could not read the updated git commit.");
+      }
+      if (newHead !== targetHead) {
+        throw new Error(`Update target mismatch: expected ${UPDATE_REF} at ${targetHead}, got ${newHead}.`);
+      }
 
-      // If git says "already up to date", check if the source actually differs
+      const alreadyUpToDate = oldHead === targetHead;
+
+      // If HEAD already matches origin/main, check if the source actually differs
       // from the running build (e.g. previous update pulled code but failed to build,
       // or the running dist is from a stale commit).
       if (alreadyUpToDate) {
         const currentCommitHash = getBuildCommit();
-        let sourceCommit: string | null = null;
-        try {
-          const { stdout } = await execFileAsync("git", ["rev-parse", "--short=7", "HEAD"], {
-            cwd: root,
-            timeout: 5_000,
-          });
-          sourceCommit = stdout.trim() || null;
-        } catch {
-          /* ignore */
-        }
+        const sourceCommit = await resolveGitRef(root, "HEAD", 12);
 
         // If the commit we're running matches HEAD and version matches, truly up to date
         if (sourceCommit && currentCommitHash && sourceCommit === currentCommitHash) {
@@ -344,7 +404,7 @@ export async function updatesRoutes(app: FastifyInstance) {
       const message = err instanceof Error ? err.message : String(err);
       return reply.status(500).send({
         error: `Update failed: ${message}`,
-        hint: "You can try running the update manually: git pull && pnpm install && pnpm build",
+        hint: `You can try running the update manually: git fetch ${UPDATE_REMOTE} ${UPDATE_BRANCH} && git merge --ff-only ${UPDATE_REF} && pnpm install && pnpm build`,
       });
     }
   });
