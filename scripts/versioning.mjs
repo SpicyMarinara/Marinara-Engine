@@ -88,14 +88,14 @@ function updateAndroidBuildGradle(content, version, androidVersionCode) {
 function updateReadme(content, version) {
   let next = replaceOrThrow(
     content,
-    /Current stable release: \*\*\[v[^\]]+\]\(https:\/\/github\.com\/SpicyMarinara\/Marinara-Engine\/releases\/tag\/v[^)]+\)\*\*\./,
+    /Current stable release: \*\*\[v[^\]]+\]\(https:\/\/github\.com\/Pasta-Devs\/Marinara-Engine\/releases\/tag\/v[^)]+\)\*\*\./,
     format(README_RELEASE_LINE, version, version),
     "README latest release line",
   );
 
   next = replaceOrThrow(
     next,
-    /Download \*\*\[Marinara-Engine-Installer-[^\]]+\.exe\]\(https:\/\/github\.com\/SpicyMarinara\/Marinara-Engine\/releases\/download\/v[^/]+\/Marinara-Engine-Installer-[^)]+\.exe\)\*\* from the \[Releases\]\(https:\/\/github\.com\/SpicyMarinara\/Marinara-Engine\/releases\) page and run it\. The installer checks for Node\.js and Git, clones the repo, installs dependencies, builds the app, and creates a desktop shortcut\./,
+    /Download \*\*\[Marinara-Engine-Installer-[^\]]+\.exe\]\(https:\/\/github\.com\/Pasta-Devs\/Marinara-Engine\/releases\/download\/v[^/]+\/Marinara-Engine-Installer-[^)]+\.exe\)\*\* from the \[Releases\]\(https:\/\/github\.com\/Pasta-Devs\/Marinara-Engine\/releases\) page and run it\. The installer checks for Node\.js and Git, clones the repo, installs dependencies, builds the app, and creates a desktop shortcut\./,
     format(README_INSTALLER_LINE, version, version, version),
     "README installer release line",
   );
