@@ -12,7 +12,7 @@ import { getBuildCommit, getBuildLabel } from "../config/build-info.js";
 
 const execFileAsync = promisify(execFile);
 
-const GITHUB_REPO = "SpicyMarinara/Marinara-Engine";
+const GITHUB_REPO = "Pasta-Devs/Marinara-Engine";
 const GITHUB_REPO_URL = `https://github.com/${GITHUB_REPO}`;
 const GITHUB_API_BASE = `https://api.github.com/repos/${GITHUB_REPO}`;
 const GITHUB_TAGS_API = `${GITHUB_API_BASE}/git/matching-refs/tags/v`;
