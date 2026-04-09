@@ -92,6 +92,8 @@ jobs:
         with:
           context: .
           platforms: ${{ matrix.platform }}
+          build-args: |
+            BUILD_COMMIT=${{ github.sha }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ steps.lower.outputs.image }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha

@@ -5,6 +5,7 @@
 # ── Stage 1: Build ──
 FROM node:22-slim AS builder
 ARG PNPM_VERSION=10.30.3
+ARG BUILD_COMMIT
 WORKDIR /app
 
 # Enable corepack for pnpm
@@ -31,6 +32,12 @@ COPY packages/client/ packages/client/
 # Increase heap for ARM64 emulation (QEMU) where memory pressure is high
 ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN pnpm build
+
+# Bake the git commit into build-meta.json so the app can display it.
+# __dirname in build-info.js resolves to packages/server/dist/config/
+RUN if [ -n "$BUILD_COMMIT" ]; then \
+      echo "{\"commit\":\"$BUILD_COMMIT\"}" > packages/server/dist/config/build-meta.json; \
+    fi
 
 # ── Stage 2: Production ──
 FROM node:22-slim AS production
