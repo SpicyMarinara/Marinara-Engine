@@ -25,6 +25,10 @@ on:
       - "*.txt"
   workflow_dispatch:
 
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 env:
   REGISTRY: ghcr.io
 

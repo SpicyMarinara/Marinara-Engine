@@ -2,10 +2,28 @@ name: Pull Request Checks
 
 on:
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE/**"
+      - "android/**"
+      - "installer/**"
+      - "LICENSE"
+      - ".gitignore"
+      - ".editorconfig"
+      - "*.txt"
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   validate:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -14,7 +32,6 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.30.3
           run_install: false
 
       - name: Set up Node.js
@@ -37,6 +54,9 @@ jobs:
 
   docker-build:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
