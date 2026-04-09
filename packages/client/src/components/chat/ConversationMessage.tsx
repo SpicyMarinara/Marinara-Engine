@@ -2,6 +2,7 @@
 // Chat: Discord-style conversation message
 // ──────────────────────────────────────────────
 import { useState, useCallback, useRef, useEffect, memo, useMemo, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Pencil, Trash2, Copy, RefreshCw, Eye, Brain, X, User, Languages } from "lucide-react";
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import type { Message } from "@marinara-engine/shared";
@@ -670,35 +671,38 @@ export const ConversationMessage = memo(function ConversationMessage({
         </div>
 
         {/* Thinking modal */}
-        {showThinking && thinking && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 max-md:pt-[env(safe-area-inset-top)]"
-            onClick={() => setShowThinking(false)}
-          >
+        {showThinking &&
+          thinking &&
+          createPortal(
             <div
-              className="relative mx-4 flex max-h-[70vh] w-full max-w-xl flex-col rounded-xl bg-[var(--card)] shadow-2xl ring-1 ring-[var(--border)]"
-              onClick={(e) => e.stopPropagation()}
+              className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm max-md:pt-[env(safe-area-inset-top)]"
+              onClick={() => setShowThinking(false)}
             >
-              <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
-                <div className="flex items-center gap-2 text-sm font-semibold">
-                  <Brain size="0.875rem" className="text-[var(--muted-foreground)]" />
-                  Model Thoughts
+              <div
+                className="relative mx-4 flex max-h-[70vh] w-full max-w-xl flex-col rounded-xl bg-[var(--card)] shadow-2xl ring-1 ring-[var(--border)]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold">
+                    <Brain size="0.875rem" className="text-[var(--muted-foreground)]" />
+                    Model Thoughts
+                  </div>
+                  <button
+                    onClick={() => setShowThinking(false)}
+                    className="rounded-md p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]"
+                  >
+                    <X size="0.875rem" />
+                  </button>
                 </div>
-                <button
-                  onClick={() => setShowThinking(false)}
-                  className="rounded-md p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]"
-                >
-                  <X size="0.875rem" />
-                </button>
+                <div className="overflow-y-auto px-4 py-3">
+                  <pre className="whitespace-pre-wrap break-words text-[0.8125rem] leading-relaxed text-[var(--muted-foreground)]">
+                    {thinking}
+                  </pre>
+                </div>
               </div>
-              <div className="overflow-y-auto px-4 py-3">
-                <pre className="whitespace-pre-wrap break-words text-[0.8125rem] leading-relaxed text-[var(--muted-foreground)]">
-                  {thinking}
-                </pre>
-              </div>
-            </div>
-          </div>
-        )}
+            </div>,
+            document.body,
+          )}
       </div>
     );
   }
@@ -918,35 +922,38 @@ export const ConversationMessage = memo(function ConversationMessage({
       )}
 
       {/* Thinking modal */}
-      {showThinking && thinking && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 max-md:pt-[env(safe-area-inset-top)]"
-          onClick={() => setShowThinking(false)}
-        >
+      {showThinking &&
+        thinking &&
+        createPortal(
           <div
-            className="relative mx-4 flex max-h-[70vh] w-full max-w-xl flex-col rounded-xl bg-[var(--card)] shadow-2xl ring-1 ring-[var(--border)]"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm max-md:pt-[env(safe-area-inset-top)]"
+            onClick={() => setShowThinking(false)}
           >
-            <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
-              <div className="flex items-center gap-2 text-sm font-semibold">
-                <Brain size="0.875rem" className="text-[var(--muted-foreground)]" />
-                Model Thoughts
+            <div
+              className="relative mx-4 flex max-h-[70vh] w-full max-w-xl flex-col rounded-xl bg-[var(--card)] shadow-2xl ring-1 ring-[var(--border)]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  <Brain size="0.875rem" className="text-[var(--muted-foreground)]" />
+                  Model Thoughts
+                </div>
+                <button
+                  onClick={() => setShowThinking(false)}
+                  className="rounded-md p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]"
+                >
+                  <X size="0.875rem" />
+                </button>
               </div>
-              <button
-                onClick={() => setShowThinking(false)}
-                className="rounded-md p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]"
-              >
-                <X size="0.875rem" />
-              </button>
+              <div className="overflow-y-auto px-4 py-3">
+                <pre className="whitespace-pre-wrap break-words text-[0.8125rem] leading-relaxed text-[var(--muted-foreground)]">
+                  {thinking}
+                </pre>
+              </div>
             </div>
-            <div className="overflow-y-auto px-4 py-3">
-              <pre className="whitespace-pre-wrap break-words text-[0.8125rem] leading-relaxed text-[var(--muted-foreground)]">
-                {thinking}
-              </pre>
-            </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 });

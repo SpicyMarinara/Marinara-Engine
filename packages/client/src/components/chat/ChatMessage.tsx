@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import type { Message } from "@marinara-engine/shared";
 import { memo, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { chatKeys } from "../../hooks/use-chats";
 import { useShallow } from "zustand/react/shallow";
@@ -1536,9 +1537,9 @@ export const ChatMessage = memo(function ChatMessage({
 
 // ── Thinking modal ──
 function ThinkingModal({ thinking, onClose }: { thinking: string; onClose: () => void }) {
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 max-md:pt-[env(safe-area-inset-top)]"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm max-md:pt-[env(safe-area-inset-top)]"
       onClick={onClose}
     >
       <div
@@ -1563,7 +1564,8 @@ function ThinkingModal({ thinking, onClose }: { thinking: string; onClose: () =>
           </pre>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
