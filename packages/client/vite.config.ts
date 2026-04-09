@@ -89,7 +89,7 @@ export default defineConfig({
           devOptions: { enabled: false },
           manifest: false, // We use the static manifest.json in public/
           workbox: {
-            globPatterns: ["**/*.{html,js,css,png,svg,ico,woff2}"],
+            globPatterns: ["**/*.{js,css,png,svg,ico,woff2}"],
             navigateFallbackAllowlist: [],
             runtimeCaching: [
               {
