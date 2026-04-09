@@ -19,6 +19,8 @@ interface SummaryPopoverProps {
 export function SummaryPopover({ chatId, summary, contextSize, onContextSizeChange, onClose }: SummaryPopoverProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(summary ?? "");
+  const [localSize, setLocalSize] = useState(String(contextSize || ""));
+  const sizeInputFocused = useRef(false);
   const generateSummary = useGenerateSummary();
   const updateMeta = useUpdateChatMetadata();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -55,6 +57,13 @@ export function SummaryPopover({ chatId, summary, contextSize, onContextSizeChan
   useEffect(() => {
     setDraft(summary ?? "");
   }, [summary]);
+
+  // Sync local size when contextSize prop changes externally
+  useEffect(() => {
+    if (!sizeInputFocused.current) {
+      setLocalSize(contextSize ? String(contextSize) : "");
+    }
+  }, [contextSize]);
 
   // Focus textarea when entering edit mode
   useEffect(() => {
@@ -117,18 +126,22 @@ export function SummaryPopover({ chatId, summary, contextSize, onContextSizeChan
                 type="number"
                 min={5}
                 max={200}
-                value={contextSize === 0 ? "" : contextSize}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  if (raw === "") {
-                    onContextSizeChange(0);
-                    return;
-                  }
-                  const v = Math.max(5, Math.min(200, parseInt(raw) || 50));
-                  onContextSizeChange(v);
+                value={localSize}
+                onFocus={() => {
+                  sizeInputFocused.current = true;
                 }}
+                onChange={(e) => setLocalSize(e.target.value)}
                 onBlur={() => {
-                  if (!contextSize) onContextSizeChange(50);
+                  sizeInputFocused.current = false;
+                  const parsed = parseInt(localSize);
+                  if (!localSize || isNaN(parsed)) {
+                    setLocalSize("50");
+                    onContextSizeChange(50);
+                  } else {
+                    const clamped = Math.max(5, Math.min(200, parsed));
+                    setLocalSize(String(clamped));
+                    onContextSizeChange(clamped);
+                  }
                 }}
                 className="w-12 rounded-md bg-[var(--secondary)] px-1.5 py-0.5 text-center text-[0.625rem] tabular-nums ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
               />
