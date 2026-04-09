@@ -106,6 +106,10 @@ function ConversationQuickSetup({ chat, onFinish }: ChatSetupWizardProps) {
   const [autonomousEnabled, setAutonomousEnabled] = useState(true);
   const [generateSchedule, setGenerateSchedule] = useState(true);
 
+  // Track whether the user has manually edited the chat name.
+  // If not, auto-rename to match the selected character name(s).
+  const [userEditedName, setUserEditedName] = useState(false);
+
   // Apply the saved custom conversation prompt immediately so it persists even if the wizard is skipped
   useEffect(() => {
     const savedPrompt = useUIStore.getState().customConversationPrompt;
@@ -132,15 +136,37 @@ function ConversationQuickSetup({ chat, onFinish }: ChatSetupWizardProps) {
     }
   }, []);
 
+  // Build an auto-generated chat name from character IDs
+  const buildAutoName = useCallback(
+    (charIds: string[]) => {
+      if (charIds.length === 0) return "New Conversation";
+      const names = charIds
+        .map((id) => {
+          const c = characters.find((ch) => ch.id === id);
+          return c ? charName(c) : null;
+        })
+        .filter((n): n is string => !!n);
+      return names.length > 0 ? names.join(", ") : "New Conversation";
+    },
+    [characters, charName],
+  );
+
   const toggleCharacter = useCallback(
     (charId: string) => {
       const current = [...chatCharIds];
       const idx = current.indexOf(charId);
       if (idx >= 0) current.splice(idx, 1);
       else current.push(charId);
-      updateChat.mutate({ id: chat.id, characterIds: current });
+
+      // Auto-rename the chat if the user hasn't manually edited the name
+      if (!userEditedName) {
+        const autoName = buildAutoName(current);
+        updateChat.mutate({ id: chat.id, characterIds: current, name: autoName });
+      } else {
+        updateChat.mutate({ id: chat.id, characterIds: current });
+      }
     },
-    [chat.id, chatCharIds, updateChat],
+    [chat.id, chatCharIds, updateChat, userEditedName, buildAutoName],
   );
 
   const setConnection = useCallback(
@@ -220,10 +246,14 @@ function ConversationQuickSetup({ chat, onFinish }: ChatSetupWizardProps) {
               </label>
               <input
                 type="text"
+                key={userEditedName ? "user" : chat.name}
                 defaultValue={chat.name}
                 onBlur={(e) => {
                   const val = e.target.value.trim();
-                  if (val && val !== chat.name) updateChat.mutate({ id: chat.id, name: val });
+                  if (val && val !== chat.name) {
+                    setUserEditedName(true);
+                    updateChat.mutate({ id: chat.id, name: val });
+                  }
                 }}
                 placeholder="Conversation name"
                 className="w-full rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs outline-none ring-1 ring-[var(--border)] transition-shadow focus:ring-[var(--primary)]/40 placeholder:text-[var(--muted-foreground)]"
@@ -574,6 +604,23 @@ function RoleplaySetupWizard({ chat, onFinish }: ChatSetupWizardProps) {
     [charNameMap],
   );
 
+  // Track whether the user has manually edited the chat name.
+  // The roleplay wizard doesn't expose a name field, so this stays false
+  // and we always auto-rename based on character selection.
+  const [userEditedName] = useState(false);
+
+  // Build an auto-generated chat name from character IDs
+  const buildAutoName = useCallback(
+    (charIds: string[]) => {
+      if (charIds.length === 0) return "New Roleplay";
+      const names = charIds
+        .map((id) => charNameMap.get(id))
+        .filter((n): n is string => !!n);
+      return names.length > 0 ? names.join(", ") : "New Roleplay";
+    },
+    [charNameMap],
+  );
+
   // ── Mutations ──
   const setConnection = useCallback(
     (connectionId: string | null) => {
@@ -609,46 +656,54 @@ function RoleplaySetupWizard({ chat, onFinish }: ChatSetupWizardProps) {
       const idx = current.indexOf(charId);
       if (idx >= 0) {
         current.splice(idx, 1);
-        updateChat.mutate({ id: chat.id, characterIds: current });
+        // Auto-rename the chat if the user hasn't manually edited the name
+        const updateData: { id: string; characterIds: string[]; name?: string } = {
+          id: chat.id,
+          characterIds: current,
+        };
+        if (!userEditedName) updateData.name = buildAutoName(current);
+        updateChat.mutate(updateData);
       } else {
         current.push(charId);
-        updateChat.mutate(
-          { id: chat.id, characterIds: current },
-          {
-            onSuccess: () => {
-              const char = characters.find((c) => c.id === charId);
-              if (!char) return;
-              try {
-                const parsed = typeof char.data === "string" ? JSON.parse(char.data) : char.data;
-                const firstMes = (parsed as { first_mes?: string }).first_mes;
-                const altGreetings = (parsed as { alternate_greetings?: string[] }).alternate_greetings ?? [];
-                if (firstMes) {
-                  createMessage
-                    .mutateAsync({ role: "assistant", content: firstMes, characterId: charId })
-                    .then(async (msg) => {
-                      if (msg?.id && altGreetings.length > 0) {
-                        for (const greeting of altGreetings) {
-                          if (greeting.trim()) {
-                            await api.post(`/chats/${chat.id}/messages/${msg.id}/swipes`, {
-                              content: greeting,
-                              silent: true,
-                            });
-                          }
+        const updateData: { id: string; characterIds: string[]; name?: string } = {
+          id: chat.id,
+          characterIds: current,
+        };
+        if (!userEditedName) updateData.name = buildAutoName(current);
+        updateChat.mutate(updateData, {
+          onSuccess: () => {
+            const char = characters.find((c) => c.id === charId);
+            if (!char) return;
+            try {
+              const parsed = typeof char.data === "string" ? JSON.parse(char.data) : char.data;
+              const firstMes = (parsed as { first_mes?: string }).first_mes;
+              const altGreetings = (parsed as { alternate_greetings?: string[] }).alternate_greetings ?? [];
+              if (firstMes) {
+                createMessage
+                  .mutateAsync({ role: "assistant", content: firstMes, characterId: charId })
+                  .then(async (msg) => {
+                    if (msg?.id && altGreetings.length > 0) {
+                      for (const greeting of altGreetings) {
+                        if (greeting.trim()) {
+                          await api.post(`/chats/${chat.id}/messages/${msg.id}/swipes`, {
+                            content: greeting,
+                            silent: true,
+                          });
                         }
-                        queryClient.invalidateQueries({ queryKey: chatKeys.messages(chat.id) });
                       }
-                    })
-                    .catch(() => {});
-                }
-              } catch {
-                /* ignore */
+                      queryClient.invalidateQueries({ queryKey: chatKeys.messages(chat.id) });
+                    }
+                  })
+                  .catch(() => {});
               }
-            },
+            } catch {
+              /* ignore */
+            }
           },
-        );
+        });
       }
     },
-    [chat.id, chatCharIds, characters, createMessage, updateChat, queryClient],
+    [chat.id, chatCharIds, characters, createMessage, updateChat, queryClient, userEditedName, buildAutoName],
   );
 
   const toggleLorebook = useCallback(
