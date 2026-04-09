@@ -187,6 +187,84 @@ export function ChatSidebar() {
   const activeChat = chats?.find((c) => c.id === activeChatId);
   const activeGroupId = activeChat?.groupId ?? null;
 
+  // ── Sync sidebar tab + folder with the currently active chat ──
+  // Covers: recent-chat clicks, page refresh, connected-chat switch,
+  // scene navigation, notification bubbles, branch switch, import, etc.
+  //
+  // Uses a structured ref so each concern (tab, folder, scroll) resolves
+  // independently — folder expansion retries when folders load late, and
+  // scroll waits until both tab and folder are settled.
+  const syncRef = useRef<{ chatId: string | null; tabSynced: boolean; folderSynced: boolean }>({
+    chatId: null,
+    tabSynced: false,
+    folderSynced: false,
+  });
+  // When true the next sync skips clearing the search query — set by
+  // the sidebar's own click handler so clicking a search result doesn't
+  // wipe the filter the user is actively browsing.
+  const internalNavRef = useRef(false);
+  useEffect(() => {
+    if (!activeChatId || !chats?.length) return;
+
+    const chat = chats.find((c) => c.id === activeChatId);
+    if (!chat) return;
+
+    const s = syncRef.current;
+    const isNewChat = s.chatId !== activeChatId;
+    let needsScroll = false;
+
+    if (isNewChat) {
+      s.chatId = activeChatId;
+      s.tabSynced = false;
+      s.folderSynced = false;
+    }
+
+    // 1. Tab sync — once per chat switch
+    if (!s.tabSynced) {
+      const chatMode = chat.mode as "conversation" | "roleplay";
+      if (chatMode === "conversation" || chatMode === "roleplay") {
+        setActiveTab(chatMode);
+      }
+      // Clear search so the active chat isn't hidden by a stale filter.
+      // Skip when the navigation originated from a sidebar click (the
+      // user is actively browsing search results and shouldn't lose them).
+      if (!internalNavRef.current) {
+        setSearchQuery("");
+      }
+      internalNavRef.current = false;
+      s.tabSynced = true;
+      needsScroll = true;
+    }
+
+    // 2. Folder expansion — waits for folders data; if the folder is
+    //    collapsed we fire a mutation and stay !folderSynced so the effect
+    //    re-runs after the query delivers the expanded state.
+    if (!s.folderSynced) {
+      if (!chat.folderId) {
+        s.folderSynced = true;
+      } else if (folders) {
+        const folder = folders.find((f) => f.id === chat.folderId);
+        if (folder?.collapsed) {
+          updateFolderMut.mutate({ id: folder.id, collapsed: false });
+          // folderSynced stays false — re-runs after query invalidation
+        } else {
+          s.folderSynced = true;
+          needsScroll = true;
+        }
+      }
+      // else: folders not loaded yet — effect re-runs when they arrive
+    }
+
+    // 3. Scroll active chat row into view once both tab + folder are settled
+    if (needsScroll && s.tabSynced && s.folderSynced) {
+      const timer = setTimeout(() => {
+        const el = document.querySelector(`[data-chat-id="${activeChatId}"]`);
+        el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }, 200);
+      return () => clearTimeout(timer);
+    }
+  }, [activeChatId, chats, folders, updateFolderMut]);
+
   const handleNewChat = useCallback(
     (mode: ChatMode) => {
       createChat.mutate(
@@ -264,6 +342,7 @@ export function ChatSidebar() {
         role="button"
         tabIndex={0}
         key={chat.groupId ?? chat.id}
+        data-chat-id={chat.id}
         onClick={() => {
           if (hasAnyDetailOpen()) {
             if (editorDirty) {
@@ -271,6 +350,7 @@ export function ChatSidebar() {
             }
             closeAllDetails();
           }
+          internalNavRef.current = true;
           setActiveChatId(chat.id);
           if (window.innerWidth < 768) setSidebarOpen(false);
         }}
