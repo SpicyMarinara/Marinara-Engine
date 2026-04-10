@@ -89,6 +89,7 @@ export default defineConfig({
           devOptions: { enabled: false },
           manifest: false, // We use the static manifest.json in public/
           workbox: {
+            // Intentionally exclude html so index.html is not precached and does not interfere with the PWA stale-version/update flow.
             globPatterns: ["**/*.{js,css,png,svg,ico,woff2}"],
             navigateFallbackAllowlist: [],
             runtimeCaching: [
