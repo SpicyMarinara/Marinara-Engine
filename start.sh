@@ -152,7 +152,8 @@ else
 fi
 
 AUTO_OPEN_BROWSER_VALUE="${AUTO_OPEN_BROWSER:-true}"
-case "${AUTO_OPEN_BROWSER_VALUE,,}" in
+AUTO_OPEN_BROWSER_NORMALIZED=$(printf '%s' "$AUTO_OPEN_BROWSER_VALUE" | tr '[:upper:]' '[:lower:]')
+case "$AUTO_OPEN_BROWSER_NORMALIZED" in
   0|false|no|off) AUTO_OPEN_BROWSER_ENABLED=0 ;;
   *) AUTO_OPEN_BROWSER_ENABLED=1 ;;
 esac
