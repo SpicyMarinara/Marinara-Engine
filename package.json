@@ -41,6 +41,11 @@
     "onlyBuiltDependencies": [
       "better-sqlite3",
       "esbuild"
-    ]
+    ],
+    "overrides": {
+      "onnxruntime-common": "1.24.3",
+      "onnxruntime-node": "1.24.3",
+      "onnxruntime-web": "1.24.3"
+    }
   }
 }
