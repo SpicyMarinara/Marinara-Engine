@@ -57,7 +57,7 @@ COPY packages/client/package.json packages/client/
 # Strip onnxruntime-web WASM blobs, uses onnxruntime-node (native)
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile --prod && \
-    rm -rf node_modules/.pnpm/onnxruntime-web@*/node_modules/onnxruntime-web/dist
+    rm -rf /app/node_modules/.pnpm/onnxruntime-web@*
 
 # Copy built artifacts from builder
 COPY --from=builder /app/packages/shared/dist packages/shared/dist
