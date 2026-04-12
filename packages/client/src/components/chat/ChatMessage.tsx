@@ -257,7 +257,7 @@ function renderContent(
   if (!HTML_TAG_RE.test(withoutSpeakerTags)) {
     // renderWithHeadings handles headings, *** and --- horizontal rules,
     // and delegates the rest to speaker-tag / dialogue rendering.
-    return renderMarkdownBlocks(normalized, (seg, kp) =>
+    return renderMarkdownBlocks(normalized, (seg, _kp) =>
       renderWithSpeakerTags(seg, dialogueColor, speakerColorMap, boldDialogue),
     );
   }
