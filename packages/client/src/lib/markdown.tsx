@@ -610,7 +610,7 @@ export function applyInlineMarkdownHTML(html: string): string {
     html
       // Pre-process: replace backslash-escaped markdown chars with HTML entities
       // so they are not matched by subsequent regex patterns.
-      .replace(/\\([-\\*_~`#|>!=\[\]{}])/g, (_m, char: string) => `&#${char.charCodeAt(0)};`)
+      .replace(/\\([-\\*_~`#|>!=[\]{}])/g, (_m, char: string) => `&#${char.charCodeAt(0)};`)
       // Fenced code blocks (``` … ```) — must run before inline code
       .replace(
         /(?:^|(?<=<br[^>]*>))\s*`{3,}([^\n<]*?)(?:<br[^>]*>)([\s\S]*?)(?:<br[^>]*>)\s*`{3,}\s*(?:$|(?=<br[^>]*>))/g,
