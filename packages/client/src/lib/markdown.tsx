@@ -156,7 +156,7 @@ const TASK_ITEM_RE = /^(\s*)[-*+] \[([ xX])\]\s+(.+)/;
 const UL_ITEM_RE = /^(\s*)[*+-]\s+(.+)/;
 
 /** Regex to match an ordered list item (1., 2., …). */
-const OL_ITEM_RE = /^(\s*)\d+\.\s+(.+)/;
+const OL_ITEM_RE = /^(\s*)(\d+)\.\s+(.+)/;
 
 /** Regex to match a table row: starts and ends with |. */
 const TABLE_ROW_RE = /^\|(.+)\|$/;
@@ -180,6 +180,8 @@ interface ListItem {
   indent: number;
   /** undefined = regular item, false = unchecked task, true = checked task */
   task?: boolean;
+  /** For ordered lists: the number written in markdown (used for the start attribute) */
+  start?: number;
 }
 
 // ── Table helpers ──
@@ -275,8 +277,11 @@ function renderList(
     className = "mari-md-ul";
   }
 
+  // Use the start number from the first item so "3. foo" renders starting at 3
+  const startAttr = ordered && items[0]?.start != null && items[0].start !== 1 ? items[0].start : undefined;
+
   return (
-    <Tag key={blockKey} className={className}>
+    <Tag key={blockKey} className={className} {...(startAttr != null ? { start: startAttr } : {})}>
       {elements}
     </Tag>
   );
@@ -567,7 +572,7 @@ export function renderMarkdownBlocks(
         flushList();
         listOrdered = true;
       }
-      listItems.push({ content: olMatch[2]!, indent: olMatch[1]!.length });
+      listItems.push({ content: olMatch[3]!, indent: olMatch[1]!.length, start: parseInt(olMatch[2]!, 10) });
       continue;
     }
 

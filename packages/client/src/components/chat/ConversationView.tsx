@@ -310,19 +310,37 @@ export function ConversationView({
           return true;
         });
         if (lines.length > 1) {
-          lines.forEach((line, li) => {
-            const isLast = li === lines.length - 1;
+          // Group consecutive list items (ordered or unordered) into single
+          // blocks so numbered / bullet lists render correctly instead of
+          // each item becoming its own <ol> / <ul>.
+          const LIST_LINE_RE = /^\s*(?:[-*+]|\d+\.)\s/;
+          const blocks: string[][] = [];
+          for (const line of lines) {
+            const isList = LIST_LINE_RE.test(line);
+            const prev = blocks[blocks.length - 1];
+            if (isList && prev && LIST_LINE_RE.test(prev[0]!)) {
+              // Continue the current list block
+              prev.push(line);
+            } else {
+              // Start a new block
+              blocks.push([line]);
+            }
+          }
+
+          blocks.forEach((block, bi) => {
+            const isLast = bi === blocks.length - 1;
+            const content = block.join("\n");
             items.push({
               type: "message",
-              key: `${msg.id}__line${li}`,
+              key: `${msg.id}__block${bi}`,
               msg: isLast
-                ? { ...msg, content: line }
+                ? { ...msg, content }
                 : {
                     ...msg,
-                    content: line,
+                    content,
                     extra: { displayText: null, isGenerated: false, tokenCount: null, generationInfo: null },
                   },
-              isGrouped: li === 0 ? grouped : true,
+              isGrouped: bi === 0 ? grouped : true,
               index: messageOffset + i,
             });
           });
