@@ -343,6 +343,7 @@ export function ConnectionEditor() {
   const markDirty = useCallback(() => setDirty(true), []);
 
   const providerDef = PROVIDERS[localProvider];
+  const isImageGenerationProvider = localProvider === "image_generation";
 
   if (!connectionDetailId) return null;
 
@@ -984,30 +985,41 @@ export function ConnectionEditor() {
           )}
 
           {/* ── Default for Agents ── */}
-          {localProvider !== "image_generation" && (
-            <FieldGroup
-              label="Default for Agents"
-              icon={<Bot size="0.875rem" className="text-teal-400" />}
-              help="When enabled, all agents that don't have a specific connection override will use this connection instead of the chat's active connection."
-            >
-              <label className="flex items-center gap-3 cursor-pointer select-none px-2 py-1">
-                <div className="relative">
-                  <input
-                    type="checkbox"
-                    checked={localDefaultForAgents}
-                    onChange={(e) => {
-                      setLocalDefaultForAgents(e.target.checked);
-                      markDirty();
-                    }}
-                    className="peer sr-only"
-                  />
-                  <div className="h-5 w-9 rounded-full bg-[var(--border)] transition-colors peer-checked:bg-teal-400/70" />
-                  <div className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4" />
-                </div>
-                <span className="text-sm">Use as default agent connection</span>
-              </label>
-            </FieldGroup>
-          )}
+          <FieldGroup
+            label={isImageGenerationProvider ? "Default for Illustrator" : "Default for Agents"}
+            icon={<Bot size="0.875rem" className="text-teal-400" />}
+            help={
+              isImageGenerationProvider
+                ? "When enabled, the Illustrator agent will use this image generation connection by default whenever it does not have a specific Image Generation Connection assigned."
+                : "When enabled, all agents that don't have a specific connection override will use this connection instead of the chat's active connection."
+            }
+          >
+            <label className="flex items-center gap-3 cursor-pointer select-none px-2 py-1">
+              <div className="relative">
+                <input
+                  type="checkbox"
+                  checked={localDefaultForAgents}
+                  onChange={(e) => {
+                    setLocalDefaultForAgents(e.target.checked);
+                    markDirty();
+                  }}
+                  className="peer sr-only"
+                />
+                <div className="h-5 w-9 rounded-full bg-[var(--border)] transition-colors peer-checked:bg-teal-400/70" />
+                <div className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4" />
+              </div>
+              <span className="text-sm">
+                {isImageGenerationProvider
+                  ? "Use as default Illustrator image connection"
+                  : "Use as default agent connection"}
+              </span>
+            </label>
+            {isImageGenerationProvider && (
+              <p className="px-2 text-[0.625rem] text-[var(--muted-foreground)]">
+                Only one image generation connection should be marked as the default for Illustrator.
+              </p>
+            )}
+          </FieldGroup>
 
           {/* ── Embedding Model (for lorebook vectorization) ── */}
           {localProvider !== "image_generation" && (

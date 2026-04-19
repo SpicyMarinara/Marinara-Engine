@@ -5340,7 +5340,14 @@ export async function generateRoutes(app: FastifyInstance) {
             if (shouldGenerate && imagePrompt) {
               // Resolve connections: text LLM = connectionId, image gen = settings.imageConnectionId
               const illustratorAgent = resolvedAgents.find((a) => a.id === result.agentId || a.type === "illustrator");
-              const imgConnId = (illustratorAgent?.settings?.imageConnectionId as string) ?? null;
+              let imgConnId = (illustratorAgent?.settings?.imageConnectionId as string) ?? null;
+              if (!imgConnId) {
+                const defaultImageConn = (await connections.list()).find(
+                  (c) =>
+                    c.provider === "image_generation" && (c.defaultForAgents === true || c.defaultForAgents === "true"),
+                );
+                imgConnId = defaultImageConn?.id ?? null;
+              }
               if (imgConnId) {
                 // Queue image generation to run after the result loop so it doesn't
                 // block other agents (game state, trackers, consistency editor).
@@ -5554,7 +5561,7 @@ export async function generateRoutes(app: FastifyInstance) {
                     data: {
                       agentType: "illustrator",
                       error:
-                        "No image generation connection set on the Illustrator agent. Go to Settings → Agents → Illustrator and assign an Image Generation Connection.",
+                        "No image generation connection set on the Illustrator agent, and no default Illustrator image connection is configured. Go to Settings → Connections and mark an image generation connection as the default for Illustrator, or assign one directly in Settings → Agents → Illustrator.",
                     },
                   })}\n\n`,
                 );

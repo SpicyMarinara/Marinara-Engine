@@ -587,7 +587,8 @@ export function AgentEditor() {
               </select>
               <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
                 The Illustrator uses two connections: the LLM above analyzes the scene and writes an image prompt, then
-                this connection generates the actual image from that prompt.
+                this connection generates the actual image from that prompt. Leave this empty to use the default
+                Illustrator image connection from Settings → Connections.
               </p>
               <label className="mt-3 flex items-center gap-2 cursor-pointer">
                 <input

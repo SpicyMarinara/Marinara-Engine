@@ -600,7 +600,14 @@ async function applyRetryResultEffects(args: {
           const illustratorAgent = resolvedAgents.find(
             (a) => a.resolved.id === result.agentId || a.resolved.type === "illustrator",
           );
-          const imgConnId = (illustratorAgent?.resolved.settings?.imageConnectionId as string) ?? null;
+          let imgConnId = (illustratorAgent?.resolved.settings?.imageConnectionId as string) ?? null;
+          if (!imgConnId) {
+            const defaultImageConn = (await conns.list()).find(
+              (c) =>
+                c.provider === "image_generation" && (c.defaultForAgents === true || c.defaultForAgents === "true"),
+            );
+            imgConnId = defaultImageConn?.id ?? null;
+          }
           if (imgConnId) {
             const imgConnFull = await conns.getWithKey(imgConnId);
             if (imgConnFull) {
