@@ -10,6 +10,7 @@ export type APIProvider =
   | "mistral"
   | "cohere"
   | "openrouter"
+  | "nanogpt"
   | "custom"
   | "image_generation";
 

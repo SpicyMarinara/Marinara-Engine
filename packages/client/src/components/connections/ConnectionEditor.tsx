@@ -47,6 +47,7 @@ const API_KEY_LINKS: Partial<Record<APIProvider, { label: string; url: string }>
   mistral: { label: "Get your Mistral API key", url: "https://console.mistral.ai/api-keys" },
   cohere: { label: "Get your Cohere API key", url: "https://dashboard.cohere.com/api-keys" },
   openrouter: { label: "Get your OpenRouter API key", url: "https://openrouter.ai/keys" },
+  nanogpt: { label: "Get your NanoGPT API key", url: "https://nano-gpt.com/api" },
 };
 
 // ═══════════════════════════════════════════════
@@ -102,6 +103,7 @@ export function ConnectionEditor() {
   const [modelSearch, setModelSearch] = useState("");
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const modelTriggerRef = useRef<HTMLDivElement>(null);
+  const modelSearchInputRef = useRef<HTMLInputElement>(null);
   const [dropdownRect, setDropdownRect] = useState<{ top: number; left: number; width: number; maxH: number } | null>(
     null,
   );
@@ -318,6 +320,11 @@ export function ConnectionEditor() {
       onSuccess: (data) => {
         const result = data as { models: Array<{ id: string; name: string }> };
         setRemoteModels(result.models);
+        setShowModelDropdown(true);
+        requestAnimationFrame(() => {
+          modelSearchInputRef.current?.focus();
+          modelSearchInputRef.current?.select();
+        });
       },
       onError: (err) => {
         setFetchError(err instanceof Error ? err.message : "Failed to fetch models");
@@ -669,6 +676,7 @@ export function ConnectionEditor() {
                 <Search size="0.8125rem" className="shrink-0 text-[var(--muted-foreground)]" />
                 {showModelDropdown ? (
                   <input
+                    ref={modelSearchInputRef}
                     value={modelSearch}
                     onChange={(e) => setModelSearch(e.target.value)}
                     className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--muted-foreground)]"

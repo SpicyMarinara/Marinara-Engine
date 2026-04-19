@@ -13,6 +13,7 @@ export function createLLMProvider(provider: string, baseUrl: string, apiKey: str
   switch (provider) {
     case "openai":
     case "openrouter":
+    case "nanogpt":
     case "mistral":
     case "cohere":
     case "custom":

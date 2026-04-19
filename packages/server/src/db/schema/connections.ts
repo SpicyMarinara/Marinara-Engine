@@ -7,7 +7,7 @@ export const apiConnections = sqliteTable("api_connections", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   provider: text("provider", {
-    enum: ["openai", "anthropic", "google", "mistral", "cohere", "openrouter", "custom", "image_generation"],
+    enum: ["openai", "anthropic", "google", "mistral", "cohere", "openrouter", "nanogpt", "custom", "image_generation"],
   }).notNull(),
   baseUrl: text("base_url").notNull().default(""),
   /** Encrypted API key */

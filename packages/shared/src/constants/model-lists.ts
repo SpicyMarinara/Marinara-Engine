@@ -496,6 +496,7 @@ export const MODEL_LISTS: Record<APIProvider, KnownModel[]> = {
   mistral: MISTRAL_MODELS,
   cohere: COHERE_MODELS,
   openrouter: OPENROUTER_MODELS,
+  nanogpt: [], // NanoGPT aggregator — models fetched dynamically via API
   custom: [], // User must type model ID manually for custom endpoints
   image_generation: IMAGE_GEN_MODELS,
 };
