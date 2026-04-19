@@ -259,8 +259,8 @@ export function ChatSidebar() {
 
     // 1. Tab sync — once per chat switch
     if (!s.tabSynced) {
-      const chatMode = chat.mode as "conversation" | "roleplay";
-      if (chatMode === "conversation" || chatMode === "roleplay") {
+      const chatMode = chat.mode as "conversation" | "roleplay" | "game";
+      if (chatMode === "conversation" || chatMode === "roleplay" || chatMode === "game") {
         setActiveTab(chatMode);
       }
       // Clear search so the active chat isn't hidden by a stale filter.
