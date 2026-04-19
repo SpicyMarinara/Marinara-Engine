@@ -1032,7 +1032,7 @@ export function CharactersPanel() {
                         "rounded-lg p-1.5 transition-all active:scale-90",
                         isSelected
                           ? "text-[var(--destructive)] hover:bg-[var(--destructive)]/15"
-                          : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--primary)]",
+                          : "text-[var(--muted-foreground)] hover:bg-[var(--primary)]/10 hover:text-[var(--primary)]",
                       )}
                       title={isSelected ? "Remove from chat" : "Add to chat"}
                     >
@@ -1048,10 +1048,10 @@ export function CharactersPanel() {
                         },
                       });
                     }}
-                    className="rounded-lg p-1.5 transition-all hover:bg-sky-400/10 hover:text-sky-400 active:scale-90"
+                    className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-all hover:bg-sky-400/10 hover:text-sky-400 active:scale-90"
                     title="Duplicate"
                   >
-                    <Copy size="0.75rem" className="text-[var(--muted-foreground)]" />
+                    <Copy size="0.75rem" />
                   </button>
                   <button
                     onClick={(e) => {

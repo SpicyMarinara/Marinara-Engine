@@ -289,7 +289,7 @@ export function PresetsPanel() {
                         "rounded-lg p-1.5 transition-all active:scale-90",
                         isSelected
                           ? "bg-purple-400/15 text-purple-400"
-                          : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--primary)]",
+                          : "text-[var(--muted-foreground)] hover:bg-[var(--primary)]/10 hover:text-[var(--primary)]",
                       )}
                       title={isSelected ? "Unassign from chat" : "Assign to chat"}
                     >
@@ -305,7 +305,7 @@ export function PresetsPanel() {
                       "rounded-lg p-1.5 transition-all active:scale-90",
                       isDefault
                         ? "text-yellow-500"
-                        : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-yellow-500",
+                        : "text-[var(--muted-foreground)] hover:bg-yellow-500/10 hover:text-yellow-500",
                     )}
                     title={isDefault ? "Default preset" : "Set as default"}
                   >
@@ -316,10 +316,10 @@ export function PresetsPanel() {
                       e.stopPropagation();
                       duplicatePreset.mutate(preset.id);
                     }}
-                    className="rounded-lg p-1.5 transition-all hover:bg-sky-400/10 hover:text-sky-400 active:scale-90"
+                    className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-all hover:bg-sky-400/10 hover:text-sky-400 active:scale-90"
                     title="Duplicate"
                   >
-                    <Copy size="0.75rem" className="text-[var(--muted-foreground)]" />
+                    <Copy size="0.75rem" />
                   </button>
                   <button
                     onClick={(e) => {
