@@ -2669,10 +2669,7 @@ export function GameSurface({
                     />
                   </div>
                   {/* Desktop: inline minimap */}
-                  <div
-                    data-tour="game-map"
-                    className="hidden md:block w-52 rounded-lg border border-[var(--border)] bg-[var(--card)]/92 shadow-lg backdrop-blur-sm"
-                  >
+                  <div data-tour="game-map" className="hidden md:block">
                     <GameMapPanel
                       map={currentMap}
                       onMove={handleMapMove}
@@ -2978,7 +2975,7 @@ export function GameSurface({
               {!combatUiActive && hudWidgets.length > 0 && (
                 <>
                   {/* Desktop: full widget cards */}
-                  <div className="pointer-events-none absolute inset-x-3 bottom-24 z-30 hidden items-start justify-between md:flex">
+                  <div className="pointer-events-none absolute inset-x-3 bottom-24 z-30 hidden items-end justify-between md:flex">
                     <div className="w-44">
                       <GameWidgetPanel widgets={normalizedWidgets} position="hud_left" />
                     </div>

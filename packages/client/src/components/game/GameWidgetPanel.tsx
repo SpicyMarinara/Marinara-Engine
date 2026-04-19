@@ -6,8 +6,10 @@
 // the renderer handles all visual presentation.
 // ──────────────────────────────────────────────
 import { useEffect, useRef, useState } from "react";
+import { motion } from "framer-motion";
 import type { HudWidget } from "@marinara-engine/shared";
 import { cn } from "../../lib/utils";
+import { PanelLockButton, useDraggablePanel } from "./DraggablePanel";
 
 // ── Public API ──
 
@@ -93,16 +95,32 @@ export function MobileWidgetPanel({ widgets, position }: GameWidgetPanelProps) {
 function WidgetCard({ widget }: { widget: HudWidget }) {
   const [collapsed, setCollapsed] = useState(false);
   const accent = widget.accent ?? "#a78bfa";
+  const { locked, toggleLocked, x, y, handleDragEnd } = useDraggablePanel(`widget:${widget.id}`);
 
   return (
-    <div
-      className="w-full overflow-hidden rounded-lg border bg-black/60 backdrop-blur-md transition-all"
-      style={{ borderColor: `${accent}30` }}
+    <motion.div
+      drag={!locked}
+      dragMomentum={false}
+      dragElastic={0}
+      onDragEnd={handleDragEnd}
+      style={{ x, y, borderColor: `${accent}30` }}
+      className={cn(
+        "w-full overflow-hidden rounded-lg border bg-black/60 backdrop-blur-md transition-colors",
+        !locked && "cursor-grab ring-1 ring-white/20 active:cursor-grabbing",
+      )}
     >
       {/* Header */}
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setCollapsed((c) => !c)}
-        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left transition-colors hover:bg-white/5"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setCollapsed((c) => !c);
+          }
+        }}
+        className="flex w-full cursor-pointer items-center gap-1.5 px-2.5 py-1.5 text-left transition-colors hover:bg-white/5"
       >
         {widget.icon && <span className="text-xs">{widget.icon}</span>}
         <span
@@ -111,8 +129,9 @@ function WidgetCard({ widget }: { widget: HudWidget }) {
         >
           {widget.label}
         </span>
+        <PanelLockButton locked={locked} onToggle={toggleLocked} size={10} />
         <span className="text-[0.5rem] text-white/30">{collapsed ? "+" : "-"}</span>
-      </button>
+      </div>
 
       {/* Body */}
       {!collapsed && (
@@ -120,7 +139,7 @@ function WidgetCard({ widget }: { widget: HudWidget }) {
           <WidgetBody widget={widget} />
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 
