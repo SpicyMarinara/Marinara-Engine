@@ -90,10 +90,10 @@ Detailed release notes now live in [CHANGELOG.md](CHANGELOG.md). Tagged releases
 
 | Platform | Guide |
 | -------- | ----- |
+| 🐳 Docker / Podman | [Container Installation Guide](docs/installation/containers.md) — recommended |
 | 🪟 Windows | [Windows Installation Guide](docs/installation/windows.md) |
 | 🍎🐧 macOS / Linux | [macOS / Linux Installation Guide](docs/installation/macos-linux.md) |
 | 🤖 Android (Termux) | [Android (Termux) Installation Guide](docs/installation/android-termux.md) |
-| 🐳 Docker / Podman | [Container Installation Guide](docs/installation/containers.md) |
 
 Each guide covers installation and updating for that platform.
 
