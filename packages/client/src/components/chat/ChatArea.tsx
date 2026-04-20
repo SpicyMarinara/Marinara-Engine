@@ -33,6 +33,7 @@ import { useChatStore } from "../../stores/chat.store";
 import { useGenerate } from "../../hooks/use-generate";
 import { useCharacters, usePersonas } from "../../hooks/use-characters";
 import { useConnections } from "../../hooks/use-connections";
+import { usePageActivity } from "../../hooks/use-page-activity";
 import { api } from "../../lib/api-client";
 import { showConfirmDialog } from "../../lib/app-dialogs";
 import { useGameStateStore } from "../../stores/game-state.store";
@@ -75,6 +76,7 @@ export function ChatArea() {
   const streamingChatId = useChatStore((s) => s.streamingChatId);
   const isStreamingGlobal = useChatStore((s) => s.isStreaming);
   const isStreaming = isStreamingGlobal && streamingChatId === activeChatId;
+  const isPageActive = usePageActivity();
   const regenerateMessageId = useChatStore((s) => s.regenerateMessageId);
   const chatBackground = useUIStore((s) => s.chatBackground);
   const weatherEffects = useUIStore((s) => s.weatherEffects);
@@ -832,6 +834,8 @@ export function ChatArea() {
   // Empty state (no active chat)
   // ═══════════════════════════════════════════════
   if (!activeChatId) {
+    const showEmptyStateEffects = isPageActive;
+
     return (
       <>
         <div
@@ -841,8 +845,17 @@ export function ChatArea() {
           <div className="flex w-full max-w-md flex-col items-center gap-4 sm:gap-6 my-auto py-4">
             {/* Central hero */}
             <div className="relative">
-              <div className="animate-pulse-ring bunny-glow flex h-14 w-14 sm:h-20 sm:w-20 items-center justify-center rounded-2xl shadow-xl shadow-orange-500/20 overflow-hidden">
-                <img src="/logo-splash.gif" alt="Marinara Engine" className="h-full w-full object-cover" />
+              <div
+                className={cn(
+                  "flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl shadow-xl shadow-orange-500/20 sm:h-20 sm:w-20",
+                  showEmptyStateEffects && "animate-pulse-ring bunny-glow",
+                )}
+              >
+                <img
+                  src={showEmptyStateEffects ? "/logo-splash.gif" : "/logo.png"}
+                  alt="Marinara Engine"
+                  className="h-full w-full object-cover"
+                />
               </div>
             </div>
 
@@ -853,7 +866,7 @@ export function ChatArea() {
               </p>
             </div>
 
-            <div className="stagger-children flex flex-wrap justify-center gap-2 sm:gap-3">
+            <div className={cn("flex flex-wrap justify-center gap-2 sm:gap-3", showEmptyStateEffects && "stagger-children")}>
               <QuickStartCard
                 icon={<MessageSquare size="1.125rem" />}
                 label="Conversation"
@@ -883,7 +896,7 @@ export function ChatArea() {
             {/* Recent Chats */}
             <RecentChats />
 
-            <div className="retro-divider w-48" />
+            <div className={cn("w-48", showEmptyStateEffects ? "retro-divider" : "h-px rounded-[1px] bg-[var(--border)]/40")} />
 
             {/* Footer */}
             <div className="mt-2 flex flex-col items-center gap-3">

@@ -26,6 +26,8 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 - Multi-line messages no longer collapse after editing in Conversations.
 - Character schedules now use your local timezone when generating.
 - Dialogue highlight colors now keep working even when bold dialogue is turned off.
+- Marinara landing-screen effects now stop rendering when they are off-screen, and they stay paused while the tab is inactive.
+- Visual effects are paused when the tab with Marinara Engine is not focused, improving GPU usage.
 
 ## [1.5.2]
 

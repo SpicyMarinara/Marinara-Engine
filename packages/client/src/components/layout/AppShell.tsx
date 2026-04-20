@@ -5,8 +5,10 @@ import { ChatSidebar } from "./ChatSidebar";
 import { TopBar } from "./TopBar";
 import { ChatNotificationBubbles } from "../chat/ChatNotificationBubbles";
 import { useUIStore } from "../../stores/ui.store";
+import { useChatStore } from "../../stores/chat.store";
 import { useBackgroundAutonomousPolling } from "../../hooks/use-background-autonomous";
 import { useIdleDetection } from "../../hooks/use-idle-detection";
+import { usePageActivity } from "../../hooks/use-page-activity";
 import { cn } from "../../lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { lazy, Suspense, useState, useEffect, useRef, useCallback, type MouseEvent as ReactMouseEvent } from "react";
@@ -176,6 +178,8 @@ export function AppShell() {
   const regexDetailId = useUIStore((s) => s.regexDetailId);
   const botBrowserOpen = useUIStore((s) => s.botBrowserOpen);
   const hasCompletedOnboarding = useUIStore((s) => s.hasCompletedOnboarding);
+  const activeChatId = useChatStore((s) => s.activeChatId);
+  const isPageActive = usePageActivity();
 
   const startSidebarResize = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -245,17 +249,26 @@ export function AppShell() {
     <LorebookEditor />
   ) : null;
 
+  const showAmbientDecor = isPageActive && !activeChatId && !detailView && !botBrowserOpen;
+
   return (
     <div
       data-component="AppShell"
-      className="mari-app retro-scanlines noise-bg geometric-grid fixed inset-0 flex overflow-hidden bg-[var(--background)] max-md:pt-[env(safe-area-inset-top)]"
+      className={cn(
+        "mari-app fixed inset-0 flex overflow-hidden bg-[var(--background)] max-md:pt-[env(safe-area-inset-top)]",
+        showAmbientDecor && "retro-scanlines noise-bg geometric-grid",
+      )}
     >
       {/* Y2K decorative stars */}
-      <div className="y2k-star hidden md:block" style={{ top: "10%", left: "5%", animationDelay: "0s" }} />
-      <div className="y2k-star-md hidden md:block" style={{ top: "25%", right: "8%", animationDelay: "1.5s" }} />
-      <div className="y2k-star-lg hidden md:block" style={{ top: "60%", left: "3%", animationDelay: "3s" }} />
-      <div className="y2k-star hidden md:block" style={{ top: "80%", right: "12%", animationDelay: "0.8s" }} />
-      <div className="y2k-star-md hidden md:block" style={{ top: "45%", left: "50%", animationDelay: "2.2s" }} />
+      {showAmbientDecor && (
+        <>
+          <div className="y2k-star hidden md:block" style={{ top: "10%", left: "5%", animationDelay: "0s" }} />
+          <div className="y2k-star-md hidden md:block" style={{ top: "25%", right: "8%", animationDelay: "1.5s" }} />
+          <div className="y2k-star-lg hidden md:block" style={{ top: "60%", left: "3%", animationDelay: "3s" }} />
+          <div className="y2k-star hidden md:block" style={{ top: "80%", right: "12%", animationDelay: "0.8s" }} />
+          <div className="y2k-star-md hidden md:block" style={{ top: "45%", left: "50%", animationDelay: "2.2s" }} />
+        </>
+      )}
 
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && (
