@@ -2589,7 +2589,7 @@ export function ChatSettingsDrawer({
             <Section
               label="Automatic Summarization"
               icon={<CalendarClock size="0.875rem" />}
-              help="Past-day conversations are auto-summarized and rolled up into weekly summaries. These summaries are injected into future prompts so characters remember what happened. Use this editor to review and correct what gets remembered."
+              help="To help keep the request context low, the conversation is automatically summarized. Each day is wrapped up into a day summary. Likewise, day summaries are combined into week summaries. Chat messages that have been summarized are not added to context. Only the week summaries, the day summaries of the current week and today's messages are added to the context. This feature currently can't be disabled."
             >
               <button
                 onClick={() => setShowSummariesModal(true)}
@@ -2598,7 +2598,7 @@ export function ChatSettingsDrawer({
                 <div className="flex-1 min-w-0">
                   <span className="text-[0.6875rem] font-medium">Edit Summaries</span>
                   <p className="text-[0.625rem] text-[var(--muted-foreground)]">
-                    Review and edit what characters remember.
+                    Review and edit what characters remember from this chat.
                   </p>
                 </div>
                 <Pencil size="0.875rem" className="shrink-0 text-[var(--muted-foreground)]" />
