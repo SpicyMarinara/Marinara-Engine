@@ -4,6 +4,7 @@
 
 ## What changed
 
+<!-- List the key changes in this PR -->
 - 
 
 ## Validation
@@ -15,6 +16,7 @@
 
 ### Manual verification notes
 
+<!-- Describe what you manually verified -->
 - 
 
 ## Docs and release impact
