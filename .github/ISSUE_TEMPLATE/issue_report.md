@@ -8,7 +8,7 @@ assignees: ""
 
 ## Template check (quick anti-skim)
 
-Please **untick** the box below before submitting so we know you read the template:
+Please **uncheck (untick)** the box below before submitting so we know you read the template:
 
 - [x] I read this template and will provide the requested details.
 
