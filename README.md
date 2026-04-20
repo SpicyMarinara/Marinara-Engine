@@ -88,11 +88,11 @@ Detailed release notes now live in [CHANGELOG.md](CHANGELOG.md). Tagged releases
 
 ## Project Docs
 
-- [docs/INSTALLATION.md](docs/INSTALLATION.md) — installation and deployment guide index
-- [docs/installation/windows-installer.md](docs/installation/windows-installer.md) — Windows installer setup
-- [docs/installation/source.md](docs/installation/source.md) — source + launcher setup (Windows/macOS/Linux/Termux)
-- [docs/installation/containers.md](docs/installation/containers.md) — Docker and Podman deployment
-- [docs/installation/updating.md](docs/installation/updating.md) — update paths for git and container installs
+- [docs/INSTALLATION.md](docs/INSTALLATION.md) — installation guide index (all platforms)
+- [docs/installation/windows.md](docs/installation/windows.md) — Windows installation guide
+- [docs/installation/macos-linux.md](docs/installation/macos-linux.md) — macOS / Linux installation guide
+- [docs/installation/android-termux.md](docs/installation/android-termux.md) — Android (Termux) installation guide
+- [docs/installation/containers.md](docs/installation/containers.md) — Docker / Podman deployment guide
 - [CONTRIBUTING.md](CONTRIBUTING.md) — contributor workflow, validation, versioning, and release steps
 - [CLAUDE.md](CLAUDE.md) — thin maintainer notes for contributors using Claude
 - [CHANGELOG.md](CHANGELOG.md) — release notes source of truth
@@ -104,13 +104,16 @@ Detailed release notes now live in [CHANGELOG.md](CHANGELOG.md). Tagged releases
 
 Download **[Marinara-Engine-Installer-1.5.2.exe](https://github.com/Pasta-Devs/Marinara-Engine/releases/download/v1.5.2/Marinara-Engine-Installer-1.5.2.exe)** from the [Releases](https://github.com/Pasta-Devs/Marinara-Engine/releases) page and run it. The installer lets you choose the install folder, checks for Node.js and Git, aligns pnpm to the repo-pinned version even if an older global pnpm is already installed, clones the repo, installs dependencies, builds the app, and creates desktop and Start Menu shortcuts with the Marinara icon.
 
-Detailed install and deploy guides:
+Choose a platform guide:
 
-- [Installation Index](docs/INSTALLATION.md)
-- [Windows Installer](docs/installation/windows-installer.md)
-- [Run from Source (Windows / macOS / Linux / Termux)](docs/installation/source.md)
-- [Run via Containers (Docker / Podman)](docs/installation/containers.md)
-- [Updating Existing Installs](docs/installation/updating.md)
+| Platform | Guide |
+| -------- | ----- |
+| 🪟 Windows | [Windows Installation Guide](docs/installation/windows.md) |
+| 🍎🐧 macOS / Linux | [macOS / Linux Installation Guide](docs/installation/macos-linux.md) |
+| 🤖 Android (Termux) | [Android (Termux) Installation Guide](docs/installation/android-termux.md) |
+| 🐳 Docker / Podman | [Container Installation Guide](docs/installation/containers.md) |
+
+Each guide covers installation and updating for that platform.
 
 ---
 

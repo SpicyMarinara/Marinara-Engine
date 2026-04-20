@@ -1,10 +1,10 @@
 # Marinara Engine Installation
 
-Use the guide that matches how you want to run Marinara Engine:
+Choose the guide for your platform:
 
-- [Windows Installer](installation/windows-installer.md) — easiest setup on Windows
-- [Run from Source (Windows / macOS / Linux / Android Termux)](installation/source.md)
-- [Run via Containers (Docker / Podman)](installation/containers.md)
-- [Updating Existing Installs](installation/updating.md)
+- 🪟 [Windows Installation Guide](installation/windows.md) — Windows installer or run from source
+- 🍎🐧 [macOS / Linux Installation Guide](installation/macos-linux.md) — run from source on macOS and Linux
+- 🤖 [Android (Termux) Installation Guide](installation/android-termux.md) — run on Android via Termux
+- 🐳 [Container (Docker / Podman) Installation Guide](installation/containers.md) — Docker and Podman deployment
 
-If you only need a quick start, the Windows installer and launcher-based source setup are the recommended paths.
+Each guide includes installation steps and the relevant update instructions for that platform.
