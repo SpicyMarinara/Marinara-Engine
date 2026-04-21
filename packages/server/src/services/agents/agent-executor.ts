@@ -198,7 +198,9 @@ async function executeAgentWithTools(
 
     // Execute each tool call and append results
     for (const tc of result.toolCalls) {
+      console.log(`[agent-tools] ${config.type} calling: ${tc.function.name}(${tc.function.arguments})`);
       const toolResult = await toolContext.executeToolCall(tc);
+      console.log(`[agent-tools] ${config.type} result: ${toolResult.slice(0, 1000)}${toolResult.length > 1000 ? "..." : ""}`);
       loopMessages.push({
         role: "tool",
         content: toolResult,
