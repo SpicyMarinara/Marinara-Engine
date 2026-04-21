@@ -450,6 +450,23 @@ export function GameNarration({
       }
     }
 
+    // Resolve display macros ({{user}}, {{char}}) on every segment's content so
+    // downstream renderers (formatNarration / animateTextHtml) receive the
+    // already-substituted text. Mirrors ChatMessage.tsx display-time logic.
+    const userName = personaInfo?.name || "You";
+    const fallbackCharName = (() => {
+      if (!characterMap || characterMap.size === 0) return null;
+      const first = characterMap.values().next().value;
+      return first?.name ?? null;
+    })();
+    for (let i = 0; i < result.length; i++) {
+      const seg = result[i]!;
+      const charName = seg.speaker ?? fallbackCharName;
+      let content = seg.content.replaceAll("{{user}}", userName);
+      if (charName) content = content.replaceAll("{{char}}", charName);
+      if (content !== seg.content) result[i] = { ...seg, content };
+    }
+
     segmentOriginalIndices.current = origIndices;
     segmentEditInfoRef.current = editInfos;
     partySegStartRef.current = partyStart;
@@ -464,6 +481,7 @@ export function GameNarration({
     partyChatInput,
     partyChatMessageId,
     segmentEdits,
+    characterMap,
   ]);
 
   // Clamp activeIndex when segments shrink (e.g. new party chat clears old dialogue)
@@ -480,6 +498,13 @@ export function GameNarration({
   const sideLineMap = useMemo(() => {
     const map = new Map<number, PartyDialogueLine[]>();
 
+    const userName = personaInfo?.name || "You";
+    const subMacros = (text: string, charName: string | null): string => {
+      let out = text.replaceAll("{{user}}", userName);
+      if (charName) out = out.replaceAll("{{char}}", charName);
+      return out;
+    };
+
     // 1. Collect inline side/extra from GM narration
     if (latestAssistant) {
       const allSegs = parseNarrationSegments(latestAssistant, speakerColors);
@@ -493,7 +518,7 @@ export function GameNarration({
           arr.push({
             character: seg.speaker ?? "",
             type: seg.partyType,
-            content: seg.content,
+            content: subMacros(seg.content, seg.speaker ?? null),
             expression: seg.sprite,
             target: seg.whisperTarget,
           });
@@ -519,7 +544,7 @@ export function GameNarration({
       for (const line of partyDialogue) {
         if (line.type === "side" || line.type === "extra") {
           const arr = map.get(lastPartySegIdx) ?? [];
-          arr.push(line);
+          arr.push({ ...line, content: subMacros(line.content, line.character) });
           map.set(lastPartySegIdx, arr);
         } else {
           for (let i = partySegCursor; i < segments.length; i++) {
@@ -534,7 +559,7 @@ export function GameNarration({
     }
 
     return map;
-  }, [latestAssistant, speakerColors, partyDialogue, segments]);
+  }, [latestAssistant, speakerColors, partyDialogue, segments, personaInfo]);
 
   const active = segments[activeIndex] ?? null;
 
