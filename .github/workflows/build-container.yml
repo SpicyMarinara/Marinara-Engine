@@ -1,28 +1,43 @@
 # ──────────────────────────────────────────────
-# Build & push Docker image to GitHub Container Registry (ghcr.io)
+# Build & push Container image to GitHub Container Registry (ghcr.io)
 # ──────────────────────────────────────────────
 # Triggers:
 #   • Push to main            → ghcr.io/pasta-devs/marinara-engine:sha-abc1234
 #   • Tag v*                  → ghcr.io/pasta-devs/marinara-engine:1.4.0 + :latest
 #   • Manual workflow_dispatch → same as push-to-main
 # ──────────────────────────────────────────────
-name: Build & Push Docker Image
+name: Build & Push Container Image
 
 on:
   push:
     branches: [main]
     tags: ["v*"]
     paths-ignore:
+      # Documentation & metadata
       - "**.md"
       - "docs/**"
-      - ".github/ISSUE_TEMPLATE/**"
-      - ".github/PULL_REQUEST_TEMPLATE/**"
+      - "LICENSE"
+      - "*.txt"
+      # Tooling configs
+      - ".editorconfig"
+      - ".gitattributes"
+      - ".gitignore"
+      - ".markdownlint.json"
+      - ".prettierignore"
+      - ".prettierrc"
+      # Compose / launcher / migration scripts
+      - "docker-compose.yml"
+      - "migrate-presets.cjs"
+      - "migrate-variables.cjs"
+      - "start.bat"
+      - "start.sh"
+      - "start-termux.sh"
+      # Platform-specific sources
       - "android/**"
       - "installer/**"
-      - "LICENSE"
-      - ".gitignore"
-      - ".editorconfig"
-      - "*.txt"
+      # GitHub community files
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE/**"
   workflow_dispatch:
 
 concurrency:
@@ -47,9 +62,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-
-    outputs:
-      metadata: ${{ steps.meta.outputs.json }}
 
     steps:
       - name: Checkout

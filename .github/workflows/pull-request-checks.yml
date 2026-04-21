@@ -3,23 +3,38 @@ name: Pull Request Checks
 on:
   pull_request:
     paths-ignore:
+      # Documentation & metadata
       - "**.md"
       - "docs/**"
-      - ".github/ISSUE_TEMPLATE/**"
-      - ".github/PULL_REQUEST_TEMPLATE/**"
+      - "LICENSE"
+      - "*.txt"
+      # Tooling configs
+      - ".editorconfig"
+      - ".gitattributes"
+      - ".gitignore"
+      - ".markdownlint.json"
+      - ".prettierignore"
+      - ".prettierrc"
+      # Compose / launcher / migration scripts
+      - "docker-compose.yml"
+      - "migrate-presets.cjs"
+      - "migrate-variables.cjs"
+      - "start.bat"
+      - "start.sh"
+      - "start-termux.sh"
+      # Platform-specific sources
       - "android/**"
       - "installer/**"
-      - "LICENSE"
-      - ".gitignore"
-      - ".editorconfig"
-      - "*.txt"
+      # GitHub community files
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE/**"
 
 concurrency:
   group: pr-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  validate:
+  pnpm-validate:
     runs-on: ubuntu-latest
 
     permissions:
@@ -52,7 +67,7 @@ jobs:
       - name: Check tracked installer artifacts
         run: pnpm guard:installer-artifacts
 
-  docker-build:
+  container-build-test:
     runs-on: ubuntu-latest
 
     permissions:
