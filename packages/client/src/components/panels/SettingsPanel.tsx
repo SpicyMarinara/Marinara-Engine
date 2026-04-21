@@ -11,6 +11,7 @@ import {
 import { cn, generateClientId } from "../../lib/utils";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api-client";
+import { forceRefreshSpa } from "@/lib/browser-runtime";
 import React, { useRef, useState, useCallback, useEffect } from "react";
 import { toast } from "sonner";
 import { APP_VERSION, type Theme } from "@marinara-engine/shared";
@@ -1919,6 +1920,7 @@ function AdvancedSettings() {
   const [selectedScopes, setSelectedScopes] = useState<ExpungeScope[]>(["chats"]);
   const [confirmAction, setConfirmAction] = useState<"selected" | "all" | null>(null);
   const [exportingProfile, setExportingProfile] = useState(false);
+  const [refreshingSpa, setRefreshingSpa] = useState(false);
 
   const handleExportProfile = async () => {
     setExportingProfile(true);
@@ -1937,6 +1939,22 @@ function AdvancedSettings() {
       toast.error("Failed to export profile");
     } finally {
       setExportingProfile(false);
+    }
+  };
+
+  const handleForceRefreshSpa = async () => {
+    if (refreshingSpa) {
+      return;
+    }
+
+    setRefreshingSpa(true);
+
+    try {
+      toast.info("Clearing caches and refreshing app…");
+      await forceRefreshSpa();
+    } catch (err) {
+      setRefreshingSpa(false);
+      toast.error(err instanceof Error ? err.message : "Failed to refresh the app");
     }
   };
 
@@ -2219,6 +2237,30 @@ function AdvancedSettings() {
             Could not check for updates. Try again later.
           </div>
         )}
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => void handleForceRefreshSpa()}
+            disabled={refreshingSpa}
+            className="flex items-center justify-center gap-1.5 rounded-lg bg-[var(--background)]/70 px-3 py-2 text-xs font-medium text-[var(--foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {refreshingSpa ? (
+              <>
+                <Loader2 size="0.8125rem" className="animate-spin" />
+                Refreshing…
+              </>
+            ) : (
+              <>
+                <RefreshCw size="0.8125rem" />
+                Refresh App
+              </>
+            )}
+          </button>
+          <HelpTooltip
+            side="bottom"
+            text="Manual refresh unregisters the active service worker and clears browser caches before reloading. Marinara's stored chats, settings, and other local app data stay intact."
+          />
+        </div>
       </div>
 
       <div className="retro-divider" />

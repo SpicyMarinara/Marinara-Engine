@@ -8,7 +8,7 @@ import { useAgentStore } from "../stores/agent.store";
 import { useGameStateStore } from "../stores/game-state.store";
 import { useEncounterStore } from "../stores/encounter.store";
 import { useUIStore } from "../stores/ui.store";
-import { clearBrowserRuntimeCaches } from "../lib/cache-reset";
+import { clearBrowserRuntimeCaches } from "../lib/browser-runtime";
 import type { Chat, Message, MessageSwipe, DaySummaryEntry, WeekSummaryEntry } from "@marinara-engine/shared";
 
 export const chatKeys = {

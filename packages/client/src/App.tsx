@@ -12,7 +12,7 @@ import { Toaster } from "sonner";
 import { useUIStore } from "./stores/ui.store";
 import { useSidecarStore } from "./stores/sidecar.store";
 import { api } from "./lib/api-client";
-import { clearBrowserRuntimeCaches } from "./lib/cache-reset";
+import { forceRefreshSpa } from "./lib/browser-runtime";
 import { useLegacyThemeMigration } from "./hooks/use-themes";
 import { useSettingsSync } from "./hooks/use-settings-sync";
 
@@ -34,12 +34,10 @@ async function recoverFromVersionSkew(serverVersion: string) {
   }
 
   sessionStorage.setItem(VERSION_RECOVERY_KEY, serverVersion);
-
-  await clearBrowserRuntimeCaches();
-
-  const nextUrl = new URL(window.location.href);
-  nextUrl.searchParams.set("v", serverVersion);
-  window.location.replace(nextUrl.toString());
+  await forceRefreshSpa({
+    queryParamKey: "v",
+    queryParamValue: serverVersion,
+  });
 }
 
 export function App() {
