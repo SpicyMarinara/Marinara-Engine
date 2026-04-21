@@ -90,7 +90,7 @@ async function executeGroup(
 
   console.log(
     `[agent-pipeline] executeGroup: ${batchAgents.length} batchable, ${toolAgents.length} tool-using`,
-    batchAgents.map((a) => a.type),
+    { batch: batchAgents.map((a) => a.type), tools: toolAgents.map((a) => a.type) },
   );
 
   // Safe callback wrapper — errors in the callback (e.g. writing to a
