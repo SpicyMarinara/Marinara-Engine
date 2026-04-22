@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────
 // Game: Map Wrapper (switches between grid and node)
 // ──────────────────────────────────────────────
-import { useState, useCallback, type RefObject } from "react";
+import { useState, useCallback, useEffect, type RefObject } from "react";
 import { motion } from "framer-motion";
 import type { GameMap, GameActiveState } from "@marinara-engine/shared";
 import { GameGridMap } from "./GameGridMap";
@@ -173,6 +173,7 @@ function TimeOfDayIndicator({ timeOfDay, size = "desktop", className }: TimeOfDa
 interface GameMapProps {
   map: GameMap | null;
   onMove: (position: { x: number; y: number } | string) => void;
+  selectedPosition?: { x: number; y: number } | string | null;
   onGenerateMap?: () => void;
   /** Disable interactive elements (e.g. during narration playback) */
   disabled?: boolean;
@@ -193,6 +194,7 @@ interface GameMapPanelProps extends GameMapProps {
 export function GameMapPanel({
   map,
   onMove,
+  selectedPosition,
   onGenerateMap,
   disabled,
   gameState,
@@ -214,7 +216,8 @@ export function GameMapPanel({
         {onGenerateMap && (
           <button
             onClick={onGenerateMap}
-            className="flex items-center gap-1 rounded-md bg-[var(--primary)] px-2 py-1 text-[0.625rem] font-medium text-[var(--primary-foreground)] transition-colors hover:opacity-90"
+            disabled={disabled}
+            className="flex items-center gap-1 rounded-md bg-[var(--primary)] px-2 py-1 text-[0.625rem] font-medium text-[var(--primary-foreground)] transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:opacity-50"
           >
             <Wand2 size={10} />
             Generate
@@ -291,9 +294,19 @@ export function GameMapPanel({
       </div>
       {!collapsed &&
         (map.type === "grid" ? (
-          <GameGridMap map={map} onCellClick={(x, y) => onMove({ x, y })} />
+          <GameGridMap
+            map={map}
+            onCellClick={(x, y) => onMove({ x, y })}
+            selectedPosition={selectedPosition}
+            disabled={disabled}
+          />
         ) : (
-          <GameNodeMap map={map} onNodeClick={(nodeId) => onMove(nodeId)} disabled={disabled} />
+          <GameNodeMap
+            map={map}
+            onNodeClick={(nodeId) => onMove(nodeId)}
+            selectedNodeId={typeof selectedPosition === "string" ? selectedPosition : null}
+            disabled={disabled}
+          />
         ))}
     </motion.div>
   );
@@ -304,6 +317,7 @@ export function GameMapPanel({
 interface MobileMapButtonProps {
   map: GameMap | null;
   onMove: (position: { x: number; y: number } | string) => void;
+  selectedPosition?: { x: number; y: number } | string | null;
   onGenerateMap?: () => void;
   disabled?: boolean;
   gameState?: GameActiveState;
@@ -311,9 +325,22 @@ interface MobileMapButtonProps {
 }
 
 /** Mobile-only: map icon button in top-left that opens a centered modal. */
-export function MobileMapButton({ map, onMove, onGenerateMap, disabled, gameState, timeOfDay }: MobileMapButtonProps) {
+export function MobileMapButton({
+  map,
+  onMove,
+  selectedPosition,
+  onGenerateMap,
+  disabled,
+  gameState,
+  timeOfDay,
+}: MobileMapButtonProps) {
   const [open, setOpen] = useState(false);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setSelectedNode(typeof selectedPosition === "string" ? selectedPosition : null);
+  }, [open, selectedPosition]);
 
   const stateCfg = gameState ? STATE_CONFIG[gameState] : null;
   const StateIcon = stateCfg?.icon ?? Compass;
@@ -417,7 +444,8 @@ export function MobileMapButton({ map, onMove, onGenerateMap, disabled, gameStat
                         onGenerateMap();
                         setOpen(false);
                       }}
-                      className="flex items-center gap-1 rounded-md bg-[var(--primary)] px-3 py-1.5 text-xs font-medium text-[var(--primary-foreground)]"
+                      disabled={disabled}
+                      className="flex items-center gap-1 rounded-md bg-[var(--primary)] px-3 py-1.5 text-xs font-medium text-[var(--primary-foreground)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Wand2 size={12} />
                       Generate
@@ -427,13 +455,15 @@ export function MobileMapButton({ map, onMove, onGenerateMap, disabled, gameStat
               ) : map.type === "grid" ? (
                 <GameGridMap
                   map={map}
+                  selectedPosition={selectedPosition}
+                  disabled={disabled}
                   onCellClick={(x, y) => {
                     onMove({ x, y });
                     setOpen(false);
                   }}
                 />
               ) : (
-                <GameNodeMap map={map} onNodeClick={handleNodeTap} disabled={disabled} />
+                <GameNodeMap map={map} onNodeClick={handleNodeTap} selectedNodeId={selectedNode} disabled={disabled} />
               )}
             </div>
 
@@ -449,7 +479,7 @@ export function MobileMapButton({ map, onMove, onGenerateMap, disabled, gameStat
                     onClick={handleTravel}
                     className="shrink-0 rounded-lg bg-[var(--primary)] px-3 py-1.5 text-[0.6875rem] font-semibold text-[var(--primary-foreground)] transition-colors active:opacity-80"
                   >
-                    Travel to
+                    Set destination
                   </button>
                 )}
                 {selectedNode === currentNode?.id && (

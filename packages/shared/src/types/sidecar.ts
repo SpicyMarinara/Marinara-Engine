@@ -12,6 +12,10 @@ export type SidecarQuantization = "q8_0" | "q4_k_m";
 /** Runtime backend used by the built-in local model. */
 export type SidecarBackend = "llama_cpp" | "mlx";
 
+/** Which runtime target Marinara should prepare for llama.cpp-based local inference. */
+export const SIDECAR_RUNTIME_PREFERENCES = ["auto", "nvidia", "amd", "intel", "vulkan", "cpu", "system"] as const;
+export type SidecarRuntimePreference = (typeof SIDECAR_RUNTIME_PREFERENCES)[number];
+
 /** Where the active runtime comes from. */
 export type SidecarRuntimeSource = "bundled" | "system";
 
@@ -59,8 +63,18 @@ export interface SidecarConfig {
   useForGameScene: boolean;
   /** Context size for the model. Default 8192. */
   contextSize: number;
+  /** Maximum completion tokens Marinara should request from the local runtime. */
+  maxTokens: number;
+  /** Sampling temperature for local inference. */
+  temperature: number;
+  /** Top-p nucleus sampling value for local inference. */
+  topP: number;
+  /** Top-k sampling limit for local inference. */
+  topK: number;
   /** GPU layers to offload (-1 = try max GPU offload first, then fall back if startup fails). */
   gpuLayers: number;
+  /** Which runtime target to install for llama.cpp-based local inference. */
+  runtimePreference: SidecarRuntimePreference;
 }
 
 export interface SidecarRuntimeInfo {
@@ -215,7 +229,12 @@ export const SIDECAR_DEFAULT_CONFIG: SidecarConfig = {
   useForTrackers: false,
   useForGameScene: true,
   contextSize: 8192,
+  maxTokens: 4096,
+  temperature: 0.3,
+  topP: 0.95,
+  topK: 64,
   gpuLayers: -1,
+  runtimePreference: "auto",
 };
 
 /**

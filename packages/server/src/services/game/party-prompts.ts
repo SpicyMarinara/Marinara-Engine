@@ -6,7 +6,7 @@ import type { PartyArc } from "@marinara-engine/shared";
 import type { CharacterSpriteInfo } from "./sprite.service.js";
 
 export interface PartyPromptContext {
-  /** Character cards for each party member (name + personality + description) */
+  /** Character cards for each party member, optionally enriched with game-specific class/ability info. */
   partyCards: Array<{ name: string; card: string }>;
   /** The player's name */
   playerName: string;

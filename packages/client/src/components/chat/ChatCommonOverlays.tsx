@@ -40,12 +40,25 @@ type SharedSceneSettingsProps = {
 
 type DeleteDialogProps = {
   messageId: string | null;
+  canDeleteSwipe: boolean;
+  activeSwipeIndex: number;
+  swipeCount: number;
   onConfirm: () => void;
+  onDeleteSwipe: () => void;
   onDeleteMore: () => void;
   onClose: () => void;
 };
 
-function DeleteConfirmationDialog({ messageId, onConfirm, onDeleteMore, onClose }: DeleteDialogProps) {
+function DeleteConfirmationDialog({
+  messageId,
+  canDeleteSwipe,
+  activeSwipeIndex,
+  swipeCount,
+  onConfirm,
+  onDeleteSwipe,
+  onDeleteMore,
+  onClose,
+}: DeleteDialogProps) {
   if (!messageId) return null;
 
   return (
@@ -56,6 +69,14 @@ function DeleteConfirmationDialog({ messageId, onConfirm, onDeleteMore, onClose 
       >
         <p className="mb-4 text-center text-sm font-semibold">How to proceed?</p>
         <div className="flex flex-col gap-2">
+          {canDeleteSwipe && (
+            <button
+              onClick={onDeleteSwipe}
+              className="rounded-lg bg-[var(--secondary)] px-4 py-2 text-xs font-medium transition-colors hover:bg-[var(--accent)]"
+            >
+              Delete only this swipe ({activeSwipeIndex + 1}/{swipeCount})
+            </button>
+          )}
           <button
             onClick={onConfirm}
             className="rounded-lg bg-[var(--destructive)] px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-[var(--destructive)]/80"
@@ -160,6 +181,9 @@ type ChatCommonOverlaysProps = {
   wizardOpen: boolean;
   peekPromptData: PeekPromptData | null;
   deleteDialogMessageId: string | null;
+  deleteDialogCanDeleteSwipe: boolean;
+  deleteDialogActiveSwipeIndex: number;
+  deleteDialogSwipeCount: number;
   multiSelectMode: boolean;
   selectedMessageCount: number;
   sceneSettings: SharedSceneSettingsProps;
@@ -171,6 +195,7 @@ type ChatCommonOverlaysProps = {
   onWizardFinish: () => void;
   onClosePeekPrompt: () => void;
   onDeleteConfirm: () => void;
+  onDeleteSwipe: () => void;
   onDeleteMore: () => void;
   onCloseDeleteDialog: () => void;
   onBulkDelete: () => void;
@@ -189,6 +214,9 @@ export function ChatCommonOverlays({
   wizardOpen,
   peekPromptData,
   deleteDialogMessageId,
+  deleteDialogCanDeleteSwipe,
+  deleteDialogActiveSwipeIndex,
+  deleteDialogSwipeCount,
   multiSelectMode,
   selectedMessageCount,
   sceneSettings,
@@ -199,6 +227,7 @@ export function ChatCommonOverlays({
   onWizardFinish,
   onClosePeekPrompt,
   onDeleteConfirm,
+  onDeleteSwipe,
   onDeleteMore,
   onCloseDeleteDialog,
   onBulkDelete,
@@ -245,7 +274,11 @@ export function ChatCommonOverlays({
       </Suspense>
       <DeleteConfirmationDialog
         messageId={deleteDialogMessageId}
+        canDeleteSwipe={deleteDialogCanDeleteSwipe}
+        activeSwipeIndex={deleteDialogActiveSwipeIndex}
+        swipeCount={deleteDialogSwipeCount}
         onConfirm={onDeleteConfirm}
+        onDeleteSwipe={onDeleteSwipe}
         onDeleteMore={onDeleteMore}
         onClose={onCloseDeleteDialog}
       />

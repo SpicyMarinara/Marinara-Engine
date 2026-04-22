@@ -4,6 +4,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useUIStore } from "../../stores/ui.store";
 import { useChatStore } from "../../stores/chat.store";
+import { useSidecarStore } from "../../stores/sidecar.store";
 import { useCreateChat } from "../../hooks/use-chats";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronRight, ArrowRightLeft } from "lucide-react";
@@ -72,6 +73,14 @@ const STEPS: TourStep[] = [
     title: "Set Up a Connection",
     body: "Before you start chatting, you'll need to connect an AI provider. Click the chain-link icon (🔗) in the top-right tab buttons, then add your API key for OpenAI, Anthropic, or another provider.",
     sprite: { src: "/sprites/mari/Mari_explaining.png" },
+  },
+  {
+    target: null,
+    title: "Optional: Local AI Model",
+    body: "If you want Marinara to run a helper model on your own device, open the Connections panel and use the Local Model card. From there you can open Local AI Model settings, install the runtime for your machine, and then choose a curated Gemma preset or your own local model.",
+    actionLabel: "Open Local Model",
+    actionKey: "local-model",
+    sprite: { src: "/sprites/mari/Mari_thinking.png" },
   },
   {
     target: null,
@@ -341,6 +350,8 @@ function OnboardingTutorialInner() {
   const openRightPanel = useUIStore((s) => s.openRightPanel);
   const setSettingsTab = useUIStore((s) => s.setSettingsTab);
   const setSidebarOpen = useUIStore((s) => s.setSidebarOpen);
+  const setShowDownloadModal = useSidecarStore((s) => s.setShowDownloadModal);
+  const fetchSidecarStatus = useSidecarStore((s) => s.fetchStatus);
 
   const createChat = useCreateChat();
 
@@ -479,9 +490,17 @@ function OnboardingTutorialInner() {
         setSettingsTab("import");
         // Jump to last step instead of finishing
         setStep(STEPS.length - 1);
+        return;
+      }
+
+      if (key === "local-model") {
+        openRightPanel("connections");
+        void fetchSidecarStatus();
+        setShowDownloadModal(true);
+        finish();
       }
     },
-    [openRightPanel, setSettingsTab],
+    [fetchSidecarStatus, finish, openRightPanel, setSettingsTab, setShowDownloadModal],
   );
 
   const next = useCallback(() => {

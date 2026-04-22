@@ -4,6 +4,7 @@
 // in the top-right game controls. Users can permanently disable it.
 // ──────────────────────────────────────────────
 import { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronRight } from "lucide-react";
 
@@ -35,7 +36,7 @@ const STEPS: GameTutorialStep[] = [
   {
     target: "game-controls",
     title: "Control Panel",
-    body: "This is the control panel. Copy the information about your game, end the session, view your journal, control the sound volume, open the gallery, re-try generations, and access settings here.",
+    body: "This is the control panel. Open the tutorial, view your history, end the session, view your journal, control the sound volume, open the gallery, re-try generations, and access settings here.",
     side: "left",
     sprite: { src: "/sprites/mari/Mari_point_up_left.png", flip: true },
   },
@@ -332,7 +333,9 @@ export function GameTutorial({ open, onClose }: GameTutorialProps) {
 
   if (!open || !stepData) return null;
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  const overlay = (
     <div className="pointer-events-none fixed inset-0 z-[9999]">
       {/* Pulsing highlight around target */}
       {targetRect && (
@@ -383,4 +386,6 @@ export function GameTutorial({ open, onClose }: GameTutorialProps) {
       )}
     </div>
   );
+
+  return createPortal(overlay, document.body);
 }

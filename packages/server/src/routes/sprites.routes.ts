@@ -33,6 +33,25 @@ async function getSharp(): Promise<SharpFn> {
     throw _sharpLoadError;
   }
 }
+
+async function getSpriteCapabilities() {
+  try {
+    await getSharp();
+    return {
+      imageProcessingAvailable: true,
+      spriteGenerationAvailable: true,
+      backgroundRemovalAvailable: true,
+      reason: null as string | null,
+    };
+  } catch (error) {
+    return {
+      imageProcessingAvailable: false,
+      spriteGenerationAvailable: false,
+      backgroundRemovalAvailable: false,
+      reason: error instanceof Error ? error.message : "Image processing is unavailable on this platform.",
+    };
+  }
+}
 import { generateImage } from "../services/image/image-generation.js";
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
 
@@ -172,6 +191,8 @@ function resolveReferenceImageBase64(input?: string): string | undefined {
 }
 
 export async function spritesRoutes(app: FastifyInstance) {
+  app.get("/capabilities", async () => getSpriteCapabilities());
+
   /**
    * GET /api/sprites/:characterId
    * List all sprite expressions for a character.
@@ -428,6 +449,7 @@ export async function spritesRoutes(app: FastifyInstance) {
               height: targetHeight,
               referenceImage: resolvedRefs[0],
               referenceImages: resolvedRefs.length > 1 ? resolvedRefs : undefined,
+              comfyWorkflow: conn.comfyuiWorkflow || undefined,
             });
 
             let spriteBuffer: Buffer = Buffer.from(imageResult.base64, "base64");
@@ -492,6 +514,7 @@ export async function spritesRoutes(app: FastifyInstance) {
         height: sheetHeight,
         referenceImage: resolvedRefs[0],
         referenceImages: resolvedRefs.length > 1 ? resolvedRefs : undefined,
+        comfyWorkflow: conn.comfyuiWorkflow || undefined,
       });
 
       // Decode the generated image

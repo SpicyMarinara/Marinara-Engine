@@ -2,11 +2,79 @@
 
 This file is the release-notes source of truth for Marinara Engine. Reuse these entries when publishing GitHub Releases for tags in the `vX.Y.Z` format.
 
+## [1.5.4]
+
+### Added
+
+- An option to control when the Narrative Director triggers to prevent rushing.
+- Every time you add an agent to a chat, you now see a window with its description and setup.
+- Macros support for {{user}} and {{char}} in Game mode.
+- Added translation support to the Game mode.
+- You can now address the GM directly in the Game mode.
+- Refresh cache button in Advanced Settings.
+
+### Fixed
+
+- OpenAI endpoint now correctly re-routes all GPT-5.4 models via Responses API.
+- Strengthened the regex to catch incorrect formatting of the messages in Conversations mode.
+- Restored the slight delay on receiving multi-line messages in Conversations mode.
+- Fixed mobile side displays of dialogues in Game mode.
+- Game mode incorrect starting narration.
+- ComfyUI generation for sprites and default workflow fixes.
+- Removed a bugged new chat creation from Manage Chat Files.
+- Bold dialogue formatting now supports Chinese and Japanese quotation marks.
+- Strengthened commands in Conversations mode.
+- Various mobile UI fixes.
+- Scenes cannot be branched anymore (that broke them).
+- Sprite generation triggering on unsupported platforms.
+- Cross-awareness with game mode.
+- Clicking on new conversation notifications while in Game mode now takes you to the Conversations correctly.
+- All GLM models now correctly receive only the `enable_thinking` parameter with `false/true` depending on whether you chose reasoning to be `None` or any other.
+- Improved Lorebook Keeper agent.
+- QTE in Game mode fix.
+
+## [1.5.3]
+
+### Added
+
+- Character galleries for storing reference images directly on a character instead of a specific chat.
+- Conversation mode swipe controls.
+- An option to delete a selected swipe instead of the entire message.
+- Prompt caching support and cache hit/write visibility for OpenRouter Claude connections.
+- Recommended models for the first Game generation.
+- A setting to disable bold dialogue formatting while keeping dialogue colors.
+- Custom parameters setup for initial Game mode generation.
+- Instant display of messages in game mode.
+- Discord Mirror for all chatting modes.
+- No more "Preset Variables" pop-up on presets without them.
+
+### Fixed
+
+- We no longer use browser pop-up windows, so the users won't accidentally permanently dismiss them.
+- Various setup fixes, including Docker runtime libraries and launcher/installer build steps.
+- Decreased text padding in Roleplay mode inside the message box area.
+- Session recordings can now be accessed.
+- Addressed Drizzle errors.
+- Impersonate direction is now properly sent to the model.
+- Inventory is now saved and stored between game sessions.
+- We now apply the correct headers for official Anthropic calls.
+- Multi-line messages no longer collapse after editing in Conversations.
+- Character schedules now use your local timezone when generating.
+- Dialogue highlight colors now keep working even when bold dialogue is turned off.
+- Marinara landing-screen effects now stop rendering when they are off-screen, and they stay paused while the tab is inactive.
+- Text renders in HD.
+- We correctly catch Gemma-4's thinking tag.
+- Audio docker fix.
+- Selecting a new location in the Game mode now doesn't automatically transport you there.
+- Party-only Game turns no longer commit staged travel.
+- Game Discord Mirror now carries narrator labels across regular turns and new-session recaps.
+- Game chat parameter changes now override setup-time defaults after the game has already been created.
+
 ## [1.5.2]
 
 ### Added
 
-- General settings now include a persisted app-language selector at the top of the tab. It currently exposes English only and is ready for future translation PRs to extend.
+- General settings now include a persisted app-language selector at the top of the tab. It currently exposes only English and is ready for future translation PRs to extend it.
 - Added a new option to display character/persona avatars in the Roleplay mode (as a side panel, bigger size). Access it in the Appearance Settings.
 - NanoGPT support and improved image connection handling.
 - Added a macOS Apple Silicon-only MLX backend for the local sidecar.
@@ -19,13 +87,14 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 - Conversation mode no longer forces OpenAI-compatible backends like NovelAI onto the non-streaming transport path, preventing immediate cancellations while keeping complete-message rendering in the UI.
 - Character maker, persona maker, lorebook maker, prompt review, retry-agents, game setup, and other system tasks now obey the global Streaming Responses toggle instead of silently forcing streamed transport.
 - Image Generation connections can now keep ComfyUI selected on non-default hosts and ports, so remote ComfyUI servers still expose checkpoint fetching and custom workflow JSON.
-- Connection max-context limits now trim oversized prompts before generation and prompt inspection shows the fitted prompt that was actually sent upstream.
+- Connection max-context limits now trim oversized prompts before generation, and prompt inspection shows the fitted prompt that was actually sent upstream.
 - OpenRouter connection provider preferences now carry through agent runs, game setup, GM/tool generations, and other helper flows instead of falling back to Auto router outside the main chat path.
 - Inline reasoning blocks wrapped in `<thought>...</thought>` or `<|think|>...<|/think|>` are now extracted into stored message thoughts, and game-mode JSON helpers strip those blocks before parsing model output.
 - Glued Side Panel roleplay avatars now fade and blur out more aggressively at the bottom so they merge into the message bubble instead of ending abruptly.
 - Clean installs no longer warn that pnpm ignored build scripts for `onnxruntime-node` and `protobufjs`, so Windows users do not need to run `pnpm approve-builds` or patch `package.json` by hand.
-- Added the no split mode flag to prevent the looping crash of Gemma-4 on multiple GPUs systems.
+- Added the no split mode flag to prevent the looping crash of Gemma-4 on multiple GPU systems.
 - Tracker agents can now use the built-in local sidecar through the normal Connection Override dropdown, and the Local Model card now provides a bulk action to point every built-in tracker at the local model.
+- Fixed new game mode sessions not starting after the last one concluded.
 
 ## [1.5.1]
 

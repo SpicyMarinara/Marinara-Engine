@@ -8,6 +8,7 @@ import { X, Loader2, Check, ImagePlus, Sparkles, ArrowLeft } from "lucide-react"
 import { Modal } from "./Modal";
 import { cn } from "../../lib/utils";
 import { useConnections } from "../../hooks/use-connections";
+import { useSpriteCapabilities } from "../../hooks/use-characters";
 import { api } from "../../lib/api-client";
 
 // ── Types ──
@@ -168,12 +169,15 @@ export function SpriteGenerationModal({
 
   // Connections
   const { data: connectionsList } = useConnections();
+  const { data: spriteCapabilities } = useSpriteCapabilities();
   const imageConnections = useMemo(() => {
     if (!connectionsList) return [];
     return (connectionsList as Array<{ id: string; name: string; model?: string; provider?: string }>).filter(
       (c) => c.provider === "image_generation",
     );
   }, [connectionsList]);
+  const spriteGenerationUnavailable = spriteCapabilities?.spriteGenerationAvailable === false;
+  const spriteGenerationReason = spriteCapabilities?.reason ?? "Sprite generation is unavailable on this platform.";
 
   // Auto-select first image connection
   const effectiveConnectionId = connectionId ?? imageConnections[0]?.id ?? null;
@@ -228,7 +232,7 @@ export function SpriteGenerationModal({
   }, []);
 
   const handleGenerate = useCallback(async () => {
-    if (!effectiveConnectionId || selectedExpressions.length === 0) return;
+    if (spriteGenerationUnavailable || !effectiveConnectionId || selectedExpressions.length === 0) return;
 
     setStep(1);
     setError(null);
@@ -273,7 +277,15 @@ export function SpriteGenerationModal({
       setError(err?.message || "Image generation failed");
       setStep(0);
     }
-  }, [effectiveConnectionId, appearance, referenceImages, selectedExpressions, preset, spriteType]);
+  }, [
+    spriteGenerationUnavailable,
+    effectiveConnectionId,
+    appearance,
+    referenceImages,
+    selectedExpressions,
+    preset,
+    spriteType,
+  ]);
 
   const handleApplyCleanup = useCallback(async () => {
     if (!noBackground || cells.length === 0) return;
@@ -420,6 +432,11 @@ export function SpriteGenerationModal({
           {error && (
             <div className="rounded-lg bg-[var(--destructive)]/10 px-3 py-2 text-xs text-[var(--destructive)]">
               {error}
+            </div>
+          )}
+          {spriteGenerationUnavailable && (
+            <div className="rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
+              {spriteGenerationReason}
             </div>
           )}
 
@@ -615,7 +632,13 @@ export function SpriteGenerationModal({
             </button>
             <button
               onClick={handleGenerate}
-              disabled={!effectiveConnectionId || selectedExpressions.length === 0 || !appearance.trim()}
+              disabled={
+                spriteGenerationUnavailable ||
+                !effectiveConnectionId ||
+                selectedExpressions.length === 0 ||
+                !appearance.trim()
+              }
+              title={spriteGenerationUnavailable ? spriteGenerationReason : undefined}
               className="flex items-center gap-1.5 rounded-lg bg-[var(--primary)] px-4 py-1.5 text-xs font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
             >
               <Sparkles size={14} />

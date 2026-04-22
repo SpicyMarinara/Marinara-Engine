@@ -38,6 +38,10 @@ const WIDGET_BAR_H = 76; // top HUD toolbar: py-2 (16px) + widget buttons h-[3.7
 const INPUT_BOX_H = 72; // bottom chat input area height
 const GAP = 8; // breathing room
 
+interface EchoChamberPanelProps {
+  hiddenOnMobile?: boolean;
+}
+
 /** Tiny 4-square grid icon; the active corner is highlighted. */
 function CornerPicker({ current, onChange }: { current: EchoChamberSide; onChange: (c: EchoChamberSide) => void }) {
   if (typeof window !== "undefined" && window.innerWidth < 768) return null;
@@ -58,7 +62,7 @@ function CornerPicker({ current, onChange }: { current: EchoChamberSide; onChang
   );
 }
 
-export function EchoChamberPanel() {
+export function EchoChamberPanel({ hiddenOnMobile = false }: EchoChamberPanelProps) {
   const echoChamberOpen = useUIStore((s) => s.echoChamberOpen);
   const echoChamberSide = useUIStore((s) => s.echoChamberSide);
   const toggleEchoChamber = useUIStore((s) => s.toggleEchoChamber);
@@ -184,6 +188,7 @@ export function EchoChamberPanel() {
 
   // ── Compute position style relative to the chat area container ──
   const [posStyle, setPosStyle] = useState<Record<string, number | undefined>>({});
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
   useEffect(() => {
     if (!echoChamberOpen) return;
@@ -232,7 +237,7 @@ export function EchoChamberPanel() {
     });
   }, [echoChamberOpen, echoChamberSide]);
 
-  if (!echoChamberOpen || !echoEnabled) return null;
+  if (!echoChamberOpen || !echoEnabled || (isMobile && hiddenOnMobile)) return null;
   const visibleMessages = echoMessages.slice(0, visibleCount);
 
   return (

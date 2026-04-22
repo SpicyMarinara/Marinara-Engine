@@ -15,6 +15,7 @@ import {
 } from "../../hooks/use-lorebooks";
 import { useCharacters } from "../../hooks/use-characters";
 import { useConnections } from "../../hooks/use-connections";
+import { showConfirmDialog } from "../../lib/app-dialogs";
 import { useUIStore } from "../../stores/ui.store";
 import {
   ArrowLeft,
@@ -108,11 +109,12 @@ export function LorebookEditor() {
 
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
-  const [dirty, setDirty] = useState(false);
+  const [lorebookDirty, setLorebookDirty] = useState(false);
+  const [entryDirty, setEntryDirty] = useState(false);
   const setEditorDirty = useUIStore((s) => s.setEditorDirty);
   useEffect(() => {
-    setEditorDirty(dirty);
-  }, [dirty, setEditorDirty]);
+    setEditorDirty(lorebookDirty || entryDirty);
+  }, [lorebookDirty, entryDirty, setEditorDirty]);
   const [saving, setSaving] = useState(false);
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [entrySearch, setEntrySearch] = useState("");
@@ -133,10 +135,15 @@ export function LorebookEditor() {
 
   // ── Form state for entry editor ──
   const [entryForm, setEntryForm] = useState<Partial<LorebookEntry> | null>(null);
+  const loadedLorebookIdRef = useRef<string | null>(null);
+  const loadedEntryIdRef = useRef<string | null>(null);
 
   // Load lorebook data into form
   useEffect(() => {
     if (!lorebook) return;
+    const hasSwitchedLorebooks = loadedLorebookIdRef.current !== lorebook.id;
+    if (!hasSwitchedLorebooks && lorebookDirty) return;
+
     setFormName(lorebook.name);
     setFormDescription(lorebook.description);
     setFormCategory(lorebook.category);
@@ -147,20 +154,28 @@ export function LorebookEditor() {
     setFormMaxRecursionDepth(lorebook.maxRecursionDepth ?? 3);
     setFormCharacterId(lorebook.characterId ?? null);
     setFormTags(lorebook.tags ?? []);
-    setDirty(false);
-  }, [lorebook]);
+    setLorebookDirty(false);
+    loadedLorebookIdRef.current = lorebook.id;
+  }, [lorebook, lorebookDirty]);
 
   // Load entry data into form
   useEffect(() => {
     if (!editingEntryId) {
       setEntryForm(null);
+      setEntryDirty(false);
+      loadedEntryIdRef.current = null;
       return;
     }
     const entry = entries.find((e) => e.id === editingEntryId);
-    if (entry) {
-      setEntryForm({ ...entry });
-    }
-  }, [editingEntryId, entries]);
+    if (!entry) return;
+
+    const hasSwitchedEntries = loadedEntryIdRef.current !== editingEntryId;
+    if (!hasSwitchedEntries && entryDirty) return;
+
+    setEntryForm({ ...entry });
+    setEntryDirty(false);
+    loadedEntryIdRef.current = editingEntryId;
+  }, [editingEntryId, entries, entryDirty]);
 
   // Filtered + sorted entries
   const filteredEntries = useMemo(() => {
@@ -194,7 +209,11 @@ export function LorebookEditor() {
   }, [entries, entrySearch, entrySort]);
 
   // ── Handlers ──
-  const markDirty = useCallback(() => setDirty(true), []);
+  const markLorebookDirty = useCallback(() => setLorebookDirty(true), []);
+  const updateEntryForm = useCallback((patch: Partial<LorebookEntry>) => {
+    setEntryDirty(true);
+    setEntryForm((current) => (current ? { ...current, ...patch } : current));
+  }, []);
 
   // Preserve main scroll position across entry editor sub-view so returning
   // from an entry doesn't reset a long entry list (e.g. 250 entries on mobile).
@@ -226,7 +245,7 @@ export function LorebookEditor() {
         characterId: formCharacterId,
         tags: formTags,
       });
-      setDirty(false);
+      setLorebookDirty(false);
     } finally {
       setSaving(false);
     }
@@ -276,7 +295,7 @@ export function LorebookEditor() {
         locked: entryForm.locked,
         preventRecursion: entryForm.preventRecursion,
       });
-      setDirty(false);
+      setEntryDirty(false);
     } finally {
       setSaving(false);
     }
@@ -298,24 +317,58 @@ export function LorebookEditor() {
   const handleDeleteEntry = useCallback(
     async (entryId: string) => {
       if (!lorebookId) return;
-      if (!confirm("Delete this lorebook entry?")) return;
+      if (
+        !(await showConfirmDialog({
+          title: "Delete Entry",
+          message: "Delete this lorebook entry?",
+          confirmLabel: "Delete",
+          tone: "destructive",
+        }))
+      ) {
+        return;
+      }
       if (editingEntryId === entryId) setEditingEntryId(null);
       await deleteEntry.mutateAsync({ lorebookId, entryId });
     },
     [lorebookId, editingEntryId, deleteEntry],
   );
 
+  const handleExitEntry = useCallback(async () => {
+    if (
+      entryDirty &&
+      !(await showConfirmDialog({
+        title: "Unsaved Changes",
+        message: "You have unsaved changes. Discard them and leave this entry?",
+        confirmLabel: "Discard",
+        tone: "destructive",
+      }))
+    ) {
+      return;
+    }
+    setEntryDirty(false);
+    setEditingEntryId(null);
+  }, [entryDirty]);
+
   const handleClose = useCallback(() => {
-    if (dirty) {
+    if (lorebookDirty) {
       setShowUnsavedWarning(true);
     } else {
       closeDetail();
     }
-  }, [dirty, closeDetail]);
+  }, [lorebookDirty, closeDetail]);
 
   const handleDelete = useCallback(async () => {
     if (!lorebookId) return;
-    if (!confirm("Delete this lorebook? All entries will be lost.")) return;
+    if (
+      !(await showConfirmDialog({
+        title: "Delete Lorebook",
+        message: "Delete this lorebook? All entries will be lost.",
+        confirmLabel: "Delete",
+        tone: "destructive",
+      }))
+    ) {
+      return;
+    }
     await deleteLorebook.mutateAsync(lorebookId);
     closeDetail();
   }, [lorebookId, deleteLorebook, closeDetail]);
@@ -335,16 +388,13 @@ export function LorebookEditor() {
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Entry editor header */}
         <div className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3">
-          <button
-            onClick={() => setEditingEntryId(null)}
-            className="rounded-lg p-1.5 transition-colors hover:bg-[var(--accent)]"
-          >
+          <button onClick={handleExitEntry} className="rounded-lg p-1.5 transition-colors hover:bg-[var(--accent)]">
             <ArrowLeft size="1rem" />
           </button>
           <div className="min-w-0 flex-1">
             <input
               value={entryForm.name ?? ""}
-              onChange={(e) => setEntryForm((f) => (f ? { ...f, name: e.target.value } : f))}
+              onChange={(e) => updateEntryForm({ name: e.target.value })}
               className="w-full rounded-lg bg-transparent px-1.5 text-base font-semibold outline-none transition-colors hover:bg-[var(--secondary)] focus:bg-[var(--secondary)] focus:ring-1 focus:ring-[var(--ring)]"
               placeholder="Entry name"
             />
@@ -369,7 +419,7 @@ export function LorebookEditor() {
             >
               <input
                 value={entryForm.name ?? ""}
-                onChange={(e) => setEntryForm((f) => (f ? { ...f, name: e.target.value } : f))}
+                onChange={(e) => updateEntryForm({ name: e.target.value })}
                 className="w-full rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
                 placeholder="Entry name"
               />
@@ -381,10 +431,7 @@ export function LorebookEditor() {
               icon={Key}
               help="Keywords that trigger this entry. When any of these words appear in the chat, this entry's content is injected into the AI's context."
             >
-              <KeysEditor
-                keys={entryForm.keys ?? []}
-                onChange={(keys) => setEntryForm((f) => (f ? { ...f, keys } : f))}
-              />
+              <KeysEditor keys={entryForm.keys ?? []} onChange={(keys) => updateEntryForm({ keys })} />
             </FieldGroup>
 
             {/* Secondary Keys */}
@@ -395,14 +442,14 @@ export function LorebookEditor() {
             >
               <KeysEditor
                 keys={entryForm.secondaryKeys ?? []}
-                onChange={(keys) => setEntryForm((f) => (f ? { ...f, secondaryKeys: keys } : f))}
+                onChange={(keys) => updateEntryForm({ secondaryKeys: keys })}
               />
               <div className="mt-2 flex items-center gap-3">
                 <label className="text-[0.6875rem] text-[var(--muted-foreground)]">Logic:</label>
                 {(["and", "or", "not"] as const).map((logic) => (
                   <button
                     key={logic}
-                    onClick={() => setEntryForm((f) => (f ? { ...f, selectiveLogic: logic } : f))}
+                    onClick={() => updateEntryForm({ selectiveLogic: logic })}
                     className={cn(
                       "rounded-md px-2 py-0.5 text-[0.6875rem] font-medium transition-colors",
                       entryForm.selectiveLogic === logic
@@ -424,7 +471,7 @@ export function LorebookEditor() {
             >
               <ExpandableTextarea
                 value={entryForm.content ?? ""}
-                onChange={(v) => setEntryForm((f) => (f ? { ...f, content: v } : f))}
+                onChange={(v) => updateEntryForm({ content: v })}
                 rows={8}
                 placeholder="The content that will be injected into the prompt when this entry activates…"
                 title="Edit Content"
@@ -439,43 +486,43 @@ export function LorebookEditor() {
               <ToggleButton
                 label="Enabled"
                 value={entryForm.enabled ?? true}
-                onChange={(v) => setEntryForm((f) => (f ? { ...f, enabled: v } : f))}
+                onChange={(v) => updateEntryForm({ enabled: v })}
               />
               <ToggleButton
                 label="Constant"
                 value={entryForm.constant ?? false}
-                onChange={(v) => setEntryForm((f) => (f ? { ...f, constant: v } : f))}
+                onChange={(v) => updateEntryForm({ constant: v })}
               />
               <ToggleButton
                 label="Selective"
                 value={entryForm.selective ?? false}
-                onChange={(v) => setEntryForm((f) => (f ? { ...f, selective: v } : f))}
+                onChange={(v) => updateEntryForm({ selective: v })}
               />
               <ToggleButton
                 label="Regex"
                 value={entryForm.useRegex ?? false}
-                onChange={(v) => setEntryForm((f) => (f ? { ...f, useRegex: v } : f))}
+                onChange={(v) => updateEntryForm({ useRegex: v })}
               />
               <ToggleButton
                 label="Whole Words"
                 value={entryForm.matchWholeWords ?? false}
-                onChange={(v) => setEntryForm((f) => (f ? { ...f, matchWholeWords: v } : f))}
+                onChange={(v) => updateEntryForm({ matchWholeWords: v })}
               />
               <ToggleButton
                 label="Case Sensitive"
                 value={entryForm.caseSensitive ?? false}
-                onChange={(v) => setEntryForm((f) => (f ? { ...f, caseSensitive: v } : f))}
+                onChange={(v) => updateEntryForm({ caseSensitive: v })}
               />
               <ToggleButton
                 label="Locked"
                 value={entryForm.locked ?? false}
-                onChange={(v) => setEntryForm((f) => (f ? { ...f, locked: v } : f))}
+                onChange={(v) => updateEntryForm({ locked: v })}
                 tooltip="Prevents the Lorebook Keeper agent from modifying this entry."
               />
               <ToggleButton
                 label="No Recursion"
                 value={entryForm.preventRecursion ?? false}
-                onChange={(v) => setEntryForm((f) => (f ? { ...f, preventRecursion: v } : f))}
+                onChange={(v) => updateEntryForm({ preventRecursion: v })}
                 tooltip="When enabled, this entry's content won't trigger additional entries during recursive scanning."
               />
             </div>
@@ -491,7 +538,7 @@ export function LorebookEditor() {
                   <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">Position</label>
                   <select
                     value={entryForm.position ?? 0}
-                    onChange={(e) => setEntryForm((f) => (f ? { ...f, position: Number(e.target.value) } : f))}
+                    onChange={(e) => updateEntryForm({ position: Number(e.target.value) })}
                     className="w-full rounded-lg bg-[var(--secondary)] px-2 py-1.5 text-xs ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
                   >
                     <option value={0}>Before Chat</option>
@@ -503,22 +550,20 @@ export function LorebookEditor() {
                   <NumberField
                     label="Depth"
                     value={entryForm.depth ?? 4}
-                    onChange={(v) => setEntryForm((f) => (f ? { ...f, depth: v } : f))}
+                    onChange={(v) => updateEntryForm({ depth: v })}
                     min={0}
                   />
                 )}
                 <NumberField
                   label="Order"
                   value={entryForm.order ?? 100}
-                  onChange={(v) => setEntryForm((f) => (f ? { ...f, order: v } : f))}
+                  onChange={(v) => updateEntryForm({ order: v })}
                 />
                 <div>
                   <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">Role</label>
                   <select
                     value={entryForm.role ?? "system"}
-                    onChange={(e) =>
-                      setEntryForm((f) => (f ? { ...f, role: e.target.value as "system" | "user" | "assistant" } : f))
-                    }
+                    onChange={(e) => updateEntryForm({ role: e.target.value as "system" | "user" | "assistant" })}
                     className="w-full rounded-lg bg-[var(--secondary)] px-2 py-1.5 text-xs ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
                   >
                     <option value="system">System</option>
@@ -539,25 +584,25 @@ export function LorebookEditor() {
                 <NumberField
                   label="Sticky"
                   value={entryForm.sticky ?? 0}
-                  onChange={(v) => setEntryForm((f) => (f ? { ...f, sticky: v || null } : f))}
+                  onChange={(v) => updateEntryForm({ sticky: v || null })}
                   min={0}
                 />
                 <NumberField
                   label="Cooldown"
                   value={entryForm.cooldown ?? 0}
-                  onChange={(v) => setEntryForm((f) => (f ? { ...f, cooldown: v || null } : f))}
+                  onChange={(v) => updateEntryForm({ cooldown: v || null })}
                   min={0}
                 />
                 <NumberField
                   label="Delay"
                   value={entryForm.delay ?? 0}
-                  onChange={(v) => setEntryForm((f) => (f ? { ...f, delay: v || null } : f))}
+                  onChange={(v) => updateEntryForm({ delay: v || null })}
                   min={0}
                 />
                 <NumberField
                   label="Ephemeral"
                   value={entryForm.ephemeral ?? 0}
-                  onChange={(v) => setEntryForm((f) => (f ? { ...f, ephemeral: v || null } : f))}
+                  onChange={(v) => updateEntryForm({ ephemeral: v || null })}
                   min={0}
                 />
               </div>
@@ -574,7 +619,7 @@ export function LorebookEditor() {
                   <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">Group</label>
                   <input
                     value={entryForm.group ?? ""}
-                    onChange={(e) => setEntryForm((f) => (f ? { ...f, group: e.target.value } : f))}
+                    onChange={(e) => updateEntryForm({ group: e.target.value })}
                     className="w-full rounded-lg bg-[var(--secondary)] px-2 py-1.5 text-xs ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
                     placeholder="Group name"
                   />
@@ -583,7 +628,7 @@ export function LorebookEditor() {
                   <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">Tag</label>
                   <input
                     value={entryForm.tag ?? ""}
-                    onChange={(e) => setEntryForm((f) => (f ? { ...f, tag: e.target.value } : f))}
+                    onChange={(e) => updateEntryForm({ tag: e.target.value })}
                     className="w-full rounded-lg bg-[var(--secondary)] px-2 py-1.5 text-xs ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
                     placeholder="e.g. location, item, lore"
                   />
@@ -613,7 +658,7 @@ export function LorebookEditor() {
           <button
             onClick={() => {
               setShowUnsavedWarning(false);
-              setDirty(false);
+              setLorebookDirty(false);
               closeDetail();
             }}
             className="rounded-lg px-3 py-1 text-[0.6875rem] font-medium text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]"
@@ -649,7 +694,7 @@ export function LorebookEditor() {
         </div>
         <button
           onClick={handleSaveLorebook}
-          disabled={!dirty || saving}
+          disabled={!lorebookDirty || saving}
           className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 px-4 py-2 text-xs font-medium text-white shadow-md transition-all hover:shadow-lg active:scale-[0.98] disabled:opacity-50"
         >
           <Save size="0.8125rem" />
@@ -721,7 +766,7 @@ export function LorebookEditor() {
                     value={formName}
                     onChange={(e) => {
                       setFormName(e.target.value);
-                      markDirty();
+                      markLorebookDirty();
                     }}
                     className="w-full rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
                   />
@@ -734,7 +779,7 @@ export function LorebookEditor() {
                     value={formDescription}
                     onChange={(e) => {
                       setFormDescription(e.target.value);
-                      markDirty();
+                      markLorebookDirty();
                     }}
                     rows={3}
                     className="w-full resize-y rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
@@ -756,7 +801,7 @@ export function LorebookEditor() {
                         <button
                           onClick={() => {
                             setFormTags(formTags.filter((t) => t !== tag));
-                            markDirty();
+                            markLorebookDirty();
                           }}
                           className="ml-0.5 rounded-full p-0.5 transition-colors hover:bg-amber-400/20"
                         >
@@ -775,7 +820,7 @@ export function LorebookEditor() {
                           const t = newTag.trim();
                           if (!formTags.includes(t)) {
                             setFormTags([...formTags, t]);
-                            markDirty();
+                            markLorebookDirty();
                           }
                           setNewTag("");
                         }
@@ -788,7 +833,7 @@ export function LorebookEditor() {
                         const t = newTag.trim();
                         if (t && !formTags.includes(t)) {
                           setFormTags([...formTags, t]);
-                          markDirty();
+                          markLorebookDirty();
                         }
                         setNewTag("");
                       }}
@@ -810,7 +855,7 @@ export function LorebookEditor() {
                           key={opt.value}
                           onClick={() => {
                             setFormCategory(opt.value);
-                            markDirty();
+                            markLorebookDirty();
                           }}
                           className={cn(
                             "flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium transition-all",
@@ -838,7 +883,7 @@ export function LorebookEditor() {
                       value={formCharacterId ?? ""}
                       onChange={(e) => {
                         setFormCharacterId(e.target.value || null);
-                        markDirty();
+                        markLorebookDirty();
                       }}
                       className="flex-1 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
                     >
@@ -853,7 +898,7 @@ export function LorebookEditor() {
                       <button
                         onClick={() => {
                           setFormCharacterId(null);
-                          markDirty();
+                          markLorebookDirty();
                         }}
                         className="rounded-xl bg-[var(--secondary)] p-2.5 text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-colors hover:text-[var(--foreground)]"
                         title="Unlink character"
@@ -875,7 +920,7 @@ export function LorebookEditor() {
                   <button
                     onClick={() => {
                       setFormEnabled(!formEnabled);
-                      markDirty();
+                      markLorebookDirty();
                     }}
                     className="transition-colors"
                   >
@@ -899,7 +944,7 @@ export function LorebookEditor() {
                       value={formScanDepth}
                       onChange={(e) => {
                         setFormScanDepth(parseInt(e.target.value) || 0);
-                        markDirty();
+                        markLorebookDirty();
                       }}
                       min={0}
                       className="w-full rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
@@ -915,7 +960,7 @@ export function LorebookEditor() {
                       value={formTokenBudget}
                       onChange={(e) => {
                         setFormTokenBudget(parseInt(e.target.value) || 0);
-                        markDirty();
+                        markLorebookDirty();
                       }}
                       min={0}
                       className="w-full rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
@@ -927,7 +972,7 @@ export function LorebookEditor() {
                       <button
                         onClick={() => {
                           setFormRecursive(!formRecursive);
-                          markDirty();
+                          markLorebookDirty();
                         }}
                       >
                         {formRecursive ? (
@@ -948,7 +993,7 @@ export function LorebookEditor() {
                           value={formMaxRecursionDepth}
                           onChange={(e) => {
                             setFormMaxRecursionDepth(Math.max(1, Math.min(10, parseInt(e.target.value) || 3)));
-                            markDirty();
+                            markLorebookDirty();
                           }}
                           min={1}
                           max={10}

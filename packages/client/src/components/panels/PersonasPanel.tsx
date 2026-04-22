@@ -39,6 +39,7 @@ import {
   UserMinus,
   Tag,
 } from "lucide-react";
+import { showConfirmDialog } from "../../lib/app-dialogs";
 import { cn } from "../../lib/utils";
 import { HelpTooltip } from "../ui/HelpTooltip";
 import { api } from "../../lib/api-client";
@@ -152,7 +153,16 @@ export function PersonasPanel() {
 
   const handleDeleteTag = useCallback(
     async (tag: string) => {
-      if (!confirm(`Remove tag "${tag}" from all personas?`)) return;
+      if (
+        !(await showConfirmDialog({
+          title: "Remove Tag",
+          message: `Remove tag "${tag}" from all personas?`,
+          confirmLabel: "Remove",
+          tone: "destructive",
+        }))
+      ) {
+        return;
+      }
       try {
         const affected = rawList.filter((p) => parseTags(p).includes(tag));
         for (const p of affected) {
@@ -621,8 +631,17 @@ export function PersonasPanel() {
                         <Pencil size="0.75rem" />
                       </button>
                       <button
-                        onClick={() => {
-                          if (!confirm(`Delete group "${group.name}"?`)) return;
+                        onClick={async () => {
+                          if (
+                            !(await showConfirmDialog({
+                              title: "Delete Group",
+                              message: `Delete group "${group.name}"?`,
+                              confirmLabel: "Delete",
+                              tone: "destructive",
+                            }))
+                          ) {
+                            return;
+                          }
                           deletePGroup.mutate(group.id);
                           if (expandedGroupId === group.id) setExpandedGroupId(null);
                           if (assigningToGroup === group.id) setAssigningToGroup(null);
@@ -831,9 +850,18 @@ export function PersonasPanel() {
                     <Copy size="0.75rem" />
                   </button>
                   <button
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.stopPropagation();
-                      if (!confirm(`Delete "${persona.name}"? This cannot be undone.`)) return;
+                      if (
+                        !(await showConfirmDialog({
+                          title: "Delete Persona",
+                          message: `Delete "${persona.name}"? This cannot be undone.`,
+                          confirmLabel: "Delete",
+                          tone: "destructive",
+                        }))
+                      ) {
+                        return;
+                      }
                       deletePersona.mutate(persona.id);
                     }}
                     className="rounded-lg p-1.5 transition-all hover:bg-[var(--destructive)]/15 active:scale-90"

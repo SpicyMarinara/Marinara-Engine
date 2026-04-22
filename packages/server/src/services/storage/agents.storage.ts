@@ -5,9 +5,70 @@ import { eq, and, desc } from "drizzle-orm";
 import type { DB } from "../../db/connection.js";
 import { agentConfigs, agentRuns, agentMemory } from "../../db/schema/index.js";
 import { newId, now } from "../../utils/id-generator.js";
-import type { CreateAgentConfigInput, AgentResult } from "@marinara-engine/shared";
+import {
+  BUILT_IN_AGENTS,
+  getDefaultBuiltInAgentSettings,
+  type CreateAgentConfigInput,
+  type AgentResult,
+} from "@marinara-engine/shared";
+
+const BUILTIN_AGENT_ID_PREFIX = "builtin:";
+
+function getBuiltinAgentType(agentConfigId: string): string | null {
+  if (!agentConfigId.startsWith(BUILTIN_AGENT_ID_PREFIX)) return null;
+  const agentType = agentConfigId.slice(BUILTIN_AGENT_ID_PREFIX.length).trim();
+  return agentType.length > 0 ? agentType : null;
+}
 
 export function createAgentsStorage(db: DB) {
+  async function getById(id: string) {
+    const rows = await db.select().from(agentConfigs).where(eq(agentConfigs.id, id));
+    return rows[0] ?? null;
+  }
+
+  async function getByType(type: string) {
+    const rows = await db.select().from(agentConfigs).where(eq(agentConfigs.type, type));
+    return rows[0] ?? null;
+  }
+
+  async function ensureBuiltinConfig(type: string) {
+    const builtIn = BUILT_IN_AGENTS.find((agent) => agent.id === type);
+    if (!builtIn) return null;
+
+    const existing = await getByType(type);
+    if (existing) return existing;
+
+    const id = `${BUILTIN_AGENT_ID_PREFIX}${type}`;
+    const timestamp = now();
+
+    try {
+      await db.insert(agentConfigs).values({
+        id,
+        type: builtIn.id,
+        name: builtIn.name,
+        description: builtIn.description,
+        phase: builtIn.phase,
+        enabled: String(builtIn.enabledByDefault),
+        connectionId: null,
+        promptTemplate: "",
+        settings: JSON.stringify(getDefaultBuiltInAgentSettings(builtIn.id)),
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+    } catch {
+      // Another request may have materialized the row first.
+    }
+
+    return (await getById(id)) ?? getByType(type);
+  }
+
+  async function resolveAgentConfigId(agentConfigId: string) {
+    const builtinType = getBuiltinAgentType(agentConfigId);
+    if (!builtinType) return agentConfigId;
+    const config = await ensureBuiltinConfig(builtinType);
+    return config?.id ?? agentConfigId;
+  }
+
   return {
     // ── Config CRUD ──
 
@@ -24,15 +85,9 @@ export function createAgentsStorage(db: DB) {
       return rows;
     },
 
-    async getById(id: string) {
-      const rows = await db.select().from(agentConfigs).where(eq(agentConfigs.id, id));
-      return rows[0] ?? null;
-    },
+    getById,
 
-    async getByType(type: string) {
-      const rows = await db.select().from(agentConfigs).where(eq(agentConfigs.type, type));
-      return rows[0] ?? null;
-    },
+    getByType,
 
     async create(input: CreateAgentConfigInput) {
       const id = newId();
@@ -75,10 +130,11 @@ export function createAgentsStorage(db: DB) {
     // ── Agent Runs ──
 
     async saveRun(input: { agentConfigId: string; chatId: string; messageId: string; result: AgentResult }) {
+      const agentConfigId = await resolveAgentConfigId(input.agentConfigId);
       const id = newId();
       await db.insert(agentRuns).values({
         id,
-        agentConfigId: input.agentConfigId,
+        agentConfigId,
         chatId: input.chatId,
         messageId: input.messageId,
         resultType: input.result.type,
@@ -135,10 +191,11 @@ export function createAgentsStorage(db: DB) {
     // ── Agent Memory (persistent KV per agent per chat) ──
 
     async getMemory(agentConfigId: string, chatId: string): Promise<Record<string, unknown>> {
+      const resolvedAgentConfigId = await resolveAgentConfigId(agentConfigId);
       const rows = await db
         .select()
         .from(agentMemory)
-        .where(and(eq(agentMemory.agentConfigId, agentConfigId), eq(agentMemory.chatId, chatId)));
+        .where(and(eq(agentMemory.agentConfigId, resolvedAgentConfigId), eq(agentMemory.chatId, chatId)));
       const mem: Record<string, unknown> = {};
       for (const row of rows) {
         try {
@@ -151,12 +208,17 @@ export function createAgentsStorage(db: DB) {
     },
 
     async setMemory(agentConfigId: string, chatId: string, key: string, value: unknown) {
+      const resolvedAgentConfigId = await resolveAgentConfigId(agentConfigId);
       const stringValue = typeof value === "string" ? value : JSON.stringify(value);
       const existing = await db
         .select()
         .from(agentMemory)
         .where(
-          and(eq(agentMemory.agentConfigId, agentConfigId), eq(agentMemory.chatId, chatId), eq(agentMemory.key, key)),
+          and(
+            eq(agentMemory.agentConfigId, resolvedAgentConfigId),
+            eq(agentMemory.chatId, chatId),
+            eq(agentMemory.key, key),
+          ),
         );
 
       if (existing.length > 0) {
@@ -167,7 +229,7 @@ export function createAgentsStorage(db: DB) {
       } else {
         await db.insert(agentMemory).values({
           id: newId(),
-          agentConfigId,
+          agentConfigId: resolvedAgentConfigId,
           chatId,
           key,
           value: stringValue,
@@ -193,18 +255,24 @@ export function createAgentsStorage(db: DB) {
 
     /** Delete a specific memory key for an agent in a chat. */
     async deleteMemoryKey(agentConfigId: string, chatId: string, key: string) {
+      const resolvedAgentConfigId = await resolveAgentConfigId(agentConfigId);
       await db
         .delete(agentMemory)
         .where(
-          and(eq(agentMemory.agentConfigId, agentConfigId), eq(agentMemory.chatId, chatId), eq(agentMemory.key, key)),
+          and(
+            eq(agentMemory.agentConfigId, resolvedAgentConfigId),
+            eq(agentMemory.chatId, chatId),
+            eq(agentMemory.key, key),
+          ),
         );
     },
 
     /** Delete all memory for a specific agent in a specific chat. */
     async clearMemoryForAgentInChat(agentConfigId: string, chatId: string) {
+      const resolvedAgentConfigId = await resolveAgentConfigId(agentConfigId);
       await db
         .delete(agentMemory)
-        .where(and(eq(agentMemory.agentConfigId, agentConfigId), eq(agentMemory.chatId, chatId)));
+        .where(and(eq(agentMemory.agentConfigId, resolvedAgentConfigId), eq(agentMemory.chatId, chatId)));
     },
   };
 }

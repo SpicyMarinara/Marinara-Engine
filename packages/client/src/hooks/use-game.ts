@@ -19,6 +19,7 @@ import type {
   Combatant,
   CombatRoundResult,
   CombatPlayerAction,
+  HudWidget,
 } from "@marinara-engine/shared";
 import type { Chat } from "@marinara-engine/shared";
 
@@ -70,6 +71,10 @@ interface MapGenerateResponse {
 
 interface MapMoveResponse {
   map: GameMap;
+}
+
+interface UpdateGameWidgetsResponse {
+  ok: boolean;
 }
 
 // ── Mutations ──
@@ -230,6 +235,22 @@ export function useMoveOnMap() {
       store.getState().setCurrentMap(res.map);
       qc.invalidateQueries({ queryKey: chatKeys.detail(variables.chatId) });
       qc.invalidateQueries({ queryKey: [...gameKeys.all, "journal", variables.chatId] });
+    },
+  });
+}
+
+export function useUpdateGameWidgets() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ chatId, widgets }: { chatId: string; widgets: HudWidget[] }) =>
+      api.put<UpdateGameWidgetsResponse>(`/game/${chatId}/widgets`, { widgets }),
+    onSuccess: (_, variables) => {
+      useGameModeStore.getState().setHudWidgets(variables.widgets);
+      qc.invalidateQueries({ queryKey: chatKeys.detail(variables.chatId) });
+    },
+    onError: (err) => {
+      console.error("[updateGameWidgets] Error:", err);
     },
   });
 }

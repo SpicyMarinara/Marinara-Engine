@@ -10,6 +10,7 @@ import type { SceneAnalysis } from "@marinara-engine/shared";
 import { sanitizeApiError } from "../llm/base-provider.js";
 import { sidecarModelService } from "./sidecar-model.service.js";
 import { sidecarProcessService } from "./sidecar-process.service.js";
+import { resolveSidecarRequestModel } from "./sidecar-request-model.js";
 
 let activeRequests = 0;
 
@@ -62,6 +63,13 @@ type SidecarChatCompletionChunk = {
   }>;
 };
 
+function getRequestModel(): string {
+  return resolveSidecarRequestModel(
+    sidecarModelService.getResolvedBackend(),
+    sidecarModelService.getConfiguredModelRef(),
+  );
+}
+
 export type SidecarTestMessageOutput = {
   content: string;
   reasoning: string;
@@ -113,13 +121,28 @@ function extractJsonPayload<T>(raw: string): T {
   }
 }
 
-function extractChoiceContent(choice: {
-  delta?: { content?: unknown; reasoning_content?: unknown };
-  message?: { content?: unknown; reasoning_content?: unknown };
-} | null | undefined): { content: string; reasoning: string } {
+function extractChoiceContent(
+  choice:
+    | {
+        delta?: { content?: unknown; reasoning_content?: unknown };
+        message?: { content?: unknown; reasoning_content?: unknown };
+      }
+    | null
+    | undefined,
+): { content: string; reasoning: string } {
   return {
     content: extractContentText(choice?.delta?.content ?? choice?.message?.content),
     reasoning: extractContentText(choice?.delta?.reasoning_content ?? choice?.message?.reasoning_content),
+  };
+}
+
+function getRuntimeGenerationSettings() {
+  const config = sidecarModelService.getConfig();
+  return {
+    maxTokens: Math.max(64, Math.floor(config.maxTokens)),
+    temperature: Math.min(2, Math.max(0, config.temperature)),
+    topP: Math.min(1, Math.max(Number.EPSILON, config.topP)),
+    topK: Math.max(0, Math.floor(config.topK)),
   };
 }
 
@@ -129,19 +152,21 @@ async function streamChatCompletion(options: {
   responseFormat?: Record<string, unknown>;
 }): Promise<string> {
   const baseUrl = await sidecarProcessService.ensureReady();
+  const generation = getRuntimeGenerationSettings();
+  const maxTokens = Math.min(Math.max(1, Math.floor(options.maxTokens)), generation.maxTokens);
   const response = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "local-sidecar",
+      model: getRequestModel(),
       stream: true,
       messages: options.messages,
-      max_tokens: options.maxTokens,
-      temperature: 1.0,
-      top_p: 0.95,
-      top_k: 64,
+      max_tokens: maxTokens,
+      temperature: generation.temperature,
+      top_p: generation.topP,
+      ...(generation.topK > 0 ? { top_k: generation.topK } : {}),
       ...(options.responseFormat ? { response_format: options.responseFormat } : {}),
     }),
     signal: AbortSignal.timeout(5 * 60_000),
@@ -226,7 +251,7 @@ export async function runTestMessage(): Promise<SidecarTestMessageOutput> {
 
     const config = sidecarModelService.getConfig();
     const shouldKeepRunning = config.useForTrackers || config.useForGameScene;
-    const baseUrl = await sidecarProcessService.ensureReady(true);
+    const baseUrl = await sidecarProcessService.ensureReady({ forceStart: true });
     const nonce = `marinara-${randomUUID().slice(0, 8)}`;
 
     try {
@@ -236,12 +261,13 @@ export async function runTestMessage(): Promise<SidecarTestMessageOutput> {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "local-sidecar",
+          model: getRequestModel(),
           stream: false,
           messages: [
             {
               role: "system",
-              content: "You are a local runtime smoke test. Follow the user's format exactly and do not omit the verification token.",
+              content:
+                "You are a local runtime smoke test. Follow the user's format exactly and do not omit the verification token.",
             },
             {
               role: "user",
@@ -429,7 +455,7 @@ export async function isInferenceAvailable(): Promise<boolean> {
   }
 
   try {
-    await sidecarProcessService.syncForCurrentConfig({ suppressKnownFailure: true });
+    await sidecarProcessService.syncForCurrentConfig({ suppressKnownFailure: true, allowRuntimeInstall: false });
   } catch {
     return false;
   }

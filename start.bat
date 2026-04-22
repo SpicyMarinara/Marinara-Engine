@@ -159,15 +159,18 @@ if errorlevel 1 echo  [ERROR] Failed to install dependencies. & pause & exit /b 
 :: Build if needed
 if not exist "packages\shared\dist" (
     echo  [..] Building shared types...
-    call :run_pnpm build:shared
+    call :run_pnpm --filter @marinara-engine/shared build
+    if errorlevel 1 echo  [ERROR] Failed to build shared types. & pause & exit /b 1
 )
 if not exist "packages\server\dist" (
     echo  [..] Building server...
-    call :run_pnpm build:server
+    call :run_pnpm --filter @marinara-engine/server build
+    if errorlevel 1 echo  [ERROR] Failed to build the server. & pause & exit /b 1
 )
 if not exist "packages\client\dist" (
     echo  [..] Building client...
-    call :run_pnpm build:client
+    call :run_pnpm --filter @marinara-engine/client build
+    if errorlevel 1 echo  [ERROR] Failed to build the client. & pause & exit /b 1
 )
 
 :: Database migrations are handled automatically at server startup by runMigrations()

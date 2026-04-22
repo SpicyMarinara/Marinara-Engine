@@ -31,6 +31,7 @@ import { useApplyRegex } from "../../hooks/use-apply-regex";
 import { useUIStore } from "../../stores/ui.store";
 import { useTranslate } from "../../hooks/use-translate";
 import { api } from "../../lib/api-client";
+import { DIALOGUE_QUOTE_PATTERN_SOURCE, HTML_SAFE_DIALOGUE_QUOTE_PATTERN_SOURCE } from "../../lib/dialogue-quotes";
 import DOMPurify from "dompurify";
 import type { MessageSelectionToggle } from "./chat-area.types";
 
@@ -156,7 +157,7 @@ function renderWithSpeakerTags(
   speakerColorMap: Map<string, string> | undefined,
   boldDialogue = true,
 ): ReactNode[] {
-  const renderLine = boldDialogue ? highlightDialogue : (t: string) => applyInlineMarkdown(t, "m");
+  const renderLine = (line: string, color = defaultDialogueColor) => highlightDialogue(line, color, boldDialogue);
 
   if (!speakerColorMap || !SPEAKER_TAG_RE.test(text)) {
     return renderLine(text, defaultDialogueColor);
@@ -190,7 +191,8 @@ function renderWithSpeakerTags(
 }
 
 /**
- * Highlight quoted dialogue — text in "" or «» gets bold + colored.
+ * Highlight quoted dialogue — text in supported dialogue quote pairs
+ * like "", «», 「」, and 『』 gets bold + colored.
  *
  * Single quotes ('') are intentionally excluded because after curly-quote
  * normalization (' → ') they are indistinguishable from apostrophes,
@@ -204,7 +206,7 @@ function renderWithSpeakerTags(
  * Code spans (`…`), images (![…](…)), and links ([…](…)) are treated as
  * protected zones — quotes inside them are not matched as dialogue.
  */
-function highlightDialogue(text: string, dialogueColor?: string): ReactNode[] {
+function highlightDialogue(text: string, dialogueColor?: string, boldDialogue = true): ReactNode[] {
   // Step 1: Find protected zones where quotes should NOT trigger dialogue detection.
   // Code spans, images, and links may legitimately contain quotation marks.
   const protectedRanges: Array<[number, number]> = [];
@@ -216,7 +218,7 @@ function highlightDialogue(text: string, dialogueColor?: string): ReactNode[] {
   const isProtected = (pos: number) => protectedRanges.some(([s, e]) => pos >= s && pos < e);
 
   // Step 2: Find quote pairs, skipping any that start inside a protected zone.
-  const quoteRe = /(?:"([^"]+)"|«([^»]+)»)/g;
+  const quoteRe = new RegExp(`(?:${DIALOGUE_QUOTE_PATTERN_SOURCE})`, "g");
   const quotePairs: Array<{ start: number; end: number }> = [];
   let qm: RegExpExecArray | null;
   while ((qm = quoteRe.exec(text)) !== null) {
@@ -245,11 +247,12 @@ function highlightDialogue(text: string, dialogueColor?: string): ReactNode[] {
     const openQuote = raw[0];
     const closeQuote = raw[raw.length - 1];
     const inner = raw.slice(1, -1);
+    const DialogueTag = boldDialogue ? "strong" : "span";
 
-    // Apply markdown inside the quoted text, then wrap in dialogue <strong>
+    // Apply markdown inside the quoted text, then wrap in a dialogue span/strong.
     const innerNodes = applyInlineMarkdown(inner, `mq${key}`);
     result.push(
-      <strong
+      <DialogueTag
         key={`d${key++}`}
         style={dialogueColor ? { color: dialogueColor } : undefined}
         className={!dialogueColor ? "text-white" : undefined}
@@ -257,7 +260,7 @@ function highlightDialogue(text: string, dialogueColor?: string): ReactNode[] {
         {openQuote}
         {innerNodes}
         {closeQuote}
-      </strong>,
+      </DialogueTag>,
     );
 
     lastIndex = q.end;
@@ -351,44 +354,44 @@ function renderContent(
   });
 
   // Apply dialogue bolding inside sanitised HTML with per-speaker color support.
-  const withDialogue = boldDialogue
-    ? (() => {
-        // Sanitize a CSS color value — only allow safe color formats
-        const safeColor = (c: string) =>
-          /^(#[0-9a-fA-F]{3,8}|[a-zA-Z]+|rgba?\([\d,.\s%]+\)|hsla?\([\d,.\s%]+\))$/.test(c) ? c : "inherit";
-        // Helper: check if an offset is inside an HTML tag (attribute context)
-        const insideTag = (text: string, offset: number) => {
-          const before = text.slice(0, offset);
-          return before.lastIndexOf("<") > before.lastIndexOf(">");
-        };
-        // Pass 1: Bold quotes inside speaker-annotated spans with their specific colors
-        const afterSpeaker = clean.replace(
-          /<span[^>]*\bdata-spk="([^"]*)"[^>]*>([\s\S]*?)<\/span>/g,
-          (_m: string, color: string, content: string) => {
-            const validColor = safeColor(color);
-            return content.replace(/(?<![=\w])"([^"<>]+)"/g, (match: string, inner: string, offset: number) => {
-              if (insideTag(content, offset)) return match;
-              return `<strong style="color:${validColor}">"${inner}"</strong>`;
-            });
-          },
-        );
-        // Pass 2: Bold remaining quotes with default dialogue color, skipping already-bolded text
-        return afterSpeaker.replace(/(?<![=\w])"([^"<>]+)"/g, (match, inner, offset) => {
-          if (insideTag(afterSpeaker, offset)) return match;
-          const before = afterSpeaker.slice(0, offset);
-          // Skip if already inside a <strong> from pass 1
-          if (/<strong[^>]*>\s*$/.test(before.slice(Math.max(0, before.length - 300)))) return match;
-          // Skip if inside a <font> tag (author-specified colors take priority)
-          const lastFontOpen = before.lastIndexOf("<font ");
-          if (lastFontOpen !== -1) {
-            const lastFontClose = before.lastIndexOf("</font>");
-            if (lastFontClose < lastFontOpen) return match;
-          }
-          const boldColor = dialogueColor ?? "white";
-          return `<strong style="color:${boldColor}">"${inner}"</strong>`;
+  const withDialogue = (() => {
+    // Sanitize a CSS color value — only allow safe color formats
+    const safeColor = (c: string) =>
+      /^(#[0-9a-fA-F]{3,8}|[a-zA-Z]+|rgba?\([\d,.\s%]+\)|hsla?\([\d,.\s%]+\))$/.test(c) ? c : "inherit";
+    // Helper: check if an offset is inside an HTML tag (attribute context)
+    const insideTag = (text: string, offset: number) => {
+      const before = text.slice(0, offset);
+      return before.lastIndexOf("<") > before.lastIndexOf(">");
+    };
+    const dialogueTag = boldDialogue ? "strong" : "span";
+    // Pass 1: color quotes inside speaker-annotated spans with their specific colors
+    const afterSpeaker = clean.replace(
+      /<span[^>]*\bdata-spk="([^"]*)"[^>]*>([\s\S]*?)<\/span>/g,
+      (_m: string, color: string, content: string) => {
+        const validColor = safeColor(color);
+        const speakerQuoteRe = new RegExp(`(?<![=\\w])(?:${HTML_SAFE_DIALOGUE_QUOTE_PATTERN_SOURCE})`, "g");
+        return content.replace(speakerQuoteRe, (match: string, offset: number) => {
+          if (insideTag(content, offset)) return match;
+          return `<${dialogueTag} style="color:${validColor}">${match}</${dialogueTag}>`;
         });
-      })()
-    : clean;
+      },
+    );
+    // Pass 2: color remaining quotes with default dialogue color, skipping already-wrapped text
+    const remainingQuoteRe = new RegExp(`(?<![=\\w])(?:${HTML_SAFE_DIALOGUE_QUOTE_PATTERN_SOURCE})`, "g");
+    return afterSpeaker.replace(remainingQuoteRe, (match, offset) => {
+      if (insideTag(afterSpeaker, offset)) return match;
+      const before = afterSpeaker.slice(0, offset);
+      if (/<(?:strong|span)[^>]*>\s*$/.test(before.slice(Math.max(0, before.length - 300)))) return match;
+      // Skip if inside a <font> tag (author-specified colors take priority)
+      const lastFontOpen = before.lastIndexOf("<font ");
+      if (lastFontOpen !== -1) {
+        const lastFontClose = before.lastIndexOf("</font>");
+        if (lastFontClose < lastFontOpen) return match;
+      }
+      const highlightColor = dialogueColor ?? "white";
+      return `<${dialogueTag} style="color:${highlightColor}">${match}</${dialogueTag}>`;
+    });
+  })();
 
   // Convert *** and --- horizontal rules to <hr> tags in HTML path
   const withHr = withDialogue.replace(
@@ -588,10 +591,16 @@ export const ChatMessage = memo(function ChatMessage({
     const parts: string[] = [];
     if (showModelName && genInfo.model) parts.push(genInfo.model);
     if (showTokenUsage) {
-      if (genInfo.tokensPrompt || genInfo.tokensCompletion != null) {
-        const p = genInfo.tokensPrompt ? genInfo.tokensPrompt : null;
+      if (genInfo.tokensPrompt != null || genInfo.tokensCompletion != null) {
+        const p = genInfo.tokensPrompt != null ? genInfo.tokensPrompt : null;
         const c = genInfo.tokensCompletion ?? "?";
         parts.push(p != null ? `${p}→${c} tok` : `${c} tok`);
+      }
+      if ((genInfo.tokensCachedPrompt ?? 0) > 0) {
+        parts.push(`cache hit ${genInfo.tokensCachedPrompt!.toLocaleString()}`);
+      }
+      if ((genInfo.tokensCacheWritePrompt ?? 0) > 0) {
+        parts.push(`cache write ${genInfo.tokensCacheWritePrompt!.toLocaleString()}`);
       }
       if (genInfo.durationMs != null) parts.push(`${(genInfo.durationMs / 1000).toFixed(1)}s`);
     }
@@ -872,9 +881,33 @@ export const ChatMessage = memo(function ChatMessage({
   // ─── System messages (shared across modes) ───
   if (isSystem) {
     return (
-      <div className="mari-system-message flex justify-center py-2">
-        <div className="mari-system-message-content rounded-full bg-[var(--secondary)] px-4 py-1.5 text-[0.6875rem] text-[var(--muted-foreground)]">
-          {message.content}
+      <div
+        ref={msgRef}
+        className={cn(
+          "mari-system-message group flex justify-center py-2",
+          multiSelectMode && isSelected && "rounded-lg bg-[var(--destructive)]/5 ring-2 ring-[var(--destructive)]/50",
+        )}
+        onClick={handleMobileTap}
+      >
+        <div className="relative">
+          {!multiSelectMode && onDelete && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(message.id);
+              }}
+              className={cn(
+                "absolute -right-1 -top-1 rounded-md p-1 text-white/20 opacity-0 transition-all hover:bg-red-500/20 hover:text-red-400 group-hover:opacity-100",
+                showActions && "opacity-100",
+              )}
+              title="Delete"
+            >
+              <Trash2 size="0.75rem" />
+            </button>
+          )}
+          <div className="mari-system-message-content rounded-full bg-[var(--secondary)] px-4 py-1.5 text-[0.6875rem] text-[var(--muted-foreground)]">
+            {message.content}
+          </div>
         </div>
       </div>
     );
@@ -1081,14 +1114,13 @@ export const ChatMessage = memo(function ChatMessage({
             {/* Message bubble */}
             <div
               className={cn(
-                "mari-message-bubble relative overflow-hidden rounded-2xl px-4 py-3 shadow-lg shadow-black/20",
+                "mari-message-bubble relative overflow-hidden rounded-2xl shadow-lg shadow-black/20",
                 isUser
                   ? "rounded-tr-sm text-neutral-100 ring-1 ring-white/10"
                   : "rounded-tl-sm text-white/90 ring-1 ring-white/8",
                 isGrouped && (isUser ? "rounded-tr-2xl" : "rounded-tl-2xl"),
                 isStreaming && "rpg-streaming",
                 isConversationStart && "ring-amber-400/30",
-                showRoleplayAvatarPanel && "px-0 py-0",
                 editing && "w-full",
               )}
               style={{
@@ -1279,12 +1311,14 @@ export const ChatMessage = memo(function ChatMessage({
                   dark
                 />
               )}
-              <ActionBtn
-                icon={<GitBranch size="0.6875rem" />}
-                onClick={() => onBranch?.(message.id)}
-                title="Branch from here"
-                dark
-              />
+              {onBranch && (
+                <ActionBtn
+                  icon={<GitBranch size="0.6875rem" />}
+                  onClick={() => onBranch(message.id)}
+                  title="Branch from here"
+                  dark
+                />
+              )}
               <ActionBtn
                 icon={<Trash2 size="0.6875rem" />}
                 onClick={() => onDelete?.(message.id)}
@@ -1583,11 +1617,13 @@ export const ChatMessage = memo(function ChatMessage({
             {thinking && !isUser && (
               <ActionBtn icon={<Brain size="0.625rem" />} onClick={() => setShowThinking(true)} title="View thoughts" />
             )}
-            <ActionBtn
-              icon={<GitBranch size="0.625rem" />}
-              onClick={() => onBranch?.(message.id)}
-              title="Branch from here"
-            />
+            {onBranch && (
+              <ActionBtn
+                icon={<GitBranch size="0.625rem" />}
+                onClick={() => onBranch(message.id)}
+                title="Branch from here"
+              />
+            )}
             <ActionBtn
               icon={<Trash2 size="0.625rem" />}
               onClick={() => onDelete?.(message.id)}

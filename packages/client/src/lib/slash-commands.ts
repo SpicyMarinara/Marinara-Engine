@@ -203,9 +203,7 @@ const COMMANDS: SlashCommand[] = [
         chatId: ctx.chatId,
         connectionId: null,
         impersonate: true,
-        ...(direction && {
-          userMessage: `[Impersonation instruction — write {{user}}'s next response, steering it toward the following: ${direction}]`,
-        }),
+        ...(direction ? { userMessage: direction } : {}),
       });
       return { handled: true };
     },

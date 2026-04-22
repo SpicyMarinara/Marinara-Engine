@@ -35,6 +35,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { showConfirmDialog } from "../../lib/app-dialogs";
 import { DraftNumberInput } from "../ui/DraftNumberInput";
 import { HelpTooltip } from "../ui/HelpTooltip";
 import {
@@ -290,9 +291,18 @@ export function ConnectionEditor() {
     updateConnection,
   ]);
 
-  const handleDelete = useCallback(() => {
+  const handleDelete = useCallback(async () => {
     if (!connectionDetailId) return;
-    if (!confirm("Delete this connection?")) return;
+    if (
+      !(await showConfirmDialog({
+        title: "Delete Connection",
+        message: "Delete this connection?",
+        confirmLabel: "Delete",
+        tone: "destructive",
+      }))
+    ) {
+      return;
+    }
     deleteConnection.mutate(connectionDetailId, { onSuccess: () => closeConnectionDetail() });
   }, [connectionDetailId, deleteConnection, closeConnectionDetail]);
 
@@ -997,12 +1007,16 @@ export function ConnectionEditor() {
             </FieldGroup>
           )}
 
-          {/* ── Prompt Caching (Anthropic only) ── */}
-          {localProvider === "anthropic" && (
+          {/* ── Prompt Caching (Anthropic + OpenRouter Claude) ── */}
+          {(localProvider === "anthropic" || localProvider === "openrouter") && (
             <FieldGroup
               label="Prompt Caching"
               icon={<Zap size="0.875rem" className="text-amber-400" />}
-              help="Enables Anthropic prompt caching, which caches your system prompt and conversation history between requests. Reduces latency and costs for multi-turn conversations. Cache lasts 5 minutes and is refreshed on each use."
+              help={
+                localProvider === "anthropic"
+                  ? "Enables Anthropic prompt caching, which caches your system prompt and conversation history between requests. Reduces latency and costs for multi-turn conversations. Cache lasts 5 minutes and is refreshed on each use."
+                  : "For OpenRouter Claude models, sends the cache_control flag needed for Anthropic prompt caching. Most non-Claude OpenRouter models cache automatically and do not need this toggle."
+              }
             >
               <label className="flex items-center gap-3 cursor-pointer rounded-xl p-2 transition-colors hover:bg-[var(--secondary)]/50">
                 <div className="relative">
@@ -1021,8 +1035,9 @@ export function ConnectionEditor() {
                 <span className="text-sm">Enable prompt caching</span>
               </label>
               <p className="text-[0.625rem] text-[var(--muted-foreground)] px-2">
-                Caches the system prompt explicitly and uses automatic caching for conversation history. Read tokens
-                cost 90% less than regular input tokens. Cache writes cost 25% more on first use.
+                {localProvider === "anthropic"
+                  ? "Caches the system prompt explicitly and uses automatic caching for conversation history. Read tokens cost 90% less than regular input tokens. Cache writes cost 25% more on first use."
+                  : "On OpenRouter, this currently targets Claude models by adding top-level cache_control. Cache reads are much cheaper than normal prompt tokens, while the first cache write costs more."}
               </p>
             </FieldGroup>
           )}

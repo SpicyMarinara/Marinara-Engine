@@ -60,16 +60,18 @@ import {
   buildStructuredRecap,
   type Journal,
 } from "../services/game/journal.service.js";
+import { generationParametersSchema, scoreMusic, scoreAmbient } from "@marinara-engine/shared";
+import { postToDiscordWebhook } from "../services/discord-webhook.js";
 import type {
   GameActiveState,
   GameSetupConfig,
   GameMap,
   GameNpc,
+  GenerationParameters,
   QuestProgress,
   SessionSummary,
   PartyArc,
 } from "@marinara-engine/shared";
-import { scoreMusic, scoreAmbient } from "@marinara-engine/shared";
 import { getAssetManifest } from "../services/game/asset-manifest.service.js";
 import { generateNpcPortrait, generateBackground } from "../services/game/game-asset-generation.js";
 
@@ -135,6 +137,7 @@ const gameSetupConfigSchema = z.object({
   activeLorebookIds: z.array(z.string()).optional(),
   enableCustomWidgets: z.boolean().optional(),
   language: z.string().min(1).max(100).optional(),
+  generationParameters: generationParametersSchema.partial().optional(),
 });
 
 const createGameSchema = z.object({
@@ -212,6 +215,127 @@ function parseMeta(raw: unknown): Record<string, unknown> {
   return (raw as Record<string, unknown>) ?? {};
 }
 
+function getDiscordWebhookUrl(meta: Record<string, unknown>): string {
+  return typeof meta.discordWebhookUrl === "string" ? meta.discordWebhookUrl.trim() : "";
+}
+
+function mirrorGameMessageToDiscord(meta: Record<string, unknown>, content: string, username: string): void {
+  const webhookUrl = getDiscordWebhookUrl(meta);
+  if (!webhookUrl || !content.trim()) return;
+  postToDiscordWebhook(webhookUrl, { content, username });
+}
+
+function normalizeSessionText(value: unknown, fallback = ""): string {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || fallback;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return fallback;
+}
+
+type StoredChatRecord = Awaited<ReturnType<ReturnType<typeof createChatsStorage>["getById"]>>;
+
+function normalizeSessionTextList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeSessionText(item)).filter((item) => item.length > 0);
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? [trimmed] : [];
+  }
+  return [];
+}
+
+function normalizeSessionStatsSnapshot(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function normalizeStoredSessionSummaries(raw: unknown): SessionSummary[] {
+  if (!Array.isArray(raw)) return [];
+
+  return raw.map((item, index) => {
+    const source = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+    return {
+      sessionNumber: index + 1,
+      summary: normalizeSessionText(source.summary, `Session ${index + 1} concluded.`),
+      partyDynamics: normalizeSessionText(source.partyDynamics),
+      partyState: normalizeSessionText(source.partyState),
+      keyDiscoveries: normalizeSessionTextList(source.keyDiscoveries),
+      revelations: normalizeSessionTextList(source.revelations),
+      characterMoments: normalizeSessionTextList(source.characterMoments),
+      statsSnapshot: normalizeSessionStatsSnapshot(source.statsSnapshot),
+      npcUpdates: normalizeSessionTextList(source.npcUpdates),
+      timestamp: normalizeSessionText(source.timestamp, new Date().toISOString()),
+    };
+  });
+}
+
+function normalizeSessionSummaryPayload(
+  payload: Record<string, unknown>,
+  sessionNumber: number,
+  fallback: string,
+): SessionSummary {
+  return {
+    sessionNumber,
+    summary: normalizeSessionText(payload.summary, fallback),
+    partyDynamics: normalizeSessionText(payload.partyDynamics),
+    partyState: normalizeSessionText(payload.partyState),
+    keyDiscoveries: normalizeSessionTextList(payload.keyDiscoveries),
+    revelations: normalizeSessionTextList(payload.revelations),
+    characterMoments: normalizeSessionTextList(payload.characterMoments),
+    statsSnapshot: normalizeSessionStatsSnapshot(payload.statsSnapshot),
+    npcUpdates: normalizeSessionTextList(payload.npcUpdates),
+    timestamp: new Date().toISOString(),
+  };
+}
+
+type ChatInventoryItem = { name: string; quantity: number };
+
+function parseJsonField<T>(raw: unknown, fallback: T): T {
+  if (raw == null) return fallback;
+  if (typeof raw !== "string") return raw as T;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeGameInventoryItems(raw: unknown): ChatInventoryItem[] {
+  if (!Array.isArray(raw)) return [];
+
+  return raw.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const source = item as Record<string, unknown>;
+    const name = typeof source.name === "string" ? source.name.trim() : "";
+    const parsedQuantity =
+      typeof source.quantity === "number" ? source.quantity : Number.parseInt(String(source.quantity ?? ""), 10);
+    const quantity = Number.isFinite(parsedQuantity) && parsedQuantity > 0 ? Math.floor(parsedQuantity) : 1;
+    return name ? [{ name, quantity }] : [];
+  });
+}
+
+function inventoryFromPlayerStats(playerStats: Record<string, unknown> | null): ChatInventoryItem[] {
+  if (!playerStats) return [];
+  return normalizeGameInventoryItems(playerStats.inventory);
+}
+
+function mergeGameInventoryItems(...sources: ChatInventoryItem[][]): ChatInventoryItem[] {
+  const merged = new Map<string, ChatInventoryItem>();
+  for (const source of sources) {
+    for (const item of source) {
+      const key = item.name.toLowerCase();
+      if (!merged.has(key)) {
+        merged.set(key, { ...item });
+      }
+    }
+  }
+  return [...merged.values()];
+}
+
 async function resolveConnection(
   connections: ReturnType<typeof createConnectionsStorage>,
   connId: string | null | undefined,
@@ -235,11 +359,61 @@ async function resolveConnection(
   }
   if (!baseUrl) throw new Error("No base URL configured for this connection");
 
-  return { conn, baseUrl };
+  return { conn, baseUrl, defaultGenerationParameters: parseStoredGenerationParameters(conn.defaultParameters) };
+}
+
+type StoredGenerationParameters = Partial<GenerationParameters>;
+
+function parseStoredGenerationParameters(raw: unknown): StoredGenerationParameters | null {
+  let parsed = raw;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return null;
+    }
+  }
+
+  const result = generationParametersSchema.partial().safeParse(parsed);
+  return result.success ? result.data : null;
+}
+
+function mergeStoredGenerationParameters(...sources: Array<unknown>): StoredGenerationParameters | null {
+  const merged: StoredGenerationParameters = {};
+  for (const source of sources) {
+    const parsed = parseStoredGenerationParameters(source);
+    if (parsed) Object.assign(merged, parsed);
+  }
+  return Object.keys(merged).length > 0 ? merged : null;
+}
+
+function resolveStoredGameGenerationParameters(
+  meta: Record<string, unknown> | null | undefined,
+  connectionDefaults: StoredGenerationParameters | null | undefined,
+) {
+  const setupConfig = (meta?.gameSetupConfig as Record<string, unknown> | null | undefined) ?? null;
+  return mergeStoredGenerationParameters(connectionDefaults, setupConfig?.generationParameters, meta?.chatParameters);
+}
+
+function resolveGameReasoningEffort(
+  model: string,
+  reasoningEffort: GenerationParameters["reasoningEffort"] | ChatOptions["reasoningEffort"] | null | undefined,
+): ChatOptions["reasoningEffort"] | undefined {
+  if (!reasoningEffort) return undefined;
+  if (reasoningEffort === "xhigh") return reasoningEffort;
+  if (reasoningEffort !== "maximum") return reasoningEffort;
+
+  const modelLower = model.toLowerCase();
+  const supportsXhigh = modelLower.startsWith("gpt-5.4") || /claude-opus-4-(?:[7-9]|\d{2,})/.test(modelLower);
+  return supportsXhigh ? "xhigh" : "high";
 }
 
 /** Build model-aware generation options for game calls. */
-function gameGenOptions(model: string, overrides: Partial<ChatOptions> = {}): ChatOptions {
+function gameGenOptions(
+  model: string,
+  overrides: Partial<ChatOptions> = {},
+  parameters: StoredGenerationParameters | null = null,
+): ChatOptions {
   const m = model.toLowerCase();
   // Opus 4.7+ and GPT-5.4 accept the strongest reasoning tier ("xhigh").
   // Opus 4.7+ also forbids sampling parameters entirely; the Anthropic
@@ -260,7 +434,53 @@ function gameGenOptions(model: string, overrides: Partial<ChatOptions> = {}): Ch
     base.temperature = 1;
     base.topP = 1;
   }
-  return { ...base, ...overrides };
+
+  if (parameters) {
+    if (typeof parameters.temperature === "number" && !isOpus47Plus) base.temperature = parameters.temperature;
+    if (typeof parameters.maxTokens === "number") base.maxTokens = parameters.maxTokens;
+    if (typeof parameters.maxContext === "number") base.maxContext = parameters.maxContext;
+    if (typeof parameters.topP === "number" && !isOpus47Plus) base.topP = parameters.topP;
+    if (typeof parameters.topK === "number") base.topK = parameters.topK;
+    if (typeof parameters.frequencyPenalty === "number") base.frequencyPenalty = parameters.frequencyPenalty;
+    if (typeof parameters.presencePenalty === "number") base.presencePenalty = parameters.presencePenalty;
+    if (parameters.reasoningEffort !== undefined) {
+      const resolvedReasoningEffort = resolveGameReasoningEffort(model, parameters.reasoningEffort);
+      if (resolvedReasoningEffort) {
+        base.reasoningEffort = resolvedReasoningEffort;
+        base.enableThinking = true;
+      } else {
+        delete base.reasoningEffort;
+        base.enableThinking = false;
+      }
+    }
+    if (parameters.verbosity !== undefined) {
+      if (parameters.verbosity) {
+        base.verbosity = parameters.verbosity;
+      } else {
+        delete base.verbosity;
+      }
+    }
+  }
+
+  const merged: ChatOptions = { ...base, ...overrides };
+  if (Object.prototype.hasOwnProperty.call(overrides, "reasoningEffort")) {
+    const resolvedReasoningEffort = resolveGameReasoningEffort(model, overrides.reasoningEffort ?? null);
+    if (resolvedReasoningEffort) {
+      merged.reasoningEffort = resolvedReasoningEffort;
+      if (!Object.prototype.hasOwnProperty.call(overrides, "enableThinking")) {
+        merged.enableThinking = true;
+      }
+    } else {
+      delete merged.reasoningEffort;
+      if (!Object.prototype.hasOwnProperty.call(overrides, "enableThinking")) {
+        merged.enableThinking = false;
+      }
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(overrides, "verbosity") && overrides.verbosity === undefined) {
+    delete merged.verbosity;
+  }
+  return merged;
 }
 
 function parseJSON(raw: string): unknown {
@@ -558,6 +778,12 @@ export async function gameRoutes(app: FastifyInstance) {
       req.body,
     );
     const chats = createChatsStorage(app.db);
+    let defaultGenerationParameters: StoredGenerationParameters | null = null;
+    if (connectionId && connectionId !== "random") {
+      const connStorage = createConnectionsStorage(app.db);
+      const conn = await connStorage.getById(connectionId);
+      defaultGenerationParameters = parseStoredGenerationParameters(conn?.defaultParameters);
+    }
 
     const gameId = randomUUID();
 
@@ -590,6 +816,11 @@ export async function gameRoutes(app: FastifyInstance) {
     if (!sessionChat) throw new Error("Failed to create game session chat");
 
     const sessionMeta = parseMeta(sessionChat.metadata);
+    const gameChatParameters = mergeStoredGenerationParameters(
+      defaultGenerationParameters,
+      sessionMeta.chatParameters,
+      setupConfig.generationParameters,
+    );
     await chats.updateMetadata(sessionChat.id, {
       ...sessionMeta,
       gameId,
@@ -615,6 +846,7 @@ export async function gameRoutes(app: FastifyInstance) {
       gameImageConnectionId: setupConfig.imageConnectionId || null,
       activeLorebookIds: setupConfig.activeLorebookIds || [],
       enableCustomWidgets: setupConfig.enableCustomWidgets !== false,
+      ...(gameChatParameters ? { chatParameters: gameChatParameters } : {}),
     });
 
     const updatedSession = await chats.getById(sessionChat.id);
@@ -637,8 +869,13 @@ export async function gameRoutes(app: FastifyInstance) {
     const setupConfig = meta.gameSetupConfig as GameSetupConfig | null;
     if (!setupConfig) throw new Error("No setup config found");
 
-    const { conn, baseUrl } = await resolveConnection(connections, connectionId, chat.connectionId);
+    const { conn, baseUrl, defaultGenerationParameters } = await resolveConnection(
+      connections,
+      connectionId,
+      chat.connectionId,
+    );
     const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey!, conn.maxContext, conn.openrouterProvider);
+    const setupGenerationParameters = resolveStoredGameGenerationParameters(meta, defaultGenerationParameters);
 
     let gmCharacterCard: string | null = null;
     if (setupConfig.gmMode === "character" && setupConfig.gmCharacterId) {
@@ -775,23 +1012,27 @@ export async function gameRoutes(app: FastifyInstance) {
     }
     console.log("[game/setup] === END PROMPT ===");
 
-    const setupOptions = gameGenOptions(conn.model, {
-      maxTokens: 16384,
-      stream: streaming,
-      ...(streaming
-        ? {
-            onToken: (() => {
-              const setupStartTime = Date.now();
-              let sawFirstToken = false;
-              return (chunk: string) => {
-                if (!chunk || sawFirstToken) return;
-                sawFirstToken = true;
-                console.log("[game/setup] First streamed token received after %d ms", Date.now() - setupStartTime);
-              };
-            })(),
-          }
-        : {}),
-    });
+    const setupOptions = gameGenOptions(
+      conn.model,
+      {
+        maxTokens: setupGenerationParameters?.maxTokens ?? 16384,
+        stream: streaming,
+        ...(streaming
+          ? {
+              onToken: (() => {
+                const setupStartTime = Date.now();
+                let sawFirstToken = false;
+                return (chunk: string) => {
+                  if (!chunk || sawFirstToken) return;
+                  sawFirstToken = true;
+                  console.log("[game/setup] First streamed token received after %d ms", Date.now() - setupStartTime);
+                };
+              })(),
+            }
+          : {}),
+      },
+      setupGenerationParameters,
+    );
     console.log(
       "[game/setup] Sending to provider=%s model=%s baseUrl=%s options=%s",
       conn.provider,
@@ -1084,128 +1325,214 @@ export async function gameRoutes(app: FastifyInstance) {
     return { status: "active" };
   });
 
+  const pendingSessionStarts = new Map<
+    string,
+    Promise<{ sessionChat: StoredChatRecord; sessionNumber: number; recap: string }>
+  >();
+
   // ── POST /game/session/start ──
   app.post("/session/start", async (req) => {
     const { gameId, connectionId } = startSessionSchema.parse(req.body);
-    const chats = createChatsStorage(app.db);
-    const connections = createConnectionsStorage(app.db);
-
-    const sessions = await chats.listByGroup(gameId);
-    const gameSessions = sessions
-      .filter((c) => (c.mode as string) === "game")
-      .sort((a, b) => {
-        const ma = parseMeta(a.metadata);
-        const mb = parseMeta(b.metadata);
-        return ((ma.gameSessionNumber as number) || 0) - ((mb.gameSessionNumber as number) || 0);
-      });
-
-    const latestSession = gameSessions[gameSessions.length - 1];
-    if (!latestSession) throw new Error("No previous session found for this game");
-
-    const prevMeta = parseMeta(latestSession.metadata);
-    const sessionNumber = ((prevMeta.gameSessionNumber as number) || 0) + 1;
-    const summaries = (prevMeta.gamePreviousSessionSummaries as SessionSummary[]) || [];
-
-    const newChat = await chats.create({
-      name: `${latestSession.name.replace(/ — Session \d+$/, "")} — Session ${sessionNumber}`,
-      mode: "game",
-      characterIds: (prevMeta.gamePartyCharacterIds as string[]) || [],
-      groupId: gameId,
-      personaId: latestSession.personaId,
-      promptPresetId: latestSession.promptPresetId,
-      connectionId: connectionId || latestSession.connectionId,
-    });
-    if (!newChat) throw new Error("Failed to create new session chat");
-
-    const newMeta = parseMeta(newChat.metadata);
-    await chats.updateMetadata(newChat.id, {
-      ...newMeta,
-      ...prevMeta,
-      gameId,
-      gameSessionNumber: sessionNumber,
-      gameSessionStatus: "ready",
-      gameActiveState: "exploration",
-      gamePartyChatId: null,
-      gamePreviousSessionSummaries: summaries,
-      gameDialogueChatId: null,
-      gameCombatChatId: null,
-      enableAgents: true,
-    });
-
-    let recapText = "";
-    let recapThinking = "";
-    if (summaries.length > 0) {
-      try {
-        const { conn, baseUrl } = await resolveConnection(connections, connectionId, newChat.connectionId);
-        const provider = createLLMProvider(
-          conn.provider,
-          baseUrl,
-          conn.apiKey!,
-          conn.maxContext,
-          conn.openrouterProvider,
-        );
-
-        const recapMessages: ChatMessage[] = [
-          { role: "system", content: buildRecapPrompt(summaries) },
-          { role: "user", content: "Generate the session recap." },
-        ];
-
-        const result = await provider.chatComplete(
-          recapMessages,
-          gameGenOptions(conn.model, {
-            temperature: 0.7,
-          }),
-        );
-        const recapExtraction = extractLeadingThinkingBlocks(result.content ?? "");
-        recapText = recapExtraction.content;
-        recapThinking = recapExtraction.thinking;
-      } catch {
-        recapText = `Session ${sessionNumber} begins. The adventure continues...`;
-        recapThinking = "";
-      }
-
-      if (recapText) {
-        try {
-          const recapMsg = await chats.createMessage({
-            chatId: newChat.id,
-            role: "narrator",
-            characterId: null,
-            content: recapText,
-          });
-          if (recapMsg?.id && recapThinking) {
-            await chats.updateMessageExtra(recapMsg.id, { thinking: recapThinking });
-          }
-        } catch (err) {
-          console.warn("[game/session/start] Failed to persist recap message:", err);
-        }
-      }
+    const existingStart = pendingSessionStarts.get(gameId);
+    if (existingStart) {
+      return existingStart;
     }
 
-    const updatedChat = await chats.getById(newChat.id);
+    const startSessionRequest = (async () => {
+      const chats = createChatsStorage(app.db);
+      const connections = createConnectionsStorage(app.db);
 
-    // Auto-checkpoint at session start
-    try {
-      const stateStore = createGameStateStorage(app.db);
-      const snap = await stateStore.getLatest(latestSession.id);
-      if (snap) {
-        const cpSvc = createCheckpointService(app.db);
-        await cpSvc.create({
-          chatId: latestSession.id,
-          snapshotId: snap.id,
-          messageId: snap.messageId,
-          label: `Session ${sessionNumber} Start`,
-          triggerType: "session_start",
-          location: snap.location,
-          gameState: "exploration",
-          weather: snap.weather,
-          timeOfDay: snap.time,
+      const sessions = await chats.listByGroup(gameId);
+      const gameSessions = sessions
+        .filter((c) => (c.mode as string) === "game")
+        .sort((a, b) => {
+          const ma = parseMeta(a.metadata);
+          const mb = parseMeta(b.metadata);
+          return ((ma.gameSessionNumber as number) || 0) - ((mb.gameSessionNumber as number) || 0);
+        });
+
+      const latestSession = gameSessions[gameSessions.length - 1];
+      if (!latestSession) throw new Error("No previous session found for this game");
+
+      const prevMeta = parseMeta(latestSession.metadata);
+      const baseSessionName = latestSession.name.replace(/ — Session \d+$/, "");
+      const latestStatus = (prevMeta.gameSessionStatus as string) || "active";
+      const summaries = normalizeStoredSessionSummaries(prevMeta.gamePreviousSessionSummaries);
+      const currentSessionNumber = latestStatus === "concluded" ? Math.max(summaries.length, 1) : summaries.length + 1;
+      const expectedLatestSessionName = `${baseSessionName} — Session ${currentSessionNumber}`;
+
+      if (
+        currentSessionNumber !== ((prevMeta.gameSessionNumber as number) || 0) ||
+        summaries.length !== (((prevMeta.gamePreviousSessionSummaries as SessionSummary[]) || []).length ?? 0)
+      ) {
+        await chats.updateMetadata(latestSession.id, {
+          ...prevMeta,
+          gameSessionNumber: currentSessionNumber,
+          gamePreviousSessionSummaries: summaries,
         });
       }
-    } catch {
-      /* non-fatal */
-    }
 
-    return { sessionChat: updatedChat, sessionNumber, recap: recapText };
+      if (latestSession.name !== expectedLatestSessionName) {
+        await chats.update(latestSession.id, { name: expectedLatestSessionName });
+      }
+
+      if (latestStatus === "ready" || latestStatus === "active") {
+        const existingChat = await chats.getById(latestSession.id);
+        if (!existingChat) throw new Error("Existing session not found");
+        return { sessionChat: existingChat, sessionNumber: currentSessionNumber, recap: "" };
+      }
+
+      const sessionNumber = summaries.length + 1;
+
+      const newChat = await chats.create({
+        name: `${baseSessionName} — Session ${sessionNumber}`,
+        mode: "game",
+        characterIds: (prevMeta.gamePartyCharacterIds as string[]) || [],
+        groupId: gameId,
+        personaId: latestSession.personaId,
+        promptPresetId: latestSession.promptPresetId,
+        connectionId: connectionId || latestSession.connectionId,
+      });
+      if (!newChat) throw new Error("Failed to create new session chat");
+
+      const stateStore = createGameStateStorage(app.db);
+      const previousState = await stateStore.getLatest(latestSession.id);
+      const previousPresentCharacters = parseJsonField<any[]>(previousState?.presentCharacters, []);
+      const previousRecentEvents = parseJsonField<string[]>(previousState?.recentEvents, []);
+      const previousPlayerStats = parseJsonField<Record<string, unknown> | null>(previousState?.playerStats, null);
+      const previousPersonaStats = parseJsonField<any[] | null>(previousState?.personaStats, null);
+      const carriedInventory = mergeGameInventoryItems(
+        normalizeGameInventoryItems(prevMeta.gameInventory),
+        inventoryFromPlayerStats(previousPlayerStats),
+      );
+
+      const newMeta = parseMeta(newChat.metadata);
+      const updatedNewMeta = {
+        ...newMeta,
+        ...prevMeta,
+        gameId,
+        gameSessionNumber: sessionNumber,
+        gameSessionStatus: "ready",
+        gameActiveState: "exploration",
+        gamePartyChatId: null,
+        gamePreviousSessionSummaries: summaries,
+        gameDialogueChatId: null,
+        gameCombatChatId: null,
+        enableAgents: true,
+        ...(carriedInventory.length > 0 ? { gameInventory: carriedInventory } : {}),
+      };
+      await chats.updateMetadata(newChat.id, updatedNewMeta);
+
+      let recapMessageId = "";
+      let recapText = "";
+      let recapThinking = "";
+      if (summaries.length > 0) {
+        try {
+          const { conn, baseUrl } = await resolveConnection(connections, connectionId, newChat.connectionId);
+          const provider = createLLMProvider(
+            conn.provider,
+            baseUrl,
+            conn.apiKey!,
+            conn.maxContext,
+            conn.openrouterProvider,
+          );
+
+          const recapMessages: ChatMessage[] = [
+            { role: "system", content: buildRecapPrompt(summaries) },
+            { role: "user", content: "Generate the session recap." },
+          ];
+
+          const result = await provider.chatComplete(
+            recapMessages,
+            gameGenOptions(conn.model, {
+              temperature: 0.7,
+            }),
+          );
+          const recapExtraction = extractLeadingThinkingBlocks(result.content ?? "");
+          recapText = recapExtraction.content;
+          recapThinking = recapExtraction.thinking;
+        } catch {
+          recapText = `Session ${sessionNumber} begins. The adventure continues...`;
+          recapThinking = "";
+        }
+
+        if (recapText) {
+          try {
+            const recapMsg = await chats.createMessage({
+              chatId: newChat.id,
+              role: "narrator",
+              characterId: null,
+              content: recapText,
+            });
+            recapMessageId = recapMsg?.id ?? "";
+            if (recapMsg?.id && recapThinking) {
+              await chats.updateMessageExtra(recapMsg.id, { thinking: recapThinking });
+            }
+            mirrorGameMessageToDiscord(updatedNewMeta, recapText, "Narrator");
+          } catch (err) {
+            console.warn("[game/session/start] Failed to persist recap message:", err);
+          }
+        }
+      }
+
+      let carriedStateSnapshotId = "";
+      if (previousState) {
+        try {
+          carriedStateSnapshotId = await stateStore.create({
+            chatId: newChat.id,
+            messageId: recapMessageId,
+            swipeIndex: 0,
+            date: previousState.date,
+            time: previousState.time,
+            location: previousState.location,
+            weather: previousState.weather,
+            temperature: previousState.temperature,
+            presentCharacters: previousPresentCharacters,
+            recentEvents: previousRecentEvents,
+            playerStats: previousPlayerStats as any,
+            personaStats: previousPersonaStats as any,
+            committed: true,
+          });
+        } catch (err) {
+          console.warn("[game/session/start] Failed to carry forward previous game state:", err);
+        }
+      }
+
+      // Auto-checkpoint at session start
+      try {
+        if (carriedStateSnapshotId) {
+          const cpSvc = createCheckpointService(app.db);
+          await cpSvc.create({
+            chatId: newChat.id,
+            snapshotId: carriedStateSnapshotId,
+            messageId: recapMessageId,
+            label: `Session ${sessionNumber} Start`,
+            triggerType: "session_start",
+            location: previousState?.location,
+            gameState: "exploration",
+            weather: previousState?.weather,
+            timeOfDay: previousState?.time,
+          });
+        }
+      } catch {
+        /* non-fatal */
+      }
+
+      const updatedChat = await chats.getById(newChat.id);
+      if (!updatedChat) throw new Error("Failed to reload new session chat");
+
+      return { sessionChat: updatedChat, sessionNumber, recap: recapText };
+    })();
+
+    pendingSessionStarts.set(gameId, startSessionRequest);
+
+    try {
+      return await startSessionRequest;
+    } finally {
+      if (pendingSessionStarts.get(gameId) === startSessionRequest) {
+        pendingSessionStarts.delete(gameId);
+      }
+    }
   });
 
   // ── POST /game/session/conclude ──
@@ -1218,13 +1545,21 @@ export async function gameRoutes(app: FastifyInstance) {
     if (!chat) throw new Error("Chat not found");
 
     const meta = parseMeta(chat.metadata);
-    const sessionNumber = (meta.gameSessionNumber as number) || 1;
+    const prevSummaries = normalizeStoredSessionSummaries(meta.gamePreviousSessionSummaries);
+    const sessionNumber = prevSummaries.length + 1;
 
     const messages = await chats.listMessages(chatId);
-    const recentMessages = messages
-      .slice(-30)
-      .map((m) => `[${m.role}] ${m.content}`)
-      .join("\n\n");
+    const relevantMessages = messages.filter((message) => message.role !== "system");
+    const transcriptMessages =
+      relevantMessages.length > 120
+        ? [...relevantMessages.slice(0, 20), ...relevantMessages.slice(-80)]
+        : relevantMessages;
+    const transcriptLabel =
+      relevantMessages.length > transcriptMessages.length
+        ? `Session transcript sample (first 20 and last 80 messages of ${relevantMessages.length} total):`
+        : `Session transcript (${relevantMessages.length} messages):`;
+    const transcriptText = transcriptMessages.map((m) => `[${m.role}] ${m.content}`).join("\n\n");
+    const journalRecap = buildStructuredRecap((meta.gameJournal as Journal | null) ?? createJournal(), sessionNumber);
 
     const gameStates = createGameStateStorage(app.db);
     const latestState = await gameStates.getLatest(chatId);
@@ -1237,9 +1572,14 @@ export async function gameRoutes(app: FastifyInstance) {
       {
         role: "user",
         content: [
-          `Session ${sessionNumber} transcript (last 30 messages):`,
-          recentMessages,
+          `Session ${sessionNumber} journal recap (covers the full session):`,
+          journalRecap,
+          "",
+          transcriptLabel,
+          transcriptText,
           latestState ? `\nCurrent game state:\n${JSON.stringify(latestState, null, 2)}` : "",
+          "",
+          "Write the summary for the entire session. The journal recap covers events from earlier in the session even when the transcript sample is truncated.",
         ].join("\n"),
       },
     ];
@@ -1255,34 +1595,10 @@ export async function gameRoutes(app: FastifyInstance) {
     let summary: SessionSummary;
     try {
       const parsed = parseJSON(summaryExtraction.content) as Record<string, unknown>;
-      summary = {
-        sessionNumber,
-        summary: (parsed.summary as string) || "Session concluded.",
-        partyDynamics: (parsed.partyDynamics as string) || "",
-        partyState: (parsed.partyState as string) || "",
-        keyDiscoveries: (parsed.keyDiscoveries as string[]) || [],
-        revelations: (parsed.revelations as string[]) || [],
-        characterMoments: (parsed.characterMoments as string[]) || [],
-        statsSnapshot: (parsed.statsSnapshot as Record<string, unknown>) || {},
-        npcUpdates: (parsed.npcUpdates as string[]) || [],
-        timestamp: new Date().toISOString(),
-      };
+      summary = normalizeSessionSummaryPayload(parsed, sessionNumber, "Session concluded.");
     } catch {
-      summary = {
-        sessionNumber,
-        summary: summaryExtraction.content || "Session concluded.",
-        partyDynamics: "",
-        partyState: "",
-        keyDiscoveries: [],
-        revelations: [],
-        characterMoments: [],
-        statsSnapshot: {},
-        npcUpdates: [],
-        timestamp: new Date().toISOString(),
-      };
+      summary = normalizeSessionSummaryPayload({}, sessionNumber, summaryExtraction.content || "Session concluded.");
     }
-
-    const prevSummaries = (meta.gamePreviousSessionSummaries as SessionSummary[]) || [];
 
     // ── Adjust character cards based on session events ──
     const currentCards = (meta.gameCharacterCards as Array<Record<string, unknown>>) ?? [];
@@ -1323,6 +1639,7 @@ export async function gameRoutes(app: FastifyInstance) {
 
     await chats.updateMetadata(chatId, {
       ...meta,
+      gameSessionNumber: sessionNumber,
       gameSessionStatus: "concluded",
       gamePreviousSessionSummaries: [...prevSummaries, summary],
       gameCharacterCards: updatedCards,
@@ -1337,6 +1654,11 @@ export async function gameRoutes(app: FastifyInstance) {
     if (sessionSummaryMsg?.id && summaryExtraction.thinking) {
       await chats.updateMessageExtra(sessionSummaryMsg.id, { thinking: summaryExtraction.thinking });
     }
+    mirrorGameMessageToDiscord(
+      meta,
+      `**Session ${sessionNumber} Concluded**\n\n${summary.summary}\n\n*Party Dynamics:* ${summary.partyDynamics}`,
+      "Narrator",
+    );
 
     // Push an OOC influence to the connected conversation if linked
     if (chat.connectedChatId) {
@@ -1986,11 +2308,23 @@ export async function gameRoutes(app: FastifyInstance) {
 
     // Resolve connection: explicit → character connection → GM connection
     const charConnId = (meta.gameCharacterConnectionId as string) || null;
-    const { conn, baseUrl } = await resolveConnection(connections, input.connectionId ?? charConnId, chat.connectionId);
+    const { conn, baseUrl, defaultGenerationParameters } = await resolveConnection(
+      connections,
+      input.connectionId ?? charConnId,
+      chat.connectionId,
+    );
+    const gameGenerationParameters = resolveStoredGameGenerationParameters(meta, defaultGenerationParameters);
 
     // Build party character cards
     const partyCards: Array<{ name: string; card: string }> = [];
     const partyIdNamePairs: Array<{ id: string; name: string }> = [];
+    const gameCharCards = (meta.gameCharacterCards as Array<Record<string, unknown>>) ?? [];
+    const gameCardByName = new Map<string, Record<string, unknown>>();
+    for (const gc of gameCharCards) {
+      if (typeof gc.name === "string" && gc.name.trim()) {
+        gameCardByName.set(gc.name.toLowerCase(), gc);
+      }
+    }
     for (const charId of partyCharIds) {
       try {
         const charRow = await chars.getById(charId);
@@ -2006,10 +2340,33 @@ export async function gameRoutes(app: FastifyInstance) {
           charData.extensions?.appearance || charData.appearance
             ? `Appearance: ${charData.extensions?.appearance || charData.appearance}`
             : null,
-        ]
-          .filter(Boolean)
-          .join("\n");
-        partyCards.push({ name: charData.name, card });
+        ];
+
+        const gameCard = gameCardByName.get(String(charData.name || "").toLowerCase());
+        if (gameCard) {
+          if (typeof gameCard.class === "string" && gameCard.class.trim()) {
+            card.push(`Class: ${gameCard.class}`);
+          }
+          if (Array.isArray(gameCard.abilities) && gameCard.abilities.length > 0) {
+            card.push(`Abilities: ${gameCard.abilities.join(", ")}`);
+          }
+          if (Array.isArray(gameCard.strengths) && gameCard.strengths.length > 0) {
+            card.push(`Strengths: ${gameCard.strengths.join(", ")}`);
+          }
+          if (Array.isArray(gameCard.weaknesses) && gameCard.weaknesses.length > 0) {
+            card.push(`Weaknesses: ${gameCard.weaknesses.join(", ")}`);
+          }
+          const extra = gameCard.extra as Record<string, unknown> | undefined;
+          if (extra) {
+            for (const [key, value] of Object.entries(extra)) {
+              if (value === null || value === undefined || value === "") continue;
+              card.push(`${key}: ${String(value)}`);
+            }
+          }
+        }
+
+        const resolvedCard = card.filter(Boolean).join("\n");
+        partyCards.push({ name: charData.name, card: resolvedCard });
         partyIdNamePairs.push({ id: charId, name: charData.name });
       } catch {
         /* skip unresolvable characters */
@@ -2065,9 +2422,13 @@ export async function gameRoutes(app: FastifyInstance) {
     const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey!, conn.maxContext, conn.openrouterProvider);
     const result = await provider.chatComplete(
       messages,
-      gameGenOptions(conn.model ?? "", {
-        maxTokens: 8192,
-      }),
+      gameGenOptions(
+        conn.model ?? "",
+        {
+          maxTokens: 8192,
+        },
+        gameGenerationParameters,
+      ),
     );
     const partyTurnExtraction = extractLeadingThinkingBlocks(result.content || "");
     const raw = partyTurnExtraction.content;
@@ -2106,6 +2467,7 @@ export async function gameRoutes(app: FastifyInstance) {
     if (partyMsg?.id && partyTurnExtraction.thinking) {
       await chats.updateMessageExtra(partyMsg.id, { thinking: partyTurnExtraction.thinking });
     }
+    mirrorGameMessageToDiscord(meta, cleanRaw, "Party");
 
     return { raw: cleanRaw };
   });
@@ -2144,11 +2506,12 @@ export async function gameRoutes(app: FastifyInstance) {
 
     const meta = parseMeta(chat.metadata);
     const sceneConnId = (meta.gameSceneConnectionId as string) || null;
-    const { conn, baseUrl } = await resolveConnection(
+    const { conn, baseUrl, defaultGenerationParameters } = await resolveConnection(
       connections,
       input.connectionId ?? sceneConnId,
       chat.connectionId,
     );
+    const gameGenerationParameters = resolveStoredGameGenerationParameters(meta, defaultGenerationParameters);
 
     // Compute approximate turn number: count user messages + 1 (current turn)
     const allMsgs = await chats.listMessages(input.chatId);
@@ -2172,12 +2535,16 @@ export async function gameRoutes(app: FastifyInstance) {
     );
     const result = await provider.chatComplete(
       messages,
-      gameGenOptions(conn.model ?? "", {
-        temperature: 0.3,
-        maxTokens: 4096,
-        reasoningEffort: undefined,
-        verbosity: undefined,
-      }),
+      gameGenOptions(
+        conn.model ?? "",
+        {
+          temperature: 0.3,
+          maxTokens: 4096,
+          reasoningEffort: undefined,
+          verbosity: undefined,
+        },
+        gameGenerationParameters,
+      ),
     );
 
     const raw = extractLeadingThinkingBlocks(result.content || "").content;

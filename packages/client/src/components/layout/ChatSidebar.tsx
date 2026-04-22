@@ -33,6 +33,7 @@ import {
 } from "../../hooks/use-chat-folders";
 import { useCharacters } from "../../hooks/use-characters";
 import { useChatStore } from "../../stores/chat.store";
+import { showConfirmDialog } from "../../lib/app-dialogs";
 import { useUIStore, type UserStatus } from "../../stores/ui.store";
 import { cn } from "../../lib/utils";
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
@@ -359,8 +360,15 @@ export function ChatSidebar() {
   );
 
   const handleDeleteFolder = useCallback(
-    (id: string) => {
-      if (confirm("Delete this folder? Chats will be moved to the top level.")) {
+    async (id: string) => {
+      if (
+        await showConfirmDialog({
+          title: "Delete Folder",
+          message: "Delete this folder? Chats will be moved to the top level.",
+          confirmLabel: "Delete",
+          tone: "destructive",
+        })
+      ) {
         deleteFolderMut.mutate(id);
       }
     },
@@ -386,9 +394,18 @@ export function ChatSidebar() {
   // ── Batch actions ──
   const [batchMovingFolder, setBatchMovingFolder] = useState(false);
 
-  const handleBatchDelete = useCallback(() => {
+  const handleBatchDelete = useCallback(async () => {
     if (selectedChatIds.size === 0) return;
-    if (!confirm(`Delete ${selectedChatIds.size} chat${selectedChatIds.size > 1 ? "s" : ""}?`)) return;
+    if (
+      !(await showConfirmDialog({
+        title: "Delete Chats",
+        message: `Delete ${selectedChatIds.size} chat${selectedChatIds.size > 1 ? "s" : ""}?`,
+        confirmLabel: "Delete",
+        tone: "destructive",
+      }))
+    ) {
+      return;
+    }
     for (const id of selectedChatIds) {
       deleteChat.mutate(id);
     }
@@ -418,14 +435,23 @@ export function ChatSidebar() {
         tabIndex={0}
         key={chat.groupId ?? chat.id}
         data-chat-id={chat.id}
-        onClick={() => {
+        onClick={async () => {
           if (multiSelectMode) {
             toggleSelectChat(chat.id);
             return;
           }
           if (hasAnyDetailOpen()) {
             if (editorDirty) {
-              if (!window.confirm("You have unsaved changes. Discard and continue?")) return;
+              if (
+                !(await showConfirmDialog({
+                  title: "Unsaved Changes",
+                  message: "You have unsaved changes. Discard and continue?",
+                  confirmLabel: "Discard",
+                  tone: "destructive",
+                }))
+              ) {
+                return;
+              }
             }
             closeAllDetails();
           }
@@ -607,12 +633,19 @@ export function ChatSidebar() {
         {/* Delete button */}
         {!multiSelectMode && (
           <button
-            onClick={(e) => {
+            onClick={async (e) => {
               e.stopPropagation();
               if (branchCount > 1 && chat.groupId) {
                 setDeleteTarget({ chatId: chat.id, groupId: chat.groupId, branchCount });
               } else {
-                if (confirm("Delete this chat?")) {
+                if (
+                  await showConfirmDialog({
+                    title: "Delete Chat",
+                    message: "Delete this chat?",
+                    confirmLabel: "Delete",
+                    tone: "destructive",
+                  })
+                ) {
                   deleteChat.mutate(chat.id);
                   if (activeChatId === chat.id) setActiveChatId(null);
                 }
@@ -630,7 +663,7 @@ export function ChatSidebar() {
   return (
     <nav data-component="ChatSidebar" aria-label="Chat navigation" className="mari-chat-sidebar flex h-full flex-col">
       {/* Header */}
-      <div className="relative flex h-12 items-center justify-between bg-[var(--card)]/80 px-4 backdrop-blur-sm">
+      <div className="mari-sidebar-header relative flex h-12 items-center justify-between bg-[var(--card)]/80 px-4 backdrop-blur-sm">
         <div className="absolute inset-x-0 bottom-0 h-px bg-[var(--border)]/30" />
         <h2 className="retro-glow-text text-sm font-bold tracking-tight">✧ Chats</h2>
         <div className="flex items-center gap-1">
@@ -818,7 +851,7 @@ export function ChatSidebar() {
 
       {/* ── Multi-select action bar ── */}
       {multiSelectMode && (
-        <div className="border-t border-[var(--border)]/30 bg-[var(--card)]/95 px-3 py-2.5 backdrop-blur-sm">
+        <div className="mari-sidebar-footer border-t border-[var(--border)]/30 bg-[var(--card)]/95 px-3 py-2.5 backdrop-blur-sm">
           <div className="mb-2 text-center text-[0.6875rem] font-medium text-[var(--muted-foreground)]">
             {selectedChatIds.size} selected
           </div>

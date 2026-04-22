@@ -20,6 +20,7 @@ import { useUIStore } from "../stores/ui.store";
 import { chatKeys } from "./use-chats";
 import { characterKeys } from "./use-characters";
 import { playNotificationPing } from "../lib/notification-sound";
+import { stripGmTagsKeepReadables } from "../lib/game-tag-parser";
 import type { Chat, GameMap, Message } from "@marinara-engine/shared";
 
 function sortMessagesByCreatedAt(messages: Message[]): Message[] {
@@ -323,8 +324,9 @@ export function useGenerate() {
       const persistedMessages = new Map<string, Message>();
 
       // ── Streaming think-tag filter ──
-      // Models may emit <think>...</think> or <thinking>...</thinking> at the
-      // start of their response. We intercept these tokens during streaming so
+      // Models may emit <think>...</think>, <thinking>...</thinking>, or
+      // <|channel>thought ... <channel|> at the start of their response.
+      // We intercept these tokens during streaming so
       // the user never sees the raw tags — the server will extract the content
       // into message.extra.thinking and emit a content_replace event.
       //
@@ -334,8 +336,9 @@ export function useGenerate() {
       // Think-tag filtering disabled — skip straight to passthrough
       let thinkState: string = "done";
       let thinkBuf = ""; // Raw token accumulator during detect/inside phases
-      let thinkTagName = "think"; // Which variant was matched ("think" or "thinking")
-      const THINK_OPEN_RE = /^(\s*)<(think(?:ing)?)>/i;
+      let thinkCloseTag = "</think>";
+      const THINK_OPEN_RE = /^(\s*)(<(think(?:ing)?)>|<\|channel>thought\b)/i;
+      const THINK_OPEN_PREFIXES = ["<thinking>", "<think>", "<|channel>thought"];
 
       // Compute charsPerTick from the user's streamingSpeed setting (1–100).
       // Read per-tick so changes to the slider take effect immediately.
@@ -432,14 +435,11 @@ export function useGenerate() {
                   // Found opening tag — enter suppression mode
                   thinkState = "inside";
                   thinkBuf = thinkBuf.slice(openMatch[0].length);
-                  thinkTagName = openMatch[2]!.toLowerCase();
+                  thinkCloseTag = openMatch[3] ? `</${openMatch[3].toLowerCase()}>` : "<channel|>";
                   chunk = ""; // suppress
                 } else if (
                   thinkBuf.length > 30 ||
-                  (!(
-                    "<thinking>".startsWith(thinkBuf.trimStart().toLowerCase()) ||
-                    "<think>".startsWith(thinkBuf.trimStart().toLowerCase())
-                  ) &&
+                  (!THINK_OPEN_PREFIXES.some((prefix) => prefix.startsWith(thinkBuf.trimStart().toLowerCase())) &&
                     thinkBuf.trimStart().length > 0)
                 ) {
                   // Not a think tag — flush accumulated buffer as regular content
@@ -454,12 +454,11 @@ export function useGenerate() {
 
               if (thinkState === "inside") {
                 thinkBuf += chunk;
-                const closeStr = `</${thinkTagName}>`;
-                const closeIdx = thinkBuf.toLowerCase().indexOf(closeStr.toLowerCase());
+                const closeIdx = thinkBuf.toLowerCase().indexOf(thinkCloseTag.toLowerCase());
                 if (closeIdx !== -1) {
                   // Found closing tag — everything after it is visible content
                   thinkState = "done";
-                  chunk = thinkBuf.slice(closeIdx + closeStr.length).trimStart();
+                  chunk = thinkBuf.slice(closeIdx + thinkCloseTag.length).trimStart();
                   thinkBuf = "";
                 } else {
                   chunk = ""; // still inside — suppress
@@ -727,6 +726,8 @@ export function useGenerate() {
                 tokensPrompt: number | null;
                 tokensCompletion: number | null;
                 tokensTotal: number | null;
+                tokensCachedPrompt: number | null;
+                tokensCacheWritePrompt: number | null;
                 durationMs: number | null;
                 finishReason: string | null;
               };
@@ -734,6 +735,12 @@ export function useGenerate() {
               if (usage.tokensPrompt != null) parts.push(`prompt: ${usage.tokensPrompt.toLocaleString()}`);
               if (usage.tokensCompletion != null) parts.push(`completion: ${usage.tokensCompletion.toLocaleString()}`);
               if (usage.tokensTotal != null) parts.push(`total: ${usage.tokensTotal.toLocaleString()}`);
+              if ((usage.tokensCachedPrompt ?? 0) > 0) {
+                parts.push(`cached: ${usage.tokensCachedPrompt!.toLocaleString()}`);
+              }
+              if ((usage.tokensCacheWritePrompt ?? 0) > 0) {
+                parts.push(`cache write: ${usage.tokensCacheWritePrompt!.toLocaleString()}`);
+              }
               if (usage.durationMs != null) parts.push(`${(usage.durationMs / 1000).toFixed(1)}s`);
               if (usage.finishReason) parts.push(`finish: ${usage.finishReason}`);
               const tokenInfo = parts.length > 0 ? parts.join(" · ") : "no usage data";
@@ -797,7 +804,7 @@ export function useGenerate() {
                 pendingText = "";
                 thinkState = "done";
                 thinkBuf = "";
-                thinkTagName = "think";
+                thinkCloseTag = "</think>";
                 if (isActiveChat()) setStreamBuffer("");
               }
 
@@ -1244,9 +1251,7 @@ export function useGenerate() {
         // Auto-translate newly generated assistant messages if enabled
         if (receivedContent) {
           try {
-            const chatData = qc.getQueryData<{ metadata?: string | Record<string, unknown> }>(
-              chatKeys.detail(params.chatId),
-            );
+            const chatData = qc.getQueryData<Chat>(chatKeys.detail(params.chatId));
             const meta =
               chatData?.metadata != null
                 ? typeof chatData.metadata === "string"
@@ -1256,11 +1261,13 @@ export function useGenerate() {
             if (meta.autoTranslate) {
               const store = useTranslationStore.getState();
               for (const [id, msg] of persistedMessages) {
-                if (msg.role === "assistant" && msg.content && !store.translations[id]) {
+                const textToTranslate =
+                  chatData?.mode === "game" ? stripGmTagsKeepReadables(msg.content ?? "").trim() : (msg.content ?? "");
+                if (msg.role === "assistant" && textToTranslate && !store.translations[id]) {
                   store.setTranslating(id, true);
                   api
                     .post<{ translatedText: string }>("/translate", {
-                      text: msg.content,
+                      text: textToTranslate,
                       provider: store.config.provider,
                       targetLanguage: store.config.targetLanguage,
                       connectionId: store.config.connectionId,
@@ -1315,7 +1322,7 @@ export function useGenerate() {
   );
 
   const retryAgents = useCallback(
-    async (chatId: string, agentTypes: string[]) => {
+    async (chatId: string, agentTypes: string[], options?: { lorebookKeeperBackfill?: boolean }) => {
       const isActiveChat = () => useChatStore.getState().activeChatId === chatId;
       const abortController = new AbortController();
       useChatStore.getState().setAbortController(chatId, abortController);
@@ -1328,7 +1335,12 @@ export function useGenerate() {
         let hasError = false;
         for await (const event of api.streamEvents(
           "/generate/retry-agents",
-          { chatId, agentTypes, streaming: useUIStore.getState().enableStreaming },
+          {
+            chatId,
+            agentTypes,
+            streaming: useUIStore.getState().enableStreaming,
+            lorebookKeeperBackfill: options?.lorebookKeeperBackfill === true,
+          },
           abortController.signal,
         )) {
           switch (event.type) {
@@ -1496,7 +1508,11 @@ export function useGenerate() {
             }
           }
         }
-        if (!hasError) toast.success("Agent retry completed");
+        if (!hasError) {
+          toast.success(
+            options?.lorebookKeeperBackfill ? "Lorebook Keeper backfill completed" : "Agent retry completed",
+          );
+        }
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
         const msg =

@@ -95,6 +95,7 @@ export function createGameStateStorage(db: DB) {
         playerStats: state.playerStats ? JSON.stringify(state.playerStats) : null,
         personaStats: state.personaStats ? JSON.stringify(state.personaStats) : null,
         manualOverrides: manualOverrides ? JSON.stringify(manualOverrides) : null,
+        committed: state.committed ? 1 : 0,
         createdAt: now(),
       });
       return id;

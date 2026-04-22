@@ -260,11 +260,11 @@ fi
 # ── Build if needed ──
 if [ ! -d "packages/shared/dist" ]; then
     echo "  [..] Building shared types..."
-    run_pnpm build:shared
+    run_pnpm --filter @marinara-engine/shared build
 fi
 if [ ! -d "packages/server/dist" ]; then
     echo "  [..] Building server..."
-    run_pnpm build:server
+    run_pnpm --filter @marinara-engine/server build
 fi
 if [ ! -d "packages/client/dist" ]; then
     echo "  [..] Building client..."
@@ -281,7 +281,7 @@ fi
 
 # ── Database schema ──
 echo "  [..] Syncing database schema..."
-run_pnpm db:push 2>/dev/null || true
+run_pnpm --filter @marinara-engine/server db:push 2>/dev/null || true
 
 # Load .env if present (respects user overrides)
 if [ -f .env ]; then

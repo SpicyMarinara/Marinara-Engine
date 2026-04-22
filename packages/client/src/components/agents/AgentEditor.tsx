@@ -4,6 +4,7 @@
 // ──────────────────────────────────────────────
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useUIStore } from "../../stores/ui.store";
+import { showConfirmDialog } from "../../lib/app-dialogs";
 import { useAgentConfigs, useUpdateAgent, useCreateAgent, type AgentConfigRow } from "../../hooks/use-agents";
 import { useConnections } from "../../hooks/use-connections";
 import { useCustomTools, type CustomToolRow } from "../../hooks/use-custom-tools";
@@ -47,6 +48,7 @@ import {
   BUILT_IN_TOOLS,
   DEFAULT_AGENT_TOOLS,
   LOCAL_SIDECAR_CONNECTION_ID,
+  getDefaultBuiltInAgentSettings,
   getDefaultAgentPrompt,
   type AgentPhase,
   type ToolDefinition,
@@ -141,6 +143,8 @@ export function AgentEditor() {
   // Populate from DB config or built-in defaults
   useEffect(() => {
     if (!agentDetailId) return;
+    const agentType = dbConfig?.type ?? builtIn?.id ?? agentDetailId;
+    const defaultSettings = getDefaultBuiltInAgentSettings(agentType);
     if (dbConfig) {
       setLocalName(builtIn ? builtIn.name : dbConfig.name);
       setLocalDescription(dbConfig.description);
@@ -153,8 +157,12 @@ export function AgentEditor() {
         : {};
       setLocalContextSize(settings.contextSize ?? "");
       setLocalImageConnectionId((settings.imageConnectionId as string) ?? "");
-      setLocalRunInterval(settings.runInterval ?? "");
-      setLocalInjectAsSection(settings.injectAsSection ?? false);
+      setLocalRunInterval(
+        (settings.runInterval as number | undefined) ?? (defaultSettings.runInterval as number) ?? "",
+      );
+      setLocalInjectAsSection(
+        (settings.injectAsSection as boolean | undefined) ?? defaultSettings.injectAsSection === true,
+      );
       setLocalEnabledTools(settings.enabledTools ?? DEFAULT_AGENT_TOOLS[dbConfig.type] ?? []);
       setLocalSpotifyClientId(settings.spotifyClientId ?? "");
       setLocalSourceLorebookIds(settings.sourceLorebookIds ?? []);
@@ -169,8 +177,8 @@ export function AgentEditor() {
       setLocalConnectionId("");
       setLocalImageConnectionId("");
       setLocalContextSize("");
-      setLocalRunInterval("");
-      setLocalInjectAsSection(builtIn.defaultInjectAsSection ?? false);
+      setLocalRunInterval((defaultSettings.runInterval as number) ?? "");
+      setLocalInjectAsSection(defaultSettings.injectAsSection === true);
       setLocalEnabledTools(DEFAULT_AGENT_TOOLS[builtIn.id] ?? []);
       setLocalSpotifyClientId("");
       setLocalSourceLorebookIds([]);
@@ -205,6 +213,9 @@ export function AgentEditor() {
 
   // Lorebook Keeper agent — run interval setting
   const isLorebookKeeperAgent = agentDetailId === "lorebook-keeper" || dbConfig?.type === "lorebook-keeper";
+
+  // Narrative Director agent — run interval setting
+  const isDirectorAgent = agentDetailId === "director" || dbConfig?.type === "director";
 
   // Chat Summary agent — uses "Triggers After" instead of context size
   const isChatSummaryAgent = agentDetailId === "chat-summary" || dbConfig?.type === "chat-summary";
@@ -374,7 +385,16 @@ export function AgentEditor() {
 
   const handleDelete = async () => {
     if (!dbConfig) return;
-    if (!confirm("Delete this custom agent? This cannot be undone.")) return;
+    if (
+      !(await showConfirmDialog({
+        title: "Delete Agent",
+        message: "Delete this custom agent? This cannot be undone.",
+        confirmLabel: "Delete",
+        tone: "destructive",
+      }))
+    ) {
+      return;
+    }
     await deleteAgent.mutateAsync(dbConfig.id);
     closeAgentDetail();
   };
@@ -737,6 +757,35 @@ export function AgentEditor() {
               </div>
               <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
                 The agent runs once every N assistant messages instead of every response. Default: 8.
+              </p>
+            </FieldGroup>
+          )}
+
+          {/* ── Run Interval (Narrative Director) ── */}
+          {isDirectorAgent && (
+            <FieldGroup
+              label="Run Interval"
+              icon={<Clock size="0.875rem" className="text-[var(--primary)]" />}
+              help="How many assistant messages between each Narrative Director intervention. Higher values make the director less aggressive. Set to 1 to run every message."
+            >
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={localRunInterval}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setLocalRunInterval(v === "" ? "" : Math.max(1, Math.min(100, parseInt(v) || 1)));
+                    markDirty();
+                  }}
+                  placeholder="5"
+                  className="w-28 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm tabular-nums ring-1 ring-[var(--border)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                />
+                <span className="text-[0.6875rem] text-[var(--muted-foreground)]">messages</span>
+              </div>
+              <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
+                The director only jumps in once every N assistant messages instead of steering every reply. Default: 5.
               </p>
             </FieldGroup>
           )}

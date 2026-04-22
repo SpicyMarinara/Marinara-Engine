@@ -1,6 +1,7 @@
 // ──────────────────────────────────────────────
 // Game Mode Types
 // ──────────────────────────────────────────────
+import type { GenerationParameters } from "./prompt.js";
 
 /** The four main states a game can be in during a session. */
 export type GameActiveState = "exploration" | "dialogue" | "combat" | "travel_rest";
@@ -167,6 +168,8 @@ export interface GameSetupConfig {
   enableCustomWidgets?: boolean;
   /** Language for all narration and dialogue (e.g. "English", "Japanese", "Spanish") */
   language?: string;
+  /** Optional generation parameter overrides applied from the moment the game is created. */
+  generationParameters?: Partial<GenerationParameters>;
 }
 
 // ── Dice ──

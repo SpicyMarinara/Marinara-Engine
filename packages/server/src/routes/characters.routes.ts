@@ -13,13 +13,26 @@ import {
 } from "@marinara-engine/shared";
 import type { ExportEnvelope } from "@marinara-engine/shared";
 import { createCharactersStorage } from "../services/storage/characters.storage.js";
+import { createCharacterGalleryStorage } from "../services/storage/character-gallery.storage.js";
 import { writeFile, mkdir, readFile } from "fs/promises";
 import { join } from "path";
 import { DATA_DIR } from "../utils/data-dir.js";
-import { existsSync } from "fs";
+import { createWriteStream, existsSync, rmSync, unlinkSync } from "fs";
 import { normalizeTimestampOverrides } from "../services/import/import-timestamps.js";
 import { importSTLorebook } from "../services/import/st-lorebook.importer.js";
 import AdmZip from "adm-zip";
+import { extname } from "path";
+import { pipeline } from "stream/promises";
+import { newId } from "../utils/id-generator.js";
+
+const CHARACTER_GALLERY_ROOT = join(DATA_DIR, "gallery", "characters");
+const ALLOWED_GALLERY_EXTS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif"]);
+
+async function ensureCharacterGalleryDir(characterId: string) {
+  const dir = join(CHARACTER_GALLERY_ROOT, characterId);
+  await mkdir(dir, { recursive: true });
+  return dir;
+}
 
 function toSafeExportName(name: string, fallback: string) {
   const sanitized = name
@@ -31,6 +44,7 @@ function toSafeExportName(name: string, fallback: string) {
 
 export async function charactersRoutes(app: FastifyInstance) {
   const storage = createCharactersStorage(app.db);
+  const characterGallery = createCharacterGalleryStorage(app.db);
 
   // ── Characters ──
 
@@ -69,8 +83,99 @@ export async function charactersRoutes(app: FastifyInstance) {
     if (req.params.id === PROFESSOR_MARI_ID) {
       return reply.status(403).send({ error: "Professor Mari is a built-in character and cannot be deleted" });
     }
+    const galleryDir = join(CHARACTER_GALLERY_ROOT, req.params.id);
+    if (existsSync(galleryDir)) {
+      rmSync(galleryDir, { recursive: true, force: true });
+    }
     await storage.remove(req.params.id);
     return reply.status(204).send();
+  });
+
+  // ── Character Gallery ──
+
+  app.get<{ Params: { id: string } }>("/:id/gallery", async (req, reply) => {
+    const char = await storage.getById(req.params.id);
+    if (!char) return reply.status(404).send({ error: "Character not found" });
+
+    const images = await characterGallery.listByCharacterId(req.params.id);
+    return images.map((img) => ({
+      ...img,
+      url: `/api/characters/${req.params.id}/gallery/file/${encodeURIComponent(img.filePath.split("/").pop()!)}`,
+    }));
+  });
+
+  app.post<{ Params: { id: string } }>("/:id/gallery/upload", async (req, reply) => {
+    const { id } = req.params;
+    const char = await storage.getById(id);
+    if (!char) return reply.status(404).send({ error: "Character not found" });
+
+    const data = await req.file();
+    if (!data) {
+      return reply.status(400).send({ error: "No file uploaded" });
+    }
+
+    const ext = extname(data.filename).toLowerCase();
+    if (!ALLOWED_GALLERY_EXTS.has(ext)) {
+      return reply.status(400).send({ error: `Unsupported file type: ${ext}` });
+    }
+
+    const dir = await ensureCharacterGalleryDir(id);
+    const filename = `${newId()}${ext}`;
+    const filePath = join(dir, filename);
+
+    await pipeline(data.file, createWriteStream(filePath));
+
+    const fields = data.fields as Record<string, { value?: string } | undefined>;
+    const prompt = fields?.prompt?.value ?? "";
+    const provider = fields?.provider?.value ?? "";
+    const model = fields?.model?.value ?? "";
+    const width = fields?.width?.value ? parseInt(fields.width.value, 10) : undefined;
+    const height = fields?.height?.value ? parseInt(fields.height.value, 10) : undefined;
+
+    const image = await characterGallery.create({
+      characterId: id,
+      filePath: `characters/${id}/${filename}`,
+      prompt,
+      provider,
+      model,
+      width: Number.isFinite(width) ? width : undefined,
+      height: Number.isFinite(height) ? height : undefined,
+    });
+
+    return {
+      ...image,
+      url: `/api/characters/${id}/gallery/file/${encodeURIComponent(filename)}`,
+    };
+  });
+
+  app.get<{ Params: { id: string; filename: string } }>("/:id/gallery/file/:filename", async (req, reply) => {
+    const { id, filename } = req.params;
+    if (filename.includes("..") || filename.includes("/") || id.includes("..") || id.includes("/")) {
+      return reply.status(400).send({ error: "Invalid path" });
+    }
+
+    const filePath = join(CHARACTER_GALLERY_ROOT, id, filename);
+    if (!existsSync(filePath)) {
+      return reply.status(404).send({ error: "Not found" });
+    }
+
+    return reply.sendFile(filename, join(CHARACTER_GALLERY_ROOT, id));
+  });
+
+  app.delete<{ Params: { id: string; imageId: string } }>("/:id/gallery/:imageId", async (req, reply) => {
+    const { id, imageId } = req.params;
+    const image = await characterGallery.getById(imageId);
+    if (!image || image.characterId !== id) {
+      return reply.status(404).send({ error: "Not found" });
+    }
+
+    const filePath = join(DATA_DIR, "gallery", image.filePath);
+    if (existsSync(filePath)) {
+      unlinkSync(filePath);
+    }
+
+    await characterGallery.remove(imageId);
+    return { success: true };
   });
 
   // ── Duplicate ──

@@ -64,7 +64,7 @@ export interface ChatOptions {
   stop?: string[];
   /** Tool/function definitions for function calling */
   tools?: LLMToolDefinition[];
-  /** Enable Anthropic prompt caching */
+  /** Enable provider-native prompt caching when supported */
   enableCaching?: boolean;
   /** Callback for streaming thinking/reasoning content */
   onThinking?: (chunk: string) => void;
@@ -95,6 +95,8 @@ export interface LLMUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  cachedPromptTokens?: number;
+  cacheWritePromptTokens?: number;
 }
 
 /** Result from a non-streaming chat call that may include tool calls */

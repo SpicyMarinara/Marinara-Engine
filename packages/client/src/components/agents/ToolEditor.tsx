@@ -3,6 +3,7 @@
 // ──────────────────────────────────────────────
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useUIStore } from "../../stores/ui.store";
+import { showConfirmDialog } from "../../lib/app-dialogs";
 import {
   useCustomTools,
   useCreateCustomTool,
@@ -191,7 +192,16 @@ export function ToolEditor() {
 
   const handleDelete = async () => {
     if (!dbTool) return;
-    if (!confirm("Delete this custom tool? This cannot be undone.")) return;
+    if (
+      !(await showConfirmDialog({
+        title: "Delete Tool",
+        message: "Delete this custom tool? This cannot be undone.",
+        confirmLabel: "Delete",
+        tone: "destructive",
+      }))
+    ) {
+      return;
+    }
     await deleteTool.mutateAsync(dbTool.id);
     closeToolDetail();
   };

@@ -1,13 +1,14 @@
 {
   "name": "@marinara-engine/server",
-  "version": "1.5.2",
+  "version": "1.5.4",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
     "dev": "tsx watch --ignore ./data --ignore ./node_modules --ignore ../../node_modules src/index.ts",
-    "build": "tsc && node ./scripts/write-build-meta.mjs && node -e \"require('fs').cpSync('src/db/default-preset.json','dist/db/default-preset.json')\"",
+    "build": "tsc && node ./scripts/write-build-meta.mjs && node -e \"const fs=require('fs');fs.cpSync('src/db/default-preset.json','dist/db/default-preset.json');fs.cpSync('src/assets','dist/assets',{recursive:true});\"",
     "start": "node dist/index.js",
+    "test": "tsx --test test/**/*.test.ts",
     "clean": "node -e \"const fs=require('fs');['dist','*.tsbuildinfo'].forEach(p=>{try{fs.rmSync(p,{recursive:true,force:true})}catch{}})\"",
     "lint": "tsc -b ../shared && tsc --noEmit",
     "db:generate": "drizzle-kit generate --config=drizzle.config.cts",

@@ -13,6 +13,7 @@ import {
   type RegexScriptRow,
 } from "../../hooks/use-regex-scripts";
 import { BUILT_IN_AGENTS, type AgentCategory } from "@marinara-engine/shared";
+import { showConfirmDialog } from "../../lib/app-dialogs";
 import { cn } from "../../lib/utils";
 
 export function AgentsPanel() {
@@ -254,8 +255,17 @@ export function AgentsPanel() {
                 <button
                   className="mt-0.5 shrink-0 text-[var(--muted-foreground)] transition-colors hover:text-[var(--destructive)]"
                   title="Delete script"
-                  onClick={() => {
-                    if (confirm(`Delete "${script.name}"?`)) deleteRegex.mutate(script.id);
+                  onClick={async () => {
+                    if (
+                      await showConfirmDialog({
+                        title: "Delete Regex Script",
+                        message: `Delete "${script.name}"?`,
+                        confirmLabel: "Delete",
+                        tone: "destructive",
+                      })
+                    ) {
+                      deleteRegex.mutate(script.id);
+                    }
                   }}
                 >
                   <Trash2 size="0.8125rem" />
@@ -383,8 +393,17 @@ export function AgentsPanel() {
                   <button
                     className="mt-0.5 shrink-0 text-[var(--muted-foreground)] transition-colors hover:text-[var(--destructive)]"
                     title="Delete agent"
-                    onClick={() => {
-                      if (confirm(`Delete "${agent.name}"?`)) deleteAgent.mutate(agent.id);
+                    onClick={async () => {
+                      if (
+                        await showConfirmDialog({
+                          title: "Delete Agent",
+                          message: `Delete "${agent.name}"?`,
+                          confirmLabel: "Delete",
+                          tone: "destructive",
+                        })
+                      ) {
+                        deleteAgent.mutate(agent.id);
+                      }
                     }}
                   >
                     <Trash2 size="0.8125rem" />
@@ -441,8 +460,17 @@ export function AgentsPanel() {
               <button
                 className="mt-0.5 shrink-0 text-[var(--muted-foreground)] transition-colors hover:text-[var(--destructive)]"
                 title="Delete tool"
-                onClick={() => {
-                  if (confirm(`Delete "${tool.name}"?`)) deleteTool.mutate(tool.id);
+                onClick={async () => {
+                  if (
+                    await showConfirmDialog({
+                      title: "Delete Tool",
+                      message: `Delete "${tool.name}"?`,
+                      confirmLabel: "Delete",
+                      tone: "destructive",
+                    })
+                  ) {
+                    deleteTool.mutate(tool.id);
+                  }
                 }}
               >
                 <Trash2 size="0.8125rem" />

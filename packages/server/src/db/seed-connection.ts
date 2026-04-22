@@ -22,6 +22,13 @@ export async function seedDefaultConnection(db: DB) {
 
   if (existing.length > 0) return;
 
+  const anyExistingConnections = await db.select({ id: apiConnections.id }).from(apiConnections).limit(1);
+
+  if (anyExistingConnections.length > 0) {
+    console.log("[seed] Skipped default connection seed because saved connections already exist");
+    return;
+  }
+
   await db.insert(apiConnections).values({
     id: DEFAULT_CONNECTION_ID,
     name: CONNECTION_NAME,

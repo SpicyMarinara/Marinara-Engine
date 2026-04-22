@@ -4,18 +4,17 @@
 
 # ── Stage 1: Build ──
 FROM node:22-slim AS builder
-ARG PNPM_VERSION=10.30.3
 ARG BUILD_COMMIT
 WORKDIR /app
-
-# Enable corepack for pnpm
-RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 
 # Copy workspace config first (layer cache for deps)
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/server/package.json packages/server/
 COPY packages/client/package.json packages/client/
+
+# Enable corepack — version is read from the packageManager field in package.json
+RUN corepack enable && corepack install
 
 # Install all dependencies (including dev for building)
 # Use cache mount to avoid storing pnpm store in image
@@ -41,7 +40,6 @@ RUN if [ -n "$BUILD_COMMIT" ]; then \
 
 # ── Stage 2: Production ──
 FROM node:22-slim AS production
-ARG PNPM_VERSION=10.30.3
 WORKDIR /app
 
 # llama-server dynamically links these at runtime
@@ -51,13 +49,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libvulkan1 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
-
 # Copy workspace config
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/server/package.json packages/server/
 COPY packages/client/package.json packages/client/
+
+# Enable corepack — version is read from the packageManager field in package.json
+RUN corepack enable && corepack install
 
 # Install production deps only
 # Use cache mount to avoid storing pnpm store in image

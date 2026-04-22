@@ -691,6 +691,31 @@ summary[class*="cursor-pointer"],
   box-shadow: var(--glass-strong-shadow);
 }
 
+/* Firefox on Windows can rasterize text inside large blurred/translucent layout layers,
+   which shows up most clearly on high-DPI displays. Fall back to opaque shell chrome there. */
+@supports (-moz-appearance: none) {
+  .mari-topbar,
+  .mari-sidebar,
+  .mari-sidebar-header,
+  .mari-sidebar-footer,
+  .mari-right-panel,
+  .mari-right-panel-header {
+    backdrop-filter: none !important;
+  }
+
+  .mari-topbar,
+  .mari-sidebar-header,
+  .mari-sidebar-footer,
+  .mari-right-panel-header {
+    background: var(--card) !important;
+  }
+
+  .mari-sidebar,
+  .mari-right-panel {
+    background: var(--background) !important;
+  }
+}
+
 /* ─────────────────────────────────────────────
    9. GLOW & SHADOW EFFECTS
    ───────────────────────────────────────────── */

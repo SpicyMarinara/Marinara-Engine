@@ -8,6 +8,7 @@ export const characterKeys = {
   all: ["characters"] as const,
   list: () => [...characterKeys.all, "list"] as const,
   detail: (id: string) => [...characterKeys.all, "detail", id] as const,
+  gallery: (id: string) => [...characterKeys.all, "gallery", id] as const,
   personas: ["personas"] as const,
   groups: ["character-groups"] as const,
   groupDetail: (id: string) => ["character-groups", "detail", id] as const,
@@ -89,9 +90,38 @@ export interface SpriteInfo {
   url: string;
 }
 
+export interface SpriteCapabilities {
+  imageProcessingAvailable: boolean;
+  spriteGenerationAvailable: boolean;
+  backgroundRemovalAvailable: boolean;
+  reason: string | null;
+}
+
+export interface CharacterGalleryImage {
+  id: string;
+  characterId: string;
+  filePath: string;
+  prompt: string;
+  provider: string;
+  model: string;
+  width: number | null;
+  height: number | null;
+  createdAt: string;
+  url: string;
+}
+
 export const spriteKeys = {
   list: (characterId: string) => ["sprites", characterId] as const,
+  capabilities: () => ["sprites", "capabilities"] as const,
 };
+
+export function useSpriteCapabilities() {
+  return useQuery({
+    queryKey: spriteKeys.capabilities(),
+    queryFn: () => api.get<SpriteCapabilities>("/sprites/capabilities"),
+    staleTime: 5 * 60_000,
+  });
+}
 
 export function useCharacterSprites(characterId: string | null) {
   return useQuery({
@@ -119,6 +149,36 @@ export function useDeleteSprite() {
       api.delete(`/sprites/${characterId}/${expression}`),
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: spriteKeys.list(variables.characterId) });
+    },
+  });
+}
+
+export function useCharacterGalleryImages(characterId: string | null) {
+  return useQuery({
+    queryKey: characterKeys.gallery(characterId ?? ""),
+    queryFn: () => api.get<CharacterGalleryImage[]>(`/characters/${characterId}/gallery`),
+    enabled: !!characterId,
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useUploadCharacterGalleryImage(characterId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (formData: FormData) =>
+      api.upload<CharacterGalleryImage>(`/characters/${characterId}/gallery/upload`, formData),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: characterKeys.gallery(characterId) });
+    },
+  });
+}
+
+export function useDeleteCharacterGalleryImage(characterId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (imageId: string) => api.delete(`/characters/${characterId}/gallery/${imageId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: characterKeys.gallery(characterId) });
     },
   });
 }

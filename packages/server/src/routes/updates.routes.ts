@@ -221,6 +221,15 @@ async function runPinnedPnpm(root: string, args: string[], timeout: number) {
   return { runner, pnpmVersion: getPinnedPnpmVersion(root) };
 }
 
+async function runPinnedBuild(root: string) {
+  await runPinnedPnpm(root, ["--filter", "@marinara-engine/shared", "build"], 120_000);
+  await runPinnedPnpm(
+    root,
+    ["--filter", "@marinara-engine/server", "--filter", "@marinara-engine/client", "--parallel", "run", "build"],
+    300_000,
+  );
+}
+
 async function resolveLatestReleaseFromGitHub(signal: AbortSignal) {
   const tagsRes = await fetch(GITHUB_TAGS_API, {
     headers: buildRequestHeaders(),
@@ -435,7 +444,7 @@ export async function updatesRoutes(app: FastifyInstance) {
       await runPinnedPnpm(root, ["install", "--frozen-lockfile"], 120_000);
 
       // Step 3: Rebuild all packages
-      await runPinnedPnpm(root, ["build"], 300_000);
+      await runPinnedBuild(root);
 
       // Step 4: Signal exit so the user can relaunch with the new version.
       // Send response first, then schedule exit.
@@ -456,7 +465,7 @@ export async function updatesRoutes(app: FastifyInstance) {
       const pnpmVersion = getPinnedPnpmVersion(root);
       return reply.status(500).send({
         error: `Update failed: ${message}`,
-        hint: `You can try running the update manually: git fetch ${UPDATE_REMOTE} ${UPDATE_BRANCH} && git merge --ff-only ${UPDATE_REF} && npx --yes pnpm@${pnpmVersion} install --frozen-lockfile && npx --yes pnpm@${pnpmVersion} build`,
+        hint: `You can try running the update manually: git fetch ${UPDATE_REMOTE} ${UPDATE_BRANCH} && git merge --ff-only ${UPDATE_REF} && npx --yes pnpm@${pnpmVersion} install --frozen-lockfile && npx --yes pnpm@${pnpmVersion} --filter @marinara-engine/shared build && npx --yes pnpm@${pnpmVersion} --filter @marinara-engine/server --filter @marinara-engine/client --parallel run build`,
       });
     }
   });

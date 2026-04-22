@@ -15,6 +15,7 @@ import {
 } from "../../hooks/use-characters";
 import { useUpdateChat, useCreateMessage, useCreateChat, chatKeys } from "../../hooks/use-chats";
 import { api } from "../../lib/api-client";
+import { showConfirmDialog } from "../../lib/app-dialogs";
 import { useChatStore } from "../../stores/chat.store";
 import { ContextMenu, type ContextMenuItem } from "../ui/ContextMenu";
 import { useQueryClient } from "@tanstack/react-query";
@@ -238,7 +239,16 @@ export function CharactersPanel() {
 
   const handleDeleteTag = useCallback(
     async (tag: string) => {
-      if (!confirm(`Remove tag "${tag}" from all characters?`)) return;
+      if (
+        !(await showConfirmDialog({
+          title: "Remove Tag",
+          message: `Remove tag "${tag}" from all characters?`,
+          confirmLabel: "Remove",
+          tone: "destructive",
+        }))
+      ) {
+        return;
+      }
       try {
         const affected = parsedCharacters.filter((c) => ((c.parsed.tags ?? []) as string[]).includes(tag));
         for (const c of affected) {
@@ -1054,9 +1064,18 @@ export function CharactersPanel() {
                     <Copy size="0.75rem" />
                   </button>
                   <button
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.stopPropagation();
-                      if (!confirm(`Delete "${char.parsed?.name ?? "this character"}"? This cannot be undone.`)) return;
+                      if (
+                        !(await showConfirmDialog({
+                          title: "Delete Character",
+                          message: `Delete "${char.parsed?.name ?? "this character"}"? This cannot be undone.`,
+                          confirmLabel: "Delete",
+                          tone: "destructive",
+                        }))
+                      ) {
+                        return;
+                      }
                       deleteCharacter.mutate(char.id);
                     }}
                     className="rounded-lg p-1.5 transition-all hover:bg-[var(--destructive)]/15 active:scale-90"

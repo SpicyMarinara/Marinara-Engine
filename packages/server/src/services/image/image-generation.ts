@@ -494,7 +494,7 @@ const DEFAULT_COMFYUI_WORKFLOW: Record<string, unknown> = {
   "3": {
     class_type: "KSampler",
     inputs: {
-      seed: 0,
+      seed: "%seed%",
       steps: 20,
       cfg: 7,
       sampler_name: "euler_ancestral",
@@ -512,7 +512,7 @@ const DEFAULT_COMFYUI_WORKFLOW: Record<string, unknown> = {
   },
   "5": {
     class_type: "EmptyLatentImage",
-    inputs: { width: 512, height: 768, batch_size: 1 },
+    inputs: { width: "%width%", height: "%height%", batch_size: 1 },
   },
   "6": {
     class_type: "CLIPTextEncode",
@@ -531,6 +531,8 @@ const DEFAULT_COMFYUI_WORKFLOW: Record<string, unknown> = {
     inputs: { filename_prefix: "marinara", images: ["8", 0] },
   },
 };
+
+const COMFYUI_GEN_TIMEOUT = Number(process.env.COMFYUI_GEN_TIMEOUT ?? 120);
 
 async function generateComfyUI(baseUrl: string, request: ImageGenRequest): Promise<ImageGenResult> {
   const base = baseUrl.replace(/\/+$/, "");
@@ -581,8 +583,7 @@ async function generateComfyUI(baseUrl: string, request: ImageGenRequest): Promi
   const { prompt_id } = (await queueResp.json()) as { prompt_id: string };
 
   // Poll for completion (max ~120 seconds)
-  const maxAttempts = 120;
-  for (let i = 0; i < maxAttempts; i++) {
+  for (let i = 0; i < COMFYUI_GEN_TIMEOUT; i++) {
     await new Promise((r) => setTimeout(r, 1000));
 
     const historyResp = await fetch(`${base}/history/${prompt_id}`);

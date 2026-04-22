@@ -5,6 +5,7 @@
     "rootDir": "./src",
     "composite": true,
     "lib": ["ES2022"],
+    "rewriteRelativeImportExtensions": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false
   },

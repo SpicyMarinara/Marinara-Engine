@@ -144,15 +144,15 @@ fi
 # ── Build if needed ──
 if [ ! -d "packages/shared/dist" ]; then
     echo "  [..] Building shared types..."
-    run_pnpm build:shared
+    run_pnpm --filter @marinara-engine/shared build
 fi
 if [ ! -d "packages/server/dist" ]; then
     echo "  [..] Building server..."
-    run_pnpm build:server
+    run_pnpm --filter @marinara-engine/server build
 fi
 if [ ! -d "packages/client/dist" ]; then
     echo "  [..] Building client..."
-    run_pnpm build:client
+    run_pnpm --filter @marinara-engine/client build
 fi
 
 # Database migrations are handled automatically at server startup by runMigrations()

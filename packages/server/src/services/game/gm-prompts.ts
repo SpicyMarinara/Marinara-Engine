@@ -351,8 +351,8 @@ export function buildGmFormatReminder(
     | "playerInventory"
     | "language"
   > & {
-    /** Whether the current turn's player message is prefixed with `[To the party]`. When true, the TALK-TO-PARTY block is appended. */
-    talkToParty?: boolean;
+    /** Special non-scene-advancing address mode inferred from the current player turn prefix. */
+    addressMode?: "party" | "gm";
   },
 ): string {
   const lines: string[] = [];
@@ -450,13 +450,22 @@ export function buildGmFormatReminder(
       ``,
       `Expression tags are MANDATORY for every party line.`,
     );
-    if (ctx.talkToParty) {
+    if (ctx.addressMode === "party") {
       lines.push(
         ``,
         `TALK-TO-PARTY MODE:`,
         `The player's input is preceded by the \`[To the party]\` part, which means this turn should be dedicated to the party discussion, and should not progress the narrative (unless the current scene is time-pressing, e.g., the party just got ambushed or is in a collapsing tunnel). Let the party members respond to the player and to each other; keep narration minimal (a breath, a shift of posture, a short beat) and let dialogue carry the scene.`,
       );
     }
+  }
+
+  if (ctx.addressMode === "gm") {
+    lines.push(
+      ``,
+      `TALK-TO-GM MODE:`,
+      `The player's input is preceded by the \`[To the GM]\` part. This is an out-of-character question or clarification addressed to you as the Game Master, not an in-scene action. Do NOT advance the scene, trigger combat, move time forward, or make characters suddenly act unless immediate danger makes that unavoidable.`,
+      `Answer directly in a clear OOC GM voice using plain narration lines, focusing on clarification, lore, continuity, consequences, reminders, or what the player would reasonably know. Keep the response grounded in already-established facts and avoid inventing new scene events just to answer the question.`,
+    );
   }
 
   lines.push(

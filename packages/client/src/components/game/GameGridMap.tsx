@@ -21,13 +21,16 @@ const TERRAIN_COLORS: Record<string, string> = {
 interface GameGridMapProps {
   map: GameMap;
   onCellClick: (x: number, y: number) => void;
+  selectedPosition?: { x: number; y: number } | string | null;
+  disabled?: boolean;
 }
 
-export function GameGridMap({ map, onCellClick }: GameGridMapProps) {
+export function GameGridMap({ map, onCellClick, selectedPosition, disabled }: GameGridMapProps) {
   const cells = map.cells || [];
   const width = map.width || 5;
   const height = map.height || 5;
   const partyPos = typeof map.partyPosition === "object" ? map.partyPosition : null;
+  const selectedCell = typeof selectedPosition === "object" ? selectedPosition : null;
 
   // Build a lookup from (x,y) to cell
   const cellMap = new Map<string, GridCell>();
@@ -75,8 +78,9 @@ export function GameGridMap({ map, onCellClick }: GameGridMapProps) {
         {rows.map((row) =>
           row.map((cell) => {
             const isParty = partyPos && partyPos.x === cell.x && partyPos.y === cell.y;
+            const isSelected = selectedCell && selectedCell.x === cell.x && selectedCell.y === cell.y;
             const isAdjacent = adjacentSet.has(`${cell.x},${cell.y}`);
-            const isMovable = isAdjacent && cell.discovered;
+            const isMovable = !disabled && isAdjacent && cell.discovered;
             const terrainBg = TERRAIN_COLORS[cell.terrain] || "bg-gray-800/40";
 
             return (
@@ -86,13 +90,14 @@ export function GameGridMap({ map, onCellClick }: GameGridMapProps) {
                 disabled={!isMovable}
                 title={
                   cell.discovered
-                    ? `${cell.label}: ${cell.description || cell.terrain}${isMovable ? " (click to move)" : ""}`
+                    ? `${cell.label}: ${cell.description || cell.terrain}${isMovable ? " (click to select)" : ""}`
                     : "Undiscovered"
                 }
                 className={cn(
                   "relative flex aspect-square items-center justify-center rounded text-base transition-all",
                   cell.discovered ? terrainBg : "bg-gray-900/70 game-map-fog",
                   isParty && "ring-2 ring-amber-400 ring-offset-1 ring-offset-[var(--card)]",
+                  isSelected && !isParty && "ring-2 ring-sky-400/70 ring-offset-1 ring-offset-[var(--card)]",
                   isMovable && "hover:brightness-125 cursor-pointer ring-1 ring-amber-400/30",
                   !isMovable && "cursor-default opacity-80",
                 )}

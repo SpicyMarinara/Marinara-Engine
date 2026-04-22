@@ -11,6 +11,7 @@ import {
 import { cn, generateClientId } from "../../lib/utils";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api-client";
+import { forceRefreshSpa } from "@/lib/browser-runtime";
 import React, { useRef, useState, useCallback, useEffect } from "react";
 import { toast } from "sonner";
 import { APP_VERSION, type Theme } from "@marinara-engine/shared";
@@ -171,6 +172,8 @@ function GeneralSettings() {
   const setEnableStreaming = useUIStore((s) => s.setEnableStreaming);
   const streamingSpeed = useUIStore((s) => s.streamingSpeed);
   const setStreamingSpeed = useUIStore((s) => s.setStreamingSpeed);
+  const gameInstantTextReveal = useUIStore((s) => s.gameInstantTextReveal);
+  const setGameInstantTextReveal = useUIStore((s) => s.setGameInstantTextReveal);
   const gameTextSpeed = useUIStore((s) => s.gameTextSpeed);
   const setGameTextSpeed = useUIStore((s) => s.setGameTextSpeed);
   const gameAutoPlayDelay = useUIStore((s) => s.gameAutoPlayDelay);
@@ -248,27 +251,36 @@ function GeneralSettings() {
         </div>
       </label>
 
+      <ToggleSetting
+        label="Instantly reveal game text"
+        checked={gameInstantTextReveal}
+        onChange={setGameInstantTextReveal}
+        help="When enabled, Game mode narration segments appear fully as soon as you enter them. This skips the typewriter effect and hides the narration speed control."
+      />
+
       {/* Game Narration Text Speed */}
-      <label className="flex flex-col gap-1.5 rounded-lg p-1 transition-colors hover:bg-[var(--secondary)]/50">
-        <div className="flex items-center gap-2">
-          <span className="text-xs">Game narration speed</span>
-          <span className="text-xs tabular-nums text-[var(--muted-foreground)]">{gameTextSpeed}</span>
-          <HelpTooltip text="How fast the typewriter effect displays narration text in Game mode. Lower values give a slower cinematic reveal. Higher values show text almost instantly." />
-        </div>
-        <input
-          type="range"
-          min={1}
-          max={100}
-          step={1}
-          value={gameTextSpeed}
-          onChange={(e) => setGameTextSpeed(Number(e.target.value))}
-          className="w-full accent-[var(--primary)]"
-        />
-        <div className="flex justify-between text-[0.625rem] text-[var(--muted-foreground)]">
-          <span>Slow</span>
-          <span>Fast</span>
-        </div>
-      </label>
+      {!gameInstantTextReveal && (
+        <label className="flex flex-col gap-1.5 rounded-lg p-1 transition-colors hover:bg-[var(--secondary)]/50">
+          <div className="flex items-center gap-2">
+            <span className="text-xs">Game narration speed</span>
+            <span className="text-xs tabular-nums text-[var(--muted-foreground)]">{gameTextSpeed}</span>
+            <HelpTooltip text="How fast the typewriter effect displays narration text in Game mode. Lower values give a slower cinematic reveal. Higher values show text almost instantly." />
+          </div>
+          <input
+            type="range"
+            min={1}
+            max={100}
+            step={1}
+            value={gameTextSpeed}
+            onChange={(e) => setGameTextSpeed(Number(e.target.value))}
+            className="w-full accent-[var(--primary)]"
+          />
+          <div className="flex justify-between text-[0.625rem] text-[var(--muted-foreground)]">
+            <span>Slow</span>
+            <span>Fast</span>
+          </div>
+        </label>
+      )}
 
       {/* Game Auto-Play Delay */}
       <label className="flex flex-col gap-1.5 rounded-lg p-1 transition-colors hover:bg-[var(--secondary)]/50">
@@ -362,7 +374,7 @@ function GeneralSettings() {
         checked={boldDialogue ?? true}
         onChange={setBoldDialogue}
         help={
-          'When on, text inside quotation marks ("like this") is bolded and colored in chat messages. Turn off for plain text rendering.'
+          'When on, text inside dialogue quotation marks ("like this", 「like this」, or 『like this』) is bolded in addition to its dialogue highlight color. Turn it off to keep the color without bold.'
         }
       />
 
@@ -1908,6 +1920,7 @@ function AdvancedSettings() {
   const [selectedScopes, setSelectedScopes] = useState<ExpungeScope[]>(["chats"]);
   const [confirmAction, setConfirmAction] = useState<"selected" | "all" | null>(null);
   const [exportingProfile, setExportingProfile] = useState(false);
+  const [refreshingSpa, setRefreshingSpa] = useState(false);
 
   const handleExportProfile = async () => {
     setExportingProfile(true);
@@ -1926,6 +1939,22 @@ function AdvancedSettings() {
       toast.error("Failed to export profile");
     } finally {
       setExportingProfile(false);
+    }
+  };
+
+  const handleForceRefreshSpa = async () => {
+    if (refreshingSpa) {
+      return;
+    }
+
+    setRefreshingSpa(true);
+
+    try {
+      toast.info("Clearing caches and refreshing app…");
+      await forceRefreshSpa();
+    } catch (err) {
+      setRefreshingSpa(false);
+      toast.error(err instanceof Error ? err.message : "Failed to refresh the app");
     }
   };
 
@@ -2208,6 +2237,30 @@ function AdvancedSettings() {
             Could not check for updates. Try again later.
           </div>
         )}
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => void handleForceRefreshSpa()}
+            disabled={refreshingSpa}
+            className="flex items-center justify-center gap-1.5 rounded-lg bg-[var(--background)]/70 px-3 py-2 text-xs font-medium text-[var(--foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {refreshingSpa ? (
+              <>
+                <Loader2 size="0.8125rem" className="animate-spin" />
+                Refreshing…
+              </>
+            ) : (
+              <>
+                <RefreshCw size="0.8125rem" />
+                Refresh App
+              </>
+            )}
+          </button>
+          <HelpTooltip
+            side="bottom"
+            text="Manual refresh unregisters the active service worker and clears browser caches before reloading. Marinara's stored chats, settings, and other local app data stay intact."
+          />
+        </div>
       </div>
 
       <div className="retro-divider" />

@@ -717,10 +717,25 @@ function buildAgentExtras(context: AgentContext): string {
   }
 
   if (context.memory._existingLorebookEntries) {
-    const entries = context.memory._existingLorebookEntries as string[];
+    const rawEntries = context.memory._existingLorebookEntries as Array<
+      string | { name?: string; keys?: string[]; locked?: boolean }
+    >;
+    const entries = rawEntries
+      .map((entry) => {
+        if (typeof entry === "string") return entry;
+        if (!entry || typeof entry !== "object") return null;
+
+        const name = typeof entry.name === "string" && entry.name.trim() ? entry.name.trim() : "Unnamed";
+        const keys = Array.isArray(entry.keys) ? entry.keys.filter((key) => typeof key === "string") : [];
+        const keyText = keys.length > 0 ? ` | keys: ${keys.join(", ")}` : "";
+        const lockedText = entry.locked === true ? " | locked" : "";
+        return `- ${name}${keyText}${lockedText}`;
+      })
+      .filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+
     if (entries.length > 0) {
       parts.push(`<existing_entries>`);
-      parts.push(entries.join(", "));
+      parts.push(entries.join("\n"));
       parts.push(`</existing_entries>`);
     }
   }

@@ -15,6 +15,7 @@
 // ──────────────────────────────────────────────
 
 import type { PartyDialogueLine, PartyDialogueType } from "@marinara-engine/shared";
+import { stripSurroundingDialogueQuotes } from "./dialogue-quotes";
 
 const VALID_TYPES = new Set<PartyDialogueType>(["main", "side", "extra", "action", "thought", "whisper"]);
 
@@ -81,18 +82,12 @@ export function parsePartyDialogue(raw: string): PartyDialogueLine[] {
     // in the union only so historical saved messages still parse).
     if (rawType === "extra") rawType = "side";
 
-    // Strip surrounding quotes if present (for main/side/extra/whisper dialogue)
+    // Strip surrounding dialogue quotes if present (for main/side/extra/whisper dialogue)
     if (
       (rawType === "main" || rawType === "side" || rawType === "extra" || rawType === "whisper") &&
       content.length >= 2
     ) {
-      if (
-        (content.startsWith('"') && content.endsWith('"')) ||
-        (content.startsWith("\u201c") && content.endsWith("\u201d")) ||
-        (content.startsWith("\u00ab") && content.endsWith("\u00bb"))
-      ) {
-        content = content.slice(1, -1);
-      }
+      content = stripSurroundingDialogueQuotes(content);
     }
 
     result.push({

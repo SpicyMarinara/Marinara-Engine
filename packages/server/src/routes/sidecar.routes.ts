@@ -24,6 +24,7 @@ import {
 } from "../services/sidecar/scene-analyzer.js";
 import { postProcessSceneResult, type PostProcessContext } from "../services/sidecar/scene-postprocess.js";
 import {
+  SIDECAR_RUNTIME_PREFERENCES,
   scoreAmbient,
   scoreMusic,
   type GameActiveState,
@@ -43,7 +44,7 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get("/status", async () => {
-    void sidecarProcessService.syncForCurrentConfig({ suppressKnownFailure: true }).catch((error) => {
+    void sidecarProcessService.syncForCurrentConfig({ suppressKnownFailure: true, allowRuntimeInstall: false }).catch((error) => {
       console.error("[sidecar] Background sync from /status failed:", error);
     });
 
@@ -60,16 +61,33 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
     useForTrackers: z.boolean().optional(),
     useForGameScene: z.boolean().optional(),
     contextSize: z.number().int().min(512).max(32768).optional(),
+    maxTokens: z.number().int().min(64).max(32768).optional(),
+    temperature: z.number().min(0).max(2).optional(),
+    topP: z.number().gt(0).max(1).optional(),
+    topK: z.number().int().min(0).max(500).optional(),
     gpuLayers: z.number().int().min(-1).max(1024).optional(),
+    runtimePreference: z.enum(SIDECAR_RUNTIME_PREFERENCES).optional(),
   });
 
   app.patch("/config", async (req) => {
     const body = configSchema.parse(req.body);
     const config = sidecarModelService.updateConfig(body);
-    void sidecarProcessService.syncForCurrentConfig({ suppressKnownFailure: true }).catch((error) => {
+    void sidecarProcessService.syncForCurrentConfig({ suppressKnownFailure: true, allowRuntimeInstall: false }).catch((error) => {
       console.error("[sidecar] Background sync from /config failed:", error);
     });
     return { config };
+  });
+
+  app.post("/runtime/install", async (req, reply) => {
+    const body = z.object({ reinstall: z.boolean().optional() }).parse(req.body ?? {});
+
+    await handleDownloadSse(reply, async () => {
+      if (body.reinstall) {
+        await sidecarProcessService.reinstallRuntime();
+      } else {
+        await sidecarProcessService.installRuntime();
+      }
+    });
   });
 
   app.post("/restart", async () => {
@@ -162,8 +180,9 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
   }>("/download", async (req, reply) => {
     const { quantization } = z.object({ quantization: quantizationSchema }).parse(req.body);
     await handleDownloadSse(reply, async () => {
+      await sidecarProcessService.stop();
       await sidecarModelService.download(quantization);
-      await sidecarProcessService.syncForCurrentConfig();
+      await sidecarProcessService.syncForCurrentConfig({ allowRuntimeInstall: false });
     });
   });
 
@@ -178,8 +197,9 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
       .parse(req.body);
 
     await handleDownloadSse(reply, async () => {
+      await sidecarProcessService.stop();
       await sidecarModelService.downloadCustomModel(body.repo, body.modelPath);
-      await sidecarProcessService.syncForCurrentConfig();
+      await sidecarProcessService.syncForCurrentConfig({ allowRuntimeInstall: false });
     });
   });
 

@@ -23,6 +23,8 @@ interface GenerationInfo {
   verbosity?: string | null;
   tokensPrompt?: number | null;
   tokensCompletion?: number | null;
+  tokensCachedPrompt?: number | null;
+  tokensCacheWritePrompt?: number | null;
   durationMs?: number | null;
   finishReason?: string | null;
 }
@@ -442,6 +444,10 @@ export function PeekPromptModal({ data, onClose }: PeekPromptModalProps) {
                 <span className="text-[var(--muted-foreground)]">
                   ~{fmtTokens(totalTokens)} est. tokens
                   {gen?.tokensPrompt != null && <> · {fmtTokens(gen.tokensPrompt)} actual prompt tokens</>}
+                  {(gen?.tokensCachedPrompt ?? 0) > 0 && <> · {fmtTokens(gen?.tokensCachedPrompt ?? 0)} cached</>}
+                  {(gen?.tokensCacheWritePrompt ?? 0) > 0 && (
+                    <> · {fmtTokens(gen?.tokensCacheWritePrompt ?? 0)} cache write</>
+                  )}
                 </span>
               </div>
               {paramPills.length > 0 && (

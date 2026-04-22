@@ -11,7 +11,7 @@
 
 ; ── App metadata ──
 !define APP_NAME "Marinara Engine"
-!define APP_VERSION "1.5.2"
+!define APP_VERSION "1.5.4"
 !define APP_PUBLISHER "Pasta-Devs"
 !define APP_URL "https://github.com/Pasta-Devs/Marinara-Engine"
 !define REPO_URL "https://github.com/Pasta-Devs/Marinara-Engine.git"
@@ -322,6 +322,10 @@ Would you like to retry?" IDYES retryInstall IDNO skipRetryInstall
       ${EndIf}
     skipRetryInstall:
   ${EndIf}
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONSTOP "Dependency installation failed.$\r$\n$\r$\nPlease check your internet connection and run the installer again."
+    Abort
+  ${EndIf}
   DetailPrint "Dependencies installed."
 
   ; ── Step 4: Build ──
@@ -330,17 +334,25 @@ Would you like to retry?" IDYES retryInstall IDNO skipRetryInstall
   DetailPrint ""
   DetailPrint "Building ${APP_NAME} (this may take 1-3 minutes)..."
   ${If} $PNPM_RUNNER == "corepack"
-    nsExec::ExecToLog 'cmd /c corepack pnpm@${PNPM_VERSION} build'
+    nsExec::ExecToLog 'cmd /c corepack pnpm@${PNPM_VERSION} --filter @marinara-engine/shared build'
     Pop $0
+    ${If} $0 == 0
+      nsExec::ExecToLog 'cmd /c corepack pnpm@${PNPM_VERSION} --filter @marinara-engine/server --filter @marinara-engine/client --parallel run build'
+      Pop $0
+    ${EndIf}
   ${Else}
-    nsExec::ExecToLog 'cmd /c npx --yes pnpm@${PNPM_VERSION} build'
+    nsExec::ExecToLog 'cmd /c npx --yes pnpm@${PNPM_VERSION} --filter @marinara-engine/shared build'
     Pop $0
+    ${If} $0 == 0
+      nsExec::ExecToLog 'cmd /c npx --yes pnpm@${PNPM_VERSION} --filter @marinara-engine/server --filter @marinara-engine/client --parallel run build'
+      Pop $0
+    ${EndIf}
   ${EndIf}
   ${If} $0 != 0
-    DetailPrint "Warning: Build reported issues. The app may still work."
-  ${Else}
-    DetailPrint "Build complete."
+    MessageBox MB_OK|MB_ICONSTOP "${APP_NAME} could not be built.$\r$\n$\r$\nInstallation was stopped so it does not leave you with a broken launcher."
+    Abort
   ${EndIf}
+  DetailPrint "Build complete."
 
   ; ── Step 5: Copy assets and create shortcuts ──
   DetailPrint ""

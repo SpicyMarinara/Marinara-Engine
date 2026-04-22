@@ -13,6 +13,7 @@ import { useChatStore } from "../../stores/chat.store";
 import { useUIStore } from "../../stores/ui.store";
 import { useSidecarStore } from "../../stores/sidecar.store";
 import { BUILT_IN_AGENTS, LOCAL_SIDECAR_CONNECTION_ID, getDefaultAgentPrompt } from "@marinara-engine/shared";
+import { showConfirmDialog } from "../../lib/app-dialogs";
 import {
   Plus,
   Trash2,
@@ -23,8 +24,7 @@ import {
   X,
   Copy,
   BrainCircuit,
-  Download,
-  Trash,
+  Settings2,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { toast } from "sonner";
@@ -71,11 +71,9 @@ function SidecarCard() {
     failedRuntimeVariant,
     setShowDownloadModal,
     updateConfig,
-    deleteModel,
     fetchStatus,
   } = useSidecarStore();
   const isDownloaded = modelDownloaded;
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [assigningTrackers, setAssigningTrackers] = useState(false);
   const activeModelName = isDownloaded ? modelDisplayName : null;
   const backendLabel = config.backend === "mlx" ? "MLX" : "GGUF";
@@ -133,6 +131,11 @@ function SidecarCard() {
     }
   };
 
+  const openLocalModelSettings = () => {
+    void fetchStatus();
+    setShowDownloadModal(true);
+  };
+
   return (
     <div className="rounded-xl border border-purple-400/20 bg-gradient-to-br from-purple-500/5 to-fuchsia-500/5 p-3">
       <div className="flex items-center gap-2.5">
@@ -155,46 +158,13 @@ function SidecarCard() {
               : "Not downloaded"}
           </div>
         </div>
-        {isDownloaded ? (
-          confirmDelete ? (
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setConfirmDelete(false)}
-                className="rounded-lg px-2 py-1 text-[0.625rem] text-[var(--muted-foreground)] transition-all hover:bg-[var(--secondary)]"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  deleteModel();
-                  setConfirmDelete(false);
-                }}
-                className="rounded-lg px-2 py-1 text-[0.625rem] font-medium text-[var(--destructive)] transition-all hover:bg-[var(--destructive)]/15"
-              >
-                Delete
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setConfirmDelete(true)}
-              className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-all hover:bg-[var(--destructive)]/15 active:scale-90"
-              title="Delete model"
-            >
-              <Trash size="0.8125rem" className="text-[var(--destructive)]" />
-            </button>
-          )
-        ) : (
-          <button
-            onClick={() => {
-              fetchStatus();
-              setShowDownloadModal(true);
-            }}
-            className="rounded-lg p-1.5 text-purple-400 transition-all hover:bg-purple-400/15 active:scale-90"
-            title="Download model"
-          >
-            <Download size="0.8125rem" />
-          </button>
-        )}
+        <button
+          onClick={openLocalModelSettings}
+          className="rounded-lg p-1.5 text-purple-400 transition-all hover:bg-purple-400/15 active:scale-90"
+          title="Open local model settings"
+        >
+          <Settings2 size="0.8125rem" />
+        </button>
       </div>
       {/* Local model actions (only when model is downloaded) */}
       {isDownloaded && (
@@ -278,8 +248,7 @@ function SidecarCard() {
           )}
           <button
             onClick={() => {
-              fetchStatus();
-              setShowDownloadModal(true);
+              openLocalModelSettings();
             }}
             className="mt-2 rounded-lg bg-amber-500/15 px-2.5 py-1 text-[0.6875rem] font-medium text-amber-200 transition-colors hover:bg-amber-500/25"
           >
@@ -444,9 +413,18 @@ export function ConnectionsPanel() {
                   <Copy size="0.75rem" />
                 </button>
                 <button
-                  onClick={(e) => {
+                  onClick={async (e) => {
                     e.stopPropagation();
-                    if (!confirm(`Delete "${conn.name}"? This cannot be undone.`)) return;
+                    if (
+                      !(await showConfirmDialog({
+                        title: "Delete Connection",
+                        message: `Delete "${conn.name}"? This cannot be undone.`,
+                        confirmLabel: "Delete",
+                        tone: "destructive",
+                      }))
+                    ) {
+                      return;
+                    }
                     deleteConnection.mutate(conn.id);
                   }}
                   className="rounded-lg p-1.5 transition-all hover:bg-[var(--destructive)]/15 active:scale-90"

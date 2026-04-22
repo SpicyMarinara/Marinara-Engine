@@ -74,7 +74,7 @@ export function RightPanel() {
       className="mari-right-panel-content flex h-full flex-col"
     >
       {/* Header - OS window style */}
-      <div className="relative flex h-12 flex-shrink-0 items-center justify-between bg-[var(--card)]/80 px-4 backdrop-blur-sm">
+      <div className="mari-right-panel-header relative flex h-12 flex-shrink-0 items-center justify-between bg-[var(--card)]/80 px-4 backdrop-blur-sm">
         <div className="absolute inset-x-0 bottom-0 h-px bg-[var(--border)]/30" />
         <div className="flex items-center gap-2.5">
           <div

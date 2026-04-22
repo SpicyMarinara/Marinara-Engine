@@ -436,6 +436,28 @@ export const BUILT_IN_AGENTS: BuiltInAgentMeta[] = [
   },
 ];
 
+export const BUILT_IN_AGENT_RUN_INTERVAL_DEFAULTS: Readonly<Record<string, number>> = {
+  director: 5,
+  "lorebook-keeper": 8,
+  "chat-summary": 5,
+};
+
+export function getDefaultBuiltInAgentSettings(agentType: string): Record<string, unknown> {
+  const builtIn = BUILT_IN_AGENTS.find((agent) => agent.id === agentType);
+  const settings: Record<string, unknown> = {};
+
+  if (builtIn?.defaultInjectAsSection) {
+    settings.injectAsSection = true;
+  }
+
+  const runInterval = BUILT_IN_AGENT_RUN_INTERVAL_DEFAULTS[agentType];
+  if (runInterval !== undefined) {
+    settings.runInterval = runInterval;
+  }
+
+  return settings;
+}
+
 /** Recommended default tools for each built-in agent type. */
 export const DEFAULT_AGENT_TOOLS: Record<string, string[]> = {
   "world-state": ["update_game_state"],

@@ -19,6 +19,12 @@ import {
 import type { GameSetupConfig, GameGmMode } from "@marinara-engine/shared";
 import { cn } from "../../lib/utils";
 import { Modal } from "../ui/Modal";
+import {
+  GenerationParametersFields,
+  getEditableGenerationParameters,
+  ROLEPLAY_PARAMETER_DEFAULTS,
+  type EditableGenerationParameters,
+} from "../ui/GenerationParametersEditor";
 import { useConnections } from "../../hooks/use-connections";
 import { usePersonas } from "../../hooks/use-characters";
 import { useSidecarStore } from "../../stores/sidecar.store";
@@ -82,6 +88,9 @@ export function GameSetupWizard({ onComplete, onCancel, isLoading, characters }:
   const [partySearch, setPartySearch] = useState("");
   const [personaId, setPersonaId] = useState<string | null>(null);
   const [gmConnectionId, setGmConnectionId] = useState<string | null>(null);
+  const [customizeParameters, setCustomizeParameters] = useState(false);
+  const [generationParameters, setGenerationParameters] =
+    useState<EditableGenerationParameters>(ROLEPLAY_PARAMETER_DEFAULTS);
   const [charConnectionId, setCharConnectionId] = useState<string | null>(null);
   const [sameConnection, setSameConnection] = useState(true);
   const [personaSearch, setPersonaSearch] = useState("");
@@ -119,8 +128,23 @@ export function GameSetupWizard({ onComplete, onCancel, isLoading, characters }:
   const { data: lorebooksList } = useLorebooks();
 
   const connections = useMemo(
-    () => (connectionsList as Array<{ id: string; name: string; model?: string; provider?: string }>) ?? [],
+    () =>
+      (connectionsList as Array<{
+        id: string;
+        name: string;
+        model?: string;
+        provider?: string;
+        defaultParameters?: string | null;
+      }>) ?? [],
     [connectionsList],
+  );
+  const selectedGmConnection = useMemo(
+    () => connections.find((connection) => connection.id === gmConnectionId) ?? null,
+    [connections, gmConnectionId],
+  );
+  const gmParameterDefaults = useMemo(
+    () => getEditableGenerationParameters(ROLEPLAY_PARAMETER_DEFAULTS, selectedGmConnection?.defaultParameters),
+    [selectedGmConnection?.defaultParameters],
   );
   const imageConnections = useMemo(() => connections.filter((c) => c.provider === "image_generation"), [connections]);
   const personas = useMemo(
@@ -203,6 +227,10 @@ export function GameSetupWizard({ onComplete, onCancel, isLoading, characters }:
     }
   }, []);
 
+  useEffect(() => {
+    setGenerationParameters(gmParameterDefaults);
+  }, [gmParameterDefaults]);
+
   const canStart = !!gmConnectionId;
 
   const handleComplete = () => {
@@ -229,6 +257,7 @@ export function GameSetupWizard({ onComplete, onCancel, isLoading, characters }:
         activeLorebookIds: activeLorebookIds.length > 0 ? activeLorebookIds : undefined,
         enableCustomWidgets,
         language: language.trim() || undefined,
+        generationParameters: customizeParameters ? generationParameters : undefined,
       },
       preferences,
       {
@@ -829,6 +858,43 @@ export function GameSetupWizard({ onComplete, onCancel, isLoading, characters }:
                   </option>
                 ))}
               </select>
+              <p className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[0.6875rem] leading-relaxed text-amber-100">
+                <span className="font-semibold text-amber-200">Warning!</span> It&apos;s recommended you use a strong
+                model (any SOTA one; the newest Opus, Gemini, GPT) for the initial generation for the best experience.
+                You can change the model later, after the initial generation (in Chat Settings -&gt; Connection).
+              </p>
+              <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
+                <button
+                  onClick={() => setCustomizeParameters((prev) => !prev)}
+                  className="flex w-full items-center justify-between gap-3 text-left"
+                >
+                  <div>
+                    <span className="block text-xs font-medium text-[var(--foreground)]">Customize Parameters</span>
+                    <span className="block text-[0.575rem] text-[var(--muted-foreground)]">
+                      Leave this off to use the selected connection&apos;s saved defaults for the initial world build
+                      and game chat.
+                    </span>
+                  </div>
+                  <div
+                    className={cn(
+                      "h-5 w-9 rounded-full p-0.5 transition-colors",
+                      customizeParameters ? "bg-[var(--primary)]" : "bg-[var(--muted-foreground)]/50",
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "h-4 w-4 rounded-full bg-white transition-transform",
+                        customizeParameters && "translate-x-3.5",
+                      )}
+                    />
+                  </div>
+                </button>
+                {customizeParameters && (
+                  <div className="mt-3 border-t border-[var(--border)] pt-3">
+                    <GenerationParametersFields value={generationParameters} onChange={setGenerationParameters} />
+                  </div>
+                )}
+              </div>
               {connections.length === 0 && (
                 <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
                   No connections configured. Add one in Settings → Connections.

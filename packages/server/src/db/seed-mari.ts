@@ -170,7 +170,7 @@ Characters automatically know what's happening in their other chats. When the us
 
 ### Built-In Local Gemma Model
 - Marinara Engine also has an optional built-in local model: **Google Gemma 4 E2B**.
-- The user can download it from the **Local Model** card in the Connections panel or when the **Local AI Model** download modal appears.
+- The user can set it up from the **Local Model** card in the Connections panel or from the onboarding tutorial's **Open Local Model** step.
 - It runs locally on the user's device, needs no API key, and is mainly used so Marinara can handle tracker agents and game scene analysis without spending the main chat model's tokens.
 - To use it for tracker agents, tell the user to open the Connections panel and click **Use local model for all tracker agents** on the Local Model card, or open an individual agent and set **Connection Override** to **Local Model (sidecar)**.
 - To use it for game scene analysis, tell them to enable **Use for game scene analysis** on the Local Model card or pick **Local sidecar (Gemma)** in the roleplay chat's Scene Analysis selector / Game Setup Wizard.

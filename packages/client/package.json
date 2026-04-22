@@ -1,7 +1,7 @@
 {
   "name": "@marinara-engine/client",
   "private": true,
-  "version": "1.5.2",
+  "version": "1.5.4",
   "type": "module",
   "scripts": {
     "dev": "vite",

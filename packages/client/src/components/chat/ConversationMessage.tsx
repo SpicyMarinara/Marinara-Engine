@@ -3,7 +3,19 @@
 // ──────────────────────────────────────────────
 import { useState, useCallback, useRef, useEffect, memo, useMemo, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Pencil, Trash2, Copy, RefreshCw, Eye, Brain, X, User, Languages } from "lucide-react";
+import {
+  Pencil,
+  Trash2,
+  Copy,
+  RefreshCw,
+  Eye,
+  Brain,
+  X,
+  User,
+  Languages,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import type { Message } from "@marinara-engine/shared";
 import { cn, copyToClipboard } from "../../lib/utils";
@@ -215,6 +227,7 @@ interface ConversationMessageProps {
   onDelete?: (messageId: string) => void;
   onRegenerate?: (messageId: string) => void;
   onEdit?: (messageId: string, content: string) => void;
+  onSetActiveSwipe?: (messageId: string, index: number) => void;
   onPeekPrompt?: () => void;
   isLastAssistantMessage?: boolean;
   characterMap?: CharacterMap;
@@ -239,6 +252,7 @@ export const ConversationMessage = memo(function ConversationMessage({
   onDelete,
   onRegenerate,
   onEdit,
+  onSetActiveSwipe,
   onPeekPrompt,
   isLastAssistantMessage,
   characterMap,
@@ -388,6 +402,28 @@ export const ConversationMessage = memo(function ConversationMessage({
   }, [message.content, segmentCount]);
 
   const thinking = extra?.thinking;
+  const swipeCount = message.swipeCount ?? 0;
+  const hasSwipes = swipeCount > 1;
+
+  const handleSwipePrev = useCallback(
+    (e?: React.MouseEvent<HTMLButtonElement>) => {
+      e?.stopPropagation();
+      if (message.activeSwipeIndex > 0) {
+        onSetActiveSwipe?.(message.id, message.activeSwipeIndex - 1);
+      }
+    },
+    [message.activeSwipeIndex, message.id, onSetActiveSwipe],
+  );
+
+  const handleSwipeNext = useCallback(
+    (e?: React.MouseEvent<HTMLButtonElement>) => {
+      e?.stopPropagation();
+      if (message.activeSwipeIndex < swipeCount - 1) {
+        onSetActiveSwipe?.(message.id, message.activeSwipeIndex + 1);
+      }
+    },
+    [message.activeSwipeIndex, message.id, onSetActiveSwipe, swipeCount],
+  );
 
   // Actions
   const handleCopy = useCallback(() => {
@@ -423,10 +459,44 @@ export const ConversationMessage = memo(function ConversationMessage({
   // System messages — minimal display
   if (isSystem) {
     return (
-      <div className="flex justify-center py-1">
-        <span className="rounded-full bg-[var(--secondary)] px-3 py-1 text-[0.6875rem] text-[var(--muted-foreground)]">
-          {message.content}
-        </span>
+      <div
+        className={cn(
+          "group flex justify-center py-1",
+          multiSelectMode && isSelected && "rounded-lg bg-[var(--destructive)]/10",
+        )}
+        onClick={(e) => {
+          if (multiSelectMode) {
+            onToggleSelect?.({
+              messageId: message.id,
+              orderIndex: messageOrderIndex ?? 0,
+              checked: !isSelected,
+              shiftKey: e.shiftKey,
+            });
+          } else {
+            setShowActions((v) => !v);
+          }
+        }}
+      >
+        <div className="relative">
+          {!multiSelectMode && onDelete && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(message.id);
+              }}
+              className={cn(
+                "absolute -right-1 -top-1 rounded-md p-1 text-white/20 opacity-0 transition-all hover:bg-red-500/20 hover:text-red-400 group-hover:opacity-100",
+                showActions && "opacity-100",
+              )}
+              title="Delete"
+            >
+              <Trash2 size="0.75rem" />
+            </button>
+          )}
+          <span className="rounded-full bg-[var(--secondary)] px-3 py-1 text-[0.6875rem] text-[var(--muted-foreground)]">
+            {message.content}
+          </span>
+        </div>
       </div>
     );
   }
@@ -578,6 +648,30 @@ export const ConversationMessage = memo(function ConversationMessage({
         {/* Streaming cursor */}
         {isStreaming && (
           <span className="ml-14 inline-block h-4 w-[0.125rem] animate-pulse rounded-full bg-[var(--foreground)]/50" />
+        )}
+
+        {!hideActions && hasSwipes && (
+          <div className="ml-14 mt-2 flex items-center gap-1.5 px-1 text-[0.6875rem] text-[var(--muted-foreground)]">
+            <button
+              className="rounded p-0.5 transition-colors hover:bg-[var(--accent)] disabled:opacity-30"
+              onClick={handleSwipePrev}
+              disabled={message.activeSwipeIndex <= 0}
+              title="Previous swipe"
+            >
+              <ChevronLeft size="0.75rem" />
+            </button>
+            <span className="tabular-nums">
+              {message.activeSwipeIndex + 1}/{swipeCount}
+            </span>
+            <button
+              className="rounded p-0.5 transition-colors hover:bg-[var(--accent)] disabled:opacity-30"
+              onClick={handleSwipeNext}
+              disabled={message.activeSwipeIndex >= swipeCount - 1}
+              title="Next swipe"
+            >
+              <ChevronRight size="0.75rem" />
+            </button>
+          </div>
         )}
 
         {/* Hover action bar */}
@@ -828,6 +922,30 @@ export const ConversationMessage = memo(function ConversationMessage({
                 </div>
               ) : null,
             )}
+          </div>
+        )}
+
+        {!hideActions && hasSwipes && (
+          <div className="mt-1.5 flex items-center gap-1.5 text-[0.6875rem] text-[var(--muted-foreground)]">
+            <button
+              className="rounded p-0.5 transition-colors hover:bg-[var(--accent)] disabled:opacity-30"
+              onClick={handleSwipePrev}
+              disabled={message.activeSwipeIndex <= 0}
+              title="Previous swipe"
+            >
+              <ChevronLeft size="0.75rem" />
+            </button>
+            <span className="tabular-nums">
+              {message.activeSwipeIndex + 1}/{swipeCount}
+            </span>
+            <button
+              className="rounded p-0.5 transition-colors hover:bg-[var(--accent)] disabled:opacity-30"
+              onClick={handleSwipeNext}
+              disabled={message.activeSwipeIndex >= swipeCount - 1}
+              title="Next swipe"
+            >
+              <ChevronRight size="0.75rem" />
+            </button>
           </div>
         )}
       </div>

@@ -1,7 +1,7 @@
 import { defineConfig } from "drizzle-kit";
 import dotenv from "dotenv";
-import { existsSync } from "fs";
-import { isAbsolute, resolve } from "path";
+import { existsSync, mkdirSync } from "fs";
+import { dirname, isAbsolute, resolve } from "path";
 
 const SERVER_ROOT = __dirname;
 const MONOREPO_ROOT = resolve(__dirname, "..", "..");
@@ -28,20 +28,36 @@ const dataDir = (() => {
   return raw ? resolveFromServerRoot(raw) : resolve(SERVER_ROOT, "data");
 })();
 
+const databaseFilePath = (() => {
+  const raw = normalizeEnvValue(process.env.DATABASE_URL);
+  if (!raw) return resolve(dataDir, "marinara-engine.db");
+  if (!raw.startsWith("file:")) return null;
+
+  const rawPath = raw.slice("file:".length);
+  if (!rawPath || rawPath === ":memory:" || rawPath.startsWith(":memory:")) return null;
+
+  return resolveFromServerRoot(rawPath);
+})();
+
+if (databaseFilePath) {
+  mkdirSync(dirname(databaseFilePath), { recursive: true });
+}
+
 const databaseUrl = (() => {
   const raw = normalizeEnvValue(process.env.DATABASE_URL);
-  if (!raw) return `file:${resolve(dataDir, "marinara-engine.db")}`;
+  if (!raw) return `file:${databaseFilePath ?? resolve(dataDir, "marinara-engine.db")}`;
   if (!raw.startsWith("file:")) return raw;
 
   const rawPath = raw.slice("file:".length);
   if (!rawPath || rawPath === ":memory:" || rawPath.startsWith(":memory:")) return raw;
 
-  return `file:${resolveFromServerRoot(rawPath)}`;
+  return `file:${databaseFilePath ?? resolveFromServerRoot(rawPath)}`;
 })();
 
 export default defineConfig({
   schema: [
     "./src/db/schema/chats.ts",
+    "./src/db/schema/chat-presets.ts",
     "./src/db/schema/characters.ts",
     "./src/db/schema/lorebooks.ts",
     "./src/db/schema/prompts.ts",
@@ -53,6 +69,8 @@ export default defineConfig({
     "./src/db/schema/checkpoints.ts",
     "./src/db/schema/regex-scripts.ts",
     "./src/db/schema/gallery.ts",
+    "./src/db/schema/themes.ts",
+    "./src/db/schema/app-settings.ts",
   ],
   out: "./src/db/migrations",
   dialect: "sqlite",

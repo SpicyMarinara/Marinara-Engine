@@ -1,5 +1,6 @@
 const XML_THINKING_BLOCK_RE = /^(\s*)<(think|thinking|thought)>([\s\S]*?)<\/\2>/i;
 const PIPE_THINKING_BLOCK_RE = /^(\s*)<\|think\|>([\s\S]*?)<\|\/think\|>/i;
+const CHANNEL_THINKING_BLOCK_RE = /^(\s*)<\|channel>thought\b([\s\S]*?)<channel\|>/i;
 
 export interface LeadingThinkingExtraction {
   content: string;
@@ -32,6 +33,15 @@ export function extractLeadingThinkingBlocks(text: string): LeadingThinkingExtra
       const thinking = pipeMatch[2]?.trim();
       if (thinking) chunks.push(thinking);
       remaining = remaining.slice(pipeMatch[0].length).trimStart();
+      continue;
+    }
+
+    const channelMatch = remaining.match(CHANNEL_THINKING_BLOCK_RE);
+    if (channelMatch) {
+      stripped = true;
+      const thinking = channelMatch[2]?.trim();
+      if (thinking) chunks.push(thinking);
+      remaining = remaining.slice(channelMatch[0].length).trimStart();
       continue;
     }
 

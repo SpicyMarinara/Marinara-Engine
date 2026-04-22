@@ -6,6 +6,7 @@ import {
   generateRequestSchema,
   BUILT_IN_TOOLS,
   BUILT_IN_AGENTS,
+  getDefaultBuiltInAgentSettings,
   findKnownModel,
   nameToXmlTag,
   DEFAULT_AGENT_TOOLS,
@@ -85,6 +86,15 @@ import {
   wrapFields,
   type SimpleMessage,
 } from "./generate/generate-route-utils.js";
+import {
+  buildHistoricalLorebookKeeperContext,
+  getLorebookKeeperAutomaticPendingCount,
+  getLorebookKeeperAutomaticTarget,
+  getLorebookKeeperSettings,
+  loadLorebookKeeperExistingEntries,
+  persistLorebookKeeperUpdates,
+  resolveLorebookKeeperTarget,
+} from "./generate/lorebook-keeper-utils.js";
 import { registerRetryAgentsRoute } from "./generate/retry-agents-route.js";
 import { sendSseEvent, startSseReply, trySendSseEvent } from "./generate/sse.js";
 import {
@@ -98,7 +108,7 @@ import {
 } from "../services/game/journal.service.js";
 import { buildGmSystemPrompt, buildGmFormatReminder, type GmPromptContext } from "../services/game/gm-prompts.js";
 import { syncGameMapPartyPosition } from "../services/game/map-position.service.js";
-import { applyAllSegmentEdits } from "../services/game/segment-edits.js";
+import { applyAllSegmentEdits, stripGmCommandTags } from "../services/game/segment-edits.js";
 import { listPartySprites } from "../services/game/sprite.service.js";
 import {
   generatePerceptionHints,
@@ -108,6 +118,12 @@ import {
 import { getMoraleTier, formatMoraleContext } from "../services/game/morale.service.js";
 import type { GameMap, GameNpc } from "@marinara-engine/shared";
 import { sidecarModelService } from "../services/sidecar/sidecar-model.service.js";
+
+function sanitizeConnectedGameTranscript(content: string): string {
+  return stripGmCommandTags(content)
+    .replace(/^\[(?:To the party|To the GM)\]\s*/i, "")
+    .trim();
+}
 import { isInferenceAvailable as isSidecarInferenceAvailable } from "../services/sidecar/sidecar-inference.service.js";
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
@@ -356,14 +372,17 @@ export async function generateRoutes(app: FastifyInstance) {
         }
       }
       let chatMessages = startIdx > 0 ? allChatMessages.slice(startIdx) : allChatMessages;
+      let lorebookKeeperMessages = startIdx > 0 ? allChatMessages.slice(startIdx) : allChatMessages;
 
       // ── Regeneration as swipe: exclude the target message from context ──
       if (input.regenerateMessageId) {
         chatMessages = chatMessages.filter((m: any) => m.id !== input.regenerateMessageId);
+        lorebookKeeperMessages = lorebookKeeperMessages.filter((m: any) => m.id !== input.regenerateMessageId);
       }
 
       // ── Context message limit (from chat metadata, off by default) ──
       const chatMeta = parseExtra(chat.metadata) as Record<string, unknown>;
+      const lorebookKeeperSettings = getLorebookKeeperSettings(chatMeta);
       const contextMessageLimit = chatMeta.contextMessageLimit as number | null;
       if (contextMessageLimit && contextMessageLimit > 0 && chatMessages.length > contextMessageLimit) {
         chatMessages = chatMessages.slice(-contextMessageLimit);
@@ -535,6 +554,7 @@ export async function generateRoutes(app: FastifyInstance) {
         images?: string[];
         providerMetadata?: Record<string, unknown>;
       }> = mappedMessages;
+      let conversationCommandsReminder: string | null = null;
       let temperature = 1;
       let maxTokens = 4096;
       let topP: number | undefined = 1;
@@ -808,6 +828,13 @@ export async function generateRoutes(app: FastifyInstance) {
         const fmtTime = (ts: Date) =>
           `${String(ts.getHours()).padStart(2, "0")}:${String(ts.getMinutes()).padStart(2, "0")}`;
 
+        // Strip leaked [HH:MM] or [DD.MM.YYYY] timestamps that models sometimes echo
+        const stripLeakedTimestamps = (text: string) =>
+          text
+            .replace(/^(\s*\[\d{1,2}[:.]\d{2}\]\s*)+/gm, "")
+            .replace(/^(\s*\[\d{1,2}\.\d{1,2}\.\d{4}\]\s*)+/gm, "")
+            .trim();
+
         // Build character name lookup for past-day author attribution
         const charIdToName = new Map<string, string>();
         for (let ci = 0; ci < characterIds.length; ci++) {
@@ -846,14 +873,17 @@ export async function generateRoutes(app: FastifyInstance) {
               buckets.push(currentBucket);
               currentBucket = null;
             }
-            buckets.push({ ...msg, content: `[${fmtTime(ts)}] ${msg.content}` });
+            buckets.push({ ...msg, content: `[${fmtTime(ts)}] ${stripLeakedTimestamps(msg.content)}` });
           } else {
             const dateKey = fmtDate(ts);
             if (currentBucket && currentBucket.date === dateKey) {
-              currentBucket.msgs.push({ ...msg, author });
+              currentBucket.msgs.push({ ...msg, content: stripLeakedTimestamps(msg.content), author });
             } else {
               if (currentBucket) buckets.push(currentBucket);
-              currentBucket = { date: dateKey, msgs: [{ ...msg, author }] };
+              currentBucket = {
+                date: dateKey,
+                msgs: [{ ...msg, content: stripLeakedTimestamps(msg.content), author }],
+              };
             }
           }
         }
@@ -1349,7 +1379,7 @@ export async function generateRoutes(app: FastifyInstance) {
 
           const commandLines: string[] = [
             `<commands>`,
-            `You have access to hidden commands that the user won't see in the chat. They are silently processed by the system. Use them when appropriate:`,
+            `Reminder: these are optional hidden commands you may use if you wish to. The user won't see the commands themselves; they are silently processed by the system. Only use them when they genuinely fit the conversation:`,
             ``,
             `1. SCHEDULE UPDATE — Change your own status/activity. Use this when the user asks you to stop what you're doing, or when you decide to change your plans.`,
             `   Format: [schedule_update: status="online", activity="free time"]`,
@@ -1452,11 +1482,11 @@ export async function generateRoutes(app: FastifyInstance) {
           }
 
           commandLines.push(
-            `IMPORTANT: Commands are stripped from your message before the user sees it. The rest of your message is shown normally. You can include multiple commands in one message. Only use commands when it makes sense in context — don't overuse them.`,
+            `IMPORTANT: Commands are stripped from your message before the user sees it. The rest of your message is shown normally. You can include multiple commands in one message, but you do not need to use any of them unless it makes sense in context.`,
             `</commands>`,
           );
 
-          conversationSystemPrompt += "\n\n" + commandLines.join("\n");
+          conversationCommandsReminder = commandLines.join("\n");
         }
 
         // ── Professor Mari: inject assistant knowledge & commands ──
@@ -1602,21 +1632,24 @@ export async function generateRoutes(app: FastifyInstance) {
           );
         }
 
-        // ── Connected Roleplay context: inject RP summary + last messages ──
-        let connectedRpBlock: string | null = null;
+        // ── Connected chat context: inject linked roleplay/game details ──
+        let connectedChatBlock: string | null = null;
         if (chat.connectedChatId) {
-          const rpChat = await chats.getById(chat.connectedChatId as string);
-          if (rpChat && rpChat.mode === "roleplay") {
-            const rpMeta = typeof rpChat.metadata === "string" ? JSON.parse(rpChat.metadata) : (rpChat.metadata ?? {});
+          const connectedChat = await chats.getById(chat.connectedChatId as string);
+          if (connectedChat && connectedChat.mode === "roleplay") {
+            const rpMeta =
+              typeof connectedChat.metadata === "string"
+                ? JSON.parse(connectedChat.metadata)
+                : (connectedChat.metadata ?? {});
             const rpSummary = (rpMeta.summary as string) ?? null;
-            const rpMessages = await chats.listMessages(rpChat.id);
+            const rpMessages = await chats.listMessages(connectedChat.id);
             const recentRp = rpMessages.slice(-20);
 
             // Resolve character names for the RP
             const rpCharIds: string[] =
-              typeof rpChat.characterIds === "string"
-                ? JSON.parse(rpChat.characterIds as string)
-                : (rpChat.characterIds as string[]);
+              typeof connectedChat.characterIds === "string"
+                ? JSON.parse(connectedChat.characterIds as string)
+                : (connectedChat.characterIds as string[]);
             const rpCharNames = new Map<string, string>();
             for (const cid of rpCharIds) {
               const row = await chars.getById(cid);
@@ -1626,7 +1659,7 @@ export async function generateRoutes(app: FastifyInstance) {
               }
             }
 
-            const rpLines: string[] = [`<connected_roleplay name="${rpChat.name}">`];
+            const rpLines: string[] = [`<connected_roleplay name="${connectedChat.name}">`];
             if (rpSummary) rpLines.push(`<summary>${rpSummary}</summary>`);
             rpLines.push(`<recent_messages>`);
             for (const m of recentRp) {
@@ -1641,14 +1674,13 @@ export async function generateRoutes(app: FastifyInstance) {
             rpLines.push(`</recent_messages>`);
             rpLines.push(`</connected_roleplay>`);
 
-            connectedRpBlock = rpLines.join("\n");
+            connectedChatBlock = rpLines.join("\n");
 
-            // Add influence instruction into the system prompt
             conversationSystemPrompt +=
               "\n\n" +
               [
                 `<connected_roleplay_instructions>`,
-                `You have access to context from a connected roleplay: "${rpChat.name}".`,
+                `You have access to context from a connected roleplay: "${connectedChat.name}".`,
                 `The summary and recent messages from that roleplay are provided so you can naturally reference or discuss events happening there.`,
                 ``,
                 `If something said in THIS conversation should affect or influence the roleplay, you can create an influence tag:`,
@@ -1659,6 +1691,94 @@ export async function generateRoutes(app: FastifyInstance) {
                 `Influences are injected into the roleplay's context before the next generation. Use them sparingly — only when conversation content genuinely should cross over into the roleplay.`,
                 `The influence tag is stripped from your visible message. The rest of your response is shown normally.`,
                 `</connected_roleplay_instructions>`,
+              ].join("\n");
+          } else if (connectedChat && connectedChat.mode === "game") {
+            const gameMeta =
+              typeof connectedChat.metadata === "string"
+                ? JSON.parse(connectedChat.metadata)
+                : (connectedChat.metadata ?? {});
+            const sessionNumber = (gameMeta.gameSessionNumber as number) ?? 1;
+            const sessionStatus = (gameMeta.gameSessionStatus as string) ?? "setup";
+            const activeState = (gameMeta.gameActiveState as string) ?? "exploration";
+            const storedSummaries = Array.isArray(gameMeta.gamePreviousSessionSummaries)
+              ? (gameMeta.gamePreviousSessionSummaries as Array<{
+                  summary?: string;
+                  partyDynamics?: string;
+                  keyDiscoveries?: string[];
+                }>)
+              : [];
+            const latestSummary = storedSummaries[storedSummaries.length - 1] ?? null;
+            const gameMessages = await chats.listMessages(connectedChat.id);
+            const recentGame = gameMessages.slice(-20);
+            const latestConnectedState =
+              (await gameStateStore.getLatestCommitted(connectedChat.id)) ??
+              (await gameStateStore.getLatest(connectedChat.id));
+            const linkedGameState = latestConnectedState
+              ? parseGameStateRow(latestConnectedState as Record<string, unknown>)
+              : null;
+
+            const gameLines: string[] = [`<connected_game name="${connectedChat.name}">`];
+            gameLines.push(`<status>Session ${sessionNumber} (${sessionStatus}), state: ${activeState}</status>`);
+            if (linkedGameState) {
+              const sceneDetails = [
+                linkedGameState.location ? `Location: ${linkedGameState.location}` : null,
+                linkedGameState.time ? `Time: ${linkedGameState.time}` : null,
+                linkedGameState.date ? `Date: ${linkedGameState.date}` : null,
+                linkedGameState.weather ? `Weather: ${linkedGameState.weather}` : null,
+                linkedGameState.temperature ? `Temperature: ${linkedGameState.temperature}` : null,
+              ].filter(Boolean);
+              if (sceneDetails.length > 0) {
+                gameLines.push(`<scene>${sceneDetails.join(" | ")}</scene>`);
+              }
+              if (linkedGameState.presentCharacters.length > 0) {
+                gameLines.push(
+                  `<present_characters>${linkedGameState.presentCharacters.map((c) => c.name).join(", ")}</present_characters>`,
+                );
+              }
+              if (linkedGameState.recentEvents.length > 0) {
+                gameLines.push(`<recent_events>`);
+                for (const event of linkedGameState.recentEvents.slice(-5)) {
+                  gameLines.push(`- ${event.slice(0, 300)}`);
+                }
+                gameLines.push(`</recent_events>`);
+              }
+            }
+            if (latestSummary?.summary) {
+              gameLines.push(`<latest_session_summary>${latestSummary.summary}</latest_session_summary>`);
+              if (latestSummary.partyDynamics) {
+                gameLines.push(`<party_dynamics>${latestSummary.partyDynamics}</party_dynamics>`);
+              }
+              if (Array.isArray(latestSummary.keyDiscoveries) && latestSummary.keyDiscoveries.length > 0) {
+                gameLines.push(`<key_discoveries>${latestSummary.keyDiscoveries.join("; ")}</key_discoveries>`);
+              }
+            }
+            gameLines.push(`<recent_messages>`);
+            for (const m of recentGame) {
+              const speaker = m.role === "user" ? personaName : m.role === "narrator" ? "Narrator" : "Game Master";
+              const content = sanitizeConnectedGameTranscript(m.content as string);
+              if (!content) continue;
+              gameLines.push(`[${speaker}]: ${content.slice(0, 500)}`);
+            }
+            gameLines.push(`</recent_messages>`);
+            gameLines.push(`</connected_game>`);
+
+            connectedChatBlock = gameLines.join("\n");
+
+            conversationSystemPrompt +=
+              "\n\n" +
+              [
+                `<connected_game_instructions>`,
+                `You have access to context from a connected game: "${connectedChat.name}".`,
+                `The current scene, session summary, and recent game messages are provided so you can naturally answer questions or comment on what is happening in that game.`,
+                ``,
+                `If something said in THIS conversation should affect or influence the game, you can create an influence tag:`,
+                `<influence>description of what should happen or change in the game based on this conversation</influence>`,
+                `Example: if the group agrees they want to visit the merchant district next, you could respond normally AND include:`,
+                `<influence>The group agreed they want to head to the merchant district next and look for supplies.</influence>`,
+                ``,
+                `Influences are injected into the game's context before the next generation. Use them sparingly — only when conversation content genuinely should cross over into the game.`,
+                `The influence tag is stripped from your visible message. The rest of your response is shown normally.`,
+                `</connected_game_instructions>`,
               ].join("\n");
           }
         }
@@ -1686,7 +1806,7 @@ export async function generateRoutes(app: FastifyInstance) {
         finalMessages = [
           { role: "system" as const, content: conversationSystemPrompt },
           ...finalMessages,
-          ...(connectedRpBlock ? [{ role: "user" as const, content: connectedRpBlock }] : []),
+          ...(connectedChatBlock ? [{ role: "user" as const, content: connectedChatBlock }] : []),
           { role: "user" as const, content: contextBlock },
         ];
 
@@ -1738,16 +1858,18 @@ export async function generateRoutes(app: FastifyInstance) {
         ]);
       }
 
-      // ── Roleplay: inject pending OOC influences from connected conversation ──
+      // ── Roleplay/Game: inject pending OOC influences from connected conversation ──
       // Skip OOC injection entirely for scene chats — scenes are self-contained
       const isSceneChat = chatMeta.sceneStatus === "active";
-      if (chatMode === "roleplay" && chat.connectedChatId && !isSceneChat) {
+      if ((chatMode === "roleplay" || chatMode === "game") && chat.connectedChatId && !isSceneChat) {
         const pendingInfluences = await chats.listPendingInfluences(input.chatId);
         if (pendingInfluences.length > 0) {
           const influenceLines = pendingInfluences.map((inf: any) => `- ${inf.content}`);
           const influenceBlock = [
             `<ooc_influences>`,
-            `The following out-of-character notes come from a connected conversation. They represent things the players discussed or decided outside of the roleplay. Weave them naturally into the story — don't mention them explicitly as "OOC" in the narrative.`,
+            chatMode === "game"
+              ? `The following out-of-character notes come from a connected conversation. They represent things the players discussed or decided outside the game. Use them to steer the next scene, NPC reactions, objectives, or world state when appropriate — don't mention them explicitly as "OOC" in the narrative.`
+              : `The following out-of-character notes come from a connected conversation. They represent things the players discussed or decided outside of the roleplay. Weave them naturally into the story — don't mention them explicitly as "OOC" in the narrative.`,
             ...influenceLines,
             `</ooc_influences>`,
           ].join("\n");
@@ -1765,7 +1887,9 @@ export async function generateRoutes(app: FastifyInstance) {
             await chats.markInfluenceConsumed(inf.id);
           }
         }
+      }
 
+      if (chatMode === "roleplay" && chat.connectedChatId && !isSceneChat) {
         // Add <ooc> instruction: characters can post comments to the connected conversation
         const convChat = await chats.getById(chat.connectedChatId as string);
         if (convChat && convChat.mode === "conversation") {
@@ -1814,10 +1938,12 @@ export async function generateRoutes(app: FastifyInstance) {
         verbosity = null;
       } else if (chatMode === "game") {
         // Local Gemma: just ensure generous output
-        maxTokens = Math.max(maxTokens, 8192);
+        if (typeof chatParams?.maxTokens !== "number") {
+          maxTokens = Math.max(maxTokens, 8192);
+        }
       }
 
-      if (chatParams && chatMode !== "game") {
+      if (chatParams) {
         if (typeof chatParams.temperature === "number") temperature = chatParams.temperature;
         if (typeof chatParams.maxTokens === "number") maxTokens = chatParams.maxTokens;
         topP = normalizeChatTopP(chatParams.topP) ?? topP;
@@ -1981,7 +2107,7 @@ export async function generateRoutes(app: FastifyInstance) {
           phase: builtIn.phase,
           promptTemplate: "",
           connectionId: defaultAgentConn?.id ?? null,
-          settings: {},
+          settings: getDefaultBuiltInAgentSettings(builtIn.id),
           provider: builtInCached?.provider ?? provider,
           model: builtInCached?.model ?? conn.model,
         });
@@ -2033,6 +2159,47 @@ export async function generateRoutes(app: FastifyInstance) {
           });
         }
       }
+
+      let resolvedGameDiscordSpeakerName: string | null = null;
+      let gameDiscordSpeakerResolved = false;
+
+      const resolveGameDiscordSpeakerName = async (): Promise<string> => {
+        if (gameDiscordSpeakerResolved) {
+          return resolvedGameDiscordSpeakerName ?? "Narrator";
+        }
+
+        gameDiscordSpeakerResolved = true;
+        const gmMode = typeof earlyMeta.gameGmMode === "string" ? earlyMeta.gameGmMode : "";
+        const gmCharacterId =
+          typeof earlyMeta.gameGmCharacterId === "string" && earlyMeta.gameGmCharacterId.trim()
+            ? earlyMeta.gameGmCharacterId.trim()
+            : null;
+
+        if (chatMode === "game" && gmMode === "character" && gmCharacterId) {
+          const knownCharacter = charInfo.find((character) => character.id === gmCharacterId);
+          if (knownCharacter?.name) {
+            resolvedGameDiscordSpeakerName = knownCharacter.name;
+            return knownCharacter.name;
+          }
+
+          const gmRow = await chars.getById(gmCharacterId);
+          if (gmRow) {
+            try {
+              const gmData = JSON.parse(gmRow.data as string);
+              if (typeof gmData.name === "string" && gmData.name.trim()) {
+                const gmName = gmData.name.trim();
+                resolvedGameDiscordSpeakerName = gmName;
+                return gmName;
+              }
+            } catch {
+              /* ignore malformed GM card data */
+            }
+          }
+        }
+
+        resolvedGameDiscordSpeakerName = "Narrator";
+        return "Narrator";
+      };
 
       // ── Fallback: inject character & persona info if the preset didn't include them ──
       // In game mode the GM prompt already includes party members and player persona
@@ -2515,10 +2682,15 @@ export async function generateRoutes(app: FastifyInstance) {
 
         // Inject the output format + commands as the last user message so they
         // sit closest to generation in the model's attention window.
-        // Detect talk-to-party toggle from the latest user message so the prompt
-        // block is only sent when actually relevant.
+        // Detect special address prefixes from the latest user message so the
+        // prompt block is only sent when actually relevant.
         const latestUserMsg = [...finalMessages].reverse().find((m) => m.role === "user");
-        const talkToParty = !!latestUserMsg?.content.trimStart().startsWith("[To the party]");
+        const latestUserContent = latestUserMsg?.content.trimStart() ?? "";
+        const addressMode = latestUserContent.startsWith("[To the party]")
+          ? "party"
+          : latestUserContent.startsWith("[To the GM]")
+            ? "gm"
+            : undefined;
         const formatReminder = buildGmFormatReminder({
           hasSceneModel,
           hudWidgets: gmCtx.hudWidgets,
@@ -2530,7 +2702,7 @@ export async function generateRoutes(app: FastifyInstance) {
           playerName: gmCtx.playerName,
           characterSprites: gmCtx.characterSprites,
           language: gmCtx.language,
-          talkToParty,
+          addressMode,
           playerInventory: (() => {
             try {
               const inv = (chatMeta.gameInventory as Array<{ name: string; quantity: number }>) ?? [];
@@ -2643,6 +2815,14 @@ export async function generateRoutes(app: FastifyInstance) {
           console.error("[memory-recall] Recall failed, skipping:", err);
         }
         console.log(`[timing] Memory recall: ${Date.now() - _tRecall}ms`);
+      }
+
+      if (chatMode === "conversation" && conversationCommandsReminder && !input.impersonate) {
+        finalMessages.push({ role: "user" as const, content: conversationCommandsReminder });
+        console.log(
+          "[generate/conversation] Injected commands reminder (%d chars) as last user message",
+          conversationCommandsReminder.length,
+        );
       }
 
       // ── Group chat processing ──
@@ -2788,58 +2968,70 @@ export async function generateRoutes(app: FastifyInstance) {
         signal: abortController.signal,
       };
 
+      // ── Interval gating: Narrative Director only intervenes every N assistant messages ──
+      const directorAgent = resolvedAgents.find((a) => a.type === "director");
+      if (directorAgent) {
+        const runInterval =
+          (directorAgent.settings.runInterval as number) ??
+          (getDefaultBuiltInAgentSettings("director").runInterval as number) ??
+          5;
+        if (runInterval > 1) {
+          const lastRun = await agentsStore.getLastSuccessfulRunByType("director", input.chatId);
+          if (lastRun) {
+            const lastRunMsgId = lastRun.messageId;
+            const lastRunIdx = allChatMessages.findIndex((m: any) => m.id === lastRunMsgId);
+            const assistantMsgsSince =
+              lastRunIdx >= 0 ? allChatMessages.slice(lastRunIdx + 1).filter((m: any) => m.role === "assistant") : [];
+            if (assistantMsgsSince.length + 1 < runInterval) {
+              resolvedAgents.splice(resolvedAgents.indexOf(directorAgent), 1);
+            }
+          }
+        }
+      }
+
       // Populate writable lorebook IDs for the lorebook-keeper agent
       if (resolvedAgents.some((a) => a.type === "lorebook-keeper")) {
-        // Only consider lorebooks that are relevant to THIS chat:
-        //  - explicitly activated for this chat (activeLorebookIds)
-        //  - linked to a character in this chat
-        //  - scoped to this chat via chatId
-        const allBooks = await lorebooksStore.list();
-        const relevantBooks = allBooks.filter((b: any) => {
-          if (b.enabled !== true && b.enabled !== "true") return false;
-          if (chatActiveLorebookIds.includes(b.id)) return true;
-          if (b.characterId && characterIds.includes(b.characterId)) return true;
-          if (b.chatId && b.chatId === input.chatId) return true;
-          return false;
+        const { writableLorebookIds, targetLorebookId, targetLorebookName } = await resolveLorebookKeeperTarget({
+          lorebooksStore,
+          chatId: input.chatId,
+          characterIds,
+          activeLorebookIds: chatActiveLorebookIds,
+          preferredTargetLorebookId: lorebookKeeperSettings.targetLorebookId,
         });
-        // Sort: prefer chat-scoped lorebooks first (from Lorebook Keeper), then character, then manual
-        relevantBooks.sort((a: any, b: any) => {
-          const aChat = a.chatId === input.chatId ? 0 : 1;
-          const bChat = b.chatId === input.chatId ? 0 : 1;
-          return aChat - bChat;
-        });
-        const enabledIds = relevantBooks.map((b: any) => b.id);
-        agentContext.writableLorebookIds = enabledIds;
+        agentContext.writableLorebookIds = writableLorebookIds;
+        if (targetLorebookId) {
+          agentContext.memory._lorebookKeeperTargetLorebookId = targetLorebookId;
+        }
+        if (targetLorebookName) {
+          agentContext.memory._lorebookKeeperTargetLorebookName = targetLorebookName;
+        }
 
         // ── Interval gating: only run every N assistant messages ──
         const lkAgent = resolvedAgents.find((a) => a.type === "lorebook-keeper")!;
         const runInterval = (lkAgent.settings.runInterval as number) ?? 8;
-        if (runInterval > 1) {
-          const lastRun = await agentsStore.getLastSuccessfulRunByType("lorebook-keeper", input.chatId);
-          if (lastRun) {
-            const lastRunMsgId = lastRun.messageId;
-            const lastRunIdx = allChatMessages.findIndex((m: any) => m.id === lastRunMsgId);
-            const messagesAfter =
-              lastRunIdx >= 0 ? allChatMessages.slice(lastRunIdx + 1).filter((m: any) => m.role === "assistant") : [];
-            if (messagesAfter.length + 1 < runInterval) {
-              // Not enough messages since last run — remove from pipeline
-              resolvedAgents.splice(resolvedAgents.indexOf(lkAgent), 1);
-            }
-          }
-          // First run ever: allow it to proceed
+        const lastRun = await agentsStore.getLastSuccessfulRunByType("lorebook-keeper", input.chatId);
+        const pendingLorebookMessages = getLorebookKeeperAutomaticPendingCount(
+          lorebookKeeperMessages,
+          lorebookKeeperSettings.readBehindMessages,
+          lastRun?.messageId ?? null,
+        );
+        const historicalLorebookTarget = getLorebookKeeperAutomaticTarget(
+          lorebookKeeperMessages,
+          lorebookKeeperSettings.readBehindMessages,
+        );
+        if (lorebookKeeperSettings.readBehindMessages > 0 && !historicalLorebookTarget) {
+          resolvedAgents.splice(resolvedAgents.indexOf(lkAgent), 1);
+        } else if (runInterval > 1 && pendingLorebookMessages < runInterval) {
+          // Not enough canon messages since the last successful run — remove from pipeline.
+          resolvedAgents.splice(resolvedAgents.indexOf(lkAgent), 1);
         }
 
-        // ── Feed existing entry names to the agent for deduplication ──
-        if (resolvedAgents.some((a) => a.type === "lorebook-keeper") && enabledIds.length > 0) {
+        // ── Feed existing target-lorebook entries to the agent for deduplication ──
+        if (resolvedAgents.some((a) => a.type === "lorebook-keeper")) {
           try {
-            const existingEntries = await lorebooksStore.listEntriesByLorebooks(enabledIds);
-            const entryNames = existingEntries.map((e: any) => ({
-              name: e.name,
-              keys: e.keys,
-              locked: e.locked === true || e.locked === "true",
-            }));
-            if (entryNames.length > 0) {
-              agentContext.memory._existingLorebookEntries = entryNames;
+            const existingEntries = await loadLorebookKeeperExistingEntries(lorebooksStore, targetLorebookId);
+            if (existingEntries.length > 0) {
+              agentContext.memory._existingLorebookEntries = existingEntries;
             }
           } catch {
             /* non-critical */
@@ -3229,7 +3421,8 @@ export async function generateRoutes(app: FastifyInstance) {
 
       // Create the pipeline (exclude editor — it runs last, after all other agents)
       const editorAgent = resolvedAgents.find((a) => a.type === "editor");
-      let pipelineAgents = editorAgent ? resolvedAgents.filter((a) => a.type !== "editor") : resolvedAgents;
+      const lorebookKeeperAgent = resolvedAgents.find((a) => a.type === "lorebook-keeper") ?? null;
+      let pipelineAgents = resolvedAgents.filter((a) => a.type !== "editor" && a.type !== "lorebook-keeper");
 
       // When manualTrackers is enabled, strip tracker-category agents from the
       // automatic pipeline — the user will trigger them manually via retry-agents.
@@ -3889,11 +4082,19 @@ export async function generateRoutes(app: FastifyInstance) {
 
       // ── Impersonate: inject instruction to respond as the user's character ──
       if (input.impersonate) {
+        const rawImpersonationDirection = input.userMessage?.trim() ?? "";
+        const legacyDirectionMatch = rawImpersonationDirection.match(
+          /^\[Impersonation instruction — write \{\{user\}\}'s next response, steering it toward the following:\s*([\s\S]+?)\]$/,
+        );
+        const impersonationDirection = legacyDirectionMatch
+          ? legacyDirectionMatch[1]!.trim()
+          : rawImpersonationDirection;
         const impersonateInstruction = [
           `<instruction>`,
           `You are now writing as ${personaName}, the user's character.`,
           `Study ${personaName}'s previous messages in the conversation and replicate their voice, mannerisms, speech patterns, and style as closely as possible.`,
           personaDescription ? `Character description: ${personaDescription}` : "",
+          impersonationDirection ? `Additional direction for this reply: ${impersonationDirection}` : "",
           `Write a single in-character response from ${personaName}'s perspective. Do NOT break character or add meta-commentary. Respond exactly as ${personaName} would.`,
           `</instruction>`,
         ]
@@ -4273,6 +4474,13 @@ export async function generateRoutes(app: FastifyInstance) {
                   usage.promptTokens += result.usage.promptTokens;
                   usage.completionTokens += result.usage.completionTokens;
                   usage.totalTokens += result.usage.totalTokens;
+                  if (result.usage.cachedPromptTokens != null) {
+                    usage.cachedPromptTokens = (usage.cachedPromptTokens ?? 0) + result.usage.cachedPromptTokens;
+                  }
+                  if (result.usage.cacheWritePromptTokens != null) {
+                    usage.cacheWritePromptTokens =
+                      (usage.cacheWritePromptTokens ?? 0) + result.usage.cacheWritePromptTokens;
+                  }
                 }
               }
               finishReason = result.finishReason;
@@ -4382,6 +4590,13 @@ export async function generateRoutes(app: FastifyInstance) {
                     usage.promptTokens += finalResult.usage.promptTokens;
                     usage.completionTokens += finalResult.usage.completionTokens;
                     usage.totalTokens += finalResult.usage.totalTokens;
+                    if (finalResult.usage.cachedPromptTokens != null) {
+                      usage.cachedPromptTokens = (usage.cachedPromptTokens ?? 0) + finalResult.usage.cachedPromptTokens;
+                    }
+                    if (finalResult.usage.cacheWritePromptTokens != null) {
+                      usage.cacheWritePromptTokens =
+                        (usage.cacheWritePromptTokens ?? 0) + finalResult.usage.cacheWritePromptTokens;
+                    }
                   }
                 }
                 finishReason = finalResult.finishReason;
@@ -4452,6 +4667,8 @@ export async function generateRoutes(app: FastifyInstance) {
                   tokensPrompt: usage?.promptTokens ?? null,
                   tokensCompletion: usage?.completionTokens ?? null,
                   tokensTotal: usage?.totalTokens ?? null,
+                  tokensCachedPrompt: usage?.cachedPromptTokens ?? null,
+                  tokensCacheWritePrompt: usage?.cacheWritePromptTokens ?? null,
                   durationMs,
                   finishReason: finishReason ?? null,
                 },
@@ -4524,6 +4741,20 @@ export async function generateRoutes(app: FastifyInstance) {
             }
           }
 
+          // ── Strip leaked timestamps from conversation mode responses ──
+          // Models sometimes echo [HH:MM] timestamps despite instructions not to.
+          // Strip them before storage to prevent compounding on future generations.
+          if (chatMode === "conversation" && !input.impersonate) {
+            const beforeStrip = fullResponse;
+            fullResponse = fullResponse
+              .replace(/^(\s*\[\d{1,2}[:.]\d{2}\]\s*)+/gm, "")
+              .replace(/^(\s*\[\d{1,2}\.\d{1,2}\.\d{4}\]\s*)+/gm, "")
+              .trim();
+            if (fullResponse !== beforeStrip) {
+              contentReplaced = true;
+            }
+          }
+
           if (contentReplaced) {
             reply.raw.write(`data: ${JSON.stringify({ type: "content_replace", data: fullResponse })}\n\n`);
           }
@@ -4565,6 +4796,8 @@ export async function generateRoutes(app: FastifyInstance) {
                 verbosity: verbosity ?? null,
                 tokensPrompt: usage?.promptTokens ?? null,
                 tokensCompletion: usage?.completionTokens ?? null,
+                tokensCachedPrompt: usage?.cachedPromptTokens ?? null,
+                tokensCacheWritePrompt: usage?.cacheWritePromptTokens ?? null,
                 durationMs,
                 finishReason: finishReason ?? null,
               },
@@ -4619,7 +4852,10 @@ export async function generateRoutes(app: FastifyInstance) {
 
           // Mirror character response to Discord (fire-and-forget, skip regens/swipes)
           if (discordWebhookUrl && fullResponse.trim() && !input.impersonate && !input.regenerateMessageId) {
-            const charName = charInfo.find((c) => c.id === targetCharId)?.name ?? "Character";
+            const charName =
+              chatMode === "game"
+                ? await resolveGameDiscordSpeakerName()
+                : (charInfo.find((c) => c.id === targetCharId)?.name ?? "Character");
             postToDiscordWebhook(discordWebhookUrl, { content: fullResponse, username: charName });
           }
 
@@ -4710,6 +4946,7 @@ export async function generateRoutes(app: FastifyInstance) {
 
       const hasPostProcessingAgents = resolvedAgents.some((a) => a.phase === "post_processing");
       const combinedResponse = allResponses.join("\n\n");
+      let lorebookKeeperProcessedMessageId = "";
       // Illustration runs asynchronously so it doesn't block other agents
       let pendingIllustration: Promise<void> | null = null;
       const hasPostWork = hasPostProcessingAgents || parallelResults.length > 0;
@@ -4719,7 +4956,8 @@ export async function generateRoutes(app: FastifyInstance) {
         // Emit debug info for post-processing agents
         if (input.debugMode) {
           const postAgents = pipelineAgents.filter((a) => a.phase === "post_processing");
-          const maxPerAgent = Math.max(...postAgents.map((a) => (a.settings.maxTokens as number) ?? 4096));
+          const maxPerAgent =
+            postAgents.length > 0 ? Math.max(...postAgents.map((a) => (a.settings.maxTokens as number) ?? 4096)) : 4096;
           const batchTokens = Math.max(maxPerAgent * postAgents.length, 16384);
           reply.raw.write(
             `data: ${JSON.stringify({
@@ -4742,15 +4980,51 @@ export async function generateRoutes(app: FastifyInstance) {
           ? [...(await pipeline.postGenerate(combinedResponse)), ...parallelResults]
           : [...parallelResults];
 
+        if (lorebookKeeperAgent) {
+          const historicalLorebookTarget = getLorebookKeeperAutomaticTarget(
+            lorebookKeeperMessages,
+            lorebookKeeperSettings.readBehindMessages,
+          );
+          const lorebookKeeperContext = historicalLorebookTarget
+            ? buildHistoricalLorebookKeeperContext(agentContext, lorebookKeeperMessages, historicalLorebookTarget.id)
+            : { ...agentContext, mainResponse: combinedResponse };
+          const processedMessageId = historicalLorebookTarget?.id ?? (lastSavedMsg as any)?.id ?? "";
+
+          if (lorebookKeeperContext && processedMessageId) {
+            lorebookKeeperProcessedMessageId = processedMessageId;
+            const lorebookKeeperResult = await executeAgent(
+              lorebookKeeperAgent,
+              lorebookKeeperContext,
+              lorebookKeeperAgent.provider,
+              lorebookKeeperAgent.model,
+            );
+            sendAgentEvent(lorebookKeeperResult);
+            postResults.push(lorebookKeeperResult);
+          }
+        }
+
         // ── Auto-retry failed agents once ──
         const failedResults = postResults.filter((r) => !r.success);
         if (failedResults.length > 0 && !abortController.signal.aborted) {
           const retryResults: AgentResult[] = [];
           for (const failed of failedResults) {
-            const agentCfg = pipelineAgents.find((a) => a.type === failed.agentType);
+            const agentCfg = resolvedAgents.find((a) => a.type === failed.agentType && a.type !== "editor");
             if (!agentCfg) continue;
             try {
-              const retryCtx: AgentContext = { ...agentContext, mainResponse: combinedResponse };
+              const historicalLorebookTarget =
+                failed.agentType === "lorebook-keeper"
+                  ? getLorebookKeeperAutomaticTarget(lorebookKeeperMessages, lorebookKeeperSettings.readBehindMessages)
+                  : null;
+              const retryCtx: AgentContext = historicalLorebookTarget
+                ? (buildHistoricalLorebookKeeperContext(
+                    agentContext,
+                    lorebookKeeperMessages,
+                    historicalLorebookTarget.id,
+                  ) ?? {
+                    ...agentContext,
+                    mainResponse: combinedResponse,
+                  })
+                : { ...agentContext, mainResponse: combinedResponse };
               const retried = await executeAgent(agentCfg, retryCtx, agentCfg.provider, agentCfg.model);
               sendAgentEvent(retried);
               retryResults.push(retried);
@@ -4814,11 +5088,15 @@ export async function generateRoutes(app: FastifyInstance) {
           if (refreshedForSwipe) targetSwipeIndex = refreshedForSwipe.activeSwipeIndex ?? 0;
         }
         for (const result of sortedResults) {
+          const resultMessageId =
+            result.agentType === "lorebook-keeper" && lorebookKeeperProcessedMessageId
+              ? lorebookKeeperProcessedMessageId
+              : messageId;
           try {
             await agentsStore.saveRun({
               agentConfigId: result.agentId,
               chatId: input.chatId,
-              messageId,
+              messageId: resultMessageId,
               result,
             });
           } catch {
@@ -5412,59 +5690,17 @@ export async function generateRoutes(app: FastifyInstance) {
               const lkData = result.data as Record<string, unknown>;
               const updates = (lkData.updates as any[]) ?? [];
               if (updates.length > 0) {
-                // Find a target lorebook: prefer first enabled lorebook, or auto-create one for this chat
-                let targetLorebookId: string | null = null;
-                if (agentContext.writableLorebookIds && agentContext.writableLorebookIds.length > 0) {
-                  targetLorebookId = agentContext.writableLorebookIds[0] ?? null;
-                } else {
-                  const created = await lorebooksStore.create({
-                    name: `Auto-generated (${chat.name || input.chatId})`,
-                    description: "Automatically created by the Lorebook Keeper agent",
-                    category: "uncategorized",
-                    chatId: input.chatId,
-                    enabled: true,
-                    generatedBy: "agent",
-                    sourceAgentId: "lorebook-keeper",
-                  });
-                  if (created) targetLorebookId = (created as any).id;
-                }
-
-                if (targetLorebookId) {
-                  // Load existing entries for update matching by name
-                  const existingEntries = await lorebooksStore.listEntries(targetLorebookId);
-                  const entryByName = new Map(existingEntries.map((e: any) => [e.name?.toLowerCase(), e]));
-
-                  for (const u of updates) {
-                    const name = (u.entryName as string) ?? "";
-                    const content = (u.content as string) ?? "";
-                    const keys = (u.keys as string[]) ?? [];
-                    const tag = (u.tag as string) ?? "";
-                    const action = (u.action as string) ?? "create";
-
-                    const existing = entryByName.get(name.toLowerCase());
-
-                    // Skip locked entries — user has protected them from agent edits
-                    if (existing && (existing.locked === true || existing.locked === "true")) {
-                      continue;
-                    }
-
-                    // Skip duplicate creates — if an entry with this name already exists, update instead
-                    if (action === "create" && existing) {
-                      await lorebooksStore.updateEntry(existing.id, { content, keys, tag });
-                    } else if (action === "update" && existing) {
-                      await lorebooksStore.updateEntry(existing.id, { content, keys, tag });
-                    } else {
-                      await lorebooksStore.createEntry({
-                        lorebookId: targetLorebookId,
-                        name,
-                        content,
-                        keys,
-                        tag,
-                        enabled: true,
-                      });
-                    }
-                  }
-                }
+                await persistLorebookKeeperUpdates({
+                  lorebooksStore,
+                  chatId: input.chatId,
+                  chatName: chat.name,
+                  preferredTargetLorebookId:
+                    typeof agentContext.memory._lorebookKeeperTargetLorebookId === "string"
+                      ? (agentContext.memory._lorebookKeeperTargetLorebookId as string)
+                      : null,
+                  writableLorebookIds: agentContext.writableLorebookIds,
+                  updates,
+                });
               }
             } catch {
               // Non-critical
@@ -6204,17 +6440,17 @@ export async function generateRoutes(app: FastifyInstance) {
             }
 
             if (command.type === "influence") {
-              // ── Influence: queue OOC influence for the connected roleplay ──
+              // ── Influence: queue OOC influence for the connected chat ──
               const infCmd = command as InfluenceCommand;
               const freshChat = await chats.getById(input.chatId);
               const connectedId = freshChat?.connectedChatId as string | null;
               if (connectedId) {
                 await chats.createInfluence(input.chatId, connectedId, infCmd.content, messageId);
                 console.log(
-                  `[commands] OOC influence queued for RP ${connectedId}: "${infCmd.content.slice(0, 80)}..."`,
+                  `[commands] OOC influence queued for connected chat ${connectedId}: "${infCmd.content.slice(0, 80)}..."`,
                 );
               } else {
-                console.warn(`[commands] Influence command used but no connected roleplay chat`);
+                console.warn(`[commands] Influence command used but no connected chat`);
               }
             }
 

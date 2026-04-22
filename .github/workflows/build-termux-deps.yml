@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       better_sqlite3_version:
-        description: 'better-sqlite3 version to build'
+        description: "better-sqlite3 version to build"
         required: true
-        default: '11.10.0'
+        default: "11.10.0"
   release:
     types: [published]
 

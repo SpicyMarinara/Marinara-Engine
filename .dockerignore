@@ -3,8 +3,6 @@ node_modules
 **/*.tsbuildinfo
 packages/*/dist
 packages/server/data
-!data/backgrounds
-!data/fonts
 .env
 .env.*
 *.log

@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────
 // Storage: Chats
 // ──────────────────────────────────────────────
-import { eq, desc, and, lt, sql, count, inArray } from "drizzle-orm";
+import { eq, desc, and, lt, gt, sql, count, inArray } from "drizzle-orm";
 import type { DB } from "../../db/connection.js";
 import {
   chats,
@@ -404,6 +404,50 @@ export function createChatsStorage(db: DB) {
           extra: JSON.stringify(swipeExtra),
         })
         .where(eq(messages.id, messageId));
+      return this.getMessage(messageId);
+    },
+
+    async removeSwipe(messageId: string, index: number) {
+      const msg = await this.getMessage(messageId);
+      if (!msg) return null;
+
+      const swipes = await this.getSwipes(messageId);
+      const target = swipes.find((s: any) => s.index === index);
+      if (!target || swipes.length <= 1) return null;
+
+      const remaining = swipes.filter((s: any) => s.index !== index);
+      const currentExtra = typeof msg.extra === "string" ? JSON.parse(msg.extra) : (msg.extra ?? {});
+
+      let nextActiveSwipeIndex = msg.activeSwipeIndex;
+      let nextContent = msg.content;
+      let nextExtra = currentExtra;
+
+      if (msg.activeSwipeIndex > index) {
+        nextActiveSwipeIndex = msg.activeSwipeIndex - 1;
+      } else if (msg.activeSwipeIndex === index) {
+        nextActiveSwipeIndex = Math.min(index, remaining.length - 1);
+        const replacement = remaining[index] ?? remaining[remaining.length - 1];
+        if (replacement) {
+          nextContent = replacement.content;
+          nextExtra = typeof replacement.extra === "string" ? JSON.parse(replacement.extra) : (replacement.extra ?? {});
+        }
+      }
+
+      await db.delete(messageSwipes).where(eq(messageSwipes.id, target.id));
+      await db
+        .update(messageSwipes)
+        .set({ index: sql`${messageSwipes.index} - 1` })
+        .where(and(eq(messageSwipes.messageId, messageId), gt(messageSwipes.index, index)));
+
+      await db
+        .update(messages)
+        .set({
+          activeSwipeIndex: nextActiveSwipeIndex,
+          content: nextContent,
+          extra: JSON.stringify(nextExtra),
+        })
+        .where(eq(messages.id, messageId));
+
       return this.getMessage(messageId);
     },
 

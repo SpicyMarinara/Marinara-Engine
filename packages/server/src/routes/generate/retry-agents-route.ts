@@ -7,7 +7,7 @@ import {
 } from "@marinara-engine/shared";
 import { eq } from "drizzle-orm";
 import type { ResolvedAgent } from "../../services/agents/agent-pipeline.js";
-import { executeAgentBatch } from "../../services/agents/agent-executor.js";
+import { executeAgent, executeAgentBatch } from "../../services/agents/agent-executor.js";
 import { getLocalSidecarProvider, LOCAL_SIDECAR_MODEL } from "../../services/llm/local-sidecar.js";
 import { createLLMProvider } from "../../services/llm/provider-registry.js";
 import { createAgentsStorage } from "../../services/storage/agents.storage.js";
@@ -19,6 +19,14 @@ import { createLorebooksStorage } from "../../services/storage/lorebooks.storage
 import { syncGameMapPartyPosition } from "../../services/game/map-position.service.js";
 import { gameStateSnapshots as gameStateSnapshotsTable } from "../../db/schema/index.js";
 import { parseExtra, parseGameStateRow, resolveBaseUrl } from "./generate-route-utils.js";
+import {
+  buildHistoricalLorebookKeeperContext,
+  getLorebookKeeperBackfillTargets,
+  getLorebookKeeperSettings,
+  loadLorebookKeeperExistingEntries,
+  persistLorebookKeeperUpdates,
+  resolveLorebookKeeperTarget,
+} from "./lorebook-keeper-utils.js";
 import { sendSseEvent, startSseReply } from "./sse.js";
 import type { GameMap } from "@marinara-engine/shared";
 
@@ -122,6 +130,9 @@ async function buildRetryAgentContext(args: {
 
   const characterIds: string[] =
     typeof chat.characterIds === "string" ? JSON.parse(chat.characterIds) : (chat.characterIds ?? []);
+  const activeLorebookIds: string[] = Array.isArray(chatMeta.activeLorebookIds)
+    ? (chatMeta.activeLorebookIds as string[])
+    : [];
   const charInfo: Array<{ id: string; name: string; description: string }> = [];
   for (const cid of characterIds) {
     const charRow = await chars.getById(cid);
@@ -191,10 +202,25 @@ async function buildRetryAgentContext(args: {
     memory: {},
   };
 
-  const enabledBooks = await lorebooksStore.list();
-  agentContext.writableLorebookIds = enabledBooks
-    .filter((book: any) => book.enabled === true || book.enabled === "true")
-    .map((book: any) => book.id);
+  const lorebookKeeperSettings = getLorebookKeeperSettings(chatMeta);
+  const { writableLorebookIds, targetLorebookId, targetLorebookName } = await resolveLorebookKeeperTarget({
+    lorebooksStore,
+    chatId,
+    characterIds,
+    activeLorebookIds,
+    preferredTargetLorebookId: lorebookKeeperSettings.targetLorebookId,
+  });
+  agentContext.writableLorebookIds = writableLorebookIds;
+  if (targetLorebookId) {
+    agentContext.memory._lorebookKeeperTargetLorebookId = targetLorebookId;
+  }
+  if (targetLorebookName) {
+    agentContext.memory._lorebookKeeperTargetLorebookName = targetLorebookName;
+  }
+  const existingEntries = await loadLorebookKeeperExistingEntries(lorebooksStore, targetLorebookId);
+  if (existingEntries.length > 0) {
+    agentContext.memory._existingLorebookEntries = existingEntries;
+  }
 
   const latestGS = await gameStateStore.getLatestCommitted(chatId);
   if (latestGS) {
@@ -358,6 +384,78 @@ async function persistRetryResults(
   }
 }
 
+async function executeLorebookKeeperRetries(args: {
+  lorebookKeeperAgent: ResolvedRetryAgent;
+  baseContext: AgentContext;
+  messages: any[];
+  readBehindMessages: number;
+  lastProcessedMessageId: string | null;
+  backfillUnprocessed: boolean;
+  lorebooksStore: ReturnType<typeof createLorebooksStorage>;
+  chatId: string;
+  chatName: string | null | undefined;
+}): Promise<Array<{ messageId: string; result: AgentResult }>> {
+  const {
+    lorebookKeeperAgent,
+    baseContext,
+    messages,
+    readBehindMessages,
+    lastProcessedMessageId,
+    backfillUnprocessed,
+    lorebooksStore,
+    chatId,
+    chatName,
+  } = args;
+
+  const eligibleTargets = getLorebookKeeperBackfillTargets(messages, readBehindMessages, lastProcessedMessageId);
+  const targets = backfillUnprocessed ? eligibleTargets : eligibleTargets.slice(-1);
+  if (targets.length === 0) return [];
+
+  let preferredTargetLorebookId =
+    typeof baseContext.memory._lorebookKeeperTargetLorebookId === "string"
+      ? (baseContext.memory._lorebookKeeperTargetLorebookId as string)
+      : null;
+
+  const results: Array<{ messageId: string; result: AgentResult }> = [];
+  for (const target of targets) {
+    const retryContext = buildHistoricalLorebookKeeperContext(baseContext, messages, target.id);
+    if (!retryContext) continue;
+
+    if (preferredTargetLorebookId) {
+      retryContext.memory._lorebookKeeperTargetLorebookId = preferredTargetLorebookId;
+    }
+    const existingEntries = await loadLorebookKeeperExistingEntries(lorebooksStore, preferredTargetLorebookId);
+    if (existingEntries.length > 0) {
+      retryContext.memory._existingLorebookEntries = existingEntries;
+    }
+
+    const result = await executeAgent(
+      lorebookKeeperAgent.resolved,
+      retryContext,
+      lorebookKeeperAgent.agentProvider,
+      lorebookKeeperAgent.agentModel,
+    );
+    results.push({ messageId: target.id, result });
+
+    if (result.success && result.type === "lorebook_update" && result.data && typeof result.data === "object") {
+      const lkData = result.data as Record<string, unknown>;
+      const updates = (lkData.updates as Array<Record<string, unknown>>) ?? [];
+      if (updates.length > 0) {
+        preferredTargetLorebookId = await persistLorebookKeeperUpdates({
+          lorebooksStore,
+          chatId,
+          chatName,
+          preferredTargetLorebookId,
+          writableLorebookIds: retryContext.writableLorebookIds,
+          updates,
+        });
+      }
+    }
+  }
+
+  return results;
+}
+
 async function applyRetryResultEffects(args: {
   app: FastifyInstance;
   reply: any;
@@ -483,52 +581,17 @@ async function applyRetryResultEffects(args: {
         const lkData = result.data as Record<string, unknown>;
         const retryUpdates = (lkData.updates as any[]) ?? [];
         if (retryUpdates.length > 0) {
-          let targetLorebookId: string | null = null;
-          if (agentContext.writableLorebookIds && agentContext.writableLorebookIds.length > 0) {
-            targetLorebookId = agentContext.writableLorebookIds[0] ?? null;
-          } else {
-            const created = await lorebooksStore.create({
-              name: `Auto-generated (${(chat as any).name || chatId})`,
-              description: "Automatically created by the Lorebook Keeper agent",
-              category: "uncategorized",
-              chatId: chatId ?? null,
-              enabled: true,
-              generatedBy: "agent",
-              sourceAgentId: "lorebook-keeper",
-            });
-            if (created) targetLorebookId = (created as any).id;
-          }
-          if (targetLorebookId) {
-            const existingEntries = await lorebooksStore.listEntries(targetLorebookId);
-            const entryByName = new Map(existingEntries.map((entry: any) => [entry.name?.toLowerCase(), entry]));
-            for (const update of retryUpdates) {
-              const name = (update.entryName as string) ?? "";
-              const content = (update.content as string) ?? "";
-              const keys = (update.keys as string[]) ?? [];
-              const tag = (update.tag as string) ?? "";
-              const action = (update.action as string) ?? "create";
-              const existing = entryByName.get(name.toLowerCase());
-
-              if (existing && (existing.locked === true || existing.locked === "true")) {
-                continue;
-              }
-
-              if (action === "create" && existing) {
-                await lorebooksStore.updateEntry(existing.id, { content, keys, tag });
-              } else if (action === "update" && existing) {
-                await lorebooksStore.updateEntry(existing.id, { content, keys, tag });
-              } else {
-                await lorebooksStore.createEntry({
-                  lorebookId: targetLorebookId,
-                  name,
-                  content,
-                  keys,
-                  tag,
-                  enabled: true,
-                });
-              }
-            }
-          }
+          await persistLorebookKeeperUpdates({
+            lorebooksStore,
+            chatId,
+            chatName: (chat as any).name,
+            preferredTargetLorebookId:
+              typeof agentContext.memory._lorebookKeeperTargetLorebookId === "string"
+                ? (agentContext.memory._lorebookKeeperTargetLorebookId as string)
+                : null,
+            writableLorebookIds: agentContext.writableLorebookIds,
+            updates: retryUpdates,
+          });
         }
       } catch {
         // Non-critical patching failure.
@@ -820,10 +883,10 @@ export async function registerRetryAgentsRoute(app: FastifyInstance) {
   const gameStateStore = createGameStateStorage(app.db);
   const lorebooksStore = createLorebooksStorage(app.db);
 
-  app.post<{ Body: { chatId: string; agentTypes: string[]; streaming?: boolean } }>(
+  app.post<{ Body: { chatId: string; agentTypes: string[]; streaming?: boolean; lorebookKeeperBackfill?: boolean } }>(
     "/retry-agents",
     async (request, reply) => {
-      const { chatId, agentTypes, streaming = true } = request.body;
+      const { chatId, agentTypes, streaming = true, lorebookKeeperBackfill = false } = request.body;
       if (!chatId || !agentTypes?.length) {
         return reply.status(400).send({ error: "chatId and agentTypes are required" });
       }
@@ -837,7 +900,16 @@ export async function registerRetryAgentsRoute(app: FastifyInstance) {
         }
 
         const chatMeta = parseExtra(chat.metadata);
-        const recentMessages = await chats.listMessages(chatId);
+        const allMessages = await chats.listMessages(chatId);
+        let startIdx = 0;
+        for (let index = allMessages.length - 1; index >= 0; index--) {
+          const extra = parseExtra(allMessages[index]!.extra);
+          if (extra.isConversationStart) {
+            startIdx = index;
+            break;
+          }
+        }
+        const recentMessages = startIdx > 0 ? allMessages.slice(startIdx) : allMessages;
         const lastAssistant = [...recentMessages].reverse().find((message: any) => message.role === "assistant");
         const { enabledConfigs, resolvedAgents } = await resolveRetryAgents({
           agentTypes,
@@ -859,7 +931,23 @@ export async function registerRetryAgentsRoute(app: FastifyInstance) {
         });
 
         sendSseEvent(reply, { type: "agent_start", data: { phase: "retry" } });
-        const results = await executeRetryBatches(agentContext, resolvedAgents);
+        const lorebookKeeperAgent = resolvedAgents.find((entry) => entry.resolved.type === "lorebook-keeper") ?? null;
+        const nonLorebookAgents = resolvedAgents.filter((entry) => entry.resolved.type !== "lorebook-keeper");
+        const results = nonLorebookAgents.length > 0 ? await executeRetryBatches(agentContext, nonLorebookAgents) : [];
+        const lorebookKeeperRunEntries = lorebookKeeperAgent
+          ? await executeLorebookKeeperRetries({
+              lorebookKeeperAgent,
+              baseContext: agentContext,
+              messages: recentMessages,
+              readBehindMessages: getLorebookKeeperSettings(chatMeta).readBehindMessages,
+              lastProcessedMessageId:
+                (await agentsStore.getLastSuccessfulRunByType("lorebook-keeper", chatId))?.messageId ?? null,
+              backfillUnprocessed: lorebookKeeperBackfill,
+              lorebooksStore,
+              chatId,
+              chatName: (chat as any).name,
+            })
+          : [];
 
         for (const result of results) {
           const cfg = resolvedAgents.find((entry) => entry.resolved.type === result.agentType)?.cfg;
@@ -877,9 +965,37 @@ export async function registerRetryAgentsRoute(app: FastifyInstance) {
           });
         }
 
+        for (const entry of lorebookKeeperRunEntries) {
+          const cfg = lorebookKeeperAgent?.cfg;
+          sendSseEvent(reply, {
+            type: "agent_result",
+            data: {
+              agentType: entry.result.agentType,
+              agentName: cfg?.name ?? entry.result.agentType,
+              resultType: entry.result.type,
+              data: entry.result.data,
+              success: entry.result.success,
+              error: entry.result.error,
+              durationMs: entry.result.durationMs,
+            },
+          });
+        }
+
         const retryMessageId = lastAssistant?.id ?? "";
         const retrySwipeIndex = lastAssistant?.activeSwipeIndex ?? 0;
         await persistRetryResults(agentsStore, chatId, retryMessageId, results);
+        for (const entry of lorebookKeeperRunEntries) {
+          try {
+            await agentsStore.saveRun({
+              agentConfigId: entry.result.agentId,
+              chatId,
+              messageId: entry.messageId,
+              result: entry.result,
+            });
+          } catch {
+            // Non-critical write; keep processing remaining results.
+          }
+        }
         await applyRetryResultEffects({
           app,
           reply,
@@ -893,7 +1009,7 @@ export async function registerRetryAgentsRoute(app: FastifyInstance) {
           gameStateStore,
           conns,
           chars,
-          resolvedAgents,
+          resolvedAgents: nonLorebookAgents,
         });
 
         sendSseEvent(reply, { type: "done", data: "" });

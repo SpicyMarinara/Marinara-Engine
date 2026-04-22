@@ -7,11 +7,12 @@ import { APP_VERSION } from "@marinara-engine/shared";
 import { AppShell } from "./components/layout/AppShell";
 import { CustomThemeInjector } from "./components/layout/CustomThemeInjector";
 import { ModelDownloadModal } from "./components/modals/ModelDownloadModal";
+import { AppDialogRenderer } from "./components/ui/AppDialogRenderer";
 import { Toaster } from "sonner";
 import { useUIStore } from "./stores/ui.store";
 import { useSidecarStore } from "./stores/sidecar.store";
 import { api } from "./lib/api-client";
-import { clearBrowserRuntimeCaches } from "./lib/cache-reset";
+import { forceRefreshSpa } from "./lib/browser-runtime";
 import { useLegacyThemeMigration } from "./hooks/use-themes";
 import { useSettingsSync } from "./hooks/use-settings-sync";
 
@@ -33,12 +34,10 @@ async function recoverFromVersionSkew(serverVersion: string) {
   }
 
   sessionStorage.setItem(VERSION_RECOVERY_KEY, serverVersion);
-
-  await clearBrowserRuntimeCaches();
-
-  const nextUrl = new URL(window.location.href);
-  nextUrl.searchParams.set("v", serverVersion);
-  window.location.replace(nextUrl.toString());
+  await forceRefreshSpa({
+    queryParamKey: "v",
+    queryParamValue: serverVersion,
+  });
 }
 
 export function App() {
@@ -54,13 +53,9 @@ export function App() {
   const setShowDownloadModal = useSidecarStore((s) => s.setShowDownloadModal);
   const fetchSidecarStatus = useSidecarStore((s) => s.fetchStatus);
 
-  // Fetch sidecar status on mount and prompt if first visit
+  // Fetch sidecar status on mount so the Local AI card is populated when opened later.
   useEffect(() => {
-    fetchSidecarStatus().then(() => {
-      if (!useSidecarStore.getState().hasBeenPrompted) {
-        setShowDownloadModal(true);
-      }
-    });
+    void fetchSidecarStatus();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Apply theme + font size to the document root whenever they change
@@ -198,6 +193,7 @@ export function App() {
           <LazyModalRenderer />
         </Suspense>
       )}
+      <AppDialogRenderer />
       <Toaster
         position="bottom-right"
         theme={theme}

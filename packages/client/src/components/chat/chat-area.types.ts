@@ -35,6 +35,8 @@ export type PeekPromptData = {
     verbosity?: string | null;
     tokensPrompt?: number | null;
     tokensCompletion?: number | null;
+    tokensCachedPrompt?: number | null;
+    tokensCacheWritePrompt?: number | null;
     durationMs?: number | null;
     finishReason?: string | null;
   } | null;

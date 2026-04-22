@@ -8,12 +8,16 @@ android {
     namespace 'com.marinara.engine'
     compileSdk 34
 
+    buildFeatures {
+        buildConfig true
+    }
+
     defaultConfig {
         applicationId "com.marinara.engine"
         minSdk 24
         targetSdk 34
-        versionCode 7
-        versionName "1.5.2"
+        versionCode 9
+        versionName "1.5.4"
         buildConfigField "String", "MARINARA_SERVER_URL", "\"http://127.0.0.1:${marinaraPort}\""
     }
 

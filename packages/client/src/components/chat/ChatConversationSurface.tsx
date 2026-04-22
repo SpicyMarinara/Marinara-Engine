@@ -39,12 +39,16 @@ type ConversationSurfaceProps = {
   wizardOpen: boolean;
   peekPromptData: PeekPromptData | null;
   deleteDialogMessageId: string | null;
+  deleteDialogCanDeleteSwipe: boolean;
+  deleteDialogActiveSwipeIndex: number;
+  deleteDialogSwipeCount: number;
   multiSelectMode: boolean;
   selectedMessageIds: Set<string>;
   spriteArrangeMode: boolean;
   onDelete: (messageId: string) => void;
   onRegenerate: (messageId: string) => void;
   onEdit: (messageId: string, content: string) => void;
+  onSetActiveSwipe: (messageId: string, index: number) => void;
   onPeekPrompt: () => void;
   onToggleSelectMessage: (toggle: MessageSelectionToggle) => void;
   onSwitchChat?: () => void;
@@ -63,6 +67,7 @@ type ConversationSurfaceProps = {
   onSpriteSideChange: (side: SpriteSide) => void;
   onToggleSpriteArrange: () => void;
   onDeleteConfirm: () => void;
+  onDeleteSwipe: () => void;
   onDeleteMore: () => void;
   onCloseDeleteDialog: () => void;
   onBulkDelete: () => void;
@@ -96,12 +101,16 @@ export function ChatConversationSurface({
   wizardOpen,
   peekPromptData,
   deleteDialogMessageId,
+  deleteDialogCanDeleteSwipe,
+  deleteDialogActiveSwipeIndex,
+  deleteDialogSwipeCount,
   multiSelectMode,
   selectedMessageIds,
   spriteArrangeMode,
   onDelete,
   onRegenerate,
   onEdit,
+  onSetActiveSwipe,
   onPeekPrompt,
   onToggleSelectMessage,
   onSwitchChat,
@@ -120,6 +129,7 @@ export function ChatConversationSurface({
   onSpriteSideChange,
   onToggleSpriteArrange,
   onDeleteConfirm,
+  onDeleteSwipe,
   onDeleteMore,
   onCloseDeleteDialog,
   onBulkDelete,
@@ -149,6 +159,7 @@ export function ChatConversationSurface({
           onDelete={onDelete}
           onRegenerate={onRegenerate}
           onEdit={onEdit}
+          onSetActiveSwipe={onSetActiveSwipe}
           onPeekPrompt={onPeekPrompt}
           lastAssistantMessageId={lastAssistantMessageId}
           onOpenSettings={onOpenSettings}
@@ -174,6 +185,9 @@ export function ChatConversationSurface({
         wizardOpen={wizardOpen}
         peekPromptData={peekPromptData}
         deleteDialogMessageId={deleteDialogMessageId}
+        deleteDialogCanDeleteSwipe={deleteDialogCanDeleteSwipe}
+        deleteDialogActiveSwipeIndex={deleteDialogActiveSwipeIndex}
+        deleteDialogSwipeCount={deleteDialogSwipeCount}
         multiSelectMode={multiSelectMode}
         selectedMessageCount={selectedMessageIds.size}
         sceneSettings={{
@@ -189,6 +203,7 @@ export function ChatConversationSurface({
         onWizardFinish={onWizardFinish}
         onClosePeekPrompt={onClosePeekPrompt}
         onDeleteConfirm={onDeleteConfirm}
+        onDeleteSwipe={onDeleteSwipe}
         onDeleteMore={onDeleteMore}
         onCloseDeleteDialog={onCloseDeleteDialog}
         onBulkDelete={onBulkDelete}

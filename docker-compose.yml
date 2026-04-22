@@ -5,6 +5,7 @@ services:
   marinara:
     # Use the pre-built image from GHCR
     image: ghcr.io/pasta-devs/marinara-engine:latest
+    init: true
     ports:
       - "${PORT:-7860}:7860"
     volumes:
@@ -12,6 +13,10 @@ services:
     environment:
       - NODE_ENV=production
       - DATA_DIR=/app/data
+      - AUTO_CREATE_DEFAULT_CONNECTION=${AUTO_CREATE_DEFAULT_CONNECTION:-true}
+      # - TZ=America/New_York          # IANA timezone for time-based features (e.g. character schedules)
+      # - ENCRYPTION_KEY=              # AES key for API key encryption (generate: openssl rand -hex 32)
+      # - LOG_LEVEL=info               # Logging verbosity
     restart: unless-stopped
 
 volumes:

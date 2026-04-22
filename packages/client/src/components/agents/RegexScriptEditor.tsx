@@ -3,6 +3,7 @@
 // ──────────────────────────────────────────────
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useUIStore } from "../../stores/ui.store";
+import { showConfirmDialog } from "../../lib/app-dialogs";
 import {
   useRegexScripts,
   useUpdateRegexScript,
@@ -222,7 +223,16 @@ export function RegexScriptEditor() {
 
   const handleDelete = async () => {
     if (!dbRow) return;
-    if (!confirm("Delete this regex script? This cannot be undone.")) return;
+    if (
+      !(await showConfirmDialog({
+        title: "Delete Regex Script",
+        message: "Delete this regex script? This cannot be undone.",
+        confirmLabel: "Delete",
+        tone: "destructive",
+      }))
+    ) {
+      return;
+    }
     await deleteScript.mutateAsync(dbRow.id);
     closeRegexDetail();
   };

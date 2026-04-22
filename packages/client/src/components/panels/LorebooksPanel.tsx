@@ -27,6 +27,7 @@ import { useUIStore } from "../../stores/ui.store";
 import { useLorebooks, useDeleteLorebook, useUpdateLorebook } from "../../hooks/use-lorebooks";
 import { useCharacters } from "../../hooks/use-characters";
 import type { Lorebook, LorebookCategory } from "@marinara-engine/shared";
+import { showConfirmDialog } from "../../lib/app-dialogs";
 import { cn } from "../../lib/utils";
 import { api } from "../../lib/api-client";
 
@@ -102,7 +103,16 @@ export function LorebooksPanel() {
 
   const handleDeleteTag = useCallback(
     async (tag: string) => {
-      if (!confirm(`Remove tag "${tag}" from all lorebooks?`)) return;
+      if (
+        !(await showConfirmDialog({
+          title: "Remove Tag",
+          message: `Remove tag "${tag}" from all lorebooks?`,
+          confirmLabel: "Remove",
+          tone: "destructive",
+        }))
+      ) {
+        return;
+      }
       try {
         if (!lorebooks) return;
         const affected = (lorebooks as Lorebook[]).filter((lb) => parseTags(lb).includes(tag));
@@ -429,8 +439,17 @@ export function LorebooksPanel() {
                           if (selectionMode) toggleSelection(lb.id);
                           else openLorebookDetail(lb.id);
                         }}
-                        onDelete={() => {
-                          if (confirm(`Delete "${lb.name}"? All entries will be lost.`)) deleteLorebook.mutate(lb.id);
+                        onDelete={async () => {
+                          if (
+                            await showConfirmDialog({
+                              title: "Delete Lorebook",
+                              message: `Delete "${lb.name}"? All entries will be lost.`,
+                              confirmLabel: "Delete",
+                              tone: "destructive",
+                            })
+                          ) {
+                            deleteLorebook.mutate(lb.id);
+                          }
                         }}
                         selectionMode={selectionMode}
                         isSelected={selectedLorebookIds.has(lb.id)}
@@ -450,8 +469,17 @@ export function LorebooksPanel() {
                     if (selectionMode) toggleSelection(lb.id);
                     else openLorebookDetail(lb.id);
                   }}
-                  onDelete={() => {
-                    if (confirm(`Delete "${lb.name}"? All entries will be lost.`)) deleteLorebook.mutate(lb.id);
+                  onDelete={async () => {
+                    if (
+                      await showConfirmDialog({
+                        title: "Delete Lorebook",
+                        message: `Delete "${lb.name}"? All entries will be lost.`,
+                        confirmLabel: "Delete",
+                        tone: "destructive",
+                      })
+                    ) {
+                      deleteLorebook.mutate(lb.id);
+                    }
                   }}
                   selectionMode={selectionMode}
                   isSelected={selectedLorebookIds.has(lb.id)}

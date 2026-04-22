@@ -8,7 +8,7 @@ import { useAgentStore } from "../stores/agent.store";
 import { useGameStateStore } from "../stores/game-state.store";
 import { useEncounterStore } from "../stores/encounter.store";
 import { useUIStore } from "../stores/ui.store";
-import { clearBrowserRuntimeCaches } from "../lib/cache-reset";
+import { clearBrowserRuntimeCaches } from "../lib/browser-runtime";
 import type { Chat, Message, MessageSwipe, DaySummaryEntry, WeekSummaryEntry } from "@marinara-engine/shared";
 
 export const chatKeys = {
@@ -311,6 +311,8 @@ export function usePeekPrompt() {
           verbosity?: string | null;
           tokensPrompt?: number | null;
           tokensCompletion?: number | null;
+          tokensCachedPrompt?: number | null;
+          tokensCacheWritePrompt?: number | null;
           durationMs?: number | null;
           finishReason?: string | null;
         } | null;
@@ -407,6 +409,20 @@ export function useSetActiveSwipe(chatId: string | null) {
       api.put<Message>(`/chats/${chatId}/messages/${messageId}/active-swipe`, { index }),
     onSuccess: () => {
       if (chatId) qc.invalidateQueries({ queryKey: chatKeys.messages(chatId) });
+    },
+  });
+}
+
+/** Delete a single swipe while keeping the parent message */
+export function useDeleteSwipe(chatId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ messageId, index }: { messageId: string; index: number }) =>
+      api.delete<Message>(`/chats/${chatId}/messages/${messageId}/swipes/${index}`),
+    onSuccess: (_data, { messageId }) => {
+      if (!chatId) return;
+      qc.invalidateQueries({ queryKey: chatKeys.messages(chatId) });
+      qc.invalidateQueries({ queryKey: [...chatKeys.all, "swipes", messageId] });
     },
   });
 }

@@ -113,6 +113,13 @@ export function ChoiceSelectionModal({
     prevOpenRef.current = open;
   }, [open]);
 
+  useEffect(() => {
+    if (!open || isLoading || !presetId) return;
+    if (variables.length === 0) {
+      onClose();
+    }
+  }, [open, isLoading, onClose, presetId, variables.length]);
+
   // Merged view: base + user overrides
   const selections = useMemo(() => ({ ...baseSelections, ...overrides }), [baseSelections, overrides]);
 

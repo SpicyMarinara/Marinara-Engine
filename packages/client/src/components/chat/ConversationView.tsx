@@ -37,6 +37,7 @@ interface ConversationViewProps {
   onDelete: (messageId: string) => void;
   onRegenerate: (messageId: string) => void;
   onEdit: (messageId: string, content: string) => void;
+  onSetActiveSwipe: (messageId: string, index: number) => void;
   onPeekPrompt: () => void;
   lastAssistantMessageId: string | null;
   onOpenSettings: () => void;
@@ -115,6 +116,7 @@ export function ConversationView({
   onDelete,
   onRegenerate,
   onEdit,
+  onSetActiveSwipe,
   onPeekPrompt,
   lastAssistantMessageId,
   onOpenSettings,
@@ -248,7 +250,7 @@ export function ConversationView({
   // Strip leaked timestamps like [16:08] or [18.03.2026] from assistant content.
   const stripTimestamps = (text: string) =>
     text
-      .replace(/^(\s*\[\d{1,2}[:.:]\d{2}\]\s*)+/gm, "")
+      .replace(/^(\s*\[\d{1,2}[:.]\d{2}\]\s*)+/gm, "")
       .replace(/^(\s*\[\d{1,2}\.\d{1,2}\.\d{4}\]\s*)+/gm, "")
       .trim();
 
@@ -377,6 +379,9 @@ export function ConversationView({
   // component remounts. This prevents sounds/stagger replaying when the user
   // navigates away and comes back to the same chat.
   const globalSeenKeysRef = useRef(globalSeenKeys);
+  // Persist stagger timers in a ref so they survive effect re-runs caused by
+  // query refetches arriving shortly after the initial message_saved upsert.
+  const staggerTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Reset stagger state when the active chat changes so no cross-chat leakage
   const prevChatIdRef = useRef(chatId);
@@ -384,6 +389,8 @@ export function ConversationView({
     prevChatIdRef.current = chatId;
     initialLoadSettledRef.current = false;
     prevRenderedKeysRef.current = new Set();
+    staggerTimersRef.current.forEach(clearTimeout);
+    staggerTimersRef.current = [];
     setHiddenLineKeys(new Set());
   }
 
@@ -434,10 +441,10 @@ export function ConversationView({
           continue;
         }
 
-        if (/__line[1-9]\d*$/.test(key)) {
+        if (/__block[1-9]\d*$/.test(key)) {
           newSplitChildren.push(key);
-        } else if (/__line0$/.test(key)) {
-          // First line of a split message — counts as new assistant message
+        } else if (/__block0$/.test(key)) {
+          // First block of a split message — counts as new assistant message
           hasNewAssistantMessage = true;
         } else {
           // Check if it's a new assistant message (not a split)
@@ -461,9 +468,17 @@ export function ConversationView({
     if (newSplitChildren.length === 0) {
       // Clear any orphaned hidden keys left by a previous stagger whose
       // reveal timers were cancelled (e.g. by a query refetch mid-stagger).
-      setHiddenLineKeys((prev) => (prev.size > 0 ? new Set() : prev));
+      // But only if no stagger is actively running — otherwise the refetch
+      // would wipe the hidden keys and show everything instantly.
+      if (staggerTimersRef.current.length === 0) {
+        setHiddenLineKeys((prev) => (prev.size > 0 ? new Set() : prev));
+      }
       return;
     }
+
+    // Cancel any previous stagger before starting a new one
+    staggerTimersRef.current.forEach(clearTimeout);
+    staggerTimersRef.current = [];
 
     // Hide all new split children initially
     setHiddenLineKeys((prev) => {
@@ -473,10 +488,9 @@ export function ConversationView({
     });
 
     // Reveal each one with a staggered delay (1.5s between each)
-    const timers: ReturnType<typeof setTimeout>[] = [];
     newSplitChildren.forEach((key, idx) => {
       const delay = (idx + 1) * 1500;
-      timers.push(
+      staggerTimersRef.current.push(
         setTimeout(() => {
           setHiddenLineKeys((prev) => {
             const next = new Set(prev);
@@ -487,12 +501,25 @@ export function ConversationView({
           if (useUIStore.getState().convoNotificationSound) {
             playNotificationPing();
           }
+          // Remove completed timer from the ref
+          if (idx === newSplitChildren.length - 1) {
+            staggerTimersRef.current = [];
+          }
         }, delay),
       );
     });
-
-    return () => timers.forEach(clearTimeout);
+    // No cleanup return here — timers are managed via staggerTimersRef and
+    // must survive effect re-runs caused by query refetches. Cleanup on
+    // unmount is handled by a separate effect below.
   }, [renderedItems]);
+
+  // Clean up stagger timers on unmount only (empty deps = unmount cleanup)
+  useEffect(() => {
+    return () => {
+      staggerTimersRef.current.forEach(clearTimeout);
+      staggerTimersRef.current = [];
+    };
+  }, []);
 
   // Auto-scroll when staggered lines are revealed
   const hiddenCount = hiddenLineKeys.size;
@@ -683,16 +710,18 @@ export function ConversationView({
               continue;
             }
 
-            // Check if this starts a split-line group
-            const isSplitStart = item.key.endsWith("__line0");
+            // Check if this starts a split assistant-message group.
+            // Older code/comments called these "line" groups, but the actual
+            // rendered keys use __blockN.
+            const isSplitStart = item.key.endsWith("__block0") || item.key.endsWith("__line0");
             if (isSplitStart) {
-              const baseId = item.key.replace("__line0", "");
+              const baseId = item.key.replace(/__(?:block|line)0$/, "");
               const groupItems = [item];
               let j = i + 1;
               while (
                 j < filtered.length &&
                 filtered[j]!.type === "message" &&
-                filtered[j]!.key.startsWith(baseId + "__line")
+                (filtered[j]!.key.startsWith(baseId + "__block") || filtered[j]!.key.startsWith(baseId + "__line"))
               ) {
                 groupItems.push(filtered[j]! as typeof item);
                 j++;
@@ -710,6 +739,7 @@ export function ConversationView({
                   onDelete={onDelete}
                   onRegenerate={onRegenerate}
                   onEdit={onEdit}
+                  onSetActiveSwipe={onSetActiveSwipe}
                   onPeekPrompt={onPeekPrompt}
                 />,
               );
@@ -741,6 +771,7 @@ export function ConversationView({
                 onDelete={onDelete}
                 onRegenerate={onRegenerate}
                 onEdit={onEdit}
+                onSetActiveSwipe={onSetActiveSwipe}
                 onPeekPrompt={onPeekPrompt}
                 isLastAssistantMessage={msg.id === lastAssistantMessageId}
                 characterMap={characterMap}
@@ -861,6 +892,7 @@ function SplitMessageGroup({
   onDelete,
   onRegenerate,
   onEdit,
+  onSetActiveSwipe,
   onPeekPrompt,
 }: {
   items: Array<{ key: string; msg: Message; isGrouped: boolean; index: number }>;
@@ -873,6 +905,7 @@ function SplitMessageGroup({
   onDelete: (id: string) => void;
   onRegenerate: (id: string) => void;
   onEdit: (id: string, content: string) => void;
+  onSetActiveSwipe: (id: string, index: number) => void;
   onPeekPrompt: () => void;
 }) {
   const [showActions, setShowActions] = useState(false);
@@ -912,6 +945,7 @@ function SplitMessageGroup({
           onDelete={onDelete}
           onRegenerate={onRegenerate}
           onEdit={onEdit}
+          onSetActiveSwipe={onSetActiveSwipe}
           onPeekPrompt={onPeekPrompt}
           isLastAssistantMessage={false}
           characterMap={characterMap}
@@ -985,6 +1019,7 @@ function SplitMessageGroup({
                 onDelete={onDelete}
                 onRegenerate={onRegenerate}
                 onEdit={onEdit}
+                onSetActiveSwipe={onSetActiveSwipe}
                 onPeekPrompt={onPeekPrompt}
                 isLastAssistantMessage={false}
                 characterMap={characterMap}
@@ -1005,6 +1040,7 @@ function SplitMessageGroup({
               onDelete={onDelete}
               onRegenerate={onRegenerate}
               onEdit={onEdit}
+              onSetActiveSwipe={onSetActiveSwipe}
               onPeekPrompt={onPeekPrompt}
               onEditClick={handleStartEdit}
               isLastAssistantMessage={firstItem.msg.id === lastAssistantMessageId}
@@ -1017,7 +1053,7 @@ function SplitMessageGroup({
 
         return items.map((gi) => {
           const { msg, isGrouped: grp } = gi;
-          const isChild = !gi.key.endsWith("__line0");
+          const isChild = !/(?:__block0|__line0)$/.test(gi.key);
           return (
             <ConversationMessage
               key={gi.key}
@@ -1030,6 +1066,7 @@ function SplitMessageGroup({
               onDelete={onDelete}
               onRegenerate={onRegenerate}
               onEdit={onEdit}
+              onSetActiveSwipe={onSetActiveSwipe}
               onPeekPrompt={onPeekPrompt}
               onEditClick={handleStartEdit}
               isLastAssistantMessage={msg.id === lastAssistantMessageId}

@@ -283,17 +283,13 @@ export function SummariesEditorModal({ chat, open, onClose }: SummariesEditorMod
           )}
 
           {entries.map((entry) => {
-            const current =
-              entry.kind === "week" ? drafts.weekSummaries[entry.key]! : drafts.daySummaries[entry.key]!;
+            const current = entry.kind === "week" ? drafts.weekSummaries[entry.key]! : drafts.daySummaries[entry.key]!;
             const id = `${entry.kind}:${entry.key}`;
             const isOpen = expanded.has(id);
             const entryTokens = estimateTokens(entryTokenText(current));
 
             return (
-              <div
-                key={id}
-                className="rounded-lg border border-[var(--border)] bg-[var(--secondary)]/20"
-              >
+              <div key={id} className="rounded-lg border border-[var(--border)] bg-[var(--secondary)]/20">
                 <button
                   onClick={() => toggleEntry(id)}
                   aria-expanded={isOpen}
@@ -310,9 +306,7 @@ export function SummariesEditorModal({ chat, open, onClose }: SummariesEditorMod
                   <span
                     className={cn(
                       "shrink-0 rounded-full px-1.5 py-0.5 text-[0.5625rem] font-medium uppercase tracking-wider max-md:hidden",
-                      entry.kind === "week"
-                        ? "bg-purple-500/20 text-purple-400"
-                        : "bg-blue-500/20 text-blue-400",
+                      entry.kind === "week" ? "bg-purple-500/20 text-purple-400" : "bg-blue-500/20 text-blue-400",
                     )}
                   >
                     {entry.kind}

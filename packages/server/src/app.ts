@@ -23,7 +23,12 @@ import { existsSync } from "fs";
 import { basename, join, resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { getBuildCommit, getBuildLabel } from "./config/build-info.js";
-import { getCorsConfig, getLogLevel, getNodeEnv } from "./config/runtime-config.js";
+import {
+  getCorsConfig,
+  getLogLevel,
+  getNodeEnv,
+  isAutoCreateDefaultConnectionDisabled,
+} from "./config/runtime-config.js";
 import { sidecarProcessService } from "./services/sidecar/sidecar-process.service.js";
 
 const REVALIDATE_FILES = new Set(["index.html"]);
@@ -59,7 +64,11 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
   // ── Seed defaults ──
   await seedDefaultPreset(db);
   await seedProfessorMari(db);
-  await seedDefaultConnection(db);
+  if (isAutoCreateDefaultConnectionDisabled()) {
+    app.log.info("Skipping default OpenRouter Free connection seed because AUTO_CREATE_DEFAULT_CONNECTION is disabled");
+  } else {
+    await seedDefaultConnection(db);
+  }
   await seedDefaultRegexScripts(db);
   await seedDefaultBackgrounds();
   await seedDefaultGameAssets();
@@ -92,7 +101,7 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
   await registerRoutes(app);
 
   // ── Sidecar bootstrap (background) ──
-  void sidecarProcessService.syncForCurrentConfig({ suppressKnownFailure: true }).catch((error) => {
+  void sidecarProcessService.syncForCurrentConfig({ suppressKnownFailure: true, allowRuntimeInstall: false }).catch((error) => {
     app.log.warn({ err: error }, "sidecar bootstrap failed");
   });
 

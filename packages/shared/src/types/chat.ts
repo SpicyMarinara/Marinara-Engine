@@ -87,6 +87,10 @@ export interface ChatMetadata {
   agentOverrides: Record<string, boolean>;
   /** Agent IDs scoped to this chat. Non-empty = only these agents run; empty = use globally-enabled agents. */
   activeAgentIds: string[];
+  /** Explicit target lorebook for the Lorebook Keeper in this chat. Null/omitted = auto-pick. */
+  lorebookKeeperTargetLorebookId?: string | null;
+  /** How many assistant responses behind the latest available one Lorebook Keeper should read from. */
+  lorebookKeeperReadBehindMessages?: number;
   /** Tool/function IDs scoped to this chat. Non-empty = only these tools are sent; empty = use all enabled tools. */
   activeToolIds: string[];
   /** Per-chat variable selections for preset variables (variableName → value or values) */
@@ -215,6 +219,8 @@ export interface GenerationInfo {
   temperature: number | null;
   tokensPrompt: number | null;
   tokensCompletion: number | null;
+  tokensCachedPrompt?: number | null;
+  tokensCacheWritePrompt?: number | null;
   durationMs: number | null;
   finishReason: string | null;
 }

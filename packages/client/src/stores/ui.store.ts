@@ -93,6 +93,8 @@ interface UIState {
   enableStreaming: boolean;
   /** Typewriter speed: 1 (very slow) to 100 (instant). Controls how fast streaming tokens appear. */
   streamingSpeed: number;
+  /** When true, Game mode narration segments are revealed in full as soon as they become active. */
+  gameInstantTextReveal: boolean;
   /** Game narration text speed: 1 (very slow) to 100 (instant). Controls the typewriter in game mode. */
   gameTextSpeed: number;
   /** Delay in ms between auto-advancing narration segments when auto-play is enabled. */
@@ -106,7 +108,7 @@ interface UIState {
   confirmBeforeDelete: boolean;
   /** Number of messages to load per page (0 = load all) */
   messagesPerPage: number;
-  /** Bold and color text inside quotation marks in chat messages */
+  /** Bold quoted dialogue in chat messages; color highlighting can still remain when this is off */
   boldDialogue: boolean;
 
   // ── Text Appearance ──
@@ -227,6 +229,7 @@ interface UIState {
   setFontFamily: (family: string) => void;
   setEnableStreaming: (v: boolean) => void;
   setStreamingSpeed: (v: number) => void;
+  setGameInstantTextReveal: (v: boolean) => void;
   setGameTextSpeed: (v: number) => void;
   setGameAutoPlayDelay: (v: number) => void;
   setDebugMode: (v: boolean) => void;
@@ -294,6 +297,9 @@ export function pickSyncedSettings(state: UIState) {
     fontFamily: state.fontFamily,
     enableStreaming: state.enableStreaming,
     streamingSpeed: state.streamingSpeed,
+    gameInstantTextReveal: state.gameInstantTextReveal,
+    gameTextSpeed: state.gameTextSpeed,
+    gameAutoPlayDelay: state.gameAutoPlayDelay,
     debugMode: state.debugMode,
     messageGrouping: state.messageGrouping,
     showTimestamps: state.showTimestamps,
@@ -360,6 +366,7 @@ export const useUIStore = create<UIState>()(
       fontFamily: "",
       enableStreaming: true,
       streamingSpeed: 50,
+      gameInstantTextReveal: false,
       gameTextSpeed: 50,
       gameAutoPlayDelay: 3000,
       debugMode: false,
@@ -574,6 +581,7 @@ export const useUIStore = create<UIState>()(
       setFontFamily: (family) => set({ fontFamily: family }),
       setEnableStreaming: (v) => set({ enableStreaming: v }),
       setStreamingSpeed: (v) => set({ streamingSpeed: Math.max(1, Math.min(100, v)) }),
+      setGameInstantTextReveal: (v) => set({ gameInstantTextReveal: v }),
       setGameTextSpeed: (v) => set({ gameTextSpeed: Math.max(1, Math.min(100, v)) }),
       setGameAutoPlayDelay: (v) => set({ gameAutoPlayDelay: Math.max(200, Math.min(10000, Math.round(v))) }),
       setDebugMode: (v) => set({ debugMode: v }),
@@ -750,6 +758,9 @@ export const useUIStore = create<UIState>()(
         fontFamily: state.fontFamily,
         enableStreaming: state.enableStreaming,
         streamingSpeed: state.streamingSpeed,
+        gameInstantTextReveal: state.gameInstantTextReveal,
+        gameTextSpeed: state.gameTextSpeed,
+        gameAutoPlayDelay: state.gameAutoPlayDelay,
         debugMode: state.debugMode,
         messageGrouping: state.messageGrouping,
         showTimestamps: state.showTimestamps,

@@ -8,6 +8,7 @@ import { useUpdateChat, useUpdateChatMetadata } from "../../hooks/use-chats";
 import { useChatStore } from "../../stores/chat.store";
 import { useUIStore } from "../../stores/ui.store";
 import { api } from "../../lib/api-client";
+import { showConfirmDialog } from "../../lib/app-dialogs";
 import { ChoiceSelectionModal } from "../presets/ChoiceSelectionModal";
 import { Plus, Download, FileText, Trash2, Check, Copy, Search, Code2, Hash, Star } from "lucide-react";
 import { cn } from "../../lib/utils";
@@ -60,9 +61,22 @@ export function PresetsPanel() {
     updateChat.mutate(
       { id: activeChat.id, promptPresetId: newId },
       {
-        onSuccess: () => {
-          // If assigning (not unassigning), check for choice blocks
-          if (newId) setChoiceModalPresetId(newId);
+        onSuccess: async () => {
+          if (!newId) {
+            setChoiceModalPresetId(null);
+            return;
+          }
+
+          try {
+            const presetFull = await api.get<{ choiceBlocks?: unknown[] }>(`/prompts/${newId}/full`);
+            if ((presetFull.choiceBlocks?.length ?? 0) > 0) {
+              setChoiceModalPresetId(newId);
+            } else {
+              setChoiceModalPresetId(null);
+            }
+          } catch {
+            setChoiceModalPresetId(null);
+          }
         },
       },
     );
@@ -322,9 +336,16 @@ export function PresetsPanel() {
                     <Copy size="0.75rem" />
                   </button>
                   <button
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.stopPropagation();
-                      if (confirm(`Delete "${preset.name}"?`)) {
+                      if (
+                        await showConfirmDialog({
+                          title: "Delete Preset",
+                          message: `Delete "${preset.name}"?`,
+                          confirmLabel: "Delete",
+                          tone: "destructive",
+                        })
+                      ) {
                         deletePreset.mutate(preset.id);
                       }
                     }}
@@ -351,7 +372,7 @@ export function PresetsPanel() {
         <ChoiceSelectionModal
           open={!!choiceModalPresetId}
           onClose={() => setChoiceModalPresetId(null)}
-          presetId={activePresetId ?? choiceModalPresetId}
+          presetId={choiceModalPresetId}
           chatId={activeChat.id}
           existingChoices={
             typeof activeChat.metadata === "string"

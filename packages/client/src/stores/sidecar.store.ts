@@ -74,10 +74,24 @@ interface SidecarState {
   deleteModel: () => Promise<void>;
   unloadModel: () => Promise<void>;
   restartRuntime: () => Promise<void>;
+  installRuntime: (reinstall?: boolean) => Promise<void>;
   sendTestMessage: () => Promise<void>;
   reinstallRuntime: () => Promise<void>;
   updateConfig: (
-    partial: Partial<Pick<SidecarConfig, "useForTrackers" | "useForGameScene" | "contextSize" | "gpuLayers">>,
+    partial: Partial<
+      Pick<
+        SidecarConfig,
+        | "useForTrackers"
+        | "useForGameScene"
+        | "contextSize"
+        | "maxTokens"
+        | "temperature"
+        | "topP"
+        | "topK"
+        | "gpuLayers"
+        | "runtimePreference"
+      >
+    >,
   ) => Promise<void>;
   setShowDownloadModal: (open: boolean) => void;
   markPrompted: () => void;
@@ -94,12 +108,17 @@ function clearStatusPollTimer() {
   }
 }
 
-function shouldKeepPolling(state: Pick<SidecarState, "status" | "config" | "inferenceReady">): boolean {
+function shouldKeepPolling(state: Pick<SidecarState, "status" | "config" | "inferenceReady" | "runtime">): boolean {
   if (TRANSITIONAL_STATUSES.has(state.status)) {
     return true;
   }
 
-  if (state.status === "downloaded" && state.config.useForGameScene && !state.inferenceReady) {
+  if (
+    state.status === "downloaded" &&
+    state.runtime.installed &&
+    (state.config.useForGameScene || state.config.useForTrackers) &&
+    !state.inferenceReady
+  ) {
     return true;
   }
 
@@ -292,12 +311,7 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
     });
 
     try {
-      await consumeDownloadStream(
-        "/api/sidecar/download/custom",
-        modelPath ? { repo, modelPath } : { repo },
-        set,
-        get,
-      );
+      await consumeDownloadStream("/api/sidecar/download/custom", modelPath ? { repo, modelPath } : { repo }, set, get);
     } catch (error) {
       set({
         downloadProgress: {
@@ -390,6 +404,39 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
     await get().fetchStatus();
   },
 
+  installRuntime: async (reinstall = false) => {
+    set({
+      status: "downloading_runtime",
+      startupError: null,
+      failedRuntimeVariant: null,
+      testMessageResult: null,
+      downloadProgress: {
+        phase: "runtime",
+        status: "downloading",
+        downloaded: 0,
+        total: 0,
+        speed: 0,
+        label: reinstall ? "Reinstalling local runtime" : "Installing local runtime",
+      },
+    });
+
+    try {
+      await consumeDownloadStream("/api/sidecar/runtime/install", reinstall ? { reinstall: true } : {}, set, get);
+    } catch (error) {
+      set({
+        downloadProgress: {
+          phase: "runtime",
+          status: "error",
+          downloaded: 0,
+          total: 0,
+          speed: 0,
+          error: error instanceof Error ? error.message : "Failed to install the local runtime",
+          label: reinstall ? "Reinstall local runtime" : "Install local runtime",
+        },
+      });
+    }
+  },
+
   sendTestMessage: async () => {
     set({
       testMessagePending: true,
@@ -421,38 +468,7 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
   },
 
   reinstallRuntime: async () => {
-    set({
-      status: "downloading_runtime",
-      startupError: null,
-      failedRuntimeVariant: null,
-      testMessageResult: null,
-      downloadProgress: {
-        phase: "runtime",
-        status: "downloading",
-        downloaded: 0,
-        total: 0,
-        speed: 0,
-        label: "Reinstalling local runtime",
-      },
-    });
-
-    try {
-      await api.post("/sidecar/reinstall");
-    } catch (error) {
-      set({
-        downloadProgress: {
-          phase: "runtime",
-          status: "error",
-          downloaded: 0,
-          total: 0,
-          speed: 0,
-          error: error instanceof Error ? error.message : "Failed to reinstall the local runtime",
-          label: "Reinstall local runtime",
-        },
-      });
-    }
-
-    await get().fetchStatus();
+    await get().installRuntime(true);
   },
 
   updateConfig: async (partial) => {

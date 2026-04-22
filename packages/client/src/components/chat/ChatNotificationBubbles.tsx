@@ -9,6 +9,7 @@
 import { useState } from "react";
 import { X, MessageCircle } from "lucide-react";
 import { useChatStore } from "../../stores/chat.store";
+import { useGameModeStore } from "../../stores/game-mode.store";
 import { useUIStore } from "../../stores/ui.store";
 import { cn } from "../../lib/utils";
 import { AnimatePresence, motion } from "framer-motion";
@@ -17,12 +18,22 @@ export function ChatNotificationBubbles() {
   const chatNotifications = useChatStore((s) => s.chatNotifications);
   const setActiveChatId = useChatStore((s) => s.setActiveChatId);
   const dismissNotification = useChatStore((s) => s.dismissNotification);
+  const setShouldOpenSettings = useChatStore((s) => s.setShouldOpenSettings);
+  const setShouldOpenWizard = useChatStore((s) => s.setShouldOpenWizard);
+  const setShouldOpenWizardInShortcutMode = useChatStore((s) => s.setShouldOpenWizardInShortcutMode);
+  const setPendingNewChatMode = useChatStore((s) => s.setPendingNewChatMode);
+  const setSetupActive = useGameModeStore((s) => s.setSetupActive);
   const closeAllDetails = useUIStore((s) => s.closeAllDetails);
   const [mobileExpanded, setMobileExpanded] = useState(false);
 
   /** Navigate to a chat — close any editor/detail view first so ChatArea is visible. */
   const navigateToChat = (chatId: string) => {
     closeAllDetails();
+    setPendingNewChatMode(null);
+    setShouldOpenSettings(false);
+    setShouldOpenWizard(false);
+    setShouldOpenWizardInShortcutMode(false);
+    setSetupActive(false);
     setActiveChatId(chatId);
   };
 

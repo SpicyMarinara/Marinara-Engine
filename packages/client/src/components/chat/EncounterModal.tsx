@@ -24,6 +24,7 @@ import {
 import { useEncounterStore } from "../../stores/encounter.store";
 import { useEncounter } from "../../hooks/use-encounter";
 import { useLorebooks } from "../../hooks/use-lorebooks";
+import { showConfirmDialog } from "../../lib/app-dialogs";
 import { cn } from "../../lib/utils";
 import type { CombatPartyMember, CombatEnemy, CombatAttack, NarrativeStyle, Lorebook } from "@marinara-engine/shared";
 
@@ -776,8 +777,17 @@ function EncounterModalInner() {
               <div className="flex items-center gap-2">
                 {initialized && !combatResult && (
                   <button
-                    onClick={() => {
-                      if (confirm("Conclude this encounter early?")) concludeEncounter();
+                    onClick={async () => {
+                      if (
+                        await showConfirmDialog({
+                          title: "Conclude Encounter",
+                          message: "Conclude this encounter early?",
+                          confirmLabel: "Conclude",
+                          tone: "destructive",
+                        })
+                      ) {
+                        concludeEncounter();
+                      }
                     }}
                     className="flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-1.5 text-[0.6875rem] text-white/50 transition-all hover:bg-white/10"
                   >
@@ -786,8 +796,17 @@ function EncounterModalInner() {
                   </button>
                 )}
                 <button
-                  onClick={() => {
-                    if (confirm("Close and end this combat?")) closeEncounter();
+                  onClick={async () => {
+                    if (
+                      await showConfirmDialog({
+                        title: "End Combat",
+                        message: "Close and end this combat?",
+                        confirmLabel: "End Combat",
+                        tone: "destructive",
+                      })
+                    ) {
+                      closeEncounter();
+                    }
                   }}
                   className="rounded-lg p-1.5 text-white/40 hover:bg-white/10 hover:text-white/80"
                 >

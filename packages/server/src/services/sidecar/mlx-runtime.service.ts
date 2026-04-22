@@ -58,14 +58,10 @@ function readInstalledVersion(): string | null {
   }
 
   try {
-    return execFileSync(
-      VENV_PYTHON,
-      ["-c", "import importlib.metadata; print(importlib.metadata.version('mlx-lm'))"],
-      {
-        encoding: "utf-8",
-        timeout: 5_000,
-      },
-    ).trim();
+    return execFileSync(VENV_PYTHON, ["-c", "import importlib.metadata; print(importlib.metadata.version('mlx-lm'))"], {
+      encoding: "utf-8",
+      timeout: 5_000,
+    }).trim();
   } catch {
     return null;
   }
@@ -183,16 +179,17 @@ class MlxRuntimeService {
     await this.ensureUvInstalled(onProgress);
 
     try {
-      this.emitProgress(onProgress, "downloading", `Python ${PYTHON_VERSION} environment`);
+      this.emitProgress(onProgress, "downloading", `Python ${PYTHON_VERSION} runtime`);
       await this.runCommand(UV_BIN, ["venv", MLX_VENV_DIR, "--python", PYTHON_VERSION], {
         cwd: MLX_RUNTIME_DIR,
         env: this.getUvEnv(),
       });
-      this.emitProgress(onProgress, "downloading", "mlx-lm package");
+      this.emitProgress(onProgress, "downloading", "MLX runtime dependencies");
       await this.runCommand(UV_BIN, ["pip", "install", "--python", VENV_PYTHON, "mlx-lm"], {
         cwd: MLX_RUNTIME_DIR,
         env: this.getUvEnv(),
       });
+      this.emitProgress(onProgress, "downloading", "Verifying MLX runtime");
     } catch (error) {
       this.emitProgress(
         onProgress,
@@ -228,7 +225,7 @@ class MlxRuntimeService {
       return;
     }
 
-    this.emitProgress(onProgress, "downloading", "uv bootstrap");
+    this.emitProgress(onProgress, "downloading", "uv dependency manager");
 
     let script: string;
     try {
@@ -246,7 +243,9 @@ class MlxRuntimeService {
 
             if (!response.ok) {
               const raw = await response.text().catch(() => "");
-              throw new Error(`Failed to download the uv installer: HTTP ${response.status} ${raw || response.statusText}`.trim());
+              throw new Error(
+                `Failed to download the uv installer: HTTP ${response.status} ${raw || response.statusText}`.trim(),
+              );
             }
 
             const text = await response.text();
@@ -273,6 +272,7 @@ class MlxRuntimeService {
     }
 
     try {
+      this.emitProgress(onProgress, "downloading", "Installing uv dependency manager");
       await this.runCommand("/bin/sh", ["-s"], {
         cwd: MLX_RUNTIME_DIR,
         env: {
@@ -287,7 +287,9 @@ class MlxRuntimeService {
       }
 
       throw new Error(
-        error instanceof Error ? `Failed to bootstrap uv for the MLX runtime.\n${error.message}` : "Failed to bootstrap uv for the MLX runtime.",
+        error instanceof Error
+          ? `Failed to bootstrap uv for the MLX runtime.\n${error.message}`
+          : "Failed to bootstrap uv for the MLX runtime.",
       );
     }
 

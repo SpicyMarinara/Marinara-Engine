@@ -16,7 +16,7 @@
  * Mirrors the client's `stripGmTagsKeepReadables` (minus readable
  * preservation which is irrelevant for segment editing).
  */
-function stripGmCommandTags(content: string): string {
+export function stripGmCommandTags(content: string): string {
   let text = content
     .replace(/\[music:\s*[^\]]+\]/gi, "")
     .replace(/\[sfx:\s*[^\]]+\]/gi, "")

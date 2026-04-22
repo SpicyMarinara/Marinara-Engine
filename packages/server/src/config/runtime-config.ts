@@ -212,6 +212,10 @@ export function isAutoOpenBrowserDisabled(value = process.env.AUTO_OPEN_BROWSER)
   return isDisabledFlag(value);
 }
 
+export function isAutoCreateDefaultConnectionDisabled(value = process.env.AUTO_CREATE_DEFAULT_CONNECTION) {
+  return isDisabledFlag(value);
+}
+
 export function logStorageDiagnostics(logger: Pick<Console, "info" | "warn"> = console) {
   const dataDir = getDataDir();
   const dbPath = getDatabaseFilePath();

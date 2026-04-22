@@ -8,11 +8,12 @@ import type { GameMap } from "@marinara-engine/shared";
 interface GameNodeMapProps {
   map: GameMap;
   onNodeClick: (nodeId: string) => void;
+  selectedNodeId?: string | null;
   /** When true, node clicks are disabled (e.g. narration still playing) */
   disabled?: boolean;
 }
 
-export function GameNodeMap({ map, onNodeClick, disabled }: GameNodeMapProps) {
+export function GameNodeMap({ map, onNodeClick, selectedNodeId, disabled }: GameNodeMapProps) {
   const nodes = map.nodes || [];
   const edges = map.edges || [];
   const currentNodeId = typeof map.partyPosition === "string" ? map.partyPosition : null;
@@ -90,6 +91,7 @@ export function GameNodeMap({ map, onNodeClick, disabled }: GameNodeMapProps) {
         {/* Nodes */}
         {nodes.map((node) => {
           const isCurrent = node.id === currentNodeId;
+          const isSelected = node.id === selectedNodeId;
           const isAdjacent = adjacentIds.has(node.id);
           const isClickable = !disabled && (isCurrent || isAdjacent);
           const isHovered = hoveredNodeId === node.id;
@@ -109,12 +111,16 @@ export function GameNodeMap({ map, onNodeClick, disabled }: GameNodeMapProps) {
                 fill={
                   isCurrent
                     ? "rgba(255, 255, 255, 0.2)"
-                    : node.discovered
-                      ? "rgba(100, 100, 100, 0.3)"
-                      : "rgba(50, 50, 50, 0.4)"
+                    : isSelected
+                      ? "rgba(56, 189, 248, 0.18)"
+                      : node.discovered
+                        ? "rgba(100, 100, 100, 0.3)"
+                        : "rgba(50, 50, 50, 0.4)"
                 }
-                stroke={isCurrent ? "#ffffff" : isAdjacent && !disabled ? "#a8a29e" : "transparent"}
-                strokeWidth={isCurrent ? 2 : 1}
+                stroke={
+                  isCurrent ? "#ffffff" : isSelected ? "#38bdf8" : isAdjacent && !disabled ? "#a8a29e" : "transparent"
+                }
+                strokeWidth={isCurrent || isSelected ? 2 : 1}
               />
               {/* Emoji */}
               <text

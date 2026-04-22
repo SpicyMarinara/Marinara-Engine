@@ -1,10 +1,32 @@
 // ──────────────────────────────────────────────
 // Game: Session History Panel (view past sessions)
 // ──────────────────────────────────────────────
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { History, ChevronDown, ChevronRight, ScrollText, Users, Sparkles, X } from "lucide-react";
 import type { SessionSummary } from "@marinara-engine/shared";
 import { AnimatedText } from "./AnimatedText";
+
+function normalizeText(value: unknown, fallback = ""): string {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || fallback;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return fallback;
+}
+
+function normalizeTextList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeText(item)).filter((item) => item.length > 0);
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? [trimmed] : [];
+  }
+  return [];
+}
 
 interface GameSessionHistoryProps {
   summaries: SessionSummary[];
@@ -15,7 +37,22 @@ interface GameSessionHistoryProps {
 export function GameSessionHistory({ summaries, currentSessionNumber, onClose }: GameSessionHistoryProps) {
   const [expandedSession, setExpandedSession] = useState<number | null>(null);
 
-  const sorted = [...summaries].sort((a, b) => b.sessionNumber - a.sessionNumber);
+  const sorted = useMemo(() => {
+    const normalized = (Array.isArray(summaries) ? summaries : []).map((session, index) => {
+      const raw = (session ?? {}) as Partial<SessionSummary> & Record<string, unknown>;
+      return {
+        sessionNumber: index + 1,
+        summary: normalizeText(raw.summary, `Session ${index + 1} concluded.`),
+        partyDynamics: normalizeText(raw.partyDynamics),
+        partyState: normalizeText(raw.partyState),
+        keyDiscoveries: normalizeTextList(raw.keyDiscoveries),
+        npcUpdates: normalizeTextList(raw.npcUpdates),
+        timestamp: normalizeText(raw.timestamp, new Date().toISOString()),
+      };
+    });
+
+    return normalized.sort((a, b) => b.sessionNumber - a.sessionNumber);
+  }, [summaries]);
 
   return (
     <div className="absolute inset-0 z-40 flex flex-col bg-[var(--card)]/95 backdrop-blur-sm">
@@ -25,7 +62,7 @@ export function GameSessionHistory({ summaries, currentSessionNumber, onClose }:
           <History size={16} className="text-[var(--muted-foreground)]" />
           <span className="text-sm font-semibold text-[var(--foreground)]">Session History</span>
           <span className="text-xs text-[var(--muted-foreground)]">
-            ({summaries.length} past session{summaries.length !== 1 ? "s" : ""})
+            ({sorted.length} past session{sorted.length !== 1 ? "s" : ""})
           </span>
         </div>
         <button

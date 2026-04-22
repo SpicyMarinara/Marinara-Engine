@@ -16,13 +16,19 @@ import {
   useCreatePersona,
   useUploadPersonaAvatar,
   useCharacterSprites,
+  useCharacterGalleryImages,
+  useUploadCharacterGalleryImage,
+  useDeleteCharacterGalleryImage,
   useUploadSprite,
   useDeleteSprite,
+  useSpriteCapabilities,
   spriteKeys,
+  type CharacterGalleryImage,
   type SpriteInfo,
 } from "../../hooks/use-characters";
 import { useUIStore } from "../../stores/ui.store";
 import { lorebookKeys } from "../../hooks/use-lorebooks";
+import { showConfirmDialog } from "../../lib/app-dialogs";
 import { SpriteGenerationModal } from "../ui/SpriteGenerationModal";
 import {
   ArrowLeft,
@@ -54,6 +60,7 @@ import {
   Crop,
   Maximize2,
   ImageDown,
+  Download,
   Wand2,
   UserPlus,
 } from "lucide-react";
@@ -75,6 +82,7 @@ const TABS = [
   { id: "scenario", label: "Scenario", icon: MapPin },
   { id: "dialogue", label: "Dialogue", icon: MessageCircle },
   { id: "sprites", label: "Sprites", icon: Image },
+  { id: "gallery", label: "Gallery", icon: Camera },
   { id: "colors", label: "Colors", icon: Palette },
   { id: "stats", label: "Stats", icon: Swords },
   { id: "advanced", label: "Advanced", icon: Settings2 },
@@ -173,7 +181,16 @@ export function CharacterEditor() {
 
   const handleDelete = async () => {
     if (!characterId) return;
-    if (!confirm("Are you sure you want to delete this character?")) return;
+    if (
+      !(await showConfirmDialog({
+        title: "Delete Character",
+        message: "Are you sure you want to delete this character?",
+        confirmLabel: "Delete",
+        tone: "destructive",
+      }))
+    ) {
+      return;
+    }
     await deleteCharacter.mutateAsync(characterId);
     closeDetail();
   };
@@ -579,6 +596,9 @@ export function CharacterEditor() {
                 defaultAppearance={(formData.extensions.appearance as string) ?? formData.description}
                 defaultAvatarUrl={avatarPreview}
               />
+            )}
+            {activeTab === "gallery" && characterId && (
+              <CharacterGalleryTab characterId={characterId} characterName={formData.name} />
             )}
             {activeTab === "colors" && (
               <ColorsTab formData={formData} updateExtension={updateExtension} avatarUrl={avatarPreview} />
@@ -1220,6 +1240,163 @@ function AdvancedTab({
 
 // ── Sprites Tab ──
 
+function CharacterGalleryTab({ characterId, characterName }: { characterId: string; characterName?: string }) {
+  const { data: images, isLoading } = useCharacterGalleryImages(characterId);
+  const upload = useUploadCharacterGalleryImage(characterId);
+  const remove = useDeleteCharacterGalleryImage(characterId);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [lightbox, setLightbox] = useState<CharacterGalleryImage | null>(null);
+
+  const handleUpload = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const formData = new FormData();
+      formData.append("file", file);
+      upload.mutate(formData);
+      e.target.value = "";
+    },
+    [upload],
+  );
+
+  const handleDelete = useCallback(
+    async (image: CharacterGalleryImage) => {
+      if (
+        !(await showConfirmDialog({
+          title: "Delete Character Image",
+          message: "Delete this character gallery image?",
+          confirmLabel: "Delete",
+          tone: "destructive",
+        }))
+      ) {
+        return;
+      }
+      remove.mutate(image.id);
+      if (lightbox?.id === image.id) setLightbox(null);
+    },
+    [lightbox?.id, remove],
+  );
+
+  return (
+    <div className="space-y-6">
+      <SectionHeader
+        title="Character Gallery"
+        subtitle="Keep reference art, alternate outfits, and other character images attached to this character even if chats get deleted."
+      />
+
+      <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleUpload} />
+
+      <button
+        onClick={() => fileInputRef.current?.click()}
+        disabled={upload.isPending}
+        className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[var(--border)] px-4 py-6 text-xs text-[var(--muted-foreground)] transition-all hover:border-[var(--primary)] hover:text-[var(--primary)] disabled:opacity-50"
+      >
+        <Upload size="1rem" />
+        {upload.isPending ? "Uploading…" : "Upload Character Image"}
+      </button>
+
+      {isLoading ? (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="shimmer aspect-square rounded-xl" />
+          ))}
+        </div>
+      ) : images && images.length > 0 ? (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+          {images.map((image) => (
+            <div
+              key={image.id}
+              className="group relative overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] transition-all hover:border-[var(--primary)]/30 hover:shadow-md"
+            >
+              <button className="block aspect-square w-full bg-[var(--secondary)]" onClick={() => setLightbox(image)}>
+                <img
+                  src={image.url}
+                  alt={image.prompt || characterName || "Character image"}
+                  className="h-full w-full object-cover"
+                />
+              </button>
+              <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/75 via-black/25 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100 max-md:opacity-100">
+                <span className="max-w-[8rem] truncate text-[0.6875rem] font-medium text-white/85">
+                  {new Date(image.createdAt).toLocaleDateString()}
+                </span>
+                <div className="flex gap-1">
+                  <a
+                    href={image.url}
+                    download
+                    className="rounded-lg bg-white/15 p-1.5 text-white transition-colors hover:bg-white/25"
+                    title="Download"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Download size="0.75rem" />
+                  </a>
+                  <button
+                    onClick={() => void handleDelete(image)}
+                    className="rounded-lg bg-red-500/35 p-1.5 text-white transition-colors hover:bg-red-500/55"
+                    title="Delete"
+                  >
+                    <Trash2 size="0.75rem" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-[var(--border)] py-12 text-center">
+          <Camera size="1.75rem" className="text-[var(--muted-foreground)]/40" />
+          <div>
+            <p className="text-sm font-medium text-[var(--muted-foreground)]">No character images yet</p>
+            <p className="mt-0.5 text-xs text-[var(--muted-foreground)]/60">
+              Upload images here to keep them tied to {characterName || "this character"} instead of a specific chat.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="rounded-xl bg-[var(--card)] p-4 ring-1 ring-[var(--border)]">
+        <h4 className="mb-1.5 text-xs font-semibold">How this differs from chat gallery</h4>
+        <ul className="space-y-1 text-[0.6875rem] text-[var(--muted-foreground)]">
+          <li>• These images belong to the character, so deleting a chat does not remove them.</li>
+          <li>• Use this for reference sheets, outfit variants, or imported ST-style character image packs.</li>
+          <li>• Chat gallery is still best for scene-specific illustrations and generated message attachments.</li>
+        </ul>
+      </div>
+
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 max-md:pt-[env(safe-area-inset-top)]"
+          onClick={() => setLightbox(null)}
+        >
+          <div className="relative max-h-[90vh] max-w-[90vw] w-[min(90vw,90vh)]" onClick={(e) => e.stopPropagation()}>
+            <img
+              src={lightbox.url}
+              alt={lightbox.prompt || characterName || "Character image"}
+              className="max-h-[85vh] w-full rounded-lg object-contain shadow-2xl"
+            />
+            <div className="absolute right-2 top-2 flex gap-2">
+              <a
+                href={lightbox.url}
+                download
+                className="rounded-lg bg-black/60 p-2 text-white transition-colors hover:bg-black/80"
+              >
+                <Download size="0.875rem" />
+              </a>
+              <button
+                onClick={() => setLightbox(null)}
+                className="rounded-lg bg-black/60 p-2 text-white transition-colors hover:bg-black/80"
+              >
+                <X size="0.875rem" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Sprites Tab ──
+
 const DEFAULT_EXPRESSIONS = [
   "neutral",
   "happy",
@@ -1251,6 +1428,7 @@ function SpritesTab({
   type SpriteCategory = "expressions" | "full-body";
 
   const { data: sprites, isLoading } = useCharacterSprites(characterId);
+  const { data: spriteCapabilities } = useSpriteCapabilities();
   const uploadSprite = useUploadSprite();
   const deleteSprite = useDeleteSprite();
   const queryClient = useQueryClient();
@@ -1272,6 +1450,8 @@ function SpritesTab({
     visibleSprites.map((s) => (category === "full-body" ? s.expression.replace(/^full_/, "") : s.expression)),
   );
   const suggestedExpressions = DEFAULT_EXPRESSIONS.filter((e) => !existingExpressions.has(e));
+  const spriteGenerationUnavailable = spriteCapabilities?.spriteGenerationAvailable === false;
+  const spriteGenerationReason = spriteCapabilities?.reason ?? "Sprite generation is unavailable on this platform.";
 
   const normalizeExpressionForCategory = (raw: string) => {
     const cleaned = raw
@@ -1356,7 +1536,16 @@ function SpritesTab({
   };
 
   const handleDelete = async (expression: string) => {
-    if (!confirm(`Delete sprite for "${expression}"?`)) return;
+    if (
+      !(await showConfirmDialog({
+        title: "Delete Sprite",
+        message: `Delete sprite for "${expression}"?`,
+        confirmLabel: "Delete",
+        tone: "destructive",
+      }))
+    ) {
+      return;
+    }
     await deleteSprite.mutateAsync({ characterId, expression });
   };
 
@@ -1464,8 +1653,11 @@ function SpritesTab({
           <div className="flex items-center gap-2">
             <button
               onClick={() => setSpriteGenOpen(true)}
-              className="flex items-center gap-1.5 rounded-lg bg-purple-500/10 px-3 py-1.5 text-[0.6875rem] font-medium text-purple-400 ring-1 ring-purple-500/20 transition-all hover:bg-purple-500/20"
-              title="Generate sprites using AI image generation"
+              disabled={spriteGenerationUnavailable}
+              className="flex items-center gap-1.5 rounded-lg bg-purple-500/10 px-3 py-1.5 text-[0.6875rem] font-medium text-purple-400 ring-1 ring-purple-500/20 transition-all hover:bg-purple-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+              title={
+                spriteGenerationUnavailable ? spriteGenerationReason : "Generate sprites using AI image generation"
+              }
             >
               <Wand2 size="0.8125rem" />
               Generate Sprite
@@ -1505,6 +1697,11 @@ function SpritesTab({
           <div className="flex items-center gap-2 rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
             <Loader2 size="0.75rem" className="animate-spin text-[var(--primary)]" />
             Uploading {folderProgress.done}/{folderProgress.total} sprites…
+          </div>
+        )}
+        {spriteGenerationUnavailable && (
+          <div className="rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
+            {spriteGenerationReason}
           </div>
         )}
         <div className="flex gap-2">
@@ -1909,7 +2106,7 @@ function ColorsTab({
         onChange={(v) => updateExtension("dialogueColor", v)}
         label="Dialogue Highlight Color"
         helpText={
-          'Text inside quotation marks ("", \u201c\u201d, \u00ab\u00bb) will be automatically bold and colored with this.'
+          'Text inside dialogue quotation marks ("", “”, «», 「」, 『』) will be automatically colored with this, and can also be bolded from Settings.'
         }
       />
 
@@ -1930,8 +2127,8 @@ function ColorsTab({
             display name in chat. Gradients use CSS linear-gradient.
           </li>
           <li>
-            &bull; <strong className="text-[var(--foreground)]">Dialogue color</strong> — All text inside double quotes
-            is automatically bold and colored with this value.
+            &bull; <strong className="text-[var(--foreground)]">Dialogue color</strong> — All text inside dialogue
+            quotation marks is automatically colored with this value, and can optionally be bolded from Settings.
           </li>
           <li>
             &bull; <strong className="text-[var(--foreground)]">Box color</strong> — Sets the background color of the

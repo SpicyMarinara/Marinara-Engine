@@ -39,6 +39,10 @@ export interface Journal {
   inventoryLog: Array<{ item: string; action: "acquired" | "used" | "lost"; quantity: number; timestamp: string }>;
 }
 
+function getReadableEntryKey(title: string, content: string): string {
+  return `${title.replace(/\r\n/g, "\n").trim()}\u0000${content.replace(/\r\n/g, "\n").trim()}`;
+}
+
 // ── Builder Functions ──
 
 /** Create an empty journal. */
@@ -184,9 +188,27 @@ export function addEventEntry(journal: Journal, title: string, content: string):
 
 /** Add a readable note or book entry (shown in the Library tab). */
 export function addNoteEntry(journal: Journal, title: string, content: string): Journal {
+  const seenReadableKeys = new Set<string>();
+  let removedDuplicates = false;
+  const dedupedEntries = journal.entries.filter((entry) => {
+    if (entry.type !== "note") return true;
+    const key = getReadableEntryKey(entry.title, entry.content);
+    if (seenReadableKeys.has(key)) {
+      removedDuplicates = true;
+      return false;
+    }
+    seenReadableKeys.add(key);
+    return true;
+  });
+
+  const nextKey = getReadableEntryKey(title, content);
+  if (seenReadableKeys.has(nextKey)) {
+    return removedDuplicates ? { ...journal, entries: dedupedEntries } : journal;
+  }
+
   return {
     ...journal,
-    entries: [...journal.entries, { timestamp: new Date().toISOString(), type: "note", title, content }],
+    entries: [...dedupedEntries, { timestamp: new Date().toISOString(), type: "note", title, content }],
   };
 }
 

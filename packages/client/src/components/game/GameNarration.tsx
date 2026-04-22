@@ -3,16 +3,22 @@
 // ──────────────────────────────────────────────
 import { useEffect, useMemo, useState, useCallback, useRef, type ReactNode } from "react";
 import DOMPurify from "dompurify";
-import { MessageCircle, RefreshCw, ScrollText, X, Package, Pencil, Check, Play, Pause } from "lucide-react";
+import { MessageCircle, RefreshCw, ScrollText, X, Package, Pencil, Check, Play, Pause, Trash2 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { stripGmTagsKeepReadables } from "../../lib/game-tag-parser";
 import { audioManager } from "../../lib/game-audio";
+import {
+  DIALOGUE_QUOTE_CAPTURE_GROUP_PATTERN_SOURCE,
+  HTML_SAFE_DIALOGUE_QUOTE_PATTERN_SOURCE,
+  stripSurroundingDialogueQuotes,
+} from "../../lib/dialogue-quotes";
 import type { SpriteInfo } from "../../hooks/use-characters";
+import { useTranslate } from "../../hooks/use-translate";
 import { useGameAssetStore } from "../../stores/game-asset.store";
 import { useGameModeStore } from "../../stores/game-mode.store";
 import { useUIStore } from "../../stores/ui.store";
 import { animateTextHtml } from "./AnimatedText";
-import type { PartyDialogueLine } from "@marinara-engine/shared";
+import type { PartyDialogueLine, Message } from "@marinara-engine/shared";
 
 /** Build inline style for a color that may be a plain color or a CSS gradient. */
 function nameColorStyle(color?: string): React.CSSProperties | undefined {
@@ -36,17 +42,13 @@ const PARTY_TYPE_ICONS: Record<string, string> = {
   whisper: "🤫",
 };
 
-interface NarrationMessage {
-  id: string;
-  role: string;
-  content: string;
-  characterId: string | null;
+type NarrationMessage = Pick<Message, "id" | "chatId" | "role" | "content" | "characterId" | "extra"> & {
   characterName?: string;
-}
+};
 
 interface NarrationSegment {
   id: string;
-  type: "narration" | "dialogue" | "readable";
+  type: "narration" | "dialogue" | "readable" | "system";
   speaker?: string;
   sprite?: string;
   content: string;
@@ -113,6 +115,8 @@ interface GameNarrationProps {
   onOpenInventory?: () => void;
   /** Number of items in inventory (for badge) */
   inventoryCount?: number;
+  /** Open the standard delete-message flow for a backing chat message. */
+  onDeleteMessage?: (messageId: string) => void;
   /** Called when user edits a narration segment. Receives message id and new content. */
   onEditSegment?: (messageId: string, segmentIndex: number, newContent: string) => void;
   /** Map of "messageId:segmentIndex" → edited content for segment overlay edits */
@@ -180,6 +184,14 @@ function slicePreservingEffects(content: string, maxVisible: number): string {
   return result;
 }
 
+function getGameTranslationHtml(message: NarrationMessage, translatedText: string): string {
+  const content =
+    message.role === "assistant" || message.role === "narrator" || message.role === "system"
+      ? stripGmTagsKeepReadables(translatedText)
+      : translatedText.replace(/^\[(?:To the party|To the GM)]\s*/i, "");
+  return animateTextHtml(formatNarration(content.trim(), false));
+}
+
 export function GameNarration({
   messages,
   isStreaming,
@@ -209,11 +221,13 @@ export function GameNarration({
   choicesSlot,
   onOpenInventory,
   inventoryCount,
+  onDeleteMessage,
   onEditSegment,
   segmentEdits,
   assetsGenerating,
   onReadable,
 }: GameNarrationProps) {
+  const { translations, translating } = useTranslate();
   const [activeIndex, setActiveIndex] = useState(0);
   const [visibleChars, setVisibleChars] = useState(0);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -224,6 +238,7 @@ export function GameNarration({
   );
   const logEditTextareaRef = useRef<HTMLTextAreaElement>(null);
   const logScrolledRef = useRef(false);
+  const segmentSourceMessageIdsRef = useRef<Array<string | null>>([]);
 
   // Clear edit state when the active segment changes
   useEffect(() => {
@@ -263,6 +278,7 @@ export function GameNarration({
   }, [characterMap, personaInfo]);
 
   const gameNpcs = useGameModeStore((s) => s.npcs);
+  const sourceMessagesById = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
 
   const speakerAvatars = useMemo(() => {
     const byName = new Map<string, string>();
@@ -290,6 +306,18 @@ export function GameNarration({
     }
     return null;
   }, [messages]);
+
+  const partyChatInputMessageId = useMemo(() => {
+    if (!partyChatMessageId || !partyChatInput) return null;
+    const partyMessageIndex = messages.findIndex((message) => message.id === partyChatMessageId);
+    if (partyMessageIndex <= 0) return null;
+    for (let index = partyMessageIndex - 1; index >= 0; index--) {
+      const candidate = messages[index]!;
+      if (candidate.role === "user") return candidate.id;
+      if (candidate.role === "assistant" || candidate.role === "narrator") break;
+    }
+    return null;
+  }, [messages, partyChatInput, partyChatMessageId]);
 
   // Find the most recent user message (for animated display)
   // Find the user message that prompted the current assistant response
@@ -330,6 +358,7 @@ export function GameNarration({
     const result: NarrationSegment[] = [];
     const origIndices: number[] = [];
     const editInfos: Array<{ messageId: string; segmentIndex: number } | null> = [];
+    const sourceMessageIds: Array<string | null> = [];
 
     // Prepend the user's action as a player dialogue segment when we're streaming or just got a response
     if (latestUserMessage?.content && latestAssistant) {
@@ -344,6 +373,7 @@ export function GameNarration({
       });
       origIndices.push(-1); // user message — not editable
       editInfos.push(null);
+      sourceMessageIds.push(latestUserMessage.id);
     }
 
     if (latestAssistant) {
@@ -356,6 +386,7 @@ export function GameNarration({
         result.push(seg);
         origIndices.push(si);
         editInfos.push({ messageId: latestAssistant.id, segmentIndex: si });
+        sourceMessageIds.push(latestAssistant.id);
       }
     }
 
@@ -377,6 +408,7 @@ export function GameNarration({
         });
         origIndices.push(-1);
         editInfos.push(null); // player's own input — not editable
+        sourceMessageIds.push(partyChatInputMessageId);
         // Player input maps to showing 0 partyDialogue entries in logs
         // (the log section builds its own player-input entry)
         logCutoff.push(0);
@@ -397,6 +429,7 @@ export function GameNarration({
             });
             origIndices.push(-1);
             editInfos.push(pcMsgId ? { messageId: pcMsgId, segmentIndex: partyEditIdx } : null);
+            sourceMessageIds.push(pcMsgId);
             partyEditIdx++;
             logCutoff.push(pdIdx + 1);
             continue;
@@ -420,6 +453,7 @@ export function GameNarration({
           });
           origIndices.push(-1);
           editInfos.push(pcMsgId ? { messageId: pcMsgId, segmentIndex: partyEditIdx } : null);
+          sourceMessageIds.push(pcMsgId);
           partyEditIdx++;
           // After seeing this filtered segment, show partyDialogue entries 0..pdIdx in logs
           logCutoff.push(pdIdx + 1);
@@ -447,8 +481,26 @@ export function GameNarration({
       }
     }
 
+    // Resolve display macros ({{user}}, {{char}}) on every segment's content so
+    // downstream renderers (formatNarration / animateTextHtml) receive the
+    // already-substituted text. Mirrors ChatMessage.tsx display-time logic.
+    const userName = personaInfo?.name || "You";
+    const fallbackCharName = (() => {
+      if (!characterMap || characterMap.size === 0) return null;
+      const first = characterMap.values().next().value;
+      return first?.name ?? null;
+    })();
+    for (let i = 0; i < result.length; i++) {
+      const seg = result[i]!;
+      const charName = seg.speaker ?? fallbackCharName;
+      let content = seg.content.replaceAll("{{user}}", userName);
+      if (charName) content = content.replaceAll("{{char}}", charName);
+      if (content !== seg.content) result[i] = { ...seg, content };
+    }
+
     segmentOriginalIndices.current = origIndices;
     segmentEditInfoRef.current = editInfos;
+    segmentSourceMessageIdsRef.current = sourceMessageIds;
     partySegStartRef.current = partyStart;
     partyLogCutoffRef.current = logCutoff;
     return result;
@@ -459,8 +511,10 @@ export function GameNarration({
     personaInfo,
     partyDialogue,
     partyChatInput,
+    partyChatInputMessageId,
     partyChatMessageId,
     segmentEdits,
+    characterMap,
   ]);
 
   // Clamp activeIndex when segments shrink (e.g. new party chat clears old dialogue)
@@ -477,6 +531,13 @@ export function GameNarration({
   const sideLineMap = useMemo(() => {
     const map = new Map<number, PartyDialogueLine[]>();
 
+    const userName = personaInfo?.name || "You";
+    const subMacros = (text: string, charName: string | null): string => {
+      let out = text.replaceAll("{{user}}", userName);
+      if (charName) out = out.replaceAll("{{char}}", charName);
+      return out;
+    };
+
     // 1. Collect inline side/extra from GM narration
     if (latestAssistant) {
       const allSegs = parseNarrationSegments(latestAssistant, speakerColors);
@@ -490,7 +551,7 @@ export function GameNarration({
           arr.push({
             character: seg.speaker ?? "",
             type: seg.partyType,
-            content: seg.content,
+            content: subMacros(seg.content, seg.speaker ?? null),
             expression: seg.sprite,
             target: seg.whisperTarget,
           });
@@ -516,7 +577,7 @@ export function GameNarration({
       for (const line of partyDialogue) {
         if (line.type === "side" || line.type === "extra") {
           const arr = map.get(lastPartySegIdx) ?? [];
-          arr.push(line);
+          arr.push({ ...line, content: subMacros(line.content, line.character) });
           map.set(lastPartySegIdx, arr);
         } else {
           for (let i = partySegCursor; i < segments.length; i++) {
@@ -531,9 +592,13 @@ export function GameNarration({
     }
 
     return map;
-  }, [latestAssistant, speakerColors, partyDialogue, segments]);
+  }, [latestAssistant, speakerColors, partyDialogue, segments, personaInfo]);
 
   const active = segments[activeIndex] ?? null;
+  const activeSourceMessageId = active ? segmentSourceMessageIdsRef.current[activeIndex] : null;
+  const activeSourceMessage = activeSourceMessageId ? (sourceMessagesById.get(activeSourceMessageId) ?? null) : null;
+  const activeTranslatedText = activeSourceMessageId ? translations[activeSourceMessageId] : undefined;
+  const activeIsTranslating = activeSourceMessageId ? !!translating[activeSourceMessageId] : false;
 
   // When a segment's content changes in-place (user edited it), snap visibleChars
   // to the full display length so the typewriter doesn't re-type the edited text.
@@ -591,6 +656,20 @@ export function GameNarration({
               speaker: playerName,
               content: msg.content,
               color,
+            },
+          ],
+        });
+        continue;
+      }
+
+      if (msg.role === "system" && msg.content.trim()) {
+        entries.push({
+          messageId: msg.id,
+          segments: [
+            {
+              id: `${msg.id}-system-log`,
+              type: "system",
+              content: msg.content,
             },
           ],
         });
@@ -751,6 +830,21 @@ export function GameNarration({
   const lastNarrationMsgIdRef = useRef<string | undefined>(undefined);
   const segmentChangeReady = useRef(false);
   const segmentEnterReady = useRef(false);
+  const gameInstantTextReveal = useUIStore((s) => s.gameInstantTextReveal);
+  const gameTextSpeed = useUIStore((s) => s.gameTextSpeed);
+  const gameAutoPlayDelay = useUIStore((s) => s.gameAutoPlayDelay);
+  const chatFontColor = useUIStore((s) => s.chatFontColor);
+  const narrationStyle = chatFontColor ? { color: chatFontColor } : undefined;
+  const [autoPlay, setAutoPlay] = useState(false);
+
+  const getSegmentStartVisibleChars = useCallback(
+    (index: number) => {
+      const segment = segments[index];
+      if (!segment || !gameInstantTextReveal || directionsActive) return 0;
+      return effectDisplayLength(segment.content);
+    },
+    [segments, gameInstantTextReveal, directionsActive],
+  );
 
   useEffect(() => {
     // Only react to message ID changes (not content changes during streaming).
@@ -782,11 +876,23 @@ export function GameNarration({
       return;
     }
     setActiveIndex(playerSegmentOffset);
-    setVisibleChars(0);
+    setVisibleChars(getSegmentStartVisibleChars(playerSegmentOffset));
+    // Clear the restore flag once we've advanced to a new message so the
+    // "segments grow after restore" effect below no longer snaps back to the
+    // stale saved index when segments rebuild for the new scene.
+    restoredRef.current = false;
     // For non-restore (new message), enable persistence and enter immediately
     segmentChangeReady.current = true;
     segmentEnterReady.current = true;
-  }, [latestAssistant?.id, isStreaming]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [
+    latestAssistant?.id,
+    isStreaming,
+    isRestored,
+    restoredSegmentIndex,
+    segments,
+    playerSegmentOffset,
+    getSegmentStartVisibleChars,
+  ]);
 
   // When segments grow after restore (e.g. party dialogue restored asynchronously),
   // jump to the exact saved segment index if it's now in bounds.
@@ -827,12 +933,6 @@ export function GameNarration({
     onReadable({ type: active.readableType ?? "note", content: active.readableContent });
   }, [activeIndex, active, visibleChars, onReadable]);
 
-  const gameTextSpeed = useUIStore((s) => s.gameTextSpeed);
-  const gameAutoPlayDelay = useUIStore((s) => s.gameAutoPlayDelay);
-  const chatFontColor = useUIStore((s) => s.chatFontColor);
-  const narrationStyle = chatFontColor ? { color: chatFontColor } : undefined;
-  const [autoPlay, setAutoPlay] = useState(false);
-
   useEffect(() => {
     if (!active) return;
     // Pause typewriter while direction effects (fades, flashes, etc.) are playing
@@ -844,7 +944,7 @@ export function GameNarration({
     tw.pos = visibleChars;
 
     if (tw.pos >= dispLen) return;
-    if (gameTextSpeed >= 100) {
+    if (gameInstantTextReveal || gameTextSpeed >= 100) {
       // Instant
       tw.pos = dispLen;
       setVisibleChars(dispLen);
@@ -866,9 +966,29 @@ export function GameNarration({
     }, TICK_MS);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, gameTextSpeed, directionsActive]); // visibleChars intentionally excluded — managed internally
+  }, [active, gameInstantTextReveal, gameTextSpeed, directionsActive]); // visibleChars intentionally excluded — managed internally
 
   const assetManifest = useGameAssetStore((s) => s.manifest);
+
+  const renderTranslationPanel = useCallback(
+    (message: NarrationMessage | null, translatedText?: string, isTranslating = false, className?: string) => {
+      if (!message || (!translatedText && !isTranslating)) return null;
+      return (
+        <div className={cn("rounded-xl border border-sky-400/15 bg-sky-500/8 px-3 py-2.5", className)}>
+          <div className="mb-1 text-[0.625rem] font-semibold uppercase tracking-wide text-sky-200/70">Translation</div>
+          {translatedText ? (
+            <div
+              className="game-narration-prose text-sm leading-relaxed text-sky-50/85"
+              dangerouslySetInnerHTML={{ __html: getGameTranslationHtml(message, translatedText) }}
+            />
+          ) : (
+            <div className="text-xs text-sky-200/60">Translating...</div>
+          )}
+        </div>
+      );
+    },
+    [],
+  );
 
   const playClickSfx = useCallback(() => {
     audioManager.playSfx("sfx:ui:click", assetManifest?.assets ?? null);
@@ -883,8 +1003,9 @@ export function GameNarration({
       return;
     }
     if (activeIndex < segments.length - 1) {
-      setActiveIndex((i) => i + 1);
-      setVisibleChars(0);
+      const nextIndex = activeIndex + 1;
+      setActiveIndex(nextIndex);
+      setVisibleChars(getSegmentStartVisibleChars(nextIndex));
       playClickSfx();
     }
   };
@@ -897,8 +1018,9 @@ export function GameNarration({
     if (editingContent !== null) return;
     if (activeIndex >= segments.length - 1) return; // reached input; stop
     const id = window.setTimeout(() => {
-      setActiveIndex((i) => (i < segments.length - 1 ? i + 1 : i));
-      setVisibleChars(0);
+      const nextIndex = Math.min(activeIndex + 1, segments.length - 1);
+      setActiveIndex(nextIndex);
+      setVisibleChars(getSegmentStartVisibleChars(nextIndex));
       playClickSfx();
     }, gameAutoPlayDelay);
     return () => window.clearTimeout(id);
@@ -914,6 +1036,7 @@ export function GameNarration({
     scenePreparing,
     directionsActive,
     editingContent,
+    getSegmentStartVisibleChars,
     playClickSfx,
   ]);
 
@@ -971,7 +1094,7 @@ export function GameNarration({
   );
 
   return (
-    <div className="relative flex flex-1 items-end px-3 pb-3 pt-24 sm:px-6 sm:pb-4">
+    <div className="relative flex min-h-0 flex-1 items-end px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-20 md:pt-24 sm:px-6 md:pb-4">
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-black/15 to-transparent" />
 
       <div data-tour="game-dialogue" className="relative z-10 mx-auto w-full max-w-4xl">
@@ -1197,6 +1320,9 @@ export function GameNarration({
                 </div>
               )}
 
+              {doneTyping &&
+                renderTranslationPanel(activeSourceMessage, activeTranslatedText, activeIsTranslating, "mt-2")}
+
               <div className="mt-2 flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
                   <button
@@ -1292,6 +1418,9 @@ export function GameNarration({
                 )}
               </div>
 
+              {doneTyping &&
+                renderTranslationPanel(activeSourceMessage, activeTranslatedText, activeIsTranslating, "mt-2")}
+
               <div className="mt-2 flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
                   <button
@@ -1346,6 +1475,9 @@ export function GameNarration({
                   }}
                 />
               </div>
+
+              {doneTyping &&
+                renderTranslationPanel(activeSourceMessage, activeTranslatedText, activeIsTranslating, "mt-2")}
 
               <div className="mt-2 flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
@@ -1438,6 +1570,9 @@ export function GameNarration({
                 <p className="text-sm text-[var(--muted-foreground)]">No previous logs yet.</p>
               )}
               {logEntries.map((entry) => {
+                const sourceMessage = sourceMessagesById.get(entry.messageId) ?? null;
+                const translatedEntryText = sourceMessage ? translations[entry.messageId] : undefined;
+                const entryIsTranslating = sourceMessage ? !!translating[entry.messageId] : false;
                 // For party-chat entries built from partyDialogue, the player input
                 // is prepended as an extra segment that doesn't exist in the stored
                 // message. Compute an offset so edit indices align with the DB content.
@@ -1586,6 +1721,36 @@ export function GameNarration({
                           </div>
                         );
                       }
+                      if (seg.type === "system") {
+                        return (
+                          <div
+                            key={seg.id}
+                            className={cn(
+                              "group/logseg relative rounded-lg border border-cyan-400/15 bg-cyan-950/15 px-3 py-2",
+                              isActiveSeg && "ring-1 ring-[var(--primary)]/40",
+                            )}
+                          >
+                            {onDeleteMessage && (
+                              <button
+                                onClick={() => onDeleteMessage(entry.messageId)}
+                                className="absolute right-1.5 top-1.5 rounded p-1 text-white/20 opacity-0 transition-all group-hover/logseg:opacity-100 hover:bg-red-500/20 hover:text-red-400"
+                                title="Delete"
+                              >
+                                <Trash2 size={11} />
+                              </button>
+                            )}
+                            <div className="mb-1 flex items-center">
+                              <span className="text-[0.6rem] font-semibold uppercase tracking-wide text-cyan-200/80">
+                                System
+                              </span>
+                            </div>
+                            <div
+                              className="whitespace-pre-wrap break-words pr-6 text-xs leading-relaxed text-cyan-50/80"
+                              dangerouslySetInnerHTML={{ __html: animateTextHtml(formatNarration(seg.content, false)) }}
+                            />
+                          </div>
+                        );
+                      }
                       if (seg.type === "readable") {
                         return (
                           <div
@@ -1640,6 +1805,7 @@ export function GameNarration({
                         </div>
                       );
                     })}
+                    {renderTranslationPanel(sourceMessage, translatedEntryText, entryIsTranslating)}
                     <div className="border-b border-white/5" />
                   </div>
                 );
@@ -1674,7 +1840,7 @@ function PartyOverlayBox({
   return (
     <div
       className={cn(
-        "flex min-w-max max-w-[75%] items-start gap-2 rounded-xl border px-3 py-2 backdrop-blur-md",
+        "flex w-fit min-w-0 max-w-full items-start gap-2 rounded-xl border px-3 py-2 backdrop-blur-md sm:max-w-[75%]",
         style.border,
         style.bg,
       )}
@@ -1693,7 +1859,7 @@ function PartyOverlayBox({
         />
       )}
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           <span className="text-[0.5625rem]">{style.icon}</span>
           <span
             className={cn("text-[0.6875rem] font-semibold", style.labelColor)}
@@ -1705,10 +1871,10 @@ function PartyOverlayBox({
             <span className="text-[0.5625rem] text-white/40">→ {line.target}</span>
           )}
         </div>
-        <div className="mt-0.5 overflow-x-auto scrollbar-hide [-webkit-overflow-scrolling:touch] md:overflow-x-visible">
+        <div className="mt-0.5 min-w-0">
           <p
             className={cn(
-              "text-xs leading-relaxed text-white/75 whitespace-nowrap md:whitespace-normal",
+              "text-xs leading-relaxed text-white/75 whitespace-normal break-words [overflow-wrap:anywhere]",
               line.type === "thought" && "italic opacity-80",
               line.type === "whisper" && "italic",
             )}
@@ -1916,18 +2082,12 @@ function parseNarrationSegments(message: NarrationMessage, speakerColors: Map<st
       const expression = partyMatch[4]?.trim() || undefined;
       let content = partyMatch[5]!.trim();
 
-      // Strip surrounding quotes for spoken dialogue types
+      // Strip surrounding dialogue quotes for spoken dialogue types
       if (
         (rawType === "main" || rawType === "side" || rawType === "extra" || rawType === "whisper") &&
         content.length >= 2
       ) {
-        if (
-          (content.startsWith('"') && content.endsWith('"')) ||
-          (content.startsWith("\u201c") && content.endsWith("\u201d")) ||
-          (content.startsWith("\u00ab") && content.endsWith("\u00bb"))
-        ) {
-          content = content.slice(1, -1);
-        }
+        content = stripSurroundingDialogueQuotes(content);
       }
 
       const color = speakerColors.get(character.toLowerCase());
@@ -1989,15 +2149,7 @@ function parseNarrationSegments(message: NarrationMessage, speakerColors: Map<st
       }
       const speaker = humanizeName(dialogueMatch[1]!.trim());
       let content = dialogueMatch[3]!.trim();
-      // Strip surrounding quotes (straight, smart, or guillemets)
-      if (
-        content.length >= 2 &&
-        ((content.startsWith('"') && content.endsWith('"')) ||
-          (content.startsWith("\u201c") && content.endsWith("\u201d")) ||
-          (content.startsWith("\u00ab") && content.endsWith("\u00bb")))
-      ) {
-        content = content.slice(1, -1);
-      }
+      content = stripSurroundingDialogueQuotes(content);
       parsed.push({
         id: `${message.id}-d-${parsed.length}`,
         type: "dialogue",
@@ -2037,6 +2189,7 @@ function parseNarrationSegments(message: NarrationMessage, speakerColors: Map<st
  * separate narration + dialogue segments. Handles patterns like:
  *   "Hello there," she said warmly.
  *   «Watch out!» Alaric warned.
+ *   「小心！」 Alaric warned.
  */
 function splitInlineDialogue(
   segments: NarrationSegment[],
@@ -2044,9 +2197,11 @@ function splitInlineDialogue(
   speakerColors: Map<string, string>,
 ): NarrationSegment[] {
   const result: NarrationSegment[] = [];
-  // Match "quoted text", «quoted text», or 'single-quoted text' followed by optional comma/period and a speaker name
-  const inlineDialogueRe =
-    /(?:^|(?<=\s))(?:"([^"]+)"|«([^»]+)»|'([^']+)')[,.]?\s+([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\s+(?:said|says|whispered|whispers|muttered|mutters|replied|replies|called|calls|shouted|shouts|asked|asks|warned|warns|growled|growls|hissed|hisses|exclaimed|exclaims|murmured|murmurs|sighed|sighs|snapped|snaps|barked|barks|declared|declares|continued|continues|added|adds|spoke|speaks|began|begins|remarked|remarks|chuckled|chuckles|laughed|laughs|cried|cries)\b/gi;
+  // Match common dialogue quote pairs followed by optional comma/period and a speaker name.
+  const inlineDialogueRe = new RegExp(
+    `(?:^|(?<=\\s))(?:${DIALOGUE_QUOTE_CAPTURE_GROUP_PATTERN_SOURCE}|'([^']+)')[,.]?\\s+([A-Z][a-z]+(?:\\s[A-Z][a-z]+)?)\\s+(?:said|says|whispered|whispers|muttered|mutters|replied|replies|called|calls|shouted|shouts|asked|asks|warned|warns|growled|growls|hissed|hisses|exclaimed|exclaims|murmured|murmurs|sighed|sighs|snapped|snaps|barked|barks|declared|declares|continued|continues|added|adds|spoke|speaks|began|begins|remarked|remarks|chuckled|chuckles|laughed|laughs|cried|cries)\\b`,
+    "gi",
+  );
 
   for (const seg of segments) {
     if (seg.type !== "narration") {
@@ -2071,8 +2226,8 @@ function splitInlineDialogue(
         });
       }
 
-      const speech = match[1] ?? match[2] ?? match[3] ?? "";
-      const speaker = match[4]!;
+      const speech = match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? match[6] ?? "";
+      const speaker = match[7]!;
       result.push({
         id: `${msgId}-inline-d-${result.length}`,
         type: "dialogue",
@@ -2115,12 +2270,8 @@ function formatNarration(content: string, boldDialogue = true): string {
     );
 
   if (boldDialogue) {
-    html = html.replace(/"([^"]+)"|«([^»]+)»/g, (match, q1, q2) => {
-      const inner = q1 ?? q2 ?? "";
-      const open = match[0];
-      const close = match[match.length - 1];
-      return `<strong>${open}${inner}${close}</strong>`;
-    });
+    const narrationQuoteRe = new RegExp(`(?<![=\\w])(?:${HTML_SAFE_DIALOGUE_QUOTE_PATTERN_SOURCE})`, "g");
+    html = html.replace(narrationQuoteRe, (match) => `<strong>${match}</strong>`);
   }
 
   return DOMPurify.sanitize(html, { ALLOWED_TAGS: ["strong", "em", "br", "span"], ALLOWED_ATTR: ["class"] });

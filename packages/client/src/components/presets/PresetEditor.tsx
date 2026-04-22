@@ -5,6 +5,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef, type FC } from "react";
 import { useUIStore } from "../../stores/ui.store";
 import { toast } from "sonner";
+import { showConfirmDialog } from "../../lib/app-dialogs";
 import {
   usePresetFull,
   useUpdatePreset,
@@ -186,9 +187,18 @@ export function PresetEditor() {
     );
   }, [presetDetailId, localName, localDescription, localWrapFormat, localAuthor, localParams, updatePreset]);
 
-  const handleDelete = useCallback(() => {
+  const handleDelete = useCallback(async () => {
     if (!presetDetailId) return;
-    if (!confirm("Delete this preset?")) return;
+    if (
+      !(await showConfirmDialog({
+        title: "Delete Preset",
+        message: "Delete this preset?",
+        confirmLabel: "Delete",
+        tone: "destructive",
+      }))
+    ) {
+      return;
+    }
     deletePreset.mutate(presetDetailId, { onSuccess: () => closePresetDetail() });
   }, [presetDetailId, deletePreset, closePresetDetail]);
 
@@ -842,8 +852,15 @@ function SectionsTab({
                     {sections.filter((s: any) => s.groupId === g.id).length} sections
                   </span>
                   <button
-                    onClick={() => {
-                      if (confirm(`Delete group "${g.name}"? Sections will be ungrouped.`)) {
+                    onClick={async () => {
+                      if (
+                        await showConfirmDialog({
+                          title: "Delete Group",
+                          message: `Delete group "${g.name}"? Sections will be ungrouped.`,
+                          confirmLabel: "Delete",
+                          tone: "destructive",
+                        })
+                      ) {
                         onDeleteGroup.mutate({ presetId, groupId: g.id });
                       }
                     }}
@@ -1394,8 +1411,15 @@ function VariableCard({
         )}
         <code className="shrink-0 text-[0.625rem] text-[var(--muted-foreground)]">{`{{${varName}}}`}</code>
         <button
-          onClick={() => {
-            if (confirm(`Delete variable "${varName}"?`)) {
+          onClick={async () => {
+            if (
+              await showConfirmDialog({
+                title: "Delete Variable",
+                message: `Delete variable "${varName}"?`,
+                confirmLabel: "Delete",
+                tone: "destructive",
+              })
+            ) {
               onDeleteVariable.mutate({ presetId, variableId: variable.id });
             }
           }}

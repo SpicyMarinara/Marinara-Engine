@@ -11,7 +11,7 @@ set "INSTALL_ERROR="
 echo.
 echo  +==========================================+
 echo  ^|   Marinara Engine - Windows Installer     ^|
-echo  ^|   v1.5.2                                  ^|
+echo  ^|   v1.5.4                                  ^|
 
 echo  +==========================================+
 echo.
@@ -174,16 +174,21 @@ echo  [OK] Dependencies installed
 :: -- Build --
 echo.
 echo  [..] Building Marinara Engine...
-call :run_pnpm build
+call :run_pnpm --filter @marinara-engine/shared build
 if %errorlevel% neq 0 (
-    set "INSTALL_ERROR=Build failed."
+    set "INSTALL_ERROR=Shared package build failed."
+    goto :fatal
+)
+call :run_pnpm --filter @marinara-engine/server --filter @marinara-engine/client --parallel run build
+if %errorlevel% neq 0 (
+    set "INSTALL_ERROR=Server or client build failed."
     goto :fatal
 )
 echo  [OK] Build complete
 
 :: -- Sync database --
 echo  [..] Setting up database...
-call :run_pnpm db:push 2>nul
+call :run_pnpm --filter @marinara-engine/server db:push 2>nul
 echo  [OK] Database ready
 
 :: -- Create desktop shortcut --

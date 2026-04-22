@@ -85,16 +85,16 @@ Current policy:
 
 Current version touchpoints:
 
-| File | Role |
-| --- | --- |
-| `package.json` | Canonical application version |
-| `packages/client/package.json` | Derived workspace version |
-| `packages/server/package.json` | Derived workspace version |
-| `packages/shared/package.json` | Derived workspace version |
+| File                                        | Role                                                   |
+| ------------------------------------------- | ------------------------------------------------------ |
+| `package.json`                              | Canonical application version                          |
+| `packages/client/package.json`              | Derived workspace version                              |
+| `packages/server/package.json`              | Derived workspace version                              |
+| `packages/shared/package.json`              | Derived workspace version                              |
 | `packages/shared/src/constants/defaults.ts` | Shared `APP_VERSION` used by the app and update checks |
-| `installer/installer.nsi` | Windows installer output version |
-| `installer/install.bat` | Windows installer banner text |
-| `android/app/build.gradle` | Android `versionName` and `versionCode` |
+| `installer/installer.nsi`                   | Windows installer output version                       |
+| `installer/install.bat`                     | Windows installer banner text                          |
+| `android/app/build.gradle`                  | Android `versionName` and `versionCode`                |
 
 Android policy:
 
