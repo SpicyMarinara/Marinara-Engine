@@ -3443,6 +3443,165 @@ export async function generateRoutes(app: FastifyInstance) {
         pipelineAgents = pipelineAgents.filter((a) => a.type !== "combat");
       }
 
+      // ────────────────────────────────────────
+      // Tool Resolution (Main Generation + Agent Pipeline)
+      // ────────────────────────────────────────
+      const inputBody = req.body as Record<string, unknown>;
+      const enableTools = inputBody.enableTools === true || chatMeta.enableTools === true;
+
+      let toolDefs: LLMToolDefinition[] | undefined;
+      const customToolDefs: Array<{
+        name: string;
+        executionType: string;
+        webhookUrl: string | null;
+        staticResult: string | null;
+        scriptBody: string | null;
+      }> = [];
+
+      if (enableTools) {
+        // Per-chat tool selection (empty = all tools)
+        const chatActiveToolIds: string[] = Array.isArray(chatMeta.activeToolIds)
+          ? (chatMeta.activeToolIds as string[])
+          : [];
+        const hasToolFilter = chatActiveToolIds.length > 0;
+
+        // Built-in tools
+        const builtInFiltered = hasToolFilter
+          ? BUILT_IN_TOOLS.filter((t) => chatActiveToolIds.includes(t.name))
+          : BUILT_IN_TOOLS;
+        toolDefs = builtInFiltered.map((t) => ({
+          type: "function" as const,
+          function: {
+            name: t.name,
+            description: t.description,
+            parameters: t.parameters as unknown as Record<string, unknown>,
+          },
+        }));
+
+        // Custom tools from DB
+        const enabledCustomTools = await customToolsStore.listEnabled();
+        const customFiltered = hasToolFilter
+          ? enabledCustomTools.filter((ct: any) => chatActiveToolIds.includes(ct.name))
+          : enabledCustomTools;
+        for (const ct of customFiltered) {
+          const schema =
+            typeof ct.parametersSchema === "string" ? JSON.parse(ct.parametersSchema) : ct.parametersSchema;
+          toolDefs.push({
+            type: "function" as const,
+            function: {
+              name: ct.name,
+              description: ct.description,
+              parameters: schema as Record<string, unknown>,
+            },
+          });
+          customToolDefs.push({
+            name: ct.name,
+            executionType: ct.executionType,
+            webhookUrl: ct.webhookUrl,
+            staticResult: ct.staticResult,
+            scriptBody: ct.scriptBody,
+          });
+        }
+      }
+
+      // ── Spotify Token Refresh (Early) ──
+      const spotifyAgent = resolvedAgents.find((a) => a.type === "spotify");
+      let spotifyAccessToken: string | null = null;
+      if (spotifyAgent) {
+        const sSettings =
+          typeof spotifyAgent.settings === "string" ? JSON.parse(spotifyAgent.settings) : spotifyAgent.settings || {};
+        spotifyAccessToken = (sSettings.spotifyAccessToken as string) || null;
+        const spotifyRefreshToken = (sSettings.spotifyRefreshToken as string) || null;
+        const spotifyClientId = (sSettings.spotifyClientId as string) || null;
+        const spotifyExpiresAt = (sSettings.spotifyExpiresAt as number) ?? 0;
+
+        if (
+          spotifyAccessToken &&
+          spotifyRefreshToken &&
+          spotifyClientId &&
+          spotifyExpiresAt > 0 &&
+          Date.now() > spotifyExpiresAt - 60_000 // Refresh 1 min before expiry
+        ) {
+          try {
+            const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: new URLSearchParams({
+                grant_type: "refresh_token",
+                refresh_token: spotifyRefreshToken,
+                client_id: spotifyClientId,
+              }),
+              signal: AbortSignal.timeout(10_000),
+            });
+            if (tokenRes.ok) {
+              const tokens = (await tokenRes.json()) as {
+                access_token: string;
+                refresh_token?: string;
+                expires_in: number;
+              };
+              spotifyAccessToken = tokens.access_token;
+              // Persist refreshed tokens in background (don't await)
+              agentsStore
+                .update(spotifyAgent.id, {
+                  settings: {
+                    ...sSettings,
+                    spotifyAccessToken: tokens.access_token,
+                    spotifyRefreshToken: tokens.refresh_token ?? spotifyRefreshToken,
+                    spotifyExpiresAt: Date.now() + tokens.expires_in * 1000,
+                  },
+                })
+                .catch(() => {});
+            }
+          } catch {
+            /* ignore refresh errors */
+          }
+        }
+      }
+      const spotifyCreds = spotifyAccessToken ? { accessToken: spotifyAccessToken } : undefined;
+
+      // ── Resolve tool context for all agents ──
+      // This enables built-in and custom tools for any agent in the pipeline.
+      for (const agent of resolvedAgents) {
+        if (agent.toolContext) continue;
+
+        const agentSettings = typeof agent.settings === "string" ? JSON.parse(agent.settings) : agent.settings || {};
+        const agentEnabledNames =
+          (agentSettings?.enabledTools as string[]) || (DEFAULT_AGENT_TOOLS[agent.type] as string[]) || [];
+        if (agentEnabledNames.length === 0) continue;
+
+        const agentTools = (toolDefs ?? []).filter((td) => agentEnabledNames.includes(td.function.name));
+        if (agentTools.length === 0) continue;
+
+        agent.toolContext = {
+          tools: agentTools,
+          executeToolCall: async (call) => {
+            const results = await executeToolCalls([call], {
+              customTools: customToolDefs,
+              spotify: spotifyCreds,
+              searchLorebook: async (query: string, category?: string | null) => {
+                const entries = await lorebooksStore.listActiveEntries({
+                  chatId: input.chatId,
+                  characterIds,
+                  activeLorebookIds: chatActiveLorebookIds,
+                });
+                const q = query.toLowerCase();
+                return entries
+                  .filter((e: any) => {
+                    const nameMatch = e.name?.toLowerCase().includes(q);
+                    const contentMatch = e.content?.toLowerCase().includes(q);
+                    const keyMatch = (e.keys as string[])?.some((k: string) => k.toLowerCase().includes(q));
+                    const catMatch = !category || e.tag === category;
+                    return catMatch && (nameMatch || contentMatch || keyMatch);
+                  })
+                  .slice(0, 20)
+                  .map((e: any) => ({ name: e.name, content: e.content, tag: e.tag, keys: e.keys as string[] }));
+              },
+            });
+            return results[0]?.result ?? "Tool execution failed";
+          },
+        };
+      }
+
       const pipeline = createAgentPipeline(pipelineAgents, agentContext, sendAgentEvent);
 
       // ────────────────────────────────────────
@@ -3917,66 +4076,9 @@ export async function generateRoutes(app: FastifyInstance) {
       // ── Early exit if client disconnected during knowledge retrieval / injection ──
       if (abortController.signal.aborted) return;
 
-      // Check if tool-use is requested for the main generation (from chat
-      // metadata or the request body). Agents handle their own tool calls
-      // independently via agent-executor — do NOT enable tools on the main
-      // generation just because agents are active.
-      const inputBody = req.body as Record<string, unknown>;
-      const enableTools = inputBody.enableTools === true || chatMeta.enableTools === true;
-
-      // Build OpenAI-compatible tool definitions from built-in + custom tools
-      let toolDefs: LLMToolDefinition[] | undefined;
-      let customToolDefs: Array<{
-        name: string;
-        executionType: string;
-        webhookUrl: string | null;
-        staticResult: string | null;
-        scriptBody: string | null;
-      }> = [];
-      if (enableTools) {
-        // Per-chat tool selection (empty = all tools)
-        const chatActiveToolIds: string[] = Array.isArray(chatMeta.activeToolIds)
-          ? (chatMeta.activeToolIds as string[])
-          : [];
-        const hasToolFilter = chatActiveToolIds.length > 0;
-
-        // Built-in tools
-        const builtInFiltered = hasToolFilter
-          ? BUILT_IN_TOOLS.filter((t) => chatActiveToolIds.includes(t.name))
-          : BUILT_IN_TOOLS;
-        toolDefs = builtInFiltered.map((t) => ({
-          type: "function" as const,
-          function: {
-            name: t.name,
-            description: t.description,
-            parameters: t.parameters as unknown as Record<string, unknown>,
-          },
-        }));
-        // Custom tools from DB
-        const enabledCustomTools = await customToolsStore.listEnabled();
-        const customFiltered = hasToolFilter
-          ? enabledCustomTools.filter((ct: any) => chatActiveToolIds.includes(ct.name))
-          : enabledCustomTools;
-        for (const ct of customFiltered) {
-          const schema =
-            typeof ct.parametersSchema === "string" ? JSON.parse(ct.parametersSchema) : ct.parametersSchema;
-          toolDefs.push({
-            type: "function" as const,
-            function: {
-              name: ct.name,
-              description: ct.description,
-              parameters: schema as Record<string, unknown>,
-            },
-          });
-          customToolDefs.push({
-            name: ct.name,
-            executionType: ct.executionType,
-            webhookUrl: ct.webhookUrl,
-            staticResult: ct.staticResult,
-            scriptBody: ct.scriptBody,
-          });
-        }
-      }
+      // ── Main Generation Tool Configuration ──
+      // Tool definitions (toolDefs) and custom tool metadata (customToolDefs) 
+      // were already resolved earlier for the agent pipeline and are reused here.
 
       // ── Impersonate: inject instruction to respond as the user's character ──
       if (input.impersonate) {
