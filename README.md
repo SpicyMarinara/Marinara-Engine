@@ -17,7 +17,7 @@
 
 - [Screenshots](#screenshots)
 - [Latest Release](#latest-release)
-- [Plans](#plans)
+- [Roadmap](#roadmap)
 - [Installation](#installation)
 - [Features](#features)
 - [Documentation](#documentation)
@@ -118,7 +118,7 @@ More detailed public [roadmap](https://github.com/orgs/Pasta-Devs/projects/1).
 | 🍎🐧 macOS / Linux  | [macOS / Linux Installation Guide](docs/installation/macos-linux.md)          |
 | 🤖 Android (Termux) | [Android (Termux) Installation Guide](docs/installation/android-termux.md)    |
 
-Each guide covers installation, updating, and LAN access for that platform. See [Configuration Reference](CONFIGURATION.md) for environment variables setup. Having trouble? See [FAQ](docs/FAQ.md) and [Troubleshooting](docs/TROUBLESHOOTING.md).
+Each guide covers installation, updating, and LAN access for that platform. See [Configuration Reference](docs/CONFIGURATION.md) for environment variables setup. Having trouble? See [FAQ](docs/FAQ.md) and [Troubleshooting](docs/TROUBLESHOOTING.md).
 
 ---
 
