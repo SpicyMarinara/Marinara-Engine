@@ -3786,10 +3786,17 @@ export async function generateRoutes(app: FastifyInstance) {
 
         const agentTools = (toolDefs ?? []).filter((td) => agentEnabledNames.includes(td.function.name));
         if (agentTools.length === 0) continue;
+        const allowedToolNames = new Set(agentTools.map((td) => td.function.name));
 
         agent.toolContext = {
           tools: agentTools,
           executeToolCall: async (call) => {
+            if (!allowedToolNames.has(call.function.name)) {
+              return JSON.stringify({
+                error: `Tool not allowed for agent ${agent.type}: ${call.function.name}`,
+                allowed: Array.from(allowedToolNames),
+              });
+            }
             const results = await executeToolCalls([call], {
               customTools: customToolDefs,
               spotify: spotifyCreds,
