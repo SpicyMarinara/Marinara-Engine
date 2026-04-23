@@ -27,6 +27,7 @@ export function useUpdateTTSConfig() {
     mutationFn: (config: TTSConfig) => api.put<void>("/tts/config", config),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.config });
+      qc.invalidateQueries({ queryKey: ["tts", "voices"] });
     },
   });
 }

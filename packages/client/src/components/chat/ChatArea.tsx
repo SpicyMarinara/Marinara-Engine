@@ -815,8 +815,15 @@ export function ChatArea() {
           : cfg.autoplayConvo;
     if (!shouldAutoplay) return;
 
-    const msgs = messagesRef.current;
-    const lastMsg = msgs?.findLast((m) => m.role === "assistant" || m.role === "narrator");
+    const msgs = messagesRef.current ?? [];
+    let lastMsg: (typeof msgs)[number] | undefined;
+    for (let index = msgs.length - 1; index >= 0; index -= 1) {
+      const candidate = msgs[index];
+      if (candidate.role === "assistant" || candidate.role === "narrator") {
+        lastMsg = candidate;
+        break;
+      }
+    }
     if (!lastMsg?.content) return;
 
     void ttsService.speak(lastMsg.content, lastMsg.id);

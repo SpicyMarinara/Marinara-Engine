@@ -11,6 +11,7 @@ class TTSService {
   private currentObjectUrl: string | null = null;
   private abortController: AbortController | null = null;
   private state: TTSState = "idle";
+  private sequence = 0;
   /** ID of the entity (e.g. message id) currently being spoken */
   private activeId: string | null = null;
   private listeners = new Set<StateListener>();
@@ -36,14 +37,20 @@ class TTSService {
     this.listeners.forEach((fn) => fn(this.state, this.activeId));
   }
 
+  private isCurrentSequence(sequence: number): boolean {
+    return this.sequence === sequence;
+  }
+
   // ── Playback ──────────────────────────────────
 
   /** Speak the given text. `id` is an optional caller-supplied key (e.g. message id) so callers can track which item is active. */
   async speak(text: string, id?: string): Promise<void> {
     this.stop();
+    const sequence = ++this.sequence;
 
     this.setState("loading", id ?? null);
-    this.abortController = new AbortController();
+    const abortController = new AbortController();
+    this.abortController = abortController;
 
     let res: Response;
     try {
@@ -51,9 +58,10 @@ class TTSService {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
-        signal: this.abortController.signal,
+        signal: abortController.signal,
       });
     } catch (err) {
+      if (!this.isCurrentSequence(sequence)) return;
       if (err instanceof Error && err.name === "AbortError") {
         this.setState("idle");
         return;
@@ -62,6 +70,7 @@ class TTSService {
       return;
     }
 
+    if (!this.isCurrentSequence(sequence)) return;
     if (!res.ok) {
       this.setState("error");
       return;
@@ -71,27 +80,40 @@ class TTSService {
     try {
       blob = await res.blob();
     } catch {
+      if (!this.isCurrentSequence(sequence)) return;
       this.setState("error");
       return;
     }
 
+    if (!this.isCurrentSequence(sequence)) return;
+    if (this.abortController === abortController) {
+      this.abortController = null;
+    }
+
     const objectUrl = URL.createObjectURL(blob);
+    if (!this.isCurrentSequence(sequence)) {
+      URL.revokeObjectURL(objectUrl);
+      return;
+    }
     this.currentObjectUrl = objectUrl;
 
     const audio = new Audio(objectUrl);
     this.audio = audio;
 
     audio.onended = () => {
+      if (!this.isCurrentSequence(sequence) || this.audio !== audio) return;
       this.cleanup();
       this.setState("idle");
     };
     audio.onerror = () => {
+      if (!this.isCurrentSequence(sequence) || this.audio !== audio) return;
       this.cleanup();
       this.setState("error");
     };
 
-    this.setState("playing");
+    this.setState("playing", id ?? null);
     audio.play().catch(() => {
+      if (!this.isCurrentSequence(sequence) || this.audio !== audio) return;
       this.cleanup();
       this.setState("error");
     });
@@ -99,6 +121,7 @@ class TTSService {
 
   /** Stop any in-progress fetch or playback. */
   stop(): void {
+    this.sequence += 1;
     this.abortController?.abort();
     this.abortController = null;
 

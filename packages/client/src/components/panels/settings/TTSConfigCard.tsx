@@ -126,7 +126,7 @@ export function TTSConfigCard() {
     const payload: TTSConfig = {
       enabled,
       baseUrl,
-      apiKey: apiKey === TTS_API_KEY_MASK || apiKey === "" ? TTS_API_KEY_MASK : apiKey,
+      apiKey: apiKey === TTS_API_KEY_MASK ? TTS_API_KEY_MASK : apiKey,
       model,
       voice,
       speed,
@@ -237,7 +237,7 @@ export function TTSConfigCard() {
           {/* API Key */}
           <FieldRow
             label="API Key"
-            help="Your API key for the TTS provider. Encrypted at rest. Leave blank to keep the existing key."
+            help="Your API key for the TTS provider. Encrypted at rest. Keep the masked value to preserve the current key, or clear the field to remove it."
           >
             <div className="relative">
               <Key size="0.875rem" className="absolute left-3 top-1/2 -translate-y-1/2 text-rose-400" />
@@ -245,15 +245,15 @@ export function TTSConfigCard() {
                 value={apiKey}
                 onChange={(e) => {
                   setApiKey(e.target.value);
-                  mark({ apiKey: e.target.value === TTS_API_KEY_MASK || e.target.value === "" ? TTS_API_KEY_MASK : e.target.value });
+                  mark({ apiKey: e.target.value === TTS_API_KEY_MASK ? TTS_API_KEY_MASK : e.target.value });
                 }}
                 type="password"
                 className={cn(INPUT_CLS, "pl-8")}
-                placeholder="••••••••  (leave empty to keep existing key)"
+                placeholder="Enter API key or clear to remove"
               />
             </div>
             <p className="text-[0.625rem] text-[var(--muted-foreground)]">
-              Encrypted at rest · Leave blank when editing to keep the existing key
+              Encrypted at rest · Keep the masked value to preserve the current key, or clear it to remove the saved key
             </p>
           </FieldRow>
 
