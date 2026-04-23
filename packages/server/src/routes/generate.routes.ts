@@ -3645,19 +3645,28 @@ export async function generateRoutes(app: FastifyInstance) {
           ? (chatMeta.activeToolIds as string[])
           : [];
         const hasToolFilter = chatActiveToolIds.length > 0;
+        const registeredToolSources = new Map<string, "built-in" | "custom">();
 
         // Built-in tools
         const builtInFiltered = hasToolFilter
           ? BUILT_IN_TOOLS.filter((t) => chatActiveToolIds.includes(t.name))
           : BUILT_IN_TOOLS;
-        toolDefs = builtInFiltered.map((t) => ({
-          type: "function" as const,
-          function: {
-            name: t.name,
-            description: t.description,
-            parameters: t.parameters as unknown as Record<string, unknown>,
-          },
-        }));
+        toolDefs = [];
+        for (const t of builtInFiltered) {
+          const existingSource = registeredToolSources.get(t.name);
+          if (existingSource) {
+            throw new Error(`Duplicate tool name "${t.name}" from built-in tool collides with existing ${existingSource} tool`);
+          }
+          registeredToolSources.set(t.name, "built-in");
+          toolDefs.push({
+            type: "function" as const,
+            function: {
+              name: t.name,
+              description: t.description,
+              parameters: t.parameters as unknown as Record<string, unknown>,
+            },
+          });
+        }
 
         // Custom tools from DB
         const enabledCustomTools = await customToolsStore.listEnabled();
@@ -3665,6 +3674,11 @@ export async function generateRoutes(app: FastifyInstance) {
           ? enabledCustomTools.filter((ct: any) => chatActiveToolIds.includes(ct.name))
           : enabledCustomTools;
         for (const ct of customFiltered) {
+          const existingSource = registeredToolSources.get(ct.name);
+          if (existingSource) {
+            throw new Error(`Duplicate tool name "${ct.name}" from custom tool collides with existing ${existingSource} tool`);
+          }
+
           customToolDefs.push({
             name: ct.name,
             executionType: ct.executionType,
@@ -3690,6 +3704,7 @@ export async function generateRoutes(app: FastifyInstance) {
                 parameters: schema as Record<string, unknown>,
               },
             });
+            registeredToolSources.set(ct.name, "custom");
           } catch {
             console.warn(`[tools] Skipping custom tool "${ct.name}" with invalid parameter schema`);
           }
