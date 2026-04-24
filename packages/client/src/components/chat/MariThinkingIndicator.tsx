@@ -55,6 +55,13 @@ export const MariThinkingIndicator = memo(function MariThinkingIndicator() {
 
   const [visible, setVisible] = useState(false);
   const shownAtRef = useRef(0);
+  /**
+   * chatId that owns the currently-visible pill. Used to bypass the
+   * minimum-duration hide when the user switches away to a different chat —
+   * otherwise a lingering timer would briefly show "Mari is thinking…" in a
+   * chat where nothing is executing.
+   */
+  const visibleChatIdRef = useRef<string | null>(null);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -63,6 +70,7 @@ export const MariThinkingIndicator = memo(function MariThinkingIndicator() {
         clearTimeout(hideTimerRef.current);
         hideTimerRef.current = null;
       }
+      visibleChatIdRef.current = null;
       setVisible(false);
       return;
     }
@@ -75,14 +83,32 @@ export const MariThinkingIndicator = memo(function MariThinkingIndicator() {
           clearTimeout(hideTimerRef.current);
           hideTimerRef.current = null;
         }
-        shownAtRef.current = Date.now();
+        // Reset the minimum-duration start only when the pill first opens
+        // (or re-opens for a different chat) — not on every re-evaluate.
+        if (visibleChatIdRef.current !== currentActive) {
+          shownAtRef.current = Date.now();
+        }
+        visibleChatIdRef.current = currentActive;
         setVisible(true);
       } else {
+        // If the user switched away from the chat that owns the visible
+        // pill, hide immediately — don't let the minimum-duration timer
+        // linger into a chat where nothing is executing.
+        if (visibleChatIdRef.current && currentActive !== visibleChatIdRef.current) {
+          if (hideTimerRef.current) {
+            clearTimeout(hideTimerRef.current);
+            hideTimerRef.current = null;
+          }
+          visibleChatIdRef.current = null;
+          setVisible(false);
+          return;
+        }
         if (hideTimerRef.current) return;
         const elapsed = Date.now() - shownAtRef.current;
         const remaining = Math.max(0, MIN_VISIBLE_MS - elapsed);
         hideTimerRef.current = setTimeout(() => {
           hideTimerRef.current = null;
+          visibleChatIdRef.current = null;
           setVisible(false);
         }, remaining);
       }
