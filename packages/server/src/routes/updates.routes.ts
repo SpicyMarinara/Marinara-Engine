@@ -2,6 +2,7 @@
 // Updates: Check for new versions and apply updates
 // ──────────────────────────────────────────────
 import type { FastifyInstance } from "fastify";
+import { logger } from "../lib/logger.js";
 import { APP_VERSION } from "@marinara-engine/shared";
 import { execFile } from "child_process";
 import { existsSync, readFileSync } from "fs";
@@ -455,7 +456,7 @@ export async function updatesRoutes(app: FastifyInstance) {
 
       // Give Fastify time to flush the response, then exit
       setTimeout(() => {
-        console.log("[Update] Shutting down after update...");
+        logger.info("[Update] Shutting down after update...");
         process.exit(0);
       }, 500);
 

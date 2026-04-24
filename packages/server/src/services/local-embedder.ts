@@ -12,6 +12,7 @@
 // and cached in data/models/.
 import { join } from "path";
 import { DATA_DIR } from "../utils/data-dir.js";
+import { logger } from "../lib/logger.js";
 
 const MODEL_ID = "Xenova/all-MiniLM-L6-v2";
 const CACHE_DIR = join(DATA_DIR, "models");
@@ -43,7 +44,7 @@ async function getPipeline(): Promise<any> {
       env.allowLocalModels = true;
       env.useBrowserCache = false;
 
-      console.log(`[local-embedder] Loading model ${MODEL_ID}...`);
+      logger.info("[local-embedder] Loading model %s...", MODEL_ID);
       const start = Date.now();
 
       const p = await createPipeline("feature-extraction", MODEL_ID, {
@@ -51,13 +52,13 @@ async function getPipeline(): Promise<any> {
       });
 
       const elapsed = Date.now() - start;
-      console.log(`[local-embedder] Model loaded in ${elapsed}ms`);
+      logger.info("[local-embedder] Model loaded in %dms", elapsed);
 
       pipeline = p;
       return p;
     } catch (err) {
       loadFailed = true;
-      console.warn("[local-embedder] Failed to load local embedding model:", err);
+      logger.warn("[local-embedder] Failed to load local embedding model: %s", err);
       return null;
     } finally {
       loadingPromise = null;
@@ -88,7 +89,7 @@ export async function localEmbed(texts: string[]): Promise<number[][] | null> {
     }
     return results;
   } catch (err) {
-    console.error("[local-embedder] Embedding failed:", err);
+    logger.error("[local-embedder] Embedding failed: %s", err);
     return null;
   }
 }

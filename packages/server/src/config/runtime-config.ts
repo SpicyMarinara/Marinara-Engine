@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import { logger as sharedLogger } from "../lib/logger.js";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -216,7 +217,9 @@ export function isAutoCreateDefaultConnectionDisabled(value = process.env.AUTO_C
   return isDisabledFlag(value);
 }
 
-export function logStorageDiagnostics(logger: Pick<Console, "info" | "warn"> = console) {
+export function logStorageDiagnostics(
+  logger: { info(...args: any[]): void; warn(...args: any[]): void } = sharedLogger,
+) {
   const dataDir = getDataDir();
   const dbPath = getDatabaseFilePath();
 

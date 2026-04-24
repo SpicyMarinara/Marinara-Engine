@@ -2,6 +2,7 @@
 // Routes: Chats
 // ──────────────────────────────────────────────
 import type { FastifyInstance } from "fastify";
+import { logger } from "../lib/logger.js";
 import {
   LOCAL_SIDECAR_CONNECTION_ID,
   createChatSchema,
@@ -853,7 +854,7 @@ export async function chatsRoutes(app: FastifyInstance) {
           return { messages: assembled.messages, parameters: assembled.parameters, generationInfo: null };
         }
       } catch (e) {
-        console.error("[peek-prompt] Assembler failed, falling through to cached/raw messages:", e);
+        logger.error(e, "[peek-prompt] Assembler failed, falling through to cached/raw messages");
       }
     }
 
@@ -1145,7 +1146,14 @@ export async function chatsRoutes(app: FastifyInstance) {
       }
       if (!baseUrl) return reply.status(400).send({ error: "No base URL for this connection" });
 
-      provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey, conn.maxContext, conn.openrouterProvider, conn.maxTokensOverride);
+      provider = createLLMProvider(
+        conn.provider,
+        baseUrl,
+        conn.apiKey,
+        conn.maxContext,
+        conn.openrouterProvider,
+        conn.maxTokensOverride,
+      );
       model = conn.model;
     }
 

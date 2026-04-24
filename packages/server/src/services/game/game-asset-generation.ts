@@ -8,6 +8,7 @@
 // ──────────────────────────────────────────────
 
 import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { logger } from "../../lib/logger.js";
 import { join } from "path";
 import { DATA_DIR } from "../../utils/data-dir.js";
 import { generateImage, type ImageGenRequest } from "../image/image-generation.js";
@@ -81,10 +82,10 @@ export async function generateNpcPortrait(req: NpcPortraitRequest): Promise<stri
     writeFileSync(avatarPath, Buffer.from(result.base64, "base64"));
 
     const url = `/api/avatars/npc/${req.chatId}/${slug}.png`;
-    console.log(`[game-asset-gen] Generated NPC portrait for "${req.npcName}" → ${url}`);
+    logger.info(`[game-asset-gen] Generated NPC portrait for "${req.npcName}" → ${url}`);
     return url;
   } catch (err) {
-    console.warn(`[game-asset-gen] Failed to generate portrait for "${req.npcName}":`, err);
+    logger.warn(`[game-asset-gen] Failed to generate portrait for "${req.npcName}": %s`, err);
     return null;
   }
 }
@@ -169,10 +170,10 @@ export async function generateBackground(req: BackgroundGenRequest): Promise<str
     // Rebuild manifest so the new tag is available immediately
     buildAssetManifest();
 
-    console.log(`[game-asset-gen] Generated background "${slug}" → tag: ${tag}`);
+    logger.info(`[game-asset-gen] Generated background "${slug}" → tag: ${tag}`);
     return tag;
   } catch (err) {
-    console.warn(`[game-asset-gen] Failed to generate background "${slug}":`, err);
+    logger.warn(`[game-asset-gen] Failed to generate background "${slug}": %s`, err);
     return null;
   }
 }

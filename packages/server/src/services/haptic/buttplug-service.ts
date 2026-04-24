@@ -1,6 +1,7 @@
 // ──────────────────────────────────────────────
 // Service: Buttplug.io Device Manager
 // ──────────────────────────────────────────────
+import { logger } from "../../lib/logger.js";
 // Singleton service that connects to an Intiface Central server
 // and manages haptic device discovery, tracking, and command execution.
 //
@@ -69,13 +70,13 @@ class ButtplugService {
 
     // Track device events
     this.client.addListener("deviceadded", (device: ButtplugClientDevice) => {
-      console.log(`[haptic] Device connected: ${device.displayName || device.name} (index ${device.index})`);
+      logger.info(`[haptic] Device connected: ${device.displayName || device.name} (index ${device.index})`);
     });
     this.client.addListener("deviceremoved", (device: ButtplugClientDevice) => {
-      console.log(`[haptic] Device disconnected: ${device.displayName || device.name} (index ${device.index})`);
+      logger.info(`[haptic] Device disconnected: ${device.displayName || device.name} (index ${device.index})`);
     });
     this.client.addListener("serverdisconnect", () => {
-      console.log("[haptic] Disconnected from Intiface Central");
+      logger.info("[haptic] Disconnected from Intiface Central");
       this.serverUrl = null;
     });
   }
@@ -110,7 +111,7 @@ class ButtplugService {
     const connector = new ButtplugNodeWebsocketClientConnector(target);
     await this.client.connect(connector);
     this.serverUrl = target;
-    console.log(`[haptic] Connected to Intiface Central at ${target}`);
+    logger.info(`[haptic] Connected to Intiface Central at ${target}`);
   }
 
   /** Disconnect from Intiface Central. */
@@ -119,7 +120,7 @@ class ButtplugService {
     this.clearAllTimers();
     await this.client.disconnect();
     this.serverUrl = null;
-    console.log("[haptic] Disconnected");
+    logger.info("[haptic] Disconnected");
   }
 
   /** Start scanning for devices. */

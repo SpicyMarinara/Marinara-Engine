@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "child_process";
+import { logger } from "../../lib/logger.js";
 import { createWriteStream, existsSync, readFileSync, writeFileSync, type WriteStream } from "fs";
 import { createServer } from "net";
 import { dirname, join } from "path";
@@ -152,7 +153,9 @@ class SidecarProcessService {
         mlxRuntimeService.resetRuntime();
       } else {
         if (sidecarRuntimeService.getStatus(sidecarModelService.getConfig().runtimePreference).source === "system") {
-          throw new Error("The local runtime is using a system llama-server from PATH. Reinstall that runtime outside Marinara.");
+          throw new Error(
+            "The local runtime is using a system llama-server from PATH. Reinstall that runtime outside Marinara.",
+          );
         }
         sidecarRuntimeService.resetRuntime();
       }
@@ -222,7 +225,9 @@ class SidecarProcessService {
     }
 
     if (!options.forceStart && !sidecarModelService.isEnabled()) {
-      return new Error("Enable the local model for trackers or game scene analysis, or start it manually from Local AI Model.");
+      return new Error(
+        "Enable the local model for trackers or game scene analysis, or start it manually from Local AI Model.",
+      );
     }
 
     return new Error(this.startupError ?? "The local sidecar server is not ready");
@@ -477,8 +482,10 @@ class SidecarProcessService {
           : null;
 
         if (nextRuntime && !this.isMlxRuntime(nextRuntime) && !attemptedVariants.has(nextRuntime.variant)) {
-          console.warn(
-            `[sidecar] Runtime ${activeRuntime.variant} failed to boot before ready. Retrying with ${nextRuntime.variant}.`,
+          logger.warn(
+            "[sidecar] Runtime %s failed to boot before ready. Retrying with %s.",
+            activeRuntime.variant,
+            nextRuntime.variant,
           );
           activeRuntime = nextRuntime;
           continue;
@@ -534,8 +541,11 @@ class SidecarProcessService {
 
         const nextPlan = startupPlans[attempt + 1];
         if (nextPlan && this.shouldRetryStartup(error)) {
-          console.warn(
-            `[sidecar] Startup with ${plan.label} failed (${error.message}). Retrying with ${nextPlan.label}.`,
+          logger.warn(
+            "[sidecar] Startup with %s failed (%s). Retrying with %s.",
+            plan.label,
+            error.message,
+            nextPlan.label,
           );
           continue;
         }
@@ -698,8 +708,10 @@ class SidecarProcessService {
       return;
     }
 
-    console.error(
-      `[sidecar] Local sidecar server exited unexpectedly (code=${code ?? "null"}, signal=${signal ?? "null"})`,
+    logger.error(
+      "[sidecar] Local sidecar server exited unexpectedly (code=%s, signal=%s)",
+      code ?? "null",
+      signal ?? "null",
     );
 
     if (this.starting) {
@@ -718,7 +730,7 @@ class SidecarProcessService {
     try {
       await this.syncForCurrentConfig({ allowRuntimeInstall: false });
     } catch (error) {
-      console.error("[sidecar] Auto-restart failed:", error);
+      logger.error("[sidecar] Auto-restart failed: %s", error);
       sidecarModelService.setStatus("server_error");
     }
   }

@@ -13,6 +13,7 @@
 
 import type { FastifyRequest, FastifyReply } from "fastify";
 import { getIpAllowlist } from "../config/runtime-config.js";
+import { logger } from "../lib/logger.js";
 
 // ── CIDR helpers ──
 
@@ -137,7 +138,7 @@ function buildAllowlist(raw: string | null): CIDREntry[] | null {
     if (!trimmed) continue;
     const cidr = parseCIDR(trimmed);
     if (!cidr) {
-      console.warn(`[ip-allowlist] Ignoring invalid entry: "${trimmed}"`);
+      logger.warn(`[ip-allowlist] Ignoring invalid entry: "${trimmed}"`);
       continue;
     }
     entries.push(cidr);
@@ -164,7 +165,7 @@ function getAllowlist() {
   }
 
   if (cachedAllowlist.entries && !cachedAllowlist.announced) {
-    console.log(`[ip-allowlist] Restricting access to: ${cachedAllowlist.raw}  (+ loopback always allowed)`);
+    logger.info(`[ip-allowlist] Restricting access to: ${cachedAllowlist.raw}  (+ loopback always allowed)`);
     cachedAllowlist.announced = true;
   }
 

@@ -1,6 +1,7 @@
 // ──────────────────────────────────────────────
 // Database Connection
 // ──────────────────────────────────────────────
+import { logger } from "../lib/logger.js";
 import * as schema from "./schema/index.js";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
@@ -65,7 +66,7 @@ async function createWithSqlJs(dbPath: string): Promise<DrizzleDB> {
       writeFileSync(dbPath, buffer);
     } catch {
       // Non-fatal — log but don't crash
-      console.error("[sql.js] Failed to persist database to disk");
+      logger.error("[sql.js] Failed to persist database to disk");
     }
   };
 

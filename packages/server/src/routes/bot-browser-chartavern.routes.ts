@@ -2,6 +2,7 @@
 // Routes: Browser — CharacterTavern provider
 // ──────────────────────────────────────────────
 import type { FastifyInstance } from "fastify";
+import { logger } from "../lib/logger.js";
 
 const CT_API_BASE = "https://character-tavern.com/api";
 const CT_CARDS_CDN = "https://cards.character-tavern.com";
@@ -65,7 +66,7 @@ export async function botBrowserChartavernRoutes(app: FastifyInstance) {
     }
 
     ctSessionCookie = `session=${value}`;
-    console.log("[bot-browser] CT session cookie stored");
+    logger.info("[bot-browser] CT session cookie stored");
     return { ok: true };
   });
 
@@ -94,12 +95,12 @@ export async function botBrowserChartavernRoutes(app: FastifyInstance) {
           const isRejected = setCookie && (setCookie.includes("session=;") || setCookie.includes("Max-Age=0"));
 
           if (isRejected) {
-            console.warn("[bot-browser] CT session rejected by server");
+            logger.warn("[bot-browser] CT session rejected by server");
             ctSessionCookie = "";
             return { valid: false, reason: "Session rejected/expired by server" };
           }
 
-          console.log(`[bot-browser] CT validate: ${hits.length} hits, hasNSFW=${hasNsfw}`);
+          logger.info(`[bot-browser] CT validate: ${hits.length} hits, hasNSFW=${hasNsfw}`);
           return { valid: true, hasNsfw };
         } else if (res.status === 403) {
           ctSessionCookie = "";
@@ -119,7 +120,7 @@ export async function botBrowserChartavernRoutes(app: FastifyInstance) {
   /** Clear stored session cookie */
   app.post("/chartavern/logout", async () => {
     ctSessionCookie = "";
-    console.log("[bot-browser] CT session cleared");
+    logger.info("[bot-browser] CT session cleared");
     return { ok: true };
   });
 

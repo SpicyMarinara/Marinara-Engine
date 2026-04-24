@@ -13,6 +13,7 @@
 import type { AgentResult, AgentContext, AgentPhase } from "@marinara-engine/shared";
 import type { BaseLLMProvider } from "../llm/base-provider.js";
 import { executeAgent, executeAgentBatch, type AgentExecConfig, type AgentToolContext } from "./agent-executor.js";
+import { logger } from "../../lib/logger.js";
 
 /** A fully resolved agent ready for execution. */
 export interface ResolvedAgent extends AgentExecConfig {
@@ -88,8 +89,10 @@ async function executeGroup(
   const toolAgents = group.agents.filter((a) => a.toolContext?.tools.length);
   const batchAgents = group.agents.filter((a) => !a.toolContext?.tools.length);
 
-  console.log(
-    `[agent-pipeline] executeGroup: ${batchAgents.length} batchable, ${toolAgents.length} tool-using`,
+  logger.debug(
+    "[agent-pipeline] executeGroup: %d batchable, %d tool-using %j",
+    batchAgents.length,
+    toolAgents.length,
     batchAgents.map((a) => a.type),
   );
 
@@ -138,8 +141,11 @@ async function executePhase(
 
   const groups = groupByProviderModel(phaseAgents);
 
-  console.log(
-    `[agent-pipeline] Phase "${phase}": ${phaseAgents.length} agents → ${groups.length} group(s)`,
+  logger.debug(
+    '[agent-pipeline] Phase "%s": %d agents → %d group(s) %j',
+    phase,
+    phaseAgents.length,
+    groups.length,
     groups.map((g) => `[${g.agents.map((a) => a.type).join(", ")}] (model: ${g.model})`),
   );
 
@@ -154,8 +160,10 @@ async function executePhase(
     } else {
       // Group rejected — log and produce error results so they're visible
       const group = groups[i]!;
-      console.error(
-        `[agent-pipeline] Group REJECTED in phase "${phase}": [${group.agents.map((a) => a.type).join(", ")}]`,
+      logger.error(
+        '[agent-pipeline] Group REJECTED in phase "%s": [%s] %s',
+        phase,
+        group.agents.map((a) => a.type).join(", "),
         entry.reason,
       );
       for (const agent of group.agents) {

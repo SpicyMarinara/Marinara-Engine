@@ -12,6 +12,7 @@ import {
   type LLMToolDefinition,
   type LLMUsage,
 } from "../base-provider.js";
+import { logger } from "../../../lib/logger.js";
 
 /**
  * Models that ONLY support the Responses API (`/responses`) and not Chat Completions.
@@ -188,7 +189,7 @@ export class OpenAIProvider extends BaseLLMProvider {
   private applyOpenRouterPromptCaching(body: Record<string, unknown>, options: ChatOptions): void {
     if (!this.shouldUseOpenRouterPromptCaching(options)) return;
     body.cache_control = { type: "ephemeral" };
-    console.log("[OpenAI] Enabling OpenRouter prompt caching for model=%s", options.model);
+    logger.debug("[OpenAI] Enabling OpenRouter prompt caching for model=%s", options.model);
   }
 
   private static extractChatCompletionsUsage(usage: ChatCompletionsUsagePayload | undefined): LLMUsage | undefined {
@@ -256,7 +257,7 @@ export class OpenAIProvider extends BaseLLMProvider {
 
     // Route to Responses API for models that require it
     if (this.useResponsesAPI(options.model)) {
-      console.log(
+      logger.debug(
         "[OpenAI] Routing chat() to Responses API for model=%s stream=%s",
         options.model,
         options.stream ?? true,
@@ -324,7 +325,7 @@ export class OpenAIProvider extends BaseLLMProvider {
       body.response_format = options.responseFormat;
     }
 
-    console.log("[OpenAI chat()] stream=%s model=%s", body.stream, body.model);
+    logger.debug("[OpenAI chat()] stream=%s model=%s", body.stream, body.model);
 
     const response = await llmFetch(url, {
       method: "POST",
@@ -439,7 +440,7 @@ export class OpenAIProvider extends BaseLLMProvider {
 
     // Route to Responses API for models that require it
     if (this.useResponsesAPI(options.model)) {
-      console.log(
+      logger.debug(
         "[OpenAI] Routing chatComplete() to Responses API for model=%s onToken=%s",
         options.model,
         !!options.onToken,
@@ -504,7 +505,7 @@ export class OpenAIProvider extends BaseLLMProvider {
       body.response_format = options.responseFormat;
     }
 
-    console.log("[OpenAI chatComplete()] stream=%s model=%s onToken=%s", useStream, body.model, !!options.onToken);
+    logger.debug("[OpenAI chatComplete()] stream=%s model=%s onToken=%s", useStream, body.model, !!options.onToken);
 
     const response = await llmFetch(url, {
       method: "POST",
@@ -866,7 +867,7 @@ export class OpenAIProvider extends BaseLLMProvider {
   ): AsyncGenerator<string, LLMUsage | void, unknown> {
     const url = `${this.baseUrl}/responses`;
     const body = this.buildResponsesBody(messages, options);
-    console.log("[OpenAI chatResponses] reasoning=%j onThinking=%s", body.reasoning ?? null, !!options.onThinking);
+    logger.debug("[OpenAI chatResponses] reasoning=%s onThinking=%s", JSON.stringify(body.reasoning ?? null), !!options.onThinking);
 
     let response = await llmFetch(url, {
       method: "POST",
@@ -883,7 +884,7 @@ export class OpenAIProvider extends BaseLLMProvider {
         this.isEncryptedContentError(errorText) &&
         options.encryptedReasoningItems?.length
       ) {
-        console.warn("[OpenAI chatResponses] Encrypted reasoning items rejected, retrying without them");
+        logger.warn("[OpenAI chatResponses] Encrypted reasoning items rejected, retrying without them");
         options.onEncryptedReasoning?.([]); // clear the cache
         this.stripEncryptedItems(body);
         response = await llmFetch(url, {
@@ -1012,9 +1013,9 @@ export class OpenAIProvider extends BaseLLMProvider {
     const url = `${this.baseUrl}/responses`;
     const useStream = options.stream ?? !!options.onToken;
     const body = this.buildResponsesBody(messages, { ...options, stream: useStream });
-    console.log(
-      "[OpenAI chatCompleteResponses] reasoning=%j onThinking=%s",
-      body.reasoning ?? null,
+    logger.debug(
+      "[OpenAI chatCompleteResponses] reasoning=%s onThinking=%s",
+      JSON.stringify(body.reasoning ?? null),
       !!options.onThinking,
     );
 
@@ -1033,7 +1034,7 @@ export class OpenAIProvider extends BaseLLMProvider {
         this.isEncryptedContentError(errorText) &&
         options.encryptedReasoningItems?.length
       ) {
-        console.warn("[OpenAI chatCompleteResponses] Encrypted reasoning items rejected, retrying without them");
+        logger.warn("[OpenAI chatCompleteResponses] Encrypted reasoning items rejected, retrying without them");
         options.onEncryptedReasoning?.([]); // clear the cache
         this.stripEncryptedItems(body);
         response = await llmFetch(url, {

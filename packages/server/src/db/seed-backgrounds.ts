@@ -3,6 +3,7 @@
 // Copies bundled background images into the data directory on first boot.
 // Images sourced from Unsplash (https://unsplash.com/license — free for any use).
 // ──────────────────────────────────────────────
+import { logger } from "../lib/logger.js";
 import { existsSync, mkdirSync, readdirSync, copyFileSync, readFileSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -42,7 +43,7 @@ export async function seedDefaultBackgrounds() {
 
   // Check that bundled assets exist
   if (!existsSync(ASSETS_DIR)) {
-    console.warn("[seed] Default backgrounds assets not found — skipping");
+    logger.warn("[seed] Default backgrounds assets not found — skipping");
     return;
   }
 
@@ -77,6 +78,6 @@ export async function seedDefaultBackgrounds() {
   writeFileSync(META_PATH, JSON.stringify(meta, null, 2), "utf-8");
 
   if (copied > 0) {
-    console.log(`[seed] Installed ${copied} default background${copied > 1 ? "s" : ""}`);
+    logger.info(`[seed] Installed ${copied} default background${copied > 1 ? "s" : ""}`);
   }
 }

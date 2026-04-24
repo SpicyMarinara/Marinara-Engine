@@ -2,6 +2,7 @@
 // Seed: Professor Mari (built-in assistant character)
 // ──────────────────────────────────────────────
 import type { DB } from "./connection.js";
+import { logger } from "../lib/logger.js";
 import type { CharacterData } from "@marinara-engine/shared";
 import { PROFESSOR_MARI_ID } from "@marinara-engine/shared";
 import { characters } from "./schema/index.js";
@@ -434,7 +435,7 @@ export async function seedProfessorMari(db: DB) {
         .update(characters)
         .set({ data: serialized, avatarPath: MARI_AVATAR, updatedAt: now() })
         .where(eq(characters.id, PROFESSOR_MARI_ID));
-      console.log("[seed] Updated built-in assistant: Professor Mari");
+      logger.info("[seed] Updated built-in assistant: Professor Mari");
     }
     return;
   }
@@ -448,5 +449,5 @@ export async function seedProfessorMari(db: DB) {
     updatedAt: now(),
   });
 
-  console.log("[seed] Created built-in assistant: Professor Mari");
+  logger.info("[seed] Created built-in assistant: Professor Mari");
 }

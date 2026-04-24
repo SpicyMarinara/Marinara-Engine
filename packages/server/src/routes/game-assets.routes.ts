@@ -2,6 +2,7 @@
 // Routes: Game Asset serving, upload, manifest
 // ──────────────────────────────────────────────
 import type { FastifyInstance } from "fastify";
+import { logger } from "../lib/logger.js";
 import { existsSync, mkdirSync, writeFileSync, createReadStream } from "fs";
 import { join, extname, dirname } from "path";
 import { execFile } from "child_process";
@@ -142,7 +143,7 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
     const os = platform();
     const cmd = os === "darwin" ? "open" : os === "win32" ? "explorer" : "xdg-open";
     execFile(cmd, [target], (err) => {
-      if (err) console.warn("Could not open game assets folder:", err.message);
+      if (err) logger.warn("Could not open game assets folder: %s", err.message);
     });
     return reply.send({ ok: true, path: target });
   });
