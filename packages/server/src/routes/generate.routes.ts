@@ -3742,7 +3742,8 @@ export async function generateRoutes(app: FastifyInstance) {
         const agentSettings = typeof agent.settings === "string" ? JSON.parse(agent.settings) : agent.settings || {};
         const agentEnabledNames =
           (agentSettings?.enabledTools as string[]) || (DEFAULT_AGENT_TOOLS[agent.type] as string[]) || [];
-        return agentEnabledNames.some((name) => spotifyToolNames.has(name));
+        const agentResolvedNames = agentEnabledNames.filter((name) => resolvedToolNames.has(name));
+        return agentResolvedNames.some((name) => spotifyToolNames.has(name));
       });
       const needsSpotify = enableTools && (chatAllowsSpotify || anyAgentAllowsSpotify);
       const spotifyAgent = needsSpotify
