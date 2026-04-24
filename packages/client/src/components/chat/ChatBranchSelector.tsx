@@ -64,18 +64,23 @@ export function ChatBranchSelector({
       if (event.key === "Escape") setOpen(false);
     };
 
-    const handleViewportChange = () => setOpen(false);
+    const handleResize = () => setOpen(false);
+
+    const handleScroll = (event: Event) => {
+      if (popoverRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    };
 
     document.addEventListener("mousedown", handlePointerDown);
     document.addEventListener("keydown", handleEscape);
-    window.addEventListener("resize", handleViewportChange);
-    window.addEventListener("scroll", handleViewportChange, true);
+    window.addEventListener("resize", handleResize);
+    window.addEventListener("scroll", handleScroll, true);
 
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
       document.removeEventListener("keydown", handleEscape);
-      window.removeEventListener("resize", handleViewportChange);
-      window.removeEventListener("scroll", handleViewportChange, true);
+      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("scroll", handleScroll, true);
     };
   }, [open]);
 
