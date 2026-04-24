@@ -86,6 +86,7 @@ import {
   wrapFields,
   type SimpleMessage,
 } from "./generate/generate-route-utils.js";
+import { getLogLevel } from "../config/runtime-config.js";
 import {
   buildHistoricalLorebookKeeperContext,
   getLorebookKeeperAutomaticPendingCount,
@@ -283,6 +284,8 @@ function normalizeChatTopP(value: unknown): number | undefined {
 }
 
 export async function generateRoutes(app: FastifyInstance) {
+  const isDebug = getLogLevel() === "debug";
+
   const chats = createChatsStorage(app.db);
   const connections = createConnectionsStorage(app.db);
   const presets = createPromptsStorage(app.db);
@@ -2779,26 +2782,26 @@ export async function generateRoutes(app: FastifyInstance) {
           }
         }
 
-        // Debug: log the full prompt being sent for game-mode generation
-        console.log(
-          "[generate/game] GM prompt length: %d chars, messages: %d",
-          finalMessages[0]?.content.length,
-          finalMessages.length,
-        );
-        console.log(
-          "[generate/game] GM context: storyArc=%s, map=%s, npcs=%d, widgets=%s, hasSceneModel=%s, state=%s",
-          !!gmCtx.storyArc,
-          !!gmCtx.map,
-          gmCtx.npcs.length,
-          !!gmCtx.hudWidgets?.length,
-          gmCtx.hasSceneModel,
-          gmCtx.gameActiveState,
-        );
-        console.log("[generate/game] === FULL MESSAGES ===");
-        for (const msg of finalMessages) {
-          console.log("[generate/game] [%s] (%d chars): %s", msg.role, msg.content.length, msg.content.slice(0, 300));
+        // LOG_LEVEL=debug: log game-mode prompt details
+        if (isDebug) {
+          app.log.debug(
+            "[debug/game] GM prompt length: %d chars, messages: %d",
+            finalMessages[0]?.content.length ?? 0,
+            finalMessages.length,
+          );
+          app.log.debug(
+            "[debug/game] GM context: storyArc=%s, map=%s, npcs=%d, widgets=%s, hasSceneModel=%s, state=%s",
+            !!gmCtx.storyArc,
+            !!gmCtx.map,
+            gmCtx.npcs.length,
+            !!gmCtx.hudWidgets?.length,
+            gmCtx.hasSceneModel,
+            gmCtx.gameActiveState,
+          );
+          for (const msg of finalMessages) {
+            app.log.debug("[debug/game] [%s] %s", msg.role.toUpperCase(), msg.content);
+          }
         }
-        console.log("[generate/game] === END MESSAGES ===");
 
         // Inject the output format + commands as the last user message so they
         // sit closest to generation in the model's attention window.
@@ -3616,23 +3619,14 @@ export async function generateRoutes(app: FastifyInstance) {
               reply.raw.write(
                 `data: ${JSON.stringify({ type: "agent_start", data: { phase: "pre_generation" } })}\n\n`,
               );
-              if (input.debugMode) {
+              if (isDebug) {
                 const preGenAgents = pipelineAgents.filter(
                   (a) => a.phase === "pre_generation" && !EXCLUDED_FROM_PIPELINE.has(a.type),
                 );
-                reply.raw.write(
-                  `data: ${JSON.stringify({
-                    type: "agent_debug",
-                    data: {
-                      phase: "pre_generation",
-                      agents: preGenAgents.map((a) => ({
-                        type: a.type,
-                        name: a.name,
-                        model: a.model,
-                        maxTokens: (a.settings.maxTokens as number) ?? 4096,
-                      })),
-                    },
-                  })}\n\n`,
+                app.log.debug(
+                  "[debug] Pre-generation agents (%d): %s",
+                  preGenAgents.length,
+                  preGenAgents.map((a) => `${a.name} (${a.model})`).join(", "),
                 );
               }
               const _tAgents = Date.now();
@@ -4279,32 +4273,8 @@ export async function generateRoutes(app: FastifyInstance) {
         }, 15_000);
 
         try {
-          // Emit debug prompt if requested (only for first character to avoid spam)
-          if (input.debugMode && targetCharId === respondingCharIds[0]) {
-            const debugPayload = {
-              messages: initialProviderMessages,
-              parameters: {
-                model: conn.model,
-                provider: conn.provider,
-                temperature,
-                maxTokens: effectiveMaxTokensForSend,
-                maxContext: effectiveMaxContext ?? connectionMaxContext ?? null,
-                topP,
-                topK: topK || undefined,
-                frequencyPenalty: frequencyPenalty || undefined,
-                presencePenalty: presencePenalty || undefined,
-                showThoughts,
-                enableThinking,
-                reasoningEffort: resolvedEffort ?? undefined,
-                enableCaching: conn.enableCaching === "true",
-                enableTools,
-                agentCount: resolvedAgents.length,
-              },
-            };
-            reply.raw.write(`data: ${JSON.stringify({ type: "debug_prompt", data: debugPayload })}\n\n`);
-
-            // Compute effective values that will actually be sent in the request body.
-            // Some providers suppress temperature/topP for certain model+effort combos.
+          // ── LOG_LEVEL=debug: log full prompt to server console ──
+          if (isDebug) {
             const effModel = conn.model.toLowerCase();
             const tempSuppressed =
               (conn.provider === "openai" || conn.provider === "openrouter") &&
@@ -4312,9 +4282,9 @@ export async function generateRoutes(app: FastifyInstance) {
             const effTemp = tempSuppressed ? "N/A" : temperature;
             const effTopP = tempSuppressed ? "N/A" : topP;
 
-            console.log("\n[Debug] Prompt sent to model (%d messages):", initialProviderMessages.length);
-            console.log(
-              "  Model: %s (%s)  Temp: %s  MaxTokens: %s  MaxContext: %s  TopP: %s  TopK: %s  EnableThinking: %s  ShowThoughts: %s  Effort: %s  Verbosity: %s  Stream: %s",
+            app.log.debug(
+              "\n[debug] Prompt sent to model (%d messages):\n  Model: %s (%s)  Temp: %s  MaxTokens: %s  MaxContext: %s  TopP: %s  TopK: %s  EnableThinking: %s  ShowThoughts: %s  Effort: %s  Verbosity: %s  Stream: %s",
+              initialProviderMessages.length,
               conn.model,
               conn.provider,
               effTemp,
@@ -4329,7 +4299,7 @@ export async function generateRoutes(app: FastifyInstance) {
               input.streaming,
             );
             for (const m of initialProviderMessages) {
-              console.log("  [%s] %s", m.role.toUpperCase(), m.content);
+              app.log.debug("  [%s] %s", m.role.toUpperCase(), m.content);
             }
           }
 
@@ -4702,22 +4672,20 @@ export async function generateRoutes(app: FastifyInstance) {
             reply.raw.write(`data: ${JSON.stringify({ type: "content_replace", data: fullResponse })}\n\n`);
           }
 
-          // Send usage to client for debug display
-          if (input.debugMode && (usage || durationMs)) {
-            reply.raw.write(
-              `data: ${JSON.stringify({
-                type: "debug_usage",
-                data: {
-                  tokensPrompt: usage?.promptTokens ?? null,
-                  tokensCompletion: usage?.completionTokens ?? null,
-                  tokensTotal: usage?.totalTokens ?? null,
-                  tokensCachedPrompt: usage?.cachedPromptTokens ?? null,
-                  tokensCacheWritePrompt: usage?.cacheWritePromptTokens ?? null,
-                  durationMs,
-                  finishReason: finishReason ?? null,
-                },
-              })}\n\n`,
-            );
+          // ── LOG_LEVEL=debug: log full response + usage to server console ──
+          if (isDebug) {
+            app.log.debug("[debug] LLM response (%d chars, %dms):\n%s", fullResponse.length, durationMs, fullResponse);
+            if (usage) {
+              app.log.debug(
+                "[debug] Token usage — prompt: %s  completion: %s  total: %s  cached: %s  cacheWrite: %s  finish: %s",
+                usage.promptTokens ?? "N/A",
+                usage.completionTokens ?? "N/A",
+                usage.totalTokens ?? "N/A",
+                usage.cachedPromptTokens ?? "N/A",
+                usage.cacheWritePromptTokens ?? "N/A",
+                finishReason ?? "N/A",
+              );
+            }
           }
 
           // ── Parse and strip character commands (Conversation mode only) ──
@@ -5030,26 +4998,13 @@ export async function generateRoutes(app: FastifyInstance) {
       if (hasPostWork && combinedResponse && !abortController.signal.aborted) {
         reply.raw.write(`data: ${JSON.stringify({ type: "agent_start", data: { phase: "post_generation" } })}\n\n`);
 
-        // Emit debug info for post-processing agents
-        if (input.debugMode) {
+        // LOG_LEVEL=debug: log post-processing agents
+        if (isDebug) {
           const postAgents = pipelineAgents.filter((a) => a.phase === "post_processing");
-          const maxPerAgent =
-            postAgents.length > 0 ? Math.max(...postAgents.map((a) => (a.settings.maxTokens as number) ?? 4096)) : 4096;
-          const batchTokens = Math.max(maxPerAgent * postAgents.length, 16384);
-          reply.raw.write(
-            `data: ${JSON.stringify({
-              type: "agent_debug",
-              data: {
-                phase: "post_generation",
-                agents: postAgents.map((a) => ({
-                  type: a.type,
-                  name: a.name,
-                  model: a.model,
-                  maxTokens: (a.settings.maxTokens as number) ?? 4096,
-                })),
-                batchMaxTokens: batchTokens,
-              },
-            })}\n\n`,
+          app.log.debug(
+            "[debug] Post-generation agents (%d): %s",
+            postAgents.length,
+            postAgents.map((a) => `${a.name} (${a.model})`).join(", "),
           );
         }
 
@@ -5129,24 +5084,18 @@ export async function generateRoutes(app: FastifyInstance) {
           }
         }
 
-        // Emit debug summary of all agent results
-        if (input.debugMode) {
-          reply.raw.write(
-            `data: ${JSON.stringify({
-              type: "agent_debug",
-              data: {
-                phase: "post_generation_results",
-                results: postResults.map((r) => ({
-                  agentType: r.agentType,
-                  success: r.success,
-                  error: r.error,
-                  durationMs: r.durationMs,
-                  tokensUsed: r.tokensUsed,
-                  resultType: r.type,
-                })),
-              },
-            })}\n\n`,
-          );
+        // LOG_LEVEL=debug: log post-generation agent results
+        if (isDebug) {
+          for (const r of postResults) {
+            app.log.debug(
+              "[debug] Agent result: %s — %s (%dms, %d tokens)%s",
+              r.agentType,
+              r.success ? "OK" : "FAILED",
+              r.durationMs,
+              r.tokensUsed,
+              r.error ? ` — ${r.error}` : "",
+            );
+          }
         }
 
         // Persist agent runs to DB + handle game state updates
