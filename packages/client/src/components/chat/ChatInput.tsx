@@ -114,13 +114,13 @@ export const ChatInput = memo(function ChatInput({
   // Save draft when component unmounts (e.g. navigating to editor)
   useEffect(() => {
     const textarea = textareaRef.current;
+    const chatId = useChatStore.getState().activeChatId;
     return () => {
       // Cancel pending debounce timers
       if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
       // Cancel pending resize rAF
       if (resizeRafRef.current) cancelAnimationFrame(resizeRafRef.current);
       // Flush draft synchronously
-      const chatId = useChatStore.getState().activeChatId;
       if (chatId && textarea) {
         const text = textarea.value;
         if (text.trim()) {

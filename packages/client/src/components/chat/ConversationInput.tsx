@@ -143,10 +143,10 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
   // Save draft on unmount
   useEffect(() => {
     const el = textareaRef.current;
+    const chatId = activeChatId;
     return () => {
-      const id = prevChatIdRef.current;
-      if (id && el?.value) {
-        useChatStore.getState().setInputDraft(id, el.value);
+      if (chatId && el?.value) {
+        useChatStore.getState().setInputDraft(chatId, el.value);
       }
     };
   }, []);
