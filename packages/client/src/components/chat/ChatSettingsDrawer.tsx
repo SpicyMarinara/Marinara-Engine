@@ -639,6 +639,9 @@ export function ChatSettingsDrawer({
   const [agentAddPreview, setAgentAddPreview] = useState<AgentAddPreview | null>(null);
   const [addingAgentToChat, setAddingAgentToChat] = useState(false);
   const [isRegeneratingSchedules, setIsRegeneratingSchedules] = useState(false);
+  // Synchronous lock to close the re-entry gap: React state commits are async, so two
+  // fast clicks can both pass the `isRegeneratingSchedules` check before the state updates.
+  const isRegeneratingSchedulesRef = useRef(false);
   const [scenePromptExpanded, setScenePromptExpanded] = useState(false);
   const [scenePromptDraft, setScenePromptDraft] = useState(metadata.sceneSystemPrompt ?? "");
   const [groupScenarioDraft, setGroupScenarioDraft] = useState((metadata.groupScenarioText as string) ?? "");
@@ -2047,7 +2050,8 @@ export function ChatSettingsDrawer({
                   </div>
                   <button
                     onClick={async () => {
-                      if (isRegeneratingSchedules) return;
+                      if (isRegeneratingSchedulesRef.current) return;
+                      isRegeneratingSchedulesRef.current = true;
                       setIsRegeneratingSchedules(true);
                       try {
                         const scheduleGenerationPreferences =
@@ -2063,6 +2067,7 @@ export function ChatSettingsDrawer({
                       } catch {
                         // non-critical
                       } finally {
+                        isRegeneratingSchedulesRef.current = false;
                         setIsRegeneratingSchedules(false);
                       }
                     }}
