@@ -52,12 +52,17 @@ function redactSensitiveValue(value: unknown): unknown {
 }
 
 function formatToolPayloadForLog(payload: string, maxLength = 400): string {
+  const truncate = (value: string) => (value.length > maxLength ? `${value.slice(0, maxLength)}...` : value);
   try {
     const parsed = JSON.parse(payload);
     const formatted = JSON.stringify(redactSensitiveValue(parsed));
-    return formatted.length > maxLength ? `${formatted.slice(0, maxLength)}...` : formatted;
+    return truncate(formatted);
   } catch {
-    return payload.length > maxLength ? `${payload.slice(0, maxLength)}...` : payload;
+    const scrubbed = payload
+      .replace(/(Bearer\s+)[A-Za-z0-9\-._~+/]+=*/gi, "$1[REDACTED]")
+      .replace(/((?:access|refresh|id)?[_-]?token["'\s:=]+)([^,\s"']+)/gi, "$1[REDACTED]")
+      .replace(/((?:api[_-]?key|password|secret|authorization|cookie|credential)["'\s:=]+)([^,\s"']+)/gi, "$1[REDACTED]");
+    return truncate(scrubbed);
   }
 }
 
