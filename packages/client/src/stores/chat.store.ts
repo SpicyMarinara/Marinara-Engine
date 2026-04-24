@@ -78,6 +78,8 @@ interface ChatState {
   pendingNewChatMode: Exclude<ChatMode, "visual_novel"> | null;
   /** Per-chat draft input text so typing isn't lost when navigating away. */
   inputDrafts: Map<string, string>;
+  /** Current chat input */
+  currentInput: string;
   /** Per-chat unread message count (from autonomous messages). */
   unreadCounts: Map<string, number>;
   /** Floating notification bubbles — tracks character info for each unread chat. */
@@ -115,6 +117,7 @@ interface ChatState {
   setPendingNewChatMode: (mode: Exclude<ChatMode, "visual_novel"> | null) => void;
   setInputDraft: (chatId: string, text: string) => void;
   clearInputDraft: (chatId: string) => void;
+  setCurrentInput: (text: string) => void;
   incrementUnread: (chatId: string) => void;
   clearUnread: (chatId: string) => void;
   addNotification: (chatId: string, characterName: string, avatarUrl: string | null) => void;
@@ -153,6 +156,7 @@ export const useChatStore = create<ChatState>()(
     shouldOpenWizardInShortcutMode: false,
     pendingNewChatMode: null,
     inputDrafts: loadDrafts(),
+    currentInput: "",
     unreadCounts: new Map(),
     chatNotifications: new Map(),
     dismissedNotifications: new Set(),
@@ -332,6 +336,8 @@ export const useChatStore = create<ChatState>()(
         return { inputDrafts: m };
       }),
 
+    setCurrentInput: (text) => set({ currentInput: text }),
+
     incrementUnread: (chatId: string) =>
       set((state) => {
         const m = new Map(state.unreadCounts);
@@ -406,6 +412,7 @@ export const useChatStore = create<ChatState>()(
         swipeIndex: new Map(),
         pendingNewChatMode: null,
         inputDrafts: new Map(),
+        currentInput: "",
         unreadCounts: new Map(),
         chatNotifications: new Map(),
         dismissedNotifications: new Set(),

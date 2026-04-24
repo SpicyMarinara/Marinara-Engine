@@ -109,12 +109,18 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
   const isActuallyGenerating = isStreaming && !delayedCharacterInfo;
   const setInputDraft = useChatStore((s) => s.setInputDraft);
   const clearInputDraft = useChatStore((s) => s.clearInputDraft);
+  const setCurrentInput = useChatStore((s) => s.setCurrentInput);
   const { generate } = useGenerate();
   const { applyToUserInput } = useApplyRegex();
   const enterToSend = useUIStore((s) => s.enterToSendConvo);
   const createMessage = useCreateMessage(activeChatId);
   const qc = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const syncInputState = useCallback((value: string) => {
+    setHasInput(value.trim().length > 0);
+    setCurrentInput(value);
+  }, [setCurrentInput]);
 
   // Restore draft
   const prevChatIdRef = useRef<string | null>(null);
@@ -127,12 +133,12 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
       if (textareaRef.current) {
         const draft = activeChatId ? (useChatStore.getState().inputDrafts.get(activeChatId) ?? "") : "";
         textareaRef.current.value = draft;
-        setHasInput(draft.length > 0);
+        syncInputState(draft);
         textareaRef.current.style.height = "auto";
         textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
       }
     }
-  }, [activeChatId, setInputDraft]);
+  }, [activeChatId, setInputDraft, syncInputState]);
 
   // Save draft on unmount
   useEffect(() => {
@@ -250,12 +256,12 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
       el.value = `${before}@${name} ${after}`;
       const cursorPos = before.length + name.length + 2; // +2 for @ and space
       el.selectionStart = el.selectionEnd = cursorPos;
-      setHasInput(el.value.length > 0);
+      syncInputState(el.value);
       setMentionQuery(null);
       setMentionCompletions([]);
       el.focus();
     },
-    [mentionStartPos],
+    [mentionStartPos, syncInputState],
   );
 
   const handleSend = useCallback(async () => {
@@ -292,8 +298,8 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
         textareaRef.current.value = "";
         textareaRef.current.style.height = "auto";
       }
-      setHasInput(false);
       clearInputDraft(activeChatId);
+      syncInputState("");
       const currentAttachments = [...attachments];
       setAttachments([]);
       createMessage.mutate({
@@ -316,8 +322,8 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
         characterNames,
       };
       if (textareaRef.current) textareaRef.current.value = "";
-      setHasInput(false);
       clearInputDraft(activeChatId);
+      syncInputState("");
       setAttachments([]);
       const result = await matched.command.execute(matched.args, slashCtx);
       if (result.feedback) {
@@ -353,8 +359,8 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
       textareaRef.current.value = "";
       textareaRef.current.style.height = "auto";
     }
-    setHasInput(false);
     clearInputDraft(activeChatId);
+    syncInputState("");
 
     const pendingAttachments = attachments.map((a) => ({ type: a.type, data: a.data }));
     setAttachments([]);
@@ -380,6 +386,7 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
     createMessage,
     characterNames,
     qc,
+    syncInputState
   ]);
 
   const handleKeyDown = useCallback(
@@ -426,7 +433,7 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
           const cmd = completions[selectedCompletion];
           if (cmd && textareaRef.current) {
             textareaRef.current.value = `/${cmd.name} `;
-            setHasInput(true);
+            syncInputState(textareaRef.current.value);
             setCompletions([]);
           }
           return;
@@ -443,7 +450,7 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
         handleSend();
       }
     },
-    [completions, selectedCompletion, mentionCompletions, selectedMention, insertMention, enterToSend, handleSend],
+    [completions, selectedCompletion, mentionCompletions, selectedMention, insertMention, enterToSend, handleSend, syncInputState],
   );
 
   const handleInput = useCallback(() => {
@@ -456,7 +463,7 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
       el.style.height = "auto";
       el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
     }, 150);
-    setHasInput(el.value.length > 0);
+    syncInputState(el.value);
 
     // Slash completions
     if (el.value.startsWith("/")) {
@@ -489,7 +496,7 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
       setMentionQuery(null);
       setMentionCompletions([]);
     }
-  }, [characterNames]);
+  }, [characterNames, syncInputState]);
 
   useEffect(() => {
     if (hasInput && feedback) setFeedback(null);
@@ -503,9 +510,9 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
     const value = el.value;
     el.value = value.slice(0, start) + emoji + value.slice(end);
     el.selectionStart = el.selectionEnd = start + emoji.length;
-    setHasInput(el.value.length > 0);
+    syncInputState(el.value);
     el.focus();
-  }, []);
+  }, [syncInputState]);
 
   const handleGifSelect = useCallback(
     async (gifUrl: string) => {
@@ -550,7 +557,7 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
                 e.preventDefault();
                 if (textareaRef.current) {
                   textareaRef.current.value = `/${cmd.name} `;
-                  setHasInput(true);
+                  syncInputState(textareaRef.current.value);
                   setCompletions([]);
                   textareaRef.current.focus();
                 }

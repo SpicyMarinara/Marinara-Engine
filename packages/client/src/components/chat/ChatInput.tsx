@@ -69,6 +69,7 @@ export const ChatInput = memo(function ChatInput({
   const isStreaming = isStreamingGlobal && streamingChatId === activeChatId;
   const setInputDraft = useChatStore((s) => s.setInputDraft);
   const clearInputDraft = useChatStore((s) => s.clearInputDraft);
+  const setCurrentInput = useChatStore((s) => s.setCurrentInput);
   const { generate } = useGenerate();
   const { applyToUserInput } = useApplyRegex();
   const enterToSend = useUIStore((s) => s.enterToSendRP);
@@ -76,6 +77,11 @@ export const ChatInput = memo(function ChatInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const resizeRafRef = useRef<number>(0);
   const qc = useQueryClient();
+
+  const syncInputState = useCallback((value: string) => {
+    setHasInput(value.trim().length > 0);
+    setCurrentInput(value);
+  }, [setCurrentInput]);
 
   // Restore draft when mounting or switching chats
   const prevChatIdRef = useRef<string | null>(null);
@@ -96,12 +102,12 @@ export const ChatInput = memo(function ChatInput({
     if (activeChatId && textareaRef.current) {
       const draft = useChatStore.getState().inputDrafts.get(activeChatId) ?? "";
       textareaRef.current.value = draft;
-      setHasInput(draft.trim().length > 0);
+      syncInputState(draft);
       // Resize textarea to fit content
       textareaRef.current.style.height = "auto";
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + "px";
     }
-  }, [activeChatId, setInputDraft, clearInputDraft]);
+  }, [activeChatId, setInputDraft, clearInputDraft, syncInputState]);
 
   // Save draft when component unmounts (e.g. navigating to editor)
   useEffect(() => {
@@ -292,7 +298,7 @@ export const ChatInput = memo(function ChatInput({
         textareaRef.current.value = "";
         textareaRef.current.style.height = "auto";
       }
-      setHasInput(false);
+      syncInputState("");
       setCompletions([]);
       setAttachments([]);
       clearInputDraft(activeChatId);
@@ -339,7 +345,7 @@ export const ChatInput = memo(function ChatInput({
       textareaRef.current.value = "";
       textareaRef.current.style.height = "auto";
     }
-    setHasInput(false);
+    syncInputState("");
     setCompletions([]);
     const pendingAttachments = attachments.map((a) => ({ type: a.type, data: a.data }));
     setAttachments([]);
@@ -384,6 +390,7 @@ export const ChatInput = memo(function ChatInput({
     mode,
     groupResponseOrder,
     createMessage,
+    syncInputState
   ]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -442,6 +449,7 @@ export const ChatInput = memo(function ChatInput({
       if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
       const chatId = activeChatId;
       const text = fixed;
+      setCurrentInput(text);
       draftTimerRef.current = setTimeout(() => {
         if (text.trim()) {
           setInputDraft(chatId, text);
@@ -486,9 +494,9 @@ export const ChatInput = memo(function ChatInput({
     const value = el.value;
     el.value = value.slice(0, start) + emoji + value.slice(end);
     el.selectionStart = el.selectionEnd = start + emoji.length;
-    setHasInput(el.value.length > 0);
+    syncInputState(el.value);
     el.focus();
-  }, []);
+  }, [syncInputState]);
 
   // Character picker: trigger a response from a specific character (manual mode)
   const handleCharacterResponse = useCallback(
