@@ -104,6 +104,10 @@ export const MariThinkingIndicator = memo(function MariThinkingIndicator() {
           return;
         }
         if (hideTimerRef.current) return;
+        // Nothing currently owns the pill, so there's nothing to hide — avoid
+        // scheduling a no-op setTimeout that would later fire setVisible(false)
+        // on already-hidden state.
+        if (!visibleChatIdRef.current) return;
         const elapsed = Date.now() - shownAtRef.current;
         const remaining = Math.max(0, MIN_VISIBLE_MS - elapsed);
         hideTimerRef.current = setTimeout(() => {
