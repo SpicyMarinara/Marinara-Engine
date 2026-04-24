@@ -74,7 +74,7 @@ The only **persisted** store (localStorage via Zustand `persist` middleware). Co
 - **Streaming**: `enableStreaming`, `streamingSpeed`
 - **Conversation theme**: gradient colors for message bubbles
 - **Sound**: `convoNotificationSound`, `rpNotificationSound`
-- **Behavior**: `confirmBeforeDelete`, `enterToSendRP`, `enterToSendConvo`, `weatherEffects`
+- **Behavior**: `confirmBeforeDelete`, `enterToSendRP`, `enterToSendConvo`, `weatherEffects`, `guideGenerations`
 - **Navigation**: `rightPanel`, `rightPanelOpen`, `sidebarOpen`, `settingsTab`, all `*DetailId` fields, `modal`
 
 Synced custom themes are **not** stored in `ui.store.ts`; they are fetched from the server via React Query and mirrored across devices connected to the same Marinara instance.
@@ -87,6 +87,7 @@ Non-persisted. Tracks the active chat session:
 - `messages` — current message array
 - `isStreaming`, `streamBuffer` — generation in progress
 - `inputDrafts` — per-chat draft messages
+- `currentInput` — current value of chat input
 - `perChatTyping` — typing indicator state
 - `unreadCounts`, `chatNotifications` — notification badges
 - `abortControllers` — cancel in-flight generations
