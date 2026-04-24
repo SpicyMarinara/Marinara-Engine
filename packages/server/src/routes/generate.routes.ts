@@ -4673,6 +4673,9 @@ export async function generateRoutes(app: FastifyInstance) {
           // ── LOG_LEVEL=debug: log full response + usage to server console ──
           if (isDebug) {
             app.log.debug("[debug] LLM response (%d chars, %dms):\n%s", fullResponse.length, durationMs, fullResponse);
+            if (fullThinking) {
+              app.log.debug("[debug] Thinking tokens (%d chars):\n%s", fullThinking.length, fullThinking);
+            }
             if (usage) {
               app.log.debug(
                 "[debug] Token usage — prompt: %s  completion: %s  total: %s  cached: %s  cacheWrite: %s  finish: %s",

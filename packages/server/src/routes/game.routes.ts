@@ -1208,10 +1208,18 @@ export async function gameRoutes(app: FastifyInstance) {
     );
 
     const result = await provider.chatComplete(messages, setupOptions);
-    const responseText = extractLeadingThinkingBlocks(result.content ?? "").content;
+    const setupExtraction = extractLeadingThinkingBlocks(result.content ?? "");
+    const responseText = setupExtraction.content;
 
     logger.debug("[game/setup] Response length: %d chars", responseText.length);
     logger.debug("[game/setup] Full response:\n%s", responseText);
+    if (setupExtraction.thinking) {
+      logger.debug(
+        "[game/setup] Thinking tokens (%d chars):\n%s",
+        setupExtraction.thinking.length,
+        setupExtraction.thinking,
+      );
+    }
 
     let setupData: Record<string, unknown> = {};
     let parseError: string | null = null;
@@ -1630,6 +1638,9 @@ export async function gameRoutes(app: FastifyInstance) {
           const recapExtraction = extractLeadingThinkingBlocks(result.content ?? "");
           recapText = recapExtraction.content;
           recapThinking = recapExtraction.thinking;
+          if (recapThinking) {
+            logger.debug("[game/session/start] Recap thinking (%d chars):\n%s", recapThinking.length, recapThinking);
+          }
         } catch {
           recapText = `Session ${sessionNumber} begins. The adventure continues...`;
           recapThinking = "";
@@ -1780,6 +1791,13 @@ export async function gameRoutes(app: FastifyInstance) {
     );
     logger.info("[game/session/conclude] Summary generation completed for chat %s", chatId);
     const summaryExtraction = extractLeadingThinkingBlocks(result.content ?? "");
+    if (summaryExtraction.thinking) {
+      logger.debug(
+        "[game/session/conclude] Thinking tokens (%d chars):\n%s",
+        summaryExtraction.thinking.length,
+        summaryExtraction.thinking,
+      );
+    }
 
     let summary: SessionSummary;
     try {
@@ -1818,7 +1836,15 @@ export async function gameRoutes(app: FastifyInstance) {
         progressionMessages,
         gameGenOptions(conn.model, { temperature: 0.35 }),
       );
-      const progressionContent = extractLeadingThinkingBlocks(progressionResult.content ?? "").content;
+      const progressionExtraction = extractLeadingThinkingBlocks(progressionResult.content ?? "");
+      const progressionContent = progressionExtraction.content;
+      if (progressionExtraction.thinking) {
+        logger.debug(
+          "[game/session/conclude] Progression thinking (%d chars):\n%s",
+          progressionExtraction.thinking.length,
+          progressionExtraction.thinking,
+        );
+      }
       const parsedProgression = parseJSON(progressionContent) as Record<string, unknown>;
 
       const nextStoryArc = normalizeSessionText(parsedProgression.storyArc, updatedStoryArc || "");
@@ -1852,7 +1878,15 @@ export async function gameRoutes(app: FastifyInstance) {
         ];
 
         const cardResult = await provider.chatComplete(cardMessages, gameGenOptions(conn.model, { temperature: 0.4 }));
-        const cardContent = extractLeadingThinkingBlocks(cardResult.content ?? "").content;
+        const cardExtraction = extractLeadingThinkingBlocks(cardResult.content ?? "");
+        const cardContent = cardExtraction.content;
+        if (cardExtraction.thinking) {
+          logger.debug(
+            "[game/session/conclude] Card adjustment thinking (%d chars):\n%s",
+            cardExtraction.thinking.length,
+            cardExtraction.thinking,
+          );
+        }
 
         const parsedCards = parseJSON(cardContent) as Array<Record<string, unknown>>;
         if (Array.isArray(parsedCards) && parsedCards.length > 0) {
@@ -2097,7 +2131,15 @@ export async function gameRoutes(app: FastifyInstance) {
         ],
         gameGenOptions(conn.model, { temperature: 0.6, maxTokens: 1200 }, generationParameters),
       );
-      const cardContent = extractLeadingThinkingBlocks(result.content ?? "").content;
+      const recruitExtraction = extractLeadingThinkingBlocks(result.content ?? "");
+      const cardContent = recruitExtraction.content;
+      if (recruitExtraction.thinking) {
+        logger.debug(
+          "[game/party/recruit] Thinking tokens (%d chars):\n%s",
+          recruitExtraction.thinking.length,
+          recruitExtraction.thinking,
+        );
+      }
       const parsed = parseJSON(cardContent);
       const rawCard =
         parsed && typeof parsed === "object" && !Array.isArray(parsed)
@@ -2296,7 +2338,15 @@ export async function gameRoutes(app: FastifyInstance) {
         temperature: 0.6,
       }),
     );
-    const mapContent = extractLeadingThinkingBlocks(result.content ?? "").content;
+    const mapExtraction = extractLeadingThinkingBlocks(result.content ?? "");
+    const mapContent = mapExtraction.content;
+    if (mapExtraction.thinking) {
+      logger.debug(
+        "[game/map/generate] Thinking tokens (%d chars):\n%s",
+        mapExtraction.thinking.length,
+        mapExtraction.thinking,
+      );
+    }
 
     let map: GameMap;
     try {
@@ -2914,6 +2964,13 @@ export async function gameRoutes(app: FastifyInstance) {
     );
     const partyTurnExtraction = extractLeadingThinkingBlocks(result.content || "");
     const raw = partyTurnExtraction.content;
+    if (partyTurnExtraction.thinking) {
+      logger.debug(
+        "[game/party-turn] Thinking tokens (%d chars):\n%s",
+        partyTurnExtraction.thinking.length,
+        partyTurnExtraction.thinking,
+      );
+    }
 
     // Extract and apply reputation tags from party response
     const repRegex = /\[reputation:\s*npc="([^"]+)"\s*action="([^"]+)"\]/gi;
@@ -3036,8 +3093,16 @@ export async function gameRoutes(app: FastifyInstance) {
       ),
     );
 
-    const raw = extractLeadingThinkingBlocks(result.content || "").content;
+    const sceneWrapExtraction = extractLeadingThinkingBlocks(result.content || "");
+    const raw = sceneWrapExtraction.content;
     logger.debug("[game/scene-wrap] Response (%d chars): %s", raw.length, raw);
+    if (sceneWrapExtraction.thinking) {
+      logger.debug(
+        "[game/scene-wrap] Thinking tokens (%d chars):\n%s",
+        sceneWrapExtraction.thinking.length,
+        sceneWrapExtraction.thinking,
+      );
+    }
 
     try {
       const rawParsed = parseJSON(raw);
