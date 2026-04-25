@@ -116,7 +116,7 @@ export async function fontsRoutes(app: FastifyInstance) {
     const os = platform();
     const cmd = os === "darwin" ? "open" : os === "win32" ? "explorer" : "xdg-open";
     execFile(cmd, [FONTS_DIR], (err) => {
-      if (err) logger.warn("Could not open fonts folder: %s", err.message);
+      if (err) logger.warn(err, "Could not open fonts folder");
     });
     return reply.send({ ok: true, path: FONTS_DIR });
   });

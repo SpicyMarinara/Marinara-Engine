@@ -48,7 +48,7 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
     void sidecarProcessService
       .syncForCurrentConfig({ suppressKnownFailure: true, allowRuntimeInstall: false })
       .catch((error) => {
-        logger.error("[sidecar] Background sync from /status failed: %s", error);
+        logger.error(error, "[sidecar] Background sync from /status failed");
       });
 
     const status = sidecarModelService.getStatus();
@@ -78,7 +78,7 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
     void sidecarProcessService
       .syncForCurrentConfig({ suppressKnownFailure: true, allowRuntimeInstall: false })
       .catch((error) => {
-        logger.error("[sidecar] Background sync from /config failed: %s", error);
+        logger.error(error, "[sidecar] Background sync from /config failed");
       });
     return { config };
   });

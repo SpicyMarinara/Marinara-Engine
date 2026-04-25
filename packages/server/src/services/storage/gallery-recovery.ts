@@ -63,7 +63,7 @@ export async function recoverGalleryImages(db: DB) {
         recovered++;
       }
     } catch (err) {
-      logger.warn("[gallery-recovery] Failed to process directory %s: %s", dir.name, err);
+      logger.warn(err, "[gallery-recovery] Failed to process directory %s", dir.name);
     }
   }
 

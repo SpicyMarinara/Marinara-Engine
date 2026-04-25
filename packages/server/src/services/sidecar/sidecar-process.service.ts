@@ -483,6 +483,7 @@ class SidecarProcessService {
 
         if (nextRuntime && !this.isMlxRuntime(nextRuntime) && !attemptedVariants.has(nextRuntime.variant)) {
           logger.warn(
+            error,
             "[sidecar] Runtime %s failed to boot before ready. Retrying with %s.",
             activeRuntime.variant,
             nextRuntime.variant,
@@ -541,12 +542,7 @@ class SidecarProcessService {
 
         const nextPlan = startupPlans[attempt + 1];
         if (nextPlan && this.shouldRetryStartup(error)) {
-          logger.warn(
-            "[sidecar] Startup with %s failed (%s). Retrying with %s.",
-            plan.label,
-            error.message,
-            nextPlan.label,
-          );
+          logger.warn(error, "[sidecar] Startup with %s failed. Retrying with %s.", plan.label, nextPlan.label);
           continue;
         }
 
@@ -730,7 +726,7 @@ class SidecarProcessService {
     try {
       await this.syncForCurrentConfig({ allowRuntimeInstall: false });
     } catch (error) {
-      logger.error("[sidecar] Auto-restart failed: %s", error);
+      logger.error(error, "[sidecar] Auto-restart failed");
       sidecarModelService.setStatus("server_error");
     }
   }

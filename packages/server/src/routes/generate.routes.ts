@@ -5429,7 +5429,7 @@ export async function generateRoutes(app: FastifyInstance) {
                           npc.avatarPath = `/api/avatars/npc/${input.chatId}/${safeName}.png`;
                           logger.info(`[character-tracker] Generated avatar for NPC "${npcName}"`);
                         } catch (err) {
-                          logger.warn(`[character-tracker] Failed to generate avatar for "${npc.name}": %s`, err);
+                          logger.warn(err, '[character-tracker] Failed to generate avatar for "%s"', npc.name);
                         }
                       }
 
@@ -5446,7 +5446,7 @@ export async function generateRoutes(app: FastifyInstance) {
                         /* stream closed */
                       }
                     } catch (err) {
-                      logger.warn(`[character-tracker] Avatar generation error: %s`, err);
+                      logger.warn(err, "[character-tracker] Avatar generation error");
                     }
                   })();
                 }
@@ -7021,7 +7021,7 @@ export async function generateRoutes(app: FastifyInstance) {
         await fetch(abortUrl, { method: "POST", signal: AbortSignal.timeout(5000) });
         logger.info("[abort] Backend abort sent successfully");
       } catch (err) {
-        logger.warn("[abort] Backend abort failed: %s", err);
+        logger.warn(err, "[abort] Backend abort failed");
       }
     }
 

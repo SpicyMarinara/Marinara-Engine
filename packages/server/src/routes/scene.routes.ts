@@ -547,7 +547,8 @@ export async function sceneRoutes(app: FastifyInstance) {
       }
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : "Unknown error";
-      logger.error("[scene/plan] Failed to parse LLM response as JSON: %s — raw: %s", errMsg, raw.slice(0, 500));
+      logger.error(e, "[scene/plan] Failed to parse LLM response as JSON");
+      logger.debug("[scene/plan] Raw unparsable LLM output (first 500 chars): %s", raw.slice(0, 500));
       return {
         plan: null,
         error: `Model didn't return valid JSON. Try again — sometimes models need a second attempt. (${errMsg})`,

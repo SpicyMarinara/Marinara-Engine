@@ -64,9 +64,9 @@ async function createWithSqlJs(dbPath: string): Promise<DrizzleDB> {
       const data = sqlDb.export();
       const buffer = Buffer.from(data);
       writeFileSync(dbPath, buffer);
-    } catch {
+    } catch (err) {
       // Non-fatal — log but don't crash
-      logger.error("[sql.js] Failed to persist database to disk");
+      logger.error(err, "[sql.js] Failed to persist database to disk");
     }
   };
 

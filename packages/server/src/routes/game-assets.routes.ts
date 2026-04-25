@@ -143,7 +143,7 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
     const os = platform();
     const cmd = os === "darwin" ? "open" : os === "win32" ? "explorer" : "xdg-open";
     execFile(cmd, [target], (err) => {
-      if (err) logger.warn("Could not open game assets folder: %s", err.message);
+      if (err) logger.warn(err, "Could not open game assets folder");
     });
     return reply.send({ ok: true, path: target });
   });

@@ -216,8 +216,8 @@ function parseMeta(raw: unknown): Record<string, unknown> {
   if (typeof raw === "string") {
     try {
       return JSON.parse(raw);
-    } catch {
-      logger.warn("[game.routes] Failed to parse chat metadata, returning empty object");
+    } catch (err) {
+      logger.warn(err, "[game.routes] Failed to parse chat metadata, returning empty object");
       return {};
     }
   }
@@ -3358,8 +3358,8 @@ export async function gameRoutes(app: FastifyInstance) {
       }
 
       return { result: parsed };
-    } catch {
-      logger.warn("[game/scene-wrap] Failed to parse LLM response as JSON: %s", raw.slice(0, 200));
+    } catch (err) {
+      logger.warn(err, "[game/scene-wrap] Failed to parse LLM response as JSON: %s", raw.slice(0, 200));
       return { result: null, raw };
     }
   });

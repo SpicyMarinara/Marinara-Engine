@@ -335,7 +335,7 @@ export async function executeAgentBatch(
           retries.push(entry.value);
         } else {
           // Individual retry also failed — produce error result
-          logger.error("[agent-batch] Individual retry FAILED for %s: %s", failed[i]!.type, entry.reason);
+          logger.error(entry.reason, "[agent-batch] Individual retry FAILED for %s", failed[i]!.type);
           retries.push(
             makeError(failed[i]!, entry.reason instanceof Error ? entry.reason.message : "Retry failed", startTime),
           );
@@ -348,7 +348,7 @@ export async function executeAgentBatch(
   } catch (err) {
     // On failure, return errors for all agents in the batch
     const errMsg = err instanceof Error ? err.message : "Batch execution failed";
-    logger.error(`[agent-batch] Batch call FAILED: ${errMsg}`);
+    logger.error(err, "[agent-batch] Batch call FAILED: %s", errMsg);
     return configs.map((c) => makeError(c, errMsg, startTime));
   }
 }

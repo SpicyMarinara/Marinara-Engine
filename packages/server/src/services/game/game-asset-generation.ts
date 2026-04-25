@@ -85,7 +85,7 @@ export async function generateNpcPortrait(req: NpcPortraitRequest): Promise<stri
     logger.info(`[game-asset-gen] Generated NPC portrait for "${req.npcName}" → ${url}`);
     return url;
   } catch (err) {
-    logger.warn(`[game-asset-gen] Failed to generate portrait for "${req.npcName}": %s`, err);
+    logger.warn(err, '[game-asset-gen] Failed to generate portrait for "%s"', req.npcName);
     return null;
   }
 }
@@ -173,7 +173,7 @@ export async function generateBackground(req: BackgroundGenRequest): Promise<str
     logger.info(`[game-asset-gen] Generated background "${slug}" → tag: ${tag}`);
     return tag;
   } catch (err) {
-    logger.warn(`[game-asset-gen] Failed to generate background "${slug}": %s`, err);
+    logger.warn(err, '[game-asset-gen] Failed to generate background "%s"', slug);
     return null;
   }
 }

@@ -58,7 +58,7 @@ async function getPipeline(): Promise<any> {
       return p;
     } catch (err) {
       loadFailed = true;
-      logger.warn("[local-embedder] Failed to load local embedding model: %s", err);
+      logger.warn(err, "[local-embedder] Failed to load local embedding model");
       return null;
     } finally {
       loadingPromise = null;
@@ -89,7 +89,7 @@ export async function localEmbed(texts: string[]): Promise<number[][] | null> {
     }
     return results;
   } catch (err) {
-    logger.error("[local-embedder] Embedding failed: %s", err);
+    logger.error(err, "[local-embedder] Embedding failed");
     return null;
   }
 }

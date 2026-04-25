@@ -366,7 +366,7 @@ async function executeRetryBatches(agentContext: AgentContext, resolvedAgents: R
     if (outcome.status === "fulfilled") {
       results.push(...outcome.value);
     } else {
-      logger.error("[retry-agents] Group failed: %s", outcome.reason);
+      logger.error(outcome.reason, "[retry-agents] Group failed");
     }
   }
 
@@ -612,7 +612,9 @@ async function applyRetryResultEffects(args: {
         const qData = result.data as Record<string, unknown>;
         const updates = (qData.updates as any[]) ?? [];
         logger.debug(
-          `[retry-agents] Quest agent result — updates: ${updates.length}, data keys: ${Object.keys(qData).join(",")} %s`,
+          "[retry-agents] Quest agent result — updates: %d, data keys: %s %s",
+          updates.length,
+          Object.keys(qData).join(","),
           JSON.stringify(qData).slice(0, 500),
         );
         if (updates.length > 0) {
@@ -871,7 +873,7 @@ async function applyRetryResultEffects(args: {
           }
         }
       } catch (illErr) {
-        logger.error("[retry-agents] Illustrator image generation failed: %s", illErr);
+        logger.error(illErr, "[retry-agents] Illustrator image generation failed");
         sendSseEvent(reply, {
           type: "agent_error",
           data: {

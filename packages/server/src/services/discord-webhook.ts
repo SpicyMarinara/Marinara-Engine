@@ -93,7 +93,7 @@ export function postToDiscordWebhook(
         logger.error("[discord-webhook] POST failed (%d): %s", res.status, await res.text().catch(() => ""));
       }
     } catch (err) {
-      logger.error("[discord-webhook] Network error: %s", err);
+      logger.error(err, "[discord-webhook] Network error");
     }
   });
 }

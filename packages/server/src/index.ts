@@ -23,6 +23,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  logger.error(`[ERROR] ${err instanceof Error ? err.message : err}`);
+  logger.error(err, "[startup] Unhandled error during server bootstrap");
   process.exit(1);
 });

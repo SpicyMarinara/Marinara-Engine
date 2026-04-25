@@ -160,12 +160,21 @@ async function executePhase(
     } else {
       // Group rejected — log and produce error results so they're visible
       const group = groups[i]!;
-      logger.error(
-        '[agent-pipeline] Group REJECTED in phase "%s": [%s] %s',
-        phase,
-        group.agents.map((a) => a.type).join(", "),
-        entry.reason,
-      );
+      if (entry.reason instanceof Error) {
+        logger.error(
+          entry.reason,
+          '[agent-pipeline] Group REJECTED in phase "%s": [%s]',
+          phase,
+          group.agents.map((a) => a.type).join(", "),
+        );
+      } else {
+        logger.error(
+          '[agent-pipeline] Group REJECTED in phase "%s": [%s] %s',
+          phase,
+          group.agents.map((a) => a.type).join(", "),
+          String(entry.reason),
+        );
+      }
       for (const agent of group.agents) {
         const errorResult: AgentResult = {
           agentId: agent.id,
