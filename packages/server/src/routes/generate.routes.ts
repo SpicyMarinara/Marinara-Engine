@@ -2225,7 +2225,13 @@ export async function generateRoutes(app: FastifyInstance) {
       }
 
       logger.info(
-        `[generate] Resolved ${resolvedAgents.length} agents for chat ${input.chatId} (enableAgents=${chatEnableAgents}, perChatList=${hasPerChatAgentList}, activeIds=[${chatActiveAgentIds.join(",")}])`,
+        "[generate] Resolved %d agents for chat %s (enableAgents=%s, perChatList=%s, activeIds=[%s]): %s",
+        resolvedAgents.length,
+        input.chatId,
+        chatEnableAgents,
+        hasPerChatAgentList,
+        chatActiveAgentIds.join(","),
+        resolvedAgents.map((a) => `${a.type}(${a.phase})`).join(", "),
       );
 
       // Resolve character info (used for agent context AND prompt fallback)
@@ -5623,7 +5629,10 @@ export async function generateRoutes(app: FastifyInstance) {
               const qData = result.data as Record<string, unknown>;
               const updates = (qData.updates as any[]) ?? [];
               logger.debug(
-                `[generate] Quest agent result — updates: ${updates.length}, data keys: ${Object.keys(qData).join(",")}`,
+                "[generate] Quest agent result — updates: %d, data keys: %s %s",
+                updates.length,
+                Object.keys(qData).join(","),
+                JSON.stringify(qData).slice(0, 500),
               );
               if (updates.length > 0) {
                 // Ensure a snapshot exists for this (messageId, swipeIndex)
