@@ -2,6 +2,7 @@
 // Seed: Default OpenRouter Free Connection
 // Creates a pre-configured OpenRouter free-tier connection for new users.
 // ──────────────────────────────────────────────
+import { logger } from "../lib/logger.js";
 import type { DB } from "./connection.js";
 import { apiConnections } from "./schema/connections.js";
 import { eq } from "drizzle-orm";
@@ -25,7 +26,7 @@ export async function seedDefaultConnection(db: DB) {
   const anyExistingConnections = await db.select({ id: apiConnections.id }).from(apiConnections).limit(1);
 
   if (anyExistingConnections.length > 0) {
-    console.log("[seed] Skipped default connection seed because saved connections already exist");
+    logger.info("[seed] Skipped default connection seed because saved connections already exist");
     return;
   }
 
@@ -45,5 +46,5 @@ export async function seedDefaultConnection(db: DB) {
     updatedAt: now(),
   });
 
-  console.log("[seed] Created default connection: OpenRouter Free");
+  logger.info("[seed] Created default connection: OpenRouter Free");
 }

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { logger } from "../../lib/logger.js";
 import {
   BUILT_IN_AGENTS,
   LOCAL_SIDECAR_CONNECTION_ID,
@@ -265,7 +266,14 @@ async function resolveRetryAgents(args: {
     throw new Error("Cannot resolve provider URL");
   }
 
-  const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey, conn.maxContext, conn.openrouterProvider, conn.maxTokensOverride);
+  const provider = createLLMProvider(
+    conn.provider,
+    baseUrl,
+    conn.apiKey,
+    conn.maxContext,
+    conn.openrouterProvider,
+    conn.maxTokensOverride,
+  );
   const resolvedAgents: ResolvedRetryAgent[] = [];
 
   for (const cfg of enabledConfigs) {
@@ -358,7 +366,7 @@ async function executeRetryBatches(agentContext: AgentContext, resolvedAgents: R
     if (outcome.status === "fulfilled") {
       results.push(...outcome.value);
     } else {
-      console.error("[retry-agents] Group failed:", outcome.reason);
+      logger.error(outcome.reason, "[retry-agents] Group failed");
     }
   }
 
@@ -603,8 +611,10 @@ async function applyRetryResultEffects(args: {
       try {
         const qData = result.data as Record<string, unknown>;
         const updates = (qData.updates as any[]) ?? [];
-        console.log(
-          `[retry-agents] Quest agent result — updates: ${updates.length}, data keys: ${Object.keys(qData).join(",")}`,
+        logger.debug(
+          "[retry-agents] Quest agent result — updates: %d, data keys: %s %s",
+          updates.length,
+          Object.keys(qData).join(","),
           JSON.stringify(qData).slice(0, 500),
         );
         if (updates.length > 0) {
@@ -856,14 +866,14 @@ async function applyRetryResultEffects(args: {
                   galleryId: (galleryEntry as any)?.id,
                 },
               });
-              console.log(
+              logger.info(
                 `[retry-agents] Illustrator generated: ${(illData.reason as string)?.slice(0, 80) ?? imagePrompt.slice(0, 80)}...`,
               );
             }
           }
         }
       } catch (illErr) {
-        console.error("[retry-agents] Illustrator image generation failed:", illErr);
+        logger.error(illErr, "[retry-agents] Illustrator image generation failed");
         sendSseEvent(reply, {
           type: "agent_error",
           data: {

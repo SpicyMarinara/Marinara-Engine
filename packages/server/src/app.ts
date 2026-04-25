@@ -103,9 +103,11 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
 
   // ── Sidecar bootstrap (background, skipped in lite mode) ──
   if (!isLite) {
-    void sidecarProcessService.syncForCurrentConfig({ suppressKnownFailure: true, allowRuntimeInstall: false }).catch((error) => {
-      app.log.warn({ err: error }, "sidecar bootstrap failed");
-    });
+    void sidecarProcessService
+      .syncForCurrentConfig({ suppressKnownFailure: true, allowRuntimeInstall: false })
+      .catch((error) => {
+        app.log.warn({ err: error }, "sidecar bootstrap failed");
+      });
   }
 
   // ── Serve client build in production ──

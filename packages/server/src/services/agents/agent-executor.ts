@@ -4,7 +4,7 @@
 import type { BaseLLMProvider, ChatMessage, LLMToolDefinition, LLMToolCall } from "../llm/base-provider.js";
 import type { AgentResult, AgentContext, AgentResultType } from "@marinara-engine/shared";
 import { getDefaultAgentPrompt } from "@marinara-engine/shared";
-import { isDebugAgentsEnabled } from "../../config/runtime-config.js";
+import { logger } from "../../lib/logger.js";
 
 /** Strip HTML/XML-style tags (e.g. <div style="..."> <br> <speaker>) from text to save tokens. */
 function stripHtmlTags(text: string): string {
@@ -96,13 +96,11 @@ export async function executeAgent(
     }
 
     // Call LLM (streaming to avoid proxy timeouts, no tools)
-    console.log(`[agent] ${config.type} (${config.name}) — ${model}`);
-    if (isDebugAgentsEnabled()) {
-      for (const msg of messages) {
-        console.log(`[agent] [${msg.role}] ${msg.content}`);
-      }
-      console.log(`[agent] ═══ END PROMPT — temperature=${temperature} maxTokens=${maxTokens} ═══\n`);
+    logger.info(`[agent] ${config.type} (${config.name}) — ${model}`);
+    for (const msg of messages) {
+      logger.debug(`[agent] [${msg.role}] ${msg.content}`);
     }
+    logger.debug(`[agent] ═══ END PROMPT — temperature=${temperature} maxTokens=${maxTokens} ═══\n`);
 
     let responseText = "";
     const result = await provider.chatComplete(messages, {
@@ -122,10 +120,8 @@ export async function executeAgent(
     responseText = responseText.trim();
     const durationMs = Date.now() - startTime;
 
-    console.log(`[agent] ${config.type} done (${responseText.length} chars, ${durationMs}ms)`);
-    if (isDebugAgentsEnabled() || config.type === "illustrator") {
-      console.log(`[agent] ${config.type} raw response: ${responseText.slice(0, 500)}`);
-    }
+    logger.info(`[agent] ${config.type} done (${responseText.length} chars, ${durationMs}ms)`);
+    logger.debug(`[agent] ${config.type} raw response: ${responseText.slice(0, 500)}`);
 
     // Parse the result based on agent type
     const parsed = parseAgentResponse(config.type, responseText);
@@ -254,11 +250,11 @@ export async function executeAgentBatch(
 ): Promise<AgentResult[]> {
   if (configs.length === 0) return [];
   if (configs.length === 1) {
-    console.log(`[agent-batch] Only 1 agent (${configs[0]!.type}), running individually`);
+    logger.info(`[agent-batch] Only 1 agent (${configs[0]!.type}), running individually`);
     return [await executeAgent(configs[0]!, context, provider, model)];
   }
 
-  console.log(`[agent-batch] Batching ${configs.length} agents: [${configs.map((c) => c.type).join(", ")}]`);
+  logger.info(`[agent-batch] Batching ${configs.length} agents: [${configs.map((c) => c.type).join(", ")}]`);
 
   const startTime = Date.now();
 
@@ -280,17 +276,15 @@ export async function executeAgentBatch(
         ? Math.min(rawBatchMaxTokens, provider.maxTokensOverrideValue)
         : rawBatchMaxTokens;
     const streamResponses = context.streaming !== false;
-    console.log(
+    logger.info(
       `[agent-batch] maxTokens: ${batchMaxTokens} (${maxTokensPerAgent} × ${configs.length} agents, floor 16384${provider.maxTokensOverrideValue !== null ? `, capped at ${provider.maxTokensOverrideValue}` : ""})`,
     );
 
-    if (isDebugAgentsEnabled()) {
-      console.log(`\n[agent-batch] ═══ BATCH PROMPT — [${configs.map((c) => c.type).join(", ")}] — ${model} ═══`);
-      for (const msg of messages) {
-        console.log(`[agent-batch] [${msg.role}] ${msg.content}`);
-      }
-      console.log(`[agent-batch] ═══ END BATCH PROMPT — temperature=${temperature} maxTokens=${batchMaxTokens} ═══\n`);
+    logger.debug(`\n[agent-batch] ═══ BATCH PROMPT — [${configs.map((c) => c.type).join(", ")}] — ${model} ═══`);
+    for (const msg of messages) {
+      logger.debug(`[agent-batch] [${msg.role}] ${msg.content}`);
     }
+    logger.debug(`[agent-batch] ═══ END BATCH PROMPT — temperature=${temperature} maxTokens=${batchMaxTokens} ═══\n`);
 
     // Use streaming (onToken) to keep the connection alive — avoids proxy
     // timeouts (e.g. Cloudflare 524) on large batch responses.
@@ -315,22 +309,22 @@ export async function executeAgentBatch(
     const durationMs = Date.now() - startTime;
     const totalTokens = result.usage?.totalTokens ?? 0;
 
-    console.log(`[agent-batch] Got response (${responseText.length} chars, ${durationMs}ms, ${totalTokens} tokens)`);
-    if (isDebugAgentsEnabled()) {
-      console.log(`[agent-batch] ${responseText}`);
-    }
+    logger.info(`[agent-batch] Got response (${responseText.length} chars, ${durationMs}ms, ${totalTokens} tokens)`);
+    logger.debug(`[agent-batch] ${responseText}`);
 
     // Parse the batched response into individual results
     const { parsed, failed } = parseBatchResponse(configs, responseText, durationMs, totalTokens);
 
-    console.log(
-      `[agent-batch] Batch parse: ${parsed.length} parsed, ${failed.length} failed`,
+    logger.info(
+      "[agent-batch] Batch parse: %d parsed, %d failed %s",
+      parsed.length,
+      failed.length,
       failed.length > 0 ? `Failed: [${failed.map((f) => f.type).join(", ")}]` : "",
     );
 
     // Retry failed agents individually (batch fallback)
     if (failed.length > 0) {
-      console.log(`[agent-batch] Retrying ${failed.length} failed agents individually...`);
+      logger.info(`[agent-batch] Retrying ${failed.length} failed agents individually...`);
       const retrySettled = await Promise.allSettled(
         failed.map((config) => executeAgent(config, context, provider, model)),
       );
@@ -341,7 +335,7 @@ export async function executeAgentBatch(
           retries.push(entry.value);
         } else {
           // Individual retry also failed — produce error result
-          console.error(`[agent-batch] Individual retry FAILED for ${failed[i]!.type}:`, entry.reason);
+          logger.error(entry.reason, "[agent-batch] Individual retry FAILED for %s", failed[i]!.type);
           retries.push(
             makeError(failed[i]!, entry.reason instanceof Error ? entry.reason.message : "Retry failed", startTime),
           );
@@ -354,7 +348,7 @@ export async function executeAgentBatch(
   } catch (err) {
     // On failure, return errors for all agents in the batch
     const errMsg = err instanceof Error ? err.message : "Batch execution failed";
-    console.error(`[agent-batch] Batch call FAILED: ${errMsg}`);
+    logger.error(err, "[agent-batch] Batch call FAILED: %s", errMsg);
     return configs.map((c) => makeError(c, errMsg, startTime));
   }
 }

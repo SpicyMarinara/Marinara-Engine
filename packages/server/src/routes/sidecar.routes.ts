@@ -4,6 +4,7 @@
 // ──────────────────────────────────────────────
 
 import type { FastifyPluginAsync, FastifyReply } from "fastify";
+import { logger } from "../lib/logger.js";
 import { z } from "zod";
 import { sidecarModelService } from "../services/sidecar/sidecar-model.service.js";
 import { mlxRuntimeService } from "../services/sidecar/mlx-runtime.service.js";
@@ -44,9 +45,11 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get("/status", async () => {
-    void sidecarProcessService.syncForCurrentConfig({ suppressKnownFailure: true, allowRuntimeInstall: false }).catch((error) => {
-      console.error("[sidecar] Background sync from /status failed:", error);
-    });
+    void sidecarProcessService
+      .syncForCurrentConfig({ suppressKnownFailure: true, allowRuntimeInstall: false })
+      .catch((error) => {
+        logger.error(error, "[sidecar] Background sync from /status failed");
+      });
 
     const status = sidecarModelService.getStatus();
     return {
@@ -72,9 +75,11 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
   app.patch("/config", async (req) => {
     const body = configSchema.parse(req.body);
     const config = sidecarModelService.updateConfig(body);
-    void sidecarProcessService.syncForCurrentConfig({ suppressKnownFailure: true, allowRuntimeInstall: false }).catch((error) => {
-      console.error("[sidecar] Background sync from /config failed:", error);
-    });
+    void sidecarProcessService
+      .syncForCurrentConfig({ suppressKnownFailure: true, allowRuntimeInstall: false })
+      .catch((error) => {
+        logger.error(error, "[sidecar] Background sync from /config failed");
+      });
     return { config };
   });
 

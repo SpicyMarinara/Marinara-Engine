@@ -9,6 +9,7 @@ import type { DB } from "../db/connection.js";
 import { messages, memoryChunks } from "../db/schema/index.js";
 import { newId, now } from "../utils/id-generator.js";
 import { localEmbed } from "./local-embedder.js";
+import { logger } from "../lib/logger.js";
 const isLite = process.env.MARINARA_LITE === "true" || process.env.MARINARA_LITE === "1";
 
 /** How many messages per chunk. */
@@ -137,7 +138,7 @@ export async function chunkAndEmbedMessages(
     });
   }
 
-  console.log(`[memory-recall] Created ${chunksToCreate.length} chunk(s) for chat ${chatId}`);
+  logger.debug("[memory-recall] Created %d chunk(s) for chat %s", chunksToCreate.length, chatId);
 }
 
 /**

@@ -1,6 +1,7 @@
 // ──────────────────────────────────────────────
 // Utility: API Key Encryption
 // ──────────────────────────────────────────────
+import { logger } from "../lib/logger.js";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -43,7 +44,7 @@ function getEncryptionKey(): Buffer {
   const newKey = randomBytes(32);
   mkdirSync(DATA_DIR, { recursive: true });
   writeFileSync(keyPath, newKey.toString("hex") + "\n", { mode: 0o600 });
-  console.log("[CRYPTO] No ENCRYPTION_KEY found — generated and saved to", keyPath);
+  logger.info("[CRYPTO] No ENCRYPTION_KEY found — generated and saved to %s", keyPath);
   cachedKey = newKey;
   return cachedKey;
 }
@@ -76,7 +77,7 @@ export function decryptApiKey(encrypted: string): string {
     return decrypted;
   } catch {
     // Key was encrypted with a different encryption key that no longer exists
-    console.warn("[CRYPTO] Failed to decrypt API key — encryption key may have changed. Please re-enter the API key.");
+    logger.warn("[CRYPTO] Failed to decrypt API key — encryption key may have changed. Please re-enter the API key.");
     return "";
   }
 }

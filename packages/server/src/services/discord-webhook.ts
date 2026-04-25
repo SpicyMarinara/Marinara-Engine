@@ -1,6 +1,7 @@
 // ──────────────────────────────────────────────
 // Discord Webhook Mirror — one-way message relay
 // ──────────────────────────────────────────────
+import { logger } from "../lib/logger.js";
 // Posts messages to a Discord channel webhook with per-character identity.
 // Webhook API: https://discord.com/developers/docs/resources/webhook#execute-webhook
 
@@ -89,10 +90,10 @@ export function postToDiscordWebhook(
         const retryAfter = Number(res.headers.get("Retry-After") || "2") * 1000;
         await sleep(retryAfter);
       } else if (!res.ok) {
-        console.error(`[discord-webhook] POST failed (${res.status}): ${await res.text().catch(() => "")}`);
+        logger.error("[discord-webhook] POST failed (%d): %s", res.status, await res.text().catch(() => ""));
       }
     } catch (err) {
-      console.error("[discord-webhook] Network error:", err);
+      logger.error(err, "[discord-webhook] Network error");
     }
   });
 }

@@ -1918,8 +1918,6 @@ function ImportButton({
 }
 
 function AdvancedSettings() {
-  const debugMode = useUIStore((s) => s.debugMode);
-  const setDebugMode = useUIStore((s) => s.setDebugMode);
   const messageGrouping = useUIStore((s) => s.messageGrouping);
   const setMessageGrouping = useUIStore((s) => s.setMessageGrouping);
   const showTimestamps = useUIStore((s) => s.showTimestamps);
@@ -2308,12 +2306,6 @@ function AdvancedSettings() {
         checked={showMessageNumbers}
         onChange={setShowMessageNumbers}
         help="Displays a message number below each avatar in roleplay chats."
-      />
-      <ToggleSetting
-        label="Debug mode (log prompts to console)"
-        checked={debugMode}
-        onChange={setDebugMode}
-        help="Logs the full prompt and API request/response to the browser console. Useful for advanced users debugging prompt formatting."
       />
 
       {/* ── Backup ── */}

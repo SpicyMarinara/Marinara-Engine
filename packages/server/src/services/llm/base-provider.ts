@@ -2,6 +2,7 @@
 // LLM Provider — Abstract Base
 // ──────────────────────────────────────────────
 import { Agent } from "undici";
+import { logger } from "../../lib/logger.js";
 
 /**
  * Shared undici Agent with a 5-minute headers timeout (time to first byte)
@@ -431,13 +432,13 @@ export abstract class BaseLLMProvider {
 
   protected logContextTrim(result: ContextFitResult, model: string): void {
     if (!result.trimmed || !result.inputBudget) return;
-    console.warn(
+    logger.warn(
       "[LLM context] Trimmed prompt for %s from ~%d to ~%d tokens (budget ~%d, maxContext=%d)",
       model,
       result.estimatedTokensBefore,
       result.estimatedTokensAfter,
-      result.inputBudget,
-      result.maxContext,
+      result.inputBudget!,
+      result.maxContext!,
     );
   }
 

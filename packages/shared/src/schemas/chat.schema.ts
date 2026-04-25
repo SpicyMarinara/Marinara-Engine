@@ -29,7 +29,7 @@ export const generateRequestSchema = z.object({
   userMessage: z.string().nullable().default(null),
   regenerateMessageId: z.string().nullable().default(null),
   connectionId: z.string().nullable().default(null),
-  debugMode: z.boolean().optional().default(false),
+
   impersonate: z.boolean().optional().default(false),
   streaming: z.boolean().optional().default(true),
   userStatus: z.enum(["active", "idle", "dnd"]).optional().default("active"),

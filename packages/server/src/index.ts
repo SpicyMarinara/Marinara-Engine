@@ -2,6 +2,7 @@
 // Server Entry Point
 // ──────────────────────────────────────────────
 import { buildApp } from "./app.js";
+import { logger } from "./lib/logger.js";
 import { getHost, getPort, getServerProtocol, loadTlsOptions, logStorageDiagnostics } from "./config/runtime-config.js";
 
 async function main() {
@@ -22,6 +23,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(`[ERROR] ${err instanceof Error ? err.message : err}`);
+  logger.error(err, "[startup] Unhandled error during server bootstrap");
   process.exit(1);
 });

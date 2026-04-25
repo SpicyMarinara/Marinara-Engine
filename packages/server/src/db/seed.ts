@@ -3,6 +3,7 @@
 // Creates Marinara's general-purpose roleplay preset on first boot.
 // Reads the exported preset JSON and imports it via the standard importer.
 // ──────────────────────────────────────────────
+import { logger } from "../lib/logger.js";
 import type { DB } from "./connection.js";
 import { createPromptsStorage } from "../services/storage/prompts.storage.js";
 import { importMarinara } from "../services/import/marinara.importer.js";
@@ -31,7 +32,7 @@ export async function seedDefaultPreset(db: DB) {
   // Import using the standard importer
   const result = await importMarinara(envelope, db);
   if (!result.success || result.type !== "marinara_preset") {
-    console.error("[seed] Failed to import default preset:", result);
+    logger.error("[seed] Failed to import default preset: %j", result);
     return;
   }
 

@@ -22,21 +22,6 @@ export interface PendingCardUpdate {
   timestamp: number;
 }
 
-interface AgentDebugEntry {
-  timestamp: number;
-  phase: string;
-  agents?: Array<{ type: string; name: string; model: string; maxTokens: number }>;
-  batchMaxTokens?: number;
-  results?: Array<{
-    agentType: string;
-    success: boolean;
-    error: string | null;
-    durationMs: number;
-    tokensUsed: number;
-    resultType: string;
-  }>;
-}
-
 interface AgentState {
   activeAgents: string[];
   lastResults: Map<string, AgentResult>;
@@ -65,7 +50,6 @@ interface AgentState {
     text: string;
   }>;
   pendingCardUpdates: PendingCardUpdate[];
-  debugLog: AgentDebugEntry[];
 
   // Actions
   setActiveAgents: (agents: string[]) => void;
@@ -87,8 +71,6 @@ interface AgentState {
   enqueuePendingCardUpdate: (entry: PendingCardUpdate) => void;
   dismissPendingCardUpdate: (id: string) => void;
   clearPendingCardUpdates: () => void;
-  addDebugEntry: (entry: AgentDebugEntry) => void;
-  clearDebugLog: () => void;
   reset: () => void;
 }
 
@@ -104,7 +86,6 @@ export const useAgentStore = create<AgentState>((set) => ({
   echoLoadedChatId: null,
   cyoaChoices: [],
   pendingCardUpdates: [],
-  debugLog: [],
 
   setActiveAgents: (agents) => set({ activeAgents: agents }),
   setProcessing: (processing) => set({ isProcessing: processing }),
@@ -158,9 +139,6 @@ export const useAgentStore = create<AgentState>((set) => ({
     set((s) => ({ pendingCardUpdates: s.pendingCardUpdates.filter((e) => e.id !== id) })),
   clearPendingCardUpdates: () => set({ pendingCardUpdates: [] }),
 
-  addDebugEntry: (entry) => set((s) => ({ debugLog: [...s.debugLog, entry].slice(-100) })),
-  clearDebugLog: () => set({ debugLog: [] }),
-
   reset: () =>
     set({
       activeAgents: [],
@@ -174,6 +152,5 @@ export const useAgentStore = create<AgentState>((set) => ({
       echoLoadedChatId: null,
       cyoaChoices: [],
       pendingCardUpdates: [],
-      debugLog: [],
     }),
 }));

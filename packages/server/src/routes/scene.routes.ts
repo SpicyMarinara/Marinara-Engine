@@ -7,6 +7,7 @@
 // roleplay chat, and returns a summary memory when concluded.
 // ──────────────────────────────────────────────
 import type { FastifyInstance } from "fastify";
+import { logger } from "../lib/logger.js";
 import { readdirSync, existsSync } from "fs";
 import { join, extname } from "path";
 import { createChatsStorage } from "../services/storage/chats.storage.js";
@@ -257,7 +258,14 @@ export async function sceneRoutes(app: FastifyInstance) {
 
     // Resolve connection
     const { conn, baseUrl } = await resolveConnection(connections, connectionId, sceneChat.connectionId);
-    const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey, conn.maxContext, conn.openrouterProvider, conn.maxTokensOverride);
+    const provider = createLLMProvider(
+      conn.provider,
+      baseUrl,
+      conn.apiKey,
+      conn.maxContext,
+      conn.openrouterProvider,
+      conn.maxTokensOverride,
+    );
 
     // Build context
     const characterIds: string[] =
@@ -416,7 +424,14 @@ export async function sceneRoutes(app: FastifyInstance) {
     if (!chat) return reply.status(404).send({ error: "Chat not found" });
 
     const { conn, baseUrl } = await resolveConnection(connections, connectionId, chat.connectionId);
-    const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey, conn.maxContext, conn.openrouterProvider, conn.maxTokensOverride);
+    const provider = createLLMProvider(
+      conn.provider,
+      baseUrl,
+      conn.apiKey,
+      conn.maxContext,
+      conn.openrouterProvider,
+      conn.maxTokensOverride,
+    );
 
     const characterIds: string[] =
       typeof chat.characterIds === "string" ? JSON.parse(chat.characterIds) : (chat.characterIds as string[]);
@@ -532,7 +547,8 @@ export async function sceneRoutes(app: FastifyInstance) {
       }
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : "Unknown error";
-      console.error("[scene/plan] Failed to parse LLM response as JSON:", errMsg, "\nRaw response:", raw.slice(0, 500));
+      logger.error(e, "[scene/plan] Failed to parse LLM response as JSON");
+      logger.debug("[scene/plan] Raw unparsable LLM output (first 500 chars): %s", raw.slice(0, 500));
       return {
         plan: null,
         error: `Model didn't return valid JSON. Try again — sometimes models need a second attempt. (${errMsg})`,

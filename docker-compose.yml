@@ -16,7 +16,7 @@ services:
       - AUTO_CREATE_DEFAULT_CONNECTION=${AUTO_CREATE_DEFAULT_CONNECTION:-true}
       # - TZ=America/New_York          # IANA timezone for time-based features (e.g. character schedules)
       # - ENCRYPTION_KEY=              # AES key for API key encryption (generate: openssl rand -hex 32)
-      # - LOG_LEVEL=info               # Logging verbosity
+      # - LOG_LEVEL=debug              # Set to "debug" to log full prompts & responses
     restart: unless-stopped
 
 volumes:

@@ -326,8 +326,6 @@ export function useGenerate() {
   const enqueuePendingCardUpdate = useAgentStore((s) => s.enqueuePendingCardUpdate);
   const setFailedAgentTypes = useAgentStore((s) => s.setFailedAgentTypes);
   const clearFailedAgentTypes = useAgentStore((s) => s.clearFailedAgentTypes);
-  const addDebugEntry = useAgentStore((s) => s.addDebugEntry);
-  const clearDebugLog = useAgentStore((s) => s.clearDebugLog);
   const setGameState = useGameStateStore((s) => s.setGameState);
 
   const generate = useCallback(
@@ -376,7 +374,6 @@ export function useGenerate() {
         clearThoughtBubbles();
         clearCyoaChoices();
         clearFailedAgentTypes();
-        clearDebugLog();
         setRegenerateMessageId(params.regenerateMessageId ?? null);
       }
       console.warn("[Generate] Starting generation for chat:", params.chatId);
@@ -543,7 +540,6 @@ export function useGenerate() {
       };
 
       try {
-        const debugMode = useUIStore.getState().debugMode;
         const userStatus = useUIStore.getState().userStatus;
 
         // Flush any pending game-state widget edits so the server sees them before committing
@@ -552,7 +548,7 @@ export function useGenerate() {
 
         for await (const event of api.streamEvents(
           "/generate",
-          { ...params, debugMode, userStatus, streaming: transportStreaming },
+          { ...params, userStatus, streaming: transportStreaming },
           abortController.signal,
         )) {
           switch (event.type) {
@@ -640,52 +636,6 @@ export function useGenerate() {
               const label = phase ? (labels[phase] ?? null) : null;
               if (label) {
                 useChatStore.getState().setGenerationPhase(label);
-              }
-              break;
-            }
-
-            case "agent_debug": {
-              // Only update debug UI for the active chat
-              if (!isActiveChat()) break;
-              const debug = event.data as {
-                phase: string;
-                agents?: Array<{ type: string; name: string; model: string; maxTokens: number }>;
-                batchMaxTokens?: number;
-                results?: Array<{
-                  agentType: string;
-                  success: boolean;
-                  error: string | null;
-                  durationMs: number;
-                  tokensUsed: number;
-                  resultType: string;
-                }>;
-              };
-              addDebugEntry({ timestamp: Date.now(), ...debug });
-
-              // Log to browser console (matches debug_prompt / debug_usage style)
-              if (debug.agents) {
-                const agentList = debug.agents.map((a) => `${a.name} (${a.model}, ${a.maxTokens}t)`).join(", ");
-                console.log(
-                  `%c[Debug] Agent ${debug.phase}: ${debug.agents.length} agent(s)` +
-                    (debug.batchMaxTokens ? ` · batch max ${debug.batchMaxTokens.toLocaleString()}t` : ""),
-                  "color: #f59e0b; font-weight: bold",
-                );
-                console.log(`  ${agentList}`);
-              }
-              if (debug.results) {
-                const ok = debug.results.filter((r) => r.success).length;
-                const fail = debug.results.length - ok;
-                console.groupCollapsed(
-                  `%c[Debug] Agent results: ${ok} succeeded, ${fail} failed`,
-                  fail > 0 ? "color: #f87171; font-weight: bold" : "color: #34d399; font-weight: bold",
-                );
-                for (const r of debug.results) {
-                  console.log(
-                    `  ${r.success ? "✓" : "✗"} ${r.agentType} — ${(r.durationMs / 1000).toFixed(1)}s, ${r.tokensUsed}t` +
-                      (r.error ? ` — ${r.error}` : ""),
-                  );
-                }
-                console.groupEnd();
               }
               break;
             }
@@ -840,69 +790,6 @@ export function useGenerate() {
 
             case "tool_result": {
               // Already handled by existing tool display — pass through
-              break;
-            }
-
-            case "debug_prompt": {
-              const payload = event.data as { messages?: unknown[]; parameters?: Record<string, unknown> } | unknown[];
-              // Handle both old (messages array) and new (object with messages + parameters) formats
-              const messages = Array.isArray(payload) ? payload : payload.messages;
-              const params = Array.isArray(payload) ? null : payload.parameters;
-              const msgArr = Array.isArray(messages) ? messages : [];
-              console.group(
-                "%c[Debug] Prompt sent to model (%d messages)" +
-                  (params ? ` — ${params.model} (${params.provider})` : ""),
-                "color: #f59e0b; font-weight: bold",
-                msgArr.length,
-              );
-              if (params) {
-                console.log("%cParameters", "color: #60a5fa; font-weight: bold", params);
-              }
-              for (let i = 0; i < msgArr.length; i++) {
-                const m = msgArr[i] as { role?: string; content?: string };
-                const role = (m.role ?? "unknown").toUpperCase();
-                const color =
-                  role === "SYSTEM"
-                    ? "#a78bfa"
-                    : role === "USER"
-                      ? "#60a5fa"
-                      : role === "ASSISTANT"
-                        ? "#34d399"
-                        : "#f59e0b";
-                console.log(
-                  `%c[${i + 1}/${msgArr.length}] ${role}`,
-                  `color: ${color}; font-weight: bold`,
-                  m.content ?? m,
-                );
-              }
-              console.groupEnd();
-              break;
-            }
-
-            case "debug_usage": {
-              const usage = event.data as {
-                tokensPrompt: number | null;
-                tokensCompletion: number | null;
-                tokensTotal: number | null;
-                tokensCachedPrompt: number | null;
-                tokensCacheWritePrompt: number | null;
-                durationMs: number | null;
-                finishReason: string | null;
-              };
-              const parts: string[] = [];
-              if (usage.tokensPrompt != null) parts.push(`prompt: ${usage.tokensPrompt.toLocaleString()}`);
-              if (usage.tokensCompletion != null) parts.push(`completion: ${usage.tokensCompletion.toLocaleString()}`);
-              if (usage.tokensTotal != null) parts.push(`total: ${usage.tokensTotal.toLocaleString()}`);
-              if ((usage.tokensCachedPrompt ?? 0) > 0) {
-                parts.push(`cached: ${usage.tokensCachedPrompt!.toLocaleString()}`);
-              }
-              if ((usage.tokensCacheWritePrompt ?? 0) > 0) {
-                parts.push(`cache write: ${usage.tokensCacheWritePrompt!.toLocaleString()}`);
-              }
-              if (usage.durationMs != null) parts.push(`${(usage.durationMs / 1000).toFixed(1)}s`);
-              if (usage.finishReason) parts.push(`finish: ${usage.finishReason}`);
-              const tokenInfo = parts.length > 0 ? parts.join(" · ") : "no usage data";
-              console.log("%c[Debug] Token usage — %s", "color: #34d399; font-weight: bold", tokenInfo);
               break;
             }
 
@@ -1474,8 +1361,6 @@ export function useGenerate() {
       enqueuePendingCardUpdate,
       clearFailedAgentTypes,
       setFailedAgentTypes,
-      addDebugEntry,
-      clearDebugLog,
       setGameState,
     ],
   );
@@ -1488,7 +1373,6 @@ export function useGenerate() {
       setProcessing(true);
       clearFailedAgentTypes();
       clearThoughtBubbles();
-      clearDebugLog();
 
       try {
         let hasError = false;
@@ -1711,7 +1595,6 @@ export function useGenerate() {
       addEchoMessage,
       enqueuePendingCardUpdate,
       clearFailedAgentTypes,
-      clearDebugLog,
       clearThoughtBubbles,
       setFailedAgentTypes,
       setProcessing,

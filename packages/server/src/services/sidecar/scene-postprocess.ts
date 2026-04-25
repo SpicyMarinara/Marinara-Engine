@@ -9,6 +9,7 @@
 // ──────────────────────────────────────────────
 
 import type { SceneAnalysis, SceneSegmentEffect } from "@marinara-engine/shared";
+import { logger } from "../../lib/logger.js";
 
 // ── Expression normalization ──
 
@@ -122,7 +123,7 @@ function postProcessSegment(seg: SceneSegmentEffect, ctx: PostProcessContext): S
       } else {
         const matched = bestMatch(out.background, ctx.availableBackgrounds);
         if (matched) {
-          console.log(`[postprocess] seg[${seg.segment}] bg: "${out.background}" → "${matched}"`);
+          logger.debug(`[postprocess] seg[${seg.segment}] bg: "${out.background}" → "${matched}"`);
           out.background = matched;
         } else {
           const slug = out.background
@@ -131,7 +132,7 @@ function postProcessSegment(seg: SceneSegmentEffect, ctx: PostProcessContext): S
             .replace(/^-+|-+$/g, "")
             .slice(0, 50);
           const gen = `backgrounds:generated:${slug}`;
-          console.log(`[postprocess] seg[${seg.segment}] bg: "${out.background}" → "${gen}" (no tag match)`);
+          logger.debug(`[postprocess] seg[${seg.segment}] bg: "${out.background}" → "${gen}" (no tag match)`);
           out.background = gen;
         }
       }
@@ -149,10 +150,10 @@ function postProcessSegment(seg: SceneSegmentEffect, ctx: PostProcessContext): S
       } else {
         const m = bestMatch(item, ctx.availableSfx);
         if (m && !matched.includes(m)) {
-          console.log(`[postprocess] seg[${seg.segment}] sfx: "${item}" → "${m}"`);
+          logger.debug(`[postprocess] seg[${seg.segment}] sfx: "${item}" → "${m}"`);
           matched.push(m);
         } else {
-          console.log(`[postprocess] seg[${seg.segment}] sfx: "${item}" → dropped`);
+          logger.debug(`[postprocess] seg[${seg.segment}] sfx: "${item}" → dropped`);
         }
       }
     }
@@ -164,7 +165,7 @@ function postProcessSegment(seg: SceneSegmentEffect, ctx: PostProcessContext): S
     const before = out.widgetUpdates.length;
     out.widgetUpdates = out.widgetUpdates.filter((wu) => ctx.validWidgetIds.has(wu.widgetId));
     if (out.widgetUpdates.length !== before) {
-      console.log(
+      logger.debug(
         `[postprocess] seg[${seg.segment}] widgets: ${before} → ${out.widgetUpdates.length} (invalid IDs removed)`,
       );
     }
@@ -195,7 +196,7 @@ export function postProcessSceneResult(raw: SceneAnalysis, ctx: PostProcessConte
     } else {
       const matched = bestMatch(result.background, ctx.availableBackgrounds);
       if (matched) {
-        console.log(`[postprocess] bg: "${result.background}" → "${matched}"`);
+        logger.debug(`[postprocess] bg: "${result.background}" → "${matched}"`);
         result.background = matched;
       } else {
         // Synthesise a generated-background slug the client can render
@@ -205,7 +206,7 @@ export function postProcessSceneResult(raw: SceneAnalysis, ctx: PostProcessConte
           .replace(/^-+|-+$/g, "")
           .slice(0, 50);
         const gen = `backgrounds:generated:${slug}`;
-        console.log(`[postprocess] bg: "${result.background}" → "${gen}" (no tag match)`);
+        logger.debug(`[postprocess] bg: "${result.background}" → "${gen}" (no tag match)`);
         result.background = gen;
       }
     }
@@ -223,7 +224,7 @@ export function postProcessSceneResult(raw: SceneAnalysis, ctx: PostProcessConte
     };
     const mapped = weatherMap[result.weather.toLowerCase()];
     if (mapped) {
-      console.log(`[postprocess] weather: "${result.weather}" → "${mapped}"`);
+      logger.debug(`[postprocess] weather: "${result.weather}" → "${mapped}"`);
       result.weather = mapped;
     }
   }
@@ -231,7 +232,9 @@ export function postProcessSceneResult(raw: SceneAnalysis, ctx: PostProcessConte
   // ── Top-level widget updates — now handled by the GM model, not sidecar ──
   // Clear any stale widgetUpdates the sidecar might still produce
   if (result.widgetUpdates?.length) {
-    console.log(`[postprocess] Ignoring ${result.widgetUpdates.length} sidecar widgetUpdates (GM handles widgets now)`);
+    logger.debug(
+      `[postprocess] Ignoring ${result.widgetUpdates.length} sidecar widgetUpdates (GM handles widgets now)`,
+    );
     result.widgetUpdates = [];
   }
 

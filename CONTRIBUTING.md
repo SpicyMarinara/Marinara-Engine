@@ -67,6 +67,56 @@ pnpm version:check
 
 There is not a meaningful automated repo test suite yet. Do not present `pnpm test` as a reliable gate in docs or PR descriptions. When you change behavior, include the manual verification you performed.
 
+## Logging
+
+All server-side logging goes through a shared [Pino](https://getpino.io/) logger instance exported from `packages/server/src/lib/logger.ts`. The `LOG_LEVEL` environment variable controls the minimum severity that gets printed (default: `warn`). See `docs/CONFIGURATION.md` for user-facing level descriptions.
+
+### Level guidelines
+
+| Level            | When to use                                         | Examples                                                                                         |
+| ---------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `logger.error()` | Unrecoverable failures that need investigation.     | Database errors, fatal agent failures, image generation crashes, command exceptions.             |
+| `logger.warn()`  | Something went wrong but the request can continue.  | Non-critical agent failures, empty model responses, missing connections, non-fatal catch blocks. |
+| `logger.info()`  | Operational milestones — "this happened".           | Seed results, game session lifecycle, commands executed, abort requests, device connections.     |
+| `logger.debug()` | Verbose detail only useful when actively debugging. | Full prompts/responses, token usage, timing traces, state patches, pipeline internals.           |
+
+### Code practices
+
+- **Never use `console.log/warn/error` in server code.** Always import and use the shared logger:
+
+  ```ts
+  import { logger } from "../lib/logger.js"; // adjust relative path
+  ```
+
+- **Pick the right level.** If you aren't sure, ask: "Would an operator running in production want to see this?" If yes → `info`. If only a developer debugging → `debug`.
+
+- **Use Pino format specifiers** for multi-argument calls. Pino does not auto-format extra positional arguments the way `console.log` does:
+
+  ```ts
+  // ✗ Wrong — second argument silently ignored by Pino
+  logger.info("Resolved agents:", agents.length);
+
+  // ✓ Correct — use %d / %s / %j format specifiers
+  logger.info("Resolved %d agents", agents.length);
+
+  // ✓ Also correct — template literals produce a single string
+  logger.info(`Resolved ${agents.length} agents`);
+  ```
+
+- **Log errors with the error object first** (Pino convention for structured output):
+
+  ```ts
+  // ✗ Avoid
+  logger.error("Import failed:", err);
+
+  // ✓ Prefer — Pino serialises the error with stack trace
+  logger.error(err, "Import failed");
+  ```
+
+- **Client-side code (`packages/client/`) should keep using `console.*`** — the browser has no Pino. Production builds automatically strip `console.log` via the Vite esbuild `pure` option; only `console.warn` and `console.error` survive.
+
+- **Route handlers** that already have access to `app.log` or `req.log` may use those instead of the shared logger — they are child loggers of the same Pino instance and inherit the same level.
+
 ## Pull Request Expectations
 
 - Keep PRs focused. Separate unrelated refactors from user-facing fixes or documentation work.

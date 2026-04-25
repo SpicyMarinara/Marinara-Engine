@@ -86,6 +86,7 @@ import {
   wrapFields,
   type SimpleMessage,
 } from "./generate/generate-route-utils.js";
+import { logger } from "../lib/logger.js";
 import {
   buildHistoricalLorebookKeeperContext,
   getLorebookKeeperAutomaticPendingCount,
@@ -283,6 +284,8 @@ function normalizeChatTopP(value: unknown): number | undefined {
 }
 
 export async function generateRoutes(app: FastifyInstance) {
+  const isDebug = logger.isLevelEnabled("debug");
+
   const chats = createChatsStorage(app.db);
   const connections = createConnectionsStorage(app.db);
   const presets = createPromptsStorage(app.db);
@@ -416,7 +419,7 @@ export async function generateRoutes(app: FastifyInstance) {
     }
 
     const onClose = () => {
-      console.log("[abort] Client disconnected — aborting generation");
+      logger.info("[abort] Client disconnected — aborting generation");
       abortController.abort();
       if (activeGenerations) activeGenerations.delete(input.chatId);
       if (baseUrl) {
@@ -650,7 +653,7 @@ export async function generateRoutes(app: FastifyInstance) {
 
       // Determine whether agents are enabled for this chat (needed by assembler + agent pipeline)
       // Conversation mode chats never run roleplay agents — force agents off.
-      console.log("[generate] chatId=%s, chatMode=%s", input.chatId, chatMode);
+      logger.info("[generate] chatId=%s, chatMode=%s", input.chatId, chatMode);
       const chatEnableAgents = chatMeta.enableAgents === true && chatMode !== "conversation";
       const chatActiveAgentIds: string[] = Array.isArray(chatMeta.activeAgentIds)
         ? (chatMeta.activeAgentIds as string[])
@@ -714,7 +717,7 @@ export async function generateRoutes(app: FastifyInstance) {
       } catch {
         // Embedding generation is optional — if it fails, fall back to keyword-only matching
       }
-      console.log(`[timing] Embedding: ${Date.now() - _tEmbed}ms`);
+      logger.debug(`[timing] Embedding: ${Date.now() - _tEmbed}ms`);
 
       sendProgress("assembling");
       const _tAssemble = Date.now();
@@ -1551,7 +1554,7 @@ export async function generateRoutes(app: FastifyInstance) {
               try {
                 await hapticService.connect();
               } catch {
-                console.warn("[haptic] Auto-connect to Intiface Central failed — is the server running?");
+                logger.warn("[haptic] Auto-connect to Intiface Central failed — is the server running?");
               }
             }
             if (hapticService.connected && hapticService.devices.length > 0) {
@@ -2221,10 +2224,14 @@ export async function generateRoutes(app: FastifyInstance) {
         });
       }
 
-      console.log(
-        `[generate] Resolved ${resolvedAgents.length} agents for chat ${input.chatId}`,
-        `(enableAgents=${chatEnableAgents}, perChatList=${hasPerChatAgentList}, activeIds=[${chatActiveAgentIds.join(",")}])`,
-        resolvedAgents.map((a) => `${a.type}(${a.phase})`),
+      logger.info(
+        "[generate] Resolved %d agents for chat %s (enableAgents=%s, perChatList=%s, activeIds=[%s]): %s",
+        resolvedAgents.length,
+        input.chatId,
+        chatEnableAgents,
+        hasPerChatAgentList,
+        chatActiveAgentIds.join(","),
+        resolvedAgents.map((a) => `${a.type}(${a.phase})`).join(", "),
       );
 
       // Resolve character info (used for agent context AND prompt fallback)
@@ -2779,26 +2786,26 @@ export async function generateRoutes(app: FastifyInstance) {
           }
         }
 
-        // Debug: log the full prompt being sent for game-mode generation
-        console.log(
-          "[generate/game] GM prompt length: %d chars, messages: %d",
-          finalMessages[0]?.content.length,
-          finalMessages.length,
-        );
-        console.log(
-          "[generate/game] GM context: storyArc=%s, map=%s, npcs=%d, widgets=%s, hasSceneModel=%s, state=%s",
-          !!gmCtx.storyArc,
-          !!gmCtx.map,
-          gmCtx.npcs.length,
-          !!gmCtx.hudWidgets?.length,
-          gmCtx.hasSceneModel,
-          gmCtx.gameActiveState,
-        );
-        console.log("[generate/game] === FULL MESSAGES ===");
-        for (const msg of finalMessages) {
-          console.log("[generate/game] [%s] (%d chars): %s", msg.role, msg.content.length, msg.content.slice(0, 300));
+        // LOG_LEVEL=debug: log game-mode prompt details
+        if (isDebug) {
+          app.log.debug(
+            "[debug/game] GM prompt length: %d chars, messages: %d",
+            finalMessages[0]?.content.length ?? 0,
+            finalMessages.length,
+          );
+          app.log.debug(
+            "[debug/game] GM context: storyArc=%s, map=%s, npcs=%d, widgets=%s, hasSceneModel=%s, state=%s",
+            !!gmCtx.storyArc,
+            !!gmCtx.map,
+            gmCtx.npcs.length,
+            !!gmCtx.hudWidgets?.length,
+            gmCtx.hasSceneModel,
+            gmCtx.gameActiveState,
+          );
+          for (const msg of finalMessages) {
+            app.log.debug("[debug/game] [%s] %s", msg.role.toUpperCase(), msg.content);
+          }
         }
-        console.log("[generate/game] === END MESSAGES ===");
 
         // Inject the output format + commands as the last user message so they
         // sit closest to generation in the model's attention window.
@@ -2833,7 +2840,7 @@ export async function generateRoutes(app: FastifyInstance) {
           })(),
         });
         finalMessages.push({ role: "user" as const, content: formatReminder });
-        console.log("[generate/game] Injected format reminder (%d chars) as last user message", formatReminder.length);
+        logger.debug("[generate/game] Injected format reminder (%d chars) as last user message", formatReminder.length);
       }
 
       // ── Inject character memories into awareness ──
@@ -2919,7 +2926,7 @@ export async function generateRoutes(app: FastifyInstance) {
             if (recalled.length > 0) {
               const packedRecall = packRecalledMemories(recalled, effectiveMaxContext ?? connectionMaxContext);
               if (packedRecall.lines.length === 0) {
-                console.log(
+                logger.debug(
                   "[memory-recall] Skipped recalled memories after budgeting (%d candidates)",
                   recalled.length,
                 );
@@ -2931,7 +2938,7 @@ export async function generateRoutes(app: FastifyInstance) {
                   `</memories>`,
                 ].join("\n");
 
-                console.log(
+                logger.debug(
                   "[memory-recall] Injecting %d/%d recalled memories (~%d/%d tokens)%s",
                   packedRecall.lines.length,
                   recalled.length,
@@ -2948,14 +2955,14 @@ export async function generateRoutes(app: FastifyInstance) {
             }
           }
         } catch (err) {
-          console.error("[memory-recall] Recall failed, skipping:", err);
+          logger.error(err, "[memory-recall] Recall failed, skipping");
         }
-        console.log(`[timing] Memory recall: ${Date.now() - _tRecall}ms`);
+        logger.debug(`[timing] Memory recall: ${Date.now() - _tRecall}ms`);
       }
 
       if (chatMode === "conversation" && conversationCommandsReminder && !input.impersonate) {
         finalMessages.push({ role: "user" as const, content: conversationCommandsReminder });
-        console.log(
+        logger.debug(
           "[generate/conversation] Injected commands reminder (%d chars) as last user message",
           conversationCommandsReminder.length,
         );
@@ -3242,7 +3249,7 @@ export async function generateRoutes(app: FastifyInstance) {
             try {
               await hapticService.connect();
             } catch {
-              console.warn("[haptic] Auto-connect to Intiface Central failed — is the server running?");
+              logger.warn("[haptic] Auto-connect to Intiface Central failed — is the server running?");
             }
           }
           if (hapticService.connected && hapticService.devices.length > 0) {
@@ -3251,14 +3258,14 @@ export async function generateRoutes(app: FastifyInstance) {
               index: d.index,
               capabilities: d.capabilities,
             }));
-            console.log(`[haptic] Injected ${hapticService.devices.length} device(s) into agent context`);
+            logger.debug(`[haptic] Injected ${hapticService.devices.length} device(s) into agent context`);
           } else if (!hapticService.connected) {
-            console.warn("[haptic] Agent enabled but Intiface Central is not connected — skipping device injection");
+            logger.warn("[haptic] Agent enabled but Intiface Central is not connected — skipping device injection");
           } else {
-            console.warn("[haptic] Agent enabled and connected, but no devices found — did you scan for devices?");
+            logger.warn("[haptic] Agent enabled and connected, but no devices found — did you scan for devices?");
           }
         } catch (err) {
-          console.error("[haptic] Failed to inject device info:", err);
+          logger.error(err, "[haptic] Failed to inject device info");
         }
       }
 
@@ -3584,7 +3591,7 @@ export async function generateRoutes(app: FastifyInstance) {
       // ────────────────────────────────────────
       // Phase 1: Pre-generation agents
       // ────────────────────────────────────────
-      console.log(`[timing] Prompt assembly + context: ${Date.now() - _tAssemble}ms`);
+      logger.debug(`[timing] Prompt assembly + context: ${Date.now() - _tAssemble}ms`);
       // Only run pre-gen agents on fresh generations (user sent a new message),
       // NOT on regenerations/swipes — EXCEPT for context-injection agents (like
       // prose-guardian) which improve writing quality and should run every time.
@@ -3616,28 +3623,19 @@ export async function generateRoutes(app: FastifyInstance) {
               reply.raw.write(
                 `data: ${JSON.stringify({ type: "agent_start", data: { phase: "pre_generation" } })}\n\n`,
               );
-              if (input.debugMode) {
+              if (isDebug) {
                 const preGenAgents = pipelineAgents.filter(
                   (a) => a.phase === "pre_generation" && !EXCLUDED_FROM_PIPELINE.has(a.type),
                 );
-                reply.raw.write(
-                  `data: ${JSON.stringify({
-                    type: "agent_debug",
-                    data: {
-                      phase: "pre_generation",
-                      agents: preGenAgents.map((a) => ({
-                        type: a.type,
-                        name: a.name,
-                        model: a.model,
-                        maxTokens: (a.settings.maxTokens as number) ?? 4096,
-                      })),
-                    },
-                  })}\n\n`,
+                app.log.debug(
+                  "[debug] Pre-generation agents (%d): %s",
+                  preGenAgents.length,
+                  preGenAgents.map((a) => `${a.name} (${a.model})`).join(", "),
                 );
               }
               const _tAgents = Date.now();
               const injections = await pipeline.preGenerate((t) => !EXCLUDED_FROM_PIPELINE.has(t));
-              console.log(`[timing] Pre-gen agents: ${Date.now() - _tAgents}ms`);
+              logger.debug(`[timing] Pre-gen agents: ${Date.now() - _tAgents}ms`);
               return injections;
             })()
           : Promise.resolve([] as AgentInjection[]);
@@ -3667,7 +3665,7 @@ export async function generateRoutes(app: FastifyInstance) {
                 sourceMaterial,
               );
               sendAgentEvent(krResult);
-              console.log(`[timing] Knowledge retrieval: ${Date.now() - _tKR}ms`);
+              logger.debug(`[timing] Knowledge retrieval: ${Date.now() - _tKR}ms`);
               return krResult;
             })()
           : Promise.resolve(null);
@@ -3685,7 +3683,7 @@ export async function generateRoutes(app: FastifyInstance) {
         if (criticalFailed.length > 0) {
           const failedNames = criticalFailed.map((r) => r.agentType).join(", ");
           const firstError = criticalFailed[0]!.error ?? "unknown error";
-          console.error(`[pre-gen] FATAL: critical agent(s) failed (${failedNames}) — aborting generation`);
+          logger.error(`[pre-gen] FATAL: critical agent(s) failed (${failedNames}) — aborting generation`);
           sendSseEvent(reply, {
             type: "error",
             data: `Critical pre-generation agent failed (${failedNames}): ${firstError}. Please try again.`,
@@ -3694,7 +3692,7 @@ export async function generateRoutes(app: FastifyInstance) {
         }
         if (nonCriticalFailed.length > 0) {
           const failedNames = nonCriticalFailed.map((r) => r.agentType).join(", ");
-          console.warn(`[pre-gen] Non-critical agent(s) failed (${failedNames}) — continuing generation`);
+          logger.warn(`[pre-gen] Non-critical agent(s) failed (${failedNames}) — continuing generation`);
         }
 
         // ── Secret Plot Driver: persist fresh state + build injection ──
@@ -3730,11 +3728,11 @@ export async function generateRoutes(app: FastifyInstance) {
               await agentsStore.setMemory(agentConfigId, input.chatId, "pacing", plotData.pacing);
             }
             await agentsStore.setMemory(agentConfigId, input.chatId, "staleDetected", plotData.staleDetected ?? false);
-            console.log(
+            logger.debug(
               `[secret-plot-driver] Persisted pre-gen state — arc: ${plotData.overarchingArc ? "updated" : "unchanged"}, directions: ${Array.isArray(plotData.sceneDirections) ? (plotData.sceneDirections as any[]).filter((d: any) => !d.fulfilled).length : 0} active, pacing: ${plotData.pacing ?? "unknown"}`,
             );
           } catch (persistErr) {
-            console.error("[secret-plot-driver] Failed to persist state:", persistErr);
+            logger.error(persistErr, "[secret-plot-driver] Failed to persist state");
           }
         }
 
@@ -3814,7 +3812,7 @@ export async function generateRoutes(app: FastifyInstance) {
             if (failedRegen.length > 0) {
               const failedNames = failedRegen.map((r) => r.agentType).join(", ");
               const firstError = failedRegen[0]!.error ?? "unknown error";
-              console.error(
+              logger.error(
                 `[pre-gen] FATAL: ${failedRegen.length} agent(s) failed on regen (${failedNames}) — aborting generation`,
               );
               sendSseEvent(reply, {
@@ -3971,7 +3969,7 @@ export async function generateRoutes(app: FastifyInstance) {
             }
           }
         } catch (plotInjectErr) {
-          console.error("[secret-plot-driver] Failed to inject arc/directions:", plotInjectErr);
+          logger.error(plotInjectErr, "[secret-plot-driver] Failed to inject arc/directions");
         }
       }
 
@@ -4279,32 +4277,8 @@ export async function generateRoutes(app: FastifyInstance) {
         }, 15_000);
 
         try {
-          // Emit debug prompt if requested (only for first character to avoid spam)
-          if (input.debugMode && targetCharId === respondingCharIds[0]) {
-            const debugPayload = {
-              messages: initialProviderMessages,
-              parameters: {
-                model: conn.model,
-                provider: conn.provider,
-                temperature,
-                maxTokens: effectiveMaxTokensForSend,
-                maxContext: effectiveMaxContext ?? connectionMaxContext ?? null,
-                topP,
-                topK: topK || undefined,
-                frequencyPenalty: frequencyPenalty || undefined,
-                presencePenalty: presencePenalty || undefined,
-                showThoughts,
-                enableThinking,
-                reasoningEffort: resolvedEffort ?? undefined,
-                enableCaching: conn.enableCaching === "true",
-                enableTools,
-                agentCount: resolvedAgents.length,
-              },
-            };
-            reply.raw.write(`data: ${JSON.stringify({ type: "debug_prompt", data: debugPayload })}\n\n`);
-
-            // Compute effective values that will actually be sent in the request body.
-            // Some providers suppress temperature/topP for certain model+effort combos.
+          // ── LOG_LEVEL=debug: log full prompt to server console ──
+          if (isDebug) {
             const effModel = conn.model.toLowerCase();
             const tempSuppressed =
               (conn.provider === "openai" || conn.provider === "openrouter") &&
@@ -4312,9 +4286,9 @@ export async function generateRoutes(app: FastifyInstance) {
             const effTemp = tempSuppressed ? "N/A" : temperature;
             const effTopP = tempSuppressed ? "N/A" : topP;
 
-            console.log("\n[Debug] Prompt sent to model (%d messages):", initialProviderMessages.length);
-            console.log(
-              "  Model: %s (%s)  Temp: %s  MaxTokens: %s  MaxContext: %s  TopP: %s  TopK: %s  EnableThinking: %s  ShowThoughts: %s  Effort: %s  Verbosity: %s  Stream: %s",
+            app.log.debug(
+              "\n[debug] Prompt sent to model (%d messages):\n  Model: %s (%s)  Temp: %s  MaxTokens: %s  MaxContext: %s  TopP: %s  TopK: %s  EnableThinking: %s  ShowThoughts: %s  Effort: %s  Verbosity: %s  Stream: %s",
+              initialProviderMessages.length,
               conn.model,
               conn.provider,
               effTemp,
@@ -4329,7 +4303,7 @@ export async function generateRoutes(app: FastifyInstance) {
               input.streaming,
             );
             for (const m of initialProviderMessages) {
-              console.log("  [%s] %s", m.role.toUpperCase(), m.content);
+              app.log.debug("  [%s] %s", m.role.toUpperCase(), m.content);
             }
           }
 
@@ -4583,7 +4557,7 @@ export async function generateRoutes(app: FastifyInstance) {
                           await gameStateStore.updateLatest(input.chatId, updates);
                         }
                         // Send game_state_patch so HUD updates live
-                        console.log("[game_state_patch] tool update_game_state:", JSON.stringify(updates));
+                        logger.debug("[game_state_patch] tool update_game_state: %j", updates);
                         reply.raw.write(`data: ${JSON.stringify({ type: "game_state_patch", data: updates })}\n\n`);
                       }
                     }
@@ -4702,22 +4676,23 @@ export async function generateRoutes(app: FastifyInstance) {
             reply.raw.write(`data: ${JSON.stringify({ type: "content_replace", data: fullResponse })}\n\n`);
           }
 
-          // Send usage to client for debug display
-          if (input.debugMode && (usage || durationMs)) {
-            reply.raw.write(
-              `data: ${JSON.stringify({
-                type: "debug_usage",
-                data: {
-                  tokensPrompt: usage?.promptTokens ?? null,
-                  tokensCompletion: usage?.completionTokens ?? null,
-                  tokensTotal: usage?.totalTokens ?? null,
-                  tokensCachedPrompt: usage?.cachedPromptTokens ?? null,
-                  tokensCacheWritePrompt: usage?.cacheWritePromptTokens ?? null,
-                  durationMs,
-                  finishReason: finishReason ?? null,
-                },
-              })}\n\n`,
-            );
+          // ── LOG_LEVEL=debug: log full response + usage to server console ──
+          if (isDebug) {
+            app.log.debug("[debug] LLM response (%d chars, %dms):\n%s", fullResponse.length, durationMs, fullResponse);
+            if (fullThinking) {
+              app.log.debug("[debug] Thinking tokens (%d chars):\n%s", fullThinking.length, fullThinking);
+            }
+            if (usage) {
+              app.log.debug(
+                "[debug] Token usage — prompt: %s  completion: %s  total: %s  cached: %s  cacheWrite: %s  finish: %s",
+                usage.promptTokens ?? "N/A",
+                usage.completionTokens ?? "N/A",
+                usage.totalTokens ?? "N/A",
+                usage.cachedPromptTokens ?? "N/A",
+                usage.cacheWritePromptTokens ?? "N/A",
+                finishReason ?? "N/A",
+              );
+            }
           }
 
           // ── Parse and strip character commands (Conversation mode only) ──
@@ -4729,8 +4704,9 @@ export async function generateRoutes(app: FastifyInstance) {
               parsedCommands = parsed.commands;
               fullResponse = parsed.cleanContent;
               contentReplaced = true;
-              console.log(
-                `[generate] Parsed ${parsed.commands.length} character command(s):`,
+              logger.info(
+                "[generate] Parsed %d character command(s): %j",
+                parsed.commands.length,
                 parsed.commands.map((c) => c.type),
               );
             }
@@ -4750,7 +4726,7 @@ export async function generateRoutes(app: FastifyInstance) {
                 .replace(/\n{3,}/g, "\n\n")
                 .trim();
               contentReplaced = true;
-              console.log(
+              logger.info(
                 `[generate] Extracted ${oocMessages.length} OOC message(s) for conversation ${chat.connectedChatId}`,
               );
             }
@@ -4805,7 +4781,7 @@ export async function generateRoutes(app: FastifyInstance) {
 
           // Guard: don't save empty responses — the model returned nothing useful
           if (!fullResponse.trim() && !input.impersonate) {
-            console.warn(`[generate] Empty response from model for chat ${input.chatId} (char: ${targetCharId})`);
+            logger.warn(`[generate] Empty response from model for chat ${input.chatId} (char: ${targetCharId})`);
             reply.raw.write(
               `data: ${JSON.stringify({ type: "error", data: "The AI returned an empty response. Try sending your message again." })}\n\n`,
             );
@@ -5030,26 +5006,13 @@ export async function generateRoutes(app: FastifyInstance) {
       if (hasPostWork && combinedResponse && !abortController.signal.aborted) {
         reply.raw.write(`data: ${JSON.stringify({ type: "agent_start", data: { phase: "post_generation" } })}\n\n`);
 
-        // Emit debug info for post-processing agents
-        if (input.debugMode) {
+        // LOG_LEVEL=debug: log post-processing agents
+        if (isDebug) {
           const postAgents = pipelineAgents.filter((a) => a.phase === "post_processing");
-          const maxPerAgent =
-            postAgents.length > 0 ? Math.max(...postAgents.map((a) => (a.settings.maxTokens as number) ?? 4096)) : 4096;
-          const batchTokens = Math.max(maxPerAgent * postAgents.length, 16384);
-          reply.raw.write(
-            `data: ${JSON.stringify({
-              type: "agent_debug",
-              data: {
-                phase: "post_generation",
-                agents: postAgents.map((a) => ({
-                  type: a.type,
-                  name: a.name,
-                  model: a.model,
-                  maxTokens: (a.settings.maxTokens as number) ?? 4096,
-                })),
-                batchMaxTokens: batchTokens,
-              },
-            })}\n\n`,
+          app.log.debug(
+            "[debug] Post-generation agents (%d): %s",
+            postAgents.length,
+            postAgents.map((a) => `${a.name} (${a.model})`).join(", "),
           );
         }
 
@@ -5129,24 +5092,18 @@ export async function generateRoutes(app: FastifyInstance) {
           }
         }
 
-        // Emit debug summary of all agent results
-        if (input.debugMode) {
-          reply.raw.write(
-            `data: ${JSON.stringify({
-              type: "agent_debug",
-              data: {
-                phase: "post_generation_results",
-                results: postResults.map((r) => ({
-                  agentType: r.agentType,
-                  success: r.success,
-                  error: r.error,
-                  durationMs: r.durationMs,
-                  tokensUsed: r.tokensUsed,
-                  resultType: r.type,
-                })),
-              },
-            })}\n\n`,
-          );
+        // LOG_LEVEL=debug: log post-generation agent results
+        if (isDebug) {
+          for (const r of postResults) {
+            app.log.debug(
+              "[debug] Agent result: %s — %s (%dms, %d tokens)%s",
+              r.agentType,
+              r.success ? "OK" : "FAILED",
+              r.durationMs,
+              r.tokensUsed,
+              r.error ? ` — ${r.error}` : "",
+            );
+          }
         }
 
         // Persist agent runs to DB + handle game state updates
@@ -5188,7 +5145,7 @@ export async function generateRoutes(app: FastifyInstance) {
               if (availableBgs) {
                 const valid = availableBgs.some((b) => b.filename === bgData.chosen);
                 if (!valid) {
-                  console.warn(`[generate] Background agent chose "${bgData.chosen}" which doesn't exist — rejecting`);
+                  logger.warn(`[generate] Background agent chose "${bgData.chosen}" which doesn't exist — rejecting`);
                   bgData.chosen = null;
                 }
               }
@@ -5224,14 +5181,14 @@ export async function generateRoutes(app: FastifyInstance) {
                     return nameLower === entryLower || nameLower.includes(entryLower) || entryLower.includes(nameLower);
                   });
                   if (charSprites) {
-                    console.warn(
+                    logger.warn(
                       `[generate] Expression agent used "${entry.characterId}" — resolved to ${charSprites.characterName} (${charSprites.characterId})`,
                     );
                     entry.characterId = charSprites.characterId;
                   }
                 }
                 if (!charSprites) {
-                  console.warn(
+                  logger.warn(
                     `[generate] Expression agent returned unknown character "${entry.characterId}" — removing`,
                   );
                   return false;
@@ -5248,12 +5205,12 @@ export async function generateRoutes(app: FastifyInstance) {
                   (e) => e.toLowerCase().includes(exprLower) || exprLower.includes(e.toLowerCase()),
                 );
                 if (fallback) {
-                  console.warn(
+                  logger.warn(
                     `[generate] Expression agent chose "${entry.expression}" — correcting to closest match "${fallback}"`,
                   );
                   entry.expression = fallback;
                 } else {
-                  console.warn(
+                  logger.warn(
                     `[generate] Expression agent chose "${entry.expression}" for ${charSprites.characterName} which doesn't exist — removing`,
                   );
                   return false;
@@ -5331,7 +5288,7 @@ export async function generateRoutes(app: FastifyInstance) {
                   ? JSON.parse(prevSnap.playerStats)
                   : prevSnap.playerStats
                 : null;
-              console.log(
+              logger.info(
                 `[generate] world-state snapshot: chars=${snapshotChars.length} (prev), personaStats=${snapshotPersonaStats ? "present" : "null"} (prev)`,
               );
               await gameStateStore.create(
@@ -5362,7 +5319,7 @@ export async function generateRoutes(app: FastifyInstance) {
                 weather: newWeather,
                 temperature: newTemperature,
               };
-              console.log("[game_state_patch] world-state:", JSON.stringify(worldStatePatch));
+              logger.debug("[game_state_patch] world-state: %j", worldStatePatch);
               reply.raw.write(`data: ${JSON.stringify({ type: "game_state_patch", data: worldStatePatch })}\n\n`);
 
               const existingGameMap = (chatMeta.gameMap as GameMap | null) ?? null;
@@ -5422,7 +5379,7 @@ export async function generateRoutes(app: FastifyInstance) {
                 }
               }
 
-              console.log(
+              logger.info(
                 `[generate] character-tracker: ${chars.length} characters to persist (msg=${messageId}, swipe=${targetSwipeIndex})`,
               );
 
@@ -5476,9 +5433,9 @@ export async function generateRoutes(app: FastifyInstance) {
 
                           // Update the character's avatarPath and stream to client
                           npc.avatarPath = `/api/avatars/npc/${input.chatId}/${safeName}.png`;
-                          console.log(`[character-tracker] Generated avatar for NPC "${npcName}"`);
+                          logger.info(`[character-tracker] Generated avatar for NPC "${npcName}"`);
                         } catch (err) {
-                          console.warn(`[character-tracker] Failed to generate avatar for "${npc.name}":`, err);
+                          logger.warn(err, '[character-tracker] Failed to generate avatar for "%s"', npc.name);
                         }
                       }
 
@@ -5487,7 +5444,7 @@ export async function generateRoutes(app: FastifyInstance) {
                         presentCharacters: chars,
                       });
                       try {
-                        console.log("[game_state_patch] character-tracker (avatar update):", chars.length, "chars");
+                        logger.debug("[game_state_patch] character-tracker (avatar update): %d chars", chars.length);
                         reply.raw.write(
                           `data: ${JSON.stringify({ type: "game_state_patch", data: { presentCharacters: chars } })}\n\n`,
                         );
@@ -5495,7 +5452,7 @@ export async function generateRoutes(app: FastifyInstance) {
                         /* stream closed */
                       }
                     } catch (err) {
-                      console.warn(`[character-tracker] Avatar generation error:`, err);
+                      logger.warn(err, "[character-tracker] Avatar generation error");
                     }
                   })();
                 }
@@ -5512,12 +5469,12 @@ export async function generateRoutes(app: FastifyInstance) {
               const updated = await gameStateStore.updateByMessage(messageId, targetSwipeIndex, input.chatId, {
                 presentCharacters: chars,
               });
-              console.log(
+              logger.info(
                 `[generate] character-tracker: updateByMessage returned ${updated ? "ok" : "null (no snapshot)"}`,
               );
               // Merge into the game_state SSE event for the HUD
               try {
-                console.log("[game_state_patch] character-tracker:", chars.map((c: any) => c.name ?? c).join(", "));
+                logger.debug("[game_state_patch] character-tracker: %s", chars.map((c: any) => c.name ?? c).join(", "));
                 reply.raw.write(
                   `data: ${JSON.stringify({ type: "game_state_patch", data: { presentCharacters: chars } })}\n\n`,
                 );
@@ -5552,7 +5509,7 @@ export async function generateRoutes(app: FastifyInstance) {
                 // Non-critical
               }
             } catch (err) {
-              console.error(`[generate] character-tracker persistence error:`, err);
+              logger.error(err, "[generate] character-tracker persistence error");
             }
           }
 
@@ -5603,7 +5560,7 @@ export async function generateRoutes(app: FastifyInstance) {
                   inventory: inventory.length > 0 ? inventory : undefined,
                 };
               }
-              console.log("[game_state_patch] persona-stats:", JSON.stringify(patchData));
+              logger.debug("[game_state_patch] persona-stats: %j", patchData);
               reply.raw.write(`data: ${JSON.stringify({ type: "game_state_patch", data: patchData })}\n\n`);
 
               // Auto-populate journal: inventory changes
@@ -5656,7 +5613,7 @@ export async function generateRoutes(app: FastifyInstance) {
                     .set({ playerStats: JSON.stringify(mergedPS) })
                     .where(eq(gameStateSnapshotsTable.id, snap.id));
                 }
-                console.log("[game_state_patch] custom-tracker:", JSON.stringify(fields));
+                logger.debug("[game_state_patch] custom-tracker: %j", fields);
                 reply.raw.write(
                   `data: ${JSON.stringify({ type: "game_state_patch", data: { playerStats: { customTrackerFields: fields } } })}\n\n`,
                 );
@@ -5671,8 +5628,10 @@ export async function generateRoutes(app: FastifyInstance) {
             try {
               const qData = result.data as Record<string, unknown>;
               const updates = (qData.updates as any[]) ?? [];
-              console.log(
-                `[generate] Quest agent result — updates: ${updates.length}, data keys: ${Object.keys(qData).join(",")}`,
+              logger.debug(
+                "[generate] Quest agent result — updates: %d, data keys: %s %s",
+                updates.length,
+                Object.keys(qData).join(","),
                 JSON.stringify(qData).slice(0, 500),
               );
               if (updates.length > 0) {
@@ -5733,7 +5692,7 @@ export async function generateRoutes(app: FastifyInstance) {
                       .set({ playerStats: JSON.stringify(mergedPS) })
                       .where(eq(gameStateSnapshotsTable.id, snap.id));
                   }
-                  console.log("[game_state_patch] quests:", JSON.stringify(quests));
+                  logger.debug("[game_state_patch] quests: %j", quests);
                   reply.raw.write(
                     `data: ${JSON.stringify({ type: "game_state_patch", data: { playerStats: { activeQuests: quests } } })}\n\n`,
                   );
@@ -5823,8 +5782,8 @@ export async function generateRoutes(app: FastifyInstance) {
             try {
               const hData = result.data as Record<string, unknown>;
               if (hData.parseError) {
-                console.warn(
-                  `[haptic] Agent output could not be parsed as JSON:`,
+                logger.warn(
+                  "[haptic] Agent output could not be parsed as JSON: %s",
                   (hData.raw as string)?.slice(0, 200),
                 );
               } else {
@@ -5843,20 +5802,20 @@ export async function generateRoutes(app: FastifyInstance) {
                     reply.raw.write(
                       `data: ${JSON.stringify({ type: "haptic_command", data: { commands: cmds, reasoning: hData.reasoning } })}\n\n`,
                     );
-                    console.log(`[haptic] Agent executed ${cmds.length} command(s): ${hData.reasoning ?? ""}`);
+                    logger.info(`[haptic] Agent executed ${cmds.length} command(s): ${hData.reasoning ?? ""}`);
                   } else {
-                    console.warn(
+                    logger.warn(
                       `[haptic] Agent produced ${cmds.length} command(s) but Intiface Central is disconnected — commands dropped`,
                     );
                   }
                 } else {
-                  console.log(
+                  logger.debug(
                     `[haptic] Agent returned no commands (reasoning: ${(hData.reasoning as string) ?? "none"})`,
                   );
                 }
               }
             } catch (hapErr) {
-              console.error("[haptic] Agent command execution failed:", hapErr);
+              logger.error(hapErr, "[haptic] Agent command execution failed");
             }
           }
 
@@ -5871,7 +5830,7 @@ export async function generateRoutes(app: FastifyInstance) {
             const illCharacters = Array.isArray(illData.characters) ? (illData.characters as string[]) : [];
 
             // Always log what the illustrator decided
-            console.log(
+            logger.debug(
               `[illustrator] shouldGenerate=${shouldGenerate}, reason="${(illData.reason as string) ?? "none"}", prompt="${imagePrompt.slice(0, 500) || "(empty)"}"${illData.parseError ? " [JSON PARSE ERROR — raw: " + ((illData.raw as string) ?? "").slice(0, 300) + "]" : ""}`,
             );
 
@@ -5928,7 +5887,7 @@ export async function generateRoutes(app: FastifyInstance) {
                     // Prepend style to the prompt for better results
                     let fullPrompt = style ? `${style}, ${imagePrompt}` : imagePrompt;
 
-                    console.log(`[illustrator] Starting image generation (${imgWidth}x${imgHeight})...`);
+                    logger.debug(`[illustrator] Starting image generation (${imgWidth}x${imgHeight})...`);
 
                     // Collect avatar reference images when the setting is enabled
                     const useAvatarRefs = illustratorAgent?.settings?.useAvatarReferences === true;
@@ -5961,7 +5920,7 @@ export async function generateRoutes(app: FastifyInstance) {
                       }
                       if (refImages.length > 0) {
                         illustratorRefImages = refImages;
-                        console.log(
+                        logger.debug(
                           `[illustrator] Sending ${refImages.length} avatar reference(s) for: ${illCharLower.length > 0 ? illCharacters.join(", ") : "all characters"}`,
                         );
                       }
@@ -6068,11 +6027,11 @@ export async function generateRoutes(app: FastifyInstance) {
                         },
                       })}\n\n`,
                     );
-                    console.log(
+                    logger.info(
                       `[illustrator] Generated illustration: ${(illData.reason as string)?.slice(0, 80) ?? imagePrompt.slice(0, 80)}...`,
                     );
                   } catch (illErr) {
-                    console.error("[illustrator] Image generation failed:", illErr);
+                    logger.error(illErr, "[illustrator] Image generation failed");
                     reply.raw.write(
                       `data: ${JSON.stringify({
                         type: "agent_error",
@@ -6085,7 +6044,7 @@ export async function generateRoutes(app: FastifyInstance) {
                   }
                 })();
               } else {
-                console.warn("[illustrator] Agent wants to generate but no image generation connection configured");
+                logger.warn("[illustrator] Agent wants to generate but no image generation connection configured");
                 reply.raw.write(
                   `data: ${JSON.stringify({
                     type: "agent_error",
@@ -6254,7 +6213,7 @@ export async function generateRoutes(app: FastifyInstance) {
                         data: { characterId, status: schedCmd.status, activity: schedCmd.activity },
                       })}\n\n`,
                     );
-                    console.log(
+                    logger.info(
                       `[commands] Schedule updated for ${characterId}: status=${schedCmd.status}, activity=${schedCmd.activity}`,
                     );
                   }
@@ -6303,9 +6262,9 @@ export async function generateRoutes(app: FastifyInstance) {
                     },
                   })}\n\n`,
                 );
-                console.log(`[commands] Cross-posted message to chat "${targetChat.name}" (${targetChat.id})`);
+                logger.info(`[commands] Cross-posted message to chat "${targetChat.name}" (${targetChat.id})`);
               } else {
-                console.warn(`[commands] Cross-post target "${crossCmd.target}" not found`);
+                logger.warn(`[commands] Cross-post target "${crossCmd.target}" not found`);
               }
             } else if (command.type === "selfie") {
               // ── Selfie: generate an image from the character's appearance ──
@@ -6441,10 +6400,10 @@ export async function generateRoutes(app: FastifyInstance) {
                         },
                       })}\n\n`,
                     );
-                    console.log(`[commands] Selfie generated for ${charName}: ${imagePrompt.slice(0, 80)}...`);
+                    logger.info(`[commands] Selfie generated for ${charName}: ${imagePrompt.slice(0, 80)}...`);
                   }
                 } catch (imgErr) {
-                  console.error(`[commands] Selfie generation failed:`, imgErr);
+                  logger.error(imgErr, "[commands] Selfie generation failed");
                   reply.raw.write(
                     `data: ${JSON.stringify({
                       type: "selfie_error",
@@ -6456,7 +6415,7 @@ export async function generateRoutes(app: FastifyInstance) {
                   );
                 }
               } else {
-                console.warn(`[commands] Selfie requested but no imageGenConnectionId set on chat metadata`);
+                logger.warn("[commands] Selfie requested but no imageGenConnectionId set on chat metadata");
                 reply.raw.write(
                   `data: ${JSON.stringify({
                     type: "selfie_error",
@@ -6501,9 +6460,9 @@ export async function generateRoutes(app: FastifyInstance) {
                 extensions.characterMemories = memories;
                 await chars.update(targetChar.id, { extensions } as any);
 
-                console.log(`[commands] Memory created: "${srcCharName}" → "${targetData.name}": ${memCmd.summary}`);
+                logger.info(`[commands] Memory created: "${srcCharName}" → "${targetData.name}": ${memCmd.summary}`);
               } else {
-                console.warn(`[commands] Memory target character "${memCmd.target}" not found`);
+                logger.warn(`[commands] Memory target character "${memCmd.target}" not found`);
               }
             }
 
@@ -6514,11 +6473,11 @@ export async function generateRoutes(app: FastifyInstance) {
               const connectedId = freshChat?.connectedChatId as string | null;
               if (connectedId) {
                 await chats.createInfluence(input.chatId, connectedId, infCmd.content, messageId);
-                console.log(
+                logger.info(
                   `[commands] OOC influence queued for connected chat ${connectedId}: "${infCmd.content.slice(0, 80)}..."`,
                 );
               } else {
-                console.warn(`[commands] Influence command used but no connected chat`);
+                logger.warn("[commands] Influence command used but no connected chat");
               }
             }
 
@@ -6540,16 +6499,16 @@ export async function generateRoutes(app: FastifyInstance) {
                       data: { action: hapCmd.action, intensity: hapCmd.intensity, duration: hapCmd.duration },
                     })}\n\n`,
                   );
-                  console.log(
+                  logger.info(
                     `[commands] Haptic: ${hapCmd.action} intensity=${hapCmd.intensity ?? "default"} duration=${hapCmd.duration ?? "indefinite"}`,
                   );
                 } else if (!hapticService.connected) {
-                  console.warn(`[commands] Haptic command [${hapCmd.action}] skipped — Intiface Central not connected`);
+                  logger.warn(`[commands] Haptic command [${hapCmd.action}] skipped — Intiface Central not connected`);
                 } else {
-                  console.warn(`[commands] Haptic command [${hapCmd.action}] skipped — no devices found`);
+                  logger.warn(`[commands] Haptic command [${hapCmd.action}] skipped — no devices found`);
                 }
               } catch (hapErr) {
-                console.error(`[commands] Haptic command failed:`, hapErr);
+                logger.error(hapErr, "[commands] Haptic command failed");
               }
             }
 
@@ -6620,12 +6579,12 @@ export async function generateRoutes(app: FastifyInstance) {
                       },
                     })}\n\n`,
                   );
-                  console.log(
+                  logger.info(
                     `[commands] Scene created: "${createBody.chatName}" (${createBody.chatId}) from chat ${input.chatId}`,
                   );
                 }
               } catch (sceneErr) {
-                console.error(`[commands] Scene creation failed:`, sceneErr);
+                logger.error(sceneErr, "[commands] Scene creation failed");
               }
             }
 
@@ -6643,9 +6602,9 @@ export async function generateRoutes(app: FastifyInstance) {
                     data: { action: "persona_created", id: persona?.id, name: cpCmd.name },
                   })}\n\n`,
                 );
-                console.log(`[commands] Assistant created persona: "${cpCmd.name}" (${persona?.id})`);
+                logger.info(`[commands] Assistant created persona: "${cpCmd.name}" (${persona?.id})`);
               } catch (err) {
-                console.error(`[commands] Create persona failed:`, err);
+                logger.error(err, "[commands] Create persona failed");
               }
             }
 
@@ -6688,10 +6647,10 @@ export async function generateRoutes(app: FastifyInstance) {
                       data: { action: "character_created", id: created.id, name: ccCmd.name },
                     })}\n\n`,
                   );
-                  console.log(`[commands] Assistant created character: "${ccCmd.name}" (${created.id})`);
+                  logger.info(`[commands] Assistant created character: "${ccCmd.name}" (${created.id})`);
                 }
               } catch (err) {
-                console.error(`[commands] Create character failed:`, err);
+                logger.error(err, "[commands] Create character failed");
               }
             }
 
@@ -6706,7 +6665,7 @@ export async function generateRoutes(app: FastifyInstance) {
                 if (targetChar) {
                   const latestTargetChar = await chars.getById(targetChar.id);
                   if (!latestTargetChar) {
-                    console.warn(`[commands] Update character: "${ucCmd.name}" disappeared before update`);
+                    logger.warn(`[commands] Update character: "${ucCmd.name}" disappeared before update`);
                     continue;
                   }
                   const existingData =
@@ -6759,12 +6718,12 @@ export async function generateRoutes(app: FastifyInstance) {
                       data: { action: "character_updated", id: targetChar.id, name: ucCmd.name },
                     })}\n\n`,
                   );
-                  console.log(`[commands] Assistant updated character: "${ucCmd.name}" (${targetChar.id})`);
+                  logger.info(`[commands] Assistant updated character: "${ucCmd.name}" (${targetChar.id})`);
                 } else {
-                  console.warn(`[commands] Update character: "${ucCmd.name}" not found`);
+                  logger.warn(`[commands] Update character: "${ucCmd.name}" not found`);
                 }
               } catch (err) {
-                console.error(`[commands] Update character failed:`, err);
+                logger.error(err, "[commands] Update character failed");
               }
             }
 
@@ -6789,12 +6748,12 @@ export async function generateRoutes(app: FastifyInstance) {
                       data: { action: "persona_updated", id: targetPersona.id, name: upCmd.name },
                     })}\n\n`,
                   );
-                  console.log(`[commands] Assistant updated persona: "${upCmd.name}" (${targetPersona.id})`);
+                  logger.info(`[commands] Assistant updated persona: "${upCmd.name}" (${targetPersona.id})`);
                 } else {
-                  console.warn(`[commands] Update persona: "${upCmd.name}" not found`);
+                  logger.warn(`[commands] Update persona: "${upCmd.name}" not found`);
                 }
               } catch (err) {
-                console.error(`[commands] Update persona failed:`, err);
+                logger.error(err, "[commands] Update persona failed");
               }
             }
 
@@ -6834,13 +6793,13 @@ export async function generateRoutes(app: FastifyInstance) {
                         },
                       })}\n\n`,
                     );
-                    console.log(`[commands] Assistant created ${mode} chat with "${targetData.name}" (${newChat.id})`);
+                    logger.info(`[commands] Assistant created ${mode} chat with "${targetData.name}" (${newChat.id})`);
                   }
                 } else {
-                  console.warn(`[commands] Create chat: character "${ctCmd.character}" not found`);
+                  logger.warn(`[commands] Create chat: character "${ctCmd.character}" not found`);
                 }
               } catch (err) {
-                console.error(`[commands] Create chat failed:`, err);
+                logger.error(err, "[commands] Create chat failed");
               }
             }
 
@@ -6852,7 +6811,7 @@ export async function generateRoutes(app: FastifyInstance) {
                   data: { action: "navigate", panel: navCmd.panel, tab: navCmd.tab ?? null },
                 })}\n\n`,
               );
-              console.log(`[commands] Assistant navigate: panel=${navCmd.panel}, tab=${navCmd.tab ?? "none"}`);
+              logger.info(`[commands] Assistant navigate: panel=${navCmd.panel}, tab=${navCmd.tab ?? "none"}`);
             }
 
             // ── Fetch command (Professor Mari) ──
@@ -6967,16 +6926,16 @@ export async function generateRoutes(app: FastifyInstance) {
                       },
                     })}\n\n`,
                   );
-                  console.log(`[commands] Assistant fetched ${fetchCmd.fetchType}: "${fetchCmd.name}"`);
+                  logger.info(`[commands] Assistant fetched ${fetchCmd.fetchType}: "${fetchCmd.name}"`);
                 } else {
-                  console.warn(`[commands] Fetch: ${fetchCmd.fetchType} "${fetchCmd.name}" not found`);
+                  logger.warn(`[commands] Fetch: ${fetchCmd.fetchType} "${fetchCmd.name}" not found`);
                 }
               } catch (err) {
-                console.error(`[commands] Fetch failed:`, err);
+                logger.error(err, "[commands] Fetch failed");
               }
             }
           } catch (cmdErr) {
-            console.error(`[commands] Error processing ${command.type} command:`, cmdErr);
+            logger.error(cmdErr, `[commands] Error processing ${command.type} command`);
           }
         }
       }
@@ -6992,14 +6951,14 @@ export async function generateRoutes(app: FastifyInstance) {
               content: oocText,
             });
           }
-          console.log(
+          logger.info(
             `[generate] Posted ${collectedOocMessages.length} OOC message(s) to conversation ${chat.connectedChatId}`,
           );
           reply.raw.write(
             `data: ${JSON.stringify({ type: "ooc_posted", data: { chatId: chat.connectedChatId, count: collectedOocMessages.length } })}\n\n`,
           );
         } catch (oocErr) {
-          console.error(`[generate] Failed to post OOC messages:`, oocErr);
+          logger.error(oocErr, "[generate] Failed to post OOC messages");
         }
       }
 
@@ -7023,7 +6982,7 @@ export async function generateRoutes(app: FastifyInstance) {
           charNameMap[ci.id] = ci.name;
         }
         chunkAndEmbedMessages(app.db, input.chatId, { userName: personaName, characterNames: charNameMap }).catch(
-          (err) => console.error("[memory-recall] Background chunking failed:", err),
+          (err) => logger.error(err, "[memory-recall] Background chunking failed"),
         );
       }
     } catch (err) {
@@ -7059,19 +7018,19 @@ export async function generateRoutes(app: FastifyInstance) {
     const gen = activeGenerations.get(chatId);
     if (!gen) return reply.send({ aborted: false, reason: "No active generation for this chat" });
 
-    console.log("[abort] Explicit abort requested for chat:", chatId);
+    logger.info("[abort] Explicit abort requested for chat: %s", chatId);
     gen.abortController.abort();
 
     // Send abort to backend (KoboldCPP etc.)
     if (gen.backendUrl) {
       const backendRoot = gen.backendUrl.replace(/\/v1\/?$/, "");
       const abortUrl = backendRoot + "/api/extra/abort";
-      console.log("[abort] Sending abort to backend:", abortUrl);
+      logger.info("[abort] Sending abort to backend: %s", abortUrl);
       try {
         await fetch(abortUrl, { method: "POST", signal: AbortSignal.timeout(5000) });
-        console.log("[abort] Backend abort sent successfully");
+        logger.info("[abort] Backend abort sent successfully");
       } catch (err) {
-        console.warn("[abort] Backend abort failed:", err);
+        logger.warn(err, "[abort] Backend abort failed");
       }
     }
 

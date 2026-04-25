@@ -101,7 +101,7 @@ interface UIState {
   gameTextSpeed: number;
   /** Delay in ms between auto-advancing narration segments when auto-play is enabled. */
   gameAutoPlayDelay: number;
-  debugMode: boolean;
+
   messageGrouping: boolean;
   showTimestamps: boolean;
   showModelName: boolean;
@@ -236,7 +236,7 @@ interface UIState {
   setGameInstantTextReveal: (v: boolean) => void;
   setGameTextSpeed: (v: number) => void;
   setGameAutoPlayDelay: (v: number) => void;
-  setDebugMode: (v: boolean) => void;
+
   setMessageGrouping: (v: boolean) => void;
   setShowTimestamps: (v: boolean) => void;
   setShowModelName: (v: boolean) => void;
@@ -304,7 +304,7 @@ export function pickSyncedSettings(state: UIState) {
     gameInstantTextReveal: state.gameInstantTextReveal,
     gameTextSpeed: state.gameTextSpeed,
     gameAutoPlayDelay: state.gameAutoPlayDelay,
-    debugMode: state.debugMode,
+
     messageGrouping: state.messageGrouping,
     showTimestamps: state.showTimestamps,
     showModelName: state.showModelName,
@@ -374,7 +374,7 @@ export const useUIStore = create<UIState>()(
       gameInstantTextReveal: false,
       gameTextSpeed: 50,
       gameAutoPlayDelay: 3000,
-      debugMode: false,
+
       messageGrouping: true,
       showTimestamps: false,
       showModelName: false,
@@ -615,7 +615,7 @@ export const useUIStore = create<UIState>()(
       setGameInstantTextReveal: (v) => set({ gameInstantTextReveal: v }),
       setGameTextSpeed: (v) => set({ gameTextSpeed: Math.max(1, Math.min(100, v)) }),
       setGameAutoPlayDelay: (v) => set({ gameAutoPlayDelay: Math.max(200, Math.min(10000, Math.round(v))) }),
-      setDebugMode: (v) => set({ debugMode: v }),
+
       setMessageGrouping: (v) => set({ messageGrouping: v }),
       setShowTimestamps: (v) => set({ showTimestamps: v }),
       setShowModelName: (v) => set({ showModelName: v }),
@@ -792,7 +792,7 @@ export const useUIStore = create<UIState>()(
         gameInstantTextReveal: state.gameInstantTextReveal,
         gameTextSpeed: state.gameTextSpeed,
         gameAutoPlayDelay: state.gameAutoPlayDelay,
-        debugMode: state.debugMode,
+
         messageGrouping: state.messageGrouping,
         showTimestamps: state.showTimestamps,
         showModelName: state.showModelName,

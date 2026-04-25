@@ -5,6 +5,7 @@
 // autonomous message polling, and busy-delay responses.
 
 import type { FastifyInstance } from "fastify";
+import { logger } from "../lib/logger.js";
 import { createChatsStorage } from "../services/storage/chats.storage.js";
 import { createCharactersStorage } from "../services/storage/characters.storage.js";
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
@@ -163,7 +164,7 @@ export async function conversationRoutes(app: FastifyInstance) {
       }
 
       try {
-        console.log(`[schedule] Generating schedule for ${charData.name} (${charId})...`);
+        logger.info("[schedule] Generating schedule for %s (%s)...", charData.name, charId);
         const { schedule } = await generateCharacterSchedule(
           provider,
           model,
@@ -171,7 +172,7 @@ export async function conversationRoutes(app: FastifyInstance) {
           charData.description ?? "",
           charData.personality ?? "",
         );
-        console.log(`[schedule] Generated schedule for ${charData.name}, days:`, Object.keys(schedule.days ?? {}));
+        logger.info("[schedule] Generated schedule for %s, days: %s", charData.name, Object.keys(schedule.days ?? {}));
 
         const fullSchedule = preserveTimingSettings(
           {
@@ -190,8 +191,7 @@ export async function conversationRoutes(app: FastifyInstance) {
         results[charId] = { status: "generated", schedule: fullSchedule };
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Schedule generation failed";
-        console.error(`[schedule] ERROR for ${charData.name}:`, msg);
-        if (err instanceof Error && err.stack) console.error(err.stack);
+        logger.error(err instanceof Error ? err : undefined, "[schedule] ERROR for %s: %s", charData.name, msg);
         results[charId] = { status: `error: ${msg}` };
       }
     }

@@ -4,6 +4,7 @@
 // into the data/game-assets directory on first boot.
 // All assets are CC0 — see CREDITS.md in the bundle.
 // ──────────────────────────────────────────────
+import { logger } from "../lib/logger.js";
 import { existsSync, mkdirSync, readdirSync, copyFileSync, statSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -45,7 +46,7 @@ function copyDirRecursive(src: string, dest: string): number {
 
 export async function seedDefaultGameAssets(): Promise<void> {
   if (!existsSync(BUNDLED_DIR)) {
-    console.warn("[seed] Default game assets bundle not found — skipping");
+    logger.warn("[seed] Default game assets bundle not found — skipping");
     return;
   }
 
@@ -56,6 +57,6 @@ export async function seedDefaultGameAssets(): Promise<void> {
   const copied = copyDirRecursive(BUNDLED_DIR, GAME_ASSETS_DIR);
 
   if (copied > 0) {
-    console.log(`[seed] Installed ${copied} default game asset${copied > 1 ? "s" : ""} (music, ambient, SFX, sprites)`);
+    logger.info(`[seed] Installed ${copied} default game asset${copied > 1 ? "s" : ""} (music, ambient, SFX, sprites)`);
   }
 }

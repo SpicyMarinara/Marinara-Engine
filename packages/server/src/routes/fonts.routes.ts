@@ -2,6 +2,7 @@
 // Routes: Custom font file serving
 // ──────────────────────────────────────────────
 import type { FastifyInstance } from "fastify";
+import { logger } from "../lib/logger.js";
 import { existsSync, mkdirSync, createReadStream } from "fs";
 import { readdir, writeFile } from "fs/promises";
 import { join, extname, basename } from "path";
@@ -115,7 +116,7 @@ export async function fontsRoutes(app: FastifyInstance) {
     const os = platform();
     const cmd = os === "darwin" ? "open" : os === "win32" ? "explorer" : "xdg-open";
     execFile(cmd, [FONTS_DIR], (err) => {
-      if (err) console.warn("Could not open fonts folder:", err.message);
+      if (err) logger.warn(err, "Could not open fonts folder");
     });
     return reply.send({ ok: true, path: FONTS_DIR });
   });

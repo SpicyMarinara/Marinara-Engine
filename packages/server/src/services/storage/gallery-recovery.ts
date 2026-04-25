@@ -5,6 +5,7 @@
 // has no matching chat_images row (but whose parent chat still exists),
 // a new DB record is inserted so the gallery UI shows the image again.
 import { existsSync, readdirSync, statSync } from "fs";
+import { logger } from "../../lib/logger.js";
 import { join, extname } from "path";
 import { eq } from "drizzle-orm";
 import type { DB } from "../../db/connection.js";
@@ -62,11 +63,11 @@ export async function recoverGalleryImages(db: DB) {
         recovered++;
       }
     } catch (err) {
-      console.warn(`[gallery-recovery] Failed to process directory ${dir.name}:`, err);
+      logger.warn(err, "[gallery-recovery] Failed to process directory %s", dir.name);
     }
   }
 
   if (recovered > 0) {
-    console.log(`[gallery-recovery] Recovered ${recovered} orphaned gallery image(s)`);
+    logger.info("[gallery-recovery] Recovered %d orphaned gallery image(s)", recovered);
   }
 }

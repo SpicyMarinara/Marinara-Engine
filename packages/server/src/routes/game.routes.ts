@@ -4,6 +4,7 @@
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "crypto";
 import { z } from "zod";
+import { logger } from "../lib/logger.js";
 import { createChatsStorage } from "../services/storage/chats.storage.js";
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
 import { createCharactersStorage } from "../services/storage/characters.storage.js";
@@ -215,8 +216,8 @@ function parseMeta(raw: unknown): Record<string, unknown> {
   if (typeof raw === "string") {
     try {
       return JSON.parse(raw);
-    } catch {
-      console.warn("[game.routes] Failed to parse chat metadata, returning empty object");
+    } catch (err) {
+      logger.warn(err, "[game.routes] Failed to parse chat metadata, returning empty object");
       return {};
     }
   }
@@ -931,7 +932,7 @@ export async function gameRoutes(app: FastifyInstance) {
 
   // ── POST /game/create ──
   app.post("/create", async (req) => {
-    console.log("[game/create] Received request");
+    logger.info("[game/create] Received request");
     const { name, setupConfig, connectionId, characterConnectionId, promptPresetId, chatId } = createGameSchema.parse(
       req.body,
     );
@@ -1014,7 +1015,7 @@ export async function gameRoutes(app: FastifyInstance) {
 
   // ── POST /game/setup ──
   app.post("/setup", async (req, reply) => {
-    console.log("[game/setup] Received request");
+    logger.info("[game/setup] Received request");
     const { chatId, connectionId, preferences, streaming } = setupSchema.parse(req.body);
     const chats = createChatsStorage(app.db);
     const connections = createConnectionsStorage(app.db);
@@ -1134,7 +1135,7 @@ export async function gameRoutes(app: FastifyInstance) {
         .join("\n\n");
       if (combinedLore) {
         setupLorebookContext = combinedLore;
-        console.log(
+        logger.info(
           "[game/setup] Injecting %d constant lorebook entries into world generation",
           lorebookResult.totalEntries,
         );
@@ -1171,11 +1172,11 @@ export async function gameRoutes(app: FastifyInstance) {
       },
     ];
 
-    console.log("[game/setup] === PROMPT BEING SENT ===");
+    logger.debug("[game/setup] === PROMPT BEING SENT ===");
     for (const msg of messages) {
-      console.log("[game/setup] [%s] (%d chars):\n%s", msg.role, msg.content.length, msg.content);
+      logger.debug("[game/setup] [%s] (%d chars):\n%s", msg.role, msg.content.length, msg.content);
     }
-    console.log("[game/setup] === END PROMPT ===");
+    logger.debug("[game/setup] === END PROMPT ===");
 
     const setupOptions = gameGenOptions(
       conn.model,
@@ -1190,7 +1191,7 @@ export async function gameRoutes(app: FastifyInstance) {
                 return (chunk: string) => {
                   if (!chunk || sawFirstToken) return;
                   sawFirstToken = true;
-                  console.log("[game/setup] First streamed token received after %d ms", Date.now() - setupStartTime);
+                  logger.debug("[game/setup] First streamed token received after %d ms", Date.now() - setupStartTime);
                 };
               })(),
             }
@@ -1198,7 +1199,7 @@ export async function gameRoutes(app: FastifyInstance) {
       },
       setupGenerationParameters,
     );
-    console.log(
+    logger.debug(
       "[game/setup] Sending to provider=%s model=%s baseUrl=%s options=%s",
       conn.provider,
       conn.model,
@@ -1207,18 +1208,26 @@ export async function gameRoutes(app: FastifyInstance) {
     );
 
     const result = await provider.chatComplete(messages, setupOptions);
-    const responseText = extractLeadingThinkingBlocks(result.content ?? "").content;
+    const setupExtraction = extractLeadingThinkingBlocks(result.content ?? "");
+    const responseText = setupExtraction.content;
 
-    console.log("[game/setup] Response length: %d chars", responseText.length);
-    console.log("[game/setup] Full response:\n%s", responseText);
+    logger.debug("[game/setup] Response length: %d chars", responseText.length);
+    logger.debug("[game/setup] Full response:\n%s", responseText);
+    if (setupExtraction.thinking) {
+      logger.debug(
+        "[game/setup] Thinking tokens (%d chars):\n%s",
+        setupExtraction.thinking.length,
+        setupExtraction.thinking,
+      );
+    }
 
     let setupData: Record<string, unknown> = {};
     let parseError: string | null = null;
     try {
       setupData = parseJSON(responseText) as Record<string, unknown>;
-      console.log("[game/setup] Parsed JSON keys:", Object.keys(setupData));
+      logger.info("[game/setup] Parsed JSON keys: %s", Object.keys(setupData));
     } catch (e) {
-      console.error("[game/setup] JSON parse failed:", e);
+      logger.error(e, "[game/setup] JSON parse failed");
       parseError = "Model did not return valid JSON. The setup response could not be parsed.";
     }
 
@@ -1230,18 +1239,18 @@ export async function gameRoutes(app: FastifyInstance) {
       if (!Array.isArray(setupData.plotTwists) || setupData.plotTwists.length === 0) missing.push("plotTwists");
       if (!Array.isArray(setupData.startingNpcs) || setupData.startingNpcs.length === 0) missing.push("startingNpcs");
       if (missing.length > 0) {
-        console.warn("[game/setup] Validation failed — missing:", missing);
+        logger.warn("[game/setup] Validation failed — missing: %s", missing);
         parseError = `Setup generation incomplete — missing: ${missing.join(", ")}. Try again or use a different model.`;
       }
     }
 
     if (parseError) {
-      console.error("[game/setup] Returning 422:", parseError);
+      logger.error("[game/setup] Returning 422: %s", parseError);
       reply.code(422).send({ error: parseError, rawResponse: responseText.slice(0, 500) });
       return;
     }
 
-    console.log("[game/setup] Validation passed, transitioning to ready");
+    logger.info("[game/setup] Validation passed, transitioning to ready");
 
     const updates: Record<string, unknown> = { ...meta, gameSessionStatus: "ready" };
     if (setupData.worldOverview) updates.gameWorldOverview = setupData.worldOverview as string;
@@ -1468,7 +1477,7 @@ export async function gameRoutes(app: FastifyInstance) {
   // which already builds the full GM system prompt with all world context,
   // streams the response, and triggers scene analysis on the client side.
   app.post("/start", async (req) => {
-    console.log("[game/start] Transitioning to active");
+    logger.info("[game/start] Transitioning to active");
     const { chatId } = gameStartSchema.parse(req.body);
     const chats = createChatsStorage(app.db);
 
@@ -1629,6 +1638,9 @@ export async function gameRoutes(app: FastifyInstance) {
           const recapExtraction = extractLeadingThinkingBlocks(result.content ?? "");
           recapText = recapExtraction.content;
           recapThinking = recapExtraction.thinking;
+          if (recapThinking) {
+            logger.debug("[game/session/start] Recap thinking (%d chars):\n%s", recapThinking.length, recapThinking);
+          }
         } catch {
           recapText = `Session ${sessionNumber} begins. The adventure continues...`;
           recapThinking = "";
@@ -1648,7 +1660,7 @@ export async function gameRoutes(app: FastifyInstance) {
             }
             mirrorGameMessageToDiscord(updatedNewMeta, recapText, "Narrator");
           } catch (err) {
-            console.warn("[game/session/start] Failed to persist recap message:", err);
+            logger.warn(err, "[game/session/start] Failed to persist recap message");
           }
         }
       }
@@ -1672,7 +1684,7 @@ export async function gameRoutes(app: FastifyInstance) {
             committed: true,
           });
         } catch (err) {
-          console.warn("[game/session/start] Failed to carry forward previous game state:", err);
+          logger.warn(err, "[game/session/start] Failed to carry forward previous game state");
         }
       }
 
@@ -1716,7 +1728,7 @@ export async function gameRoutes(app: FastifyInstance) {
   // ── POST /game/session/conclude ──
   app.post("/session/conclude", async (req) => {
     const { chatId, connectionId } = concludeSessionSchema.parse(req.body);
-    console.log("[game/session/conclude] Starting manual conclude for chat %s", chatId);
+    logger.info("[game/session/conclude] Starting manual conclude for chat %s", chatId);
     const chats = createChatsStorage(app.db);
     const connections = createConnectionsStorage(app.db);
 
@@ -1777,8 +1789,15 @@ export async function gameRoutes(app: FastifyInstance) {
         temperature: 0.5,
       }),
     );
-    console.log("[game/session/conclude] Summary generation completed for chat %s", chatId);
+    logger.info("[game/session/conclude] Summary generation completed for chat %s", chatId);
     const summaryExtraction = extractLeadingThinkingBlocks(result.content ?? "");
+    if (summaryExtraction.thinking) {
+      logger.debug(
+        "[game/session/conclude] Thinking tokens (%d chars):\n%s",
+        summaryExtraction.thinking.length,
+        summaryExtraction.thinking,
+      );
+    }
 
     let summary: SessionSummary;
     try {
@@ -1817,7 +1836,15 @@ export async function gameRoutes(app: FastifyInstance) {
         progressionMessages,
         gameGenOptions(conn.model, { temperature: 0.35 }),
       );
-      const progressionContent = extractLeadingThinkingBlocks(progressionResult.content ?? "").content;
+      const progressionExtraction = extractLeadingThinkingBlocks(progressionResult.content ?? "");
+      const progressionContent = progressionExtraction.content;
+      if (progressionExtraction.thinking) {
+        logger.debug(
+          "[game/session/conclude] Progression thinking (%d chars):\n%s",
+          progressionExtraction.thinking.length,
+          progressionExtraction.thinking,
+        );
+      }
       const parsedProgression = parseJSON(progressionContent) as Record<string, unknown>;
 
       const nextStoryArc = normalizeSessionText(parsedProgression.storyArc, updatedStoryArc || "");
@@ -1828,7 +1855,7 @@ export async function gameRoutes(app: FastifyInstance) {
       updatedPlotTwists = nextPlotTwists;
       updatedPartyArcs = nextPartyArcs;
     } catch (err) {
-      console.warn("[session/conclude] Campaign progression adjustment failed (non-fatal):", err);
+      logger.warn(err, "[session/conclude] Campaign progression adjustment failed (non-fatal)");
     }
 
     // ── Adjust character cards based on session events ──
@@ -1851,7 +1878,15 @@ export async function gameRoutes(app: FastifyInstance) {
         ];
 
         const cardResult = await provider.chatComplete(cardMessages, gameGenOptions(conn.model, { temperature: 0.4 }));
-        const cardContent = extractLeadingThinkingBlocks(cardResult.content ?? "").content;
+        const cardExtraction = extractLeadingThinkingBlocks(cardResult.content ?? "");
+        const cardContent = cardExtraction.content;
+        if (cardExtraction.thinking) {
+          logger.debug(
+            "[game/session/conclude] Card adjustment thinking (%d chars):\n%s",
+            cardExtraction.thinking.length,
+            cardExtraction.thinking,
+          );
+        }
 
         const parsedCards = parseJSON(cardContent) as Array<Record<string, unknown>>;
         if (Array.isArray(parsedCards) && parsedCards.length > 0) {
@@ -1873,11 +1908,11 @@ export async function gameRoutes(app: FastifyInstance) {
                   }
                 : normalizedCard;
             });
-            console.log(`[session/conclude] Updated ${valid.length} character cards after session ${sessionNumber}`);
+            logger.info(`[session/conclude] Updated ${valid.length} character cards after session ${sessionNumber}`);
           }
         }
       } catch (err) {
-        console.warn("[session/conclude] Card adjustment failed (non-fatal):", err);
+        logger.warn(err, "[session/conclude] Card adjustment failed (non-fatal)");
         // Keep original cards on failure
       }
     }
@@ -1939,7 +1974,7 @@ export async function gameRoutes(app: FastifyInstance) {
       /* non-fatal */
     }
 
-    console.log("[game/session/conclude] Session %d concluded for chat %s", sessionNumber, chatId);
+    logger.info("[game/session/conclude] Session %d concluded for chat %s", sessionNumber, chatId);
     return { summary };
   });
 
@@ -2096,7 +2131,15 @@ export async function gameRoutes(app: FastifyInstance) {
         ],
         gameGenOptions(conn.model, { temperature: 0.6, maxTokens: 1200 }, generationParameters),
       );
-      const cardContent = extractLeadingThinkingBlocks(result.content ?? "").content;
+      const recruitExtraction = extractLeadingThinkingBlocks(result.content ?? "");
+      const cardContent = recruitExtraction.content;
+      if (recruitExtraction.thinking) {
+        logger.debug(
+          "[game/party/recruit] Thinking tokens (%d chars):\n%s",
+          recruitExtraction.thinking.length,
+          recruitExtraction.thinking,
+        );
+      }
       const parsed = parseJSON(cardContent);
       const rawCard =
         parsed && typeof parsed === "object" && !Array.isArray(parsed)
@@ -2111,7 +2154,7 @@ export async function gameRoutes(app: FastifyInstance) {
         };
       }
     } catch (error) {
-      console.warn("[game/party/recruit] Failed to generate recruit card, using fallback:", error);
+      logger.warn(error, "[game/party/recruit] Failed to generate recruit card, using fallback");
     }
 
     const updatedPartyIds = alreadyInParty ? currentPartyIds : [...currentPartyIds, recruit.row.id];
@@ -2295,7 +2338,15 @@ export async function gameRoutes(app: FastifyInstance) {
         temperature: 0.6,
       }),
     );
-    const mapContent = extractLeadingThinkingBlocks(result.content ?? "").content;
+    const mapExtraction = extractLeadingThinkingBlocks(result.content ?? "");
+    const mapContent = mapExtraction.content;
+    if (mapExtraction.thinking) {
+      logger.debug(
+        "[game/map/generate] Thinking tokens (%d chars):\n%s",
+        mapExtraction.thinking.length,
+        mapExtraction.thinking,
+      );
+    }
 
     let map: GameMap;
     try {
@@ -2913,6 +2964,13 @@ export async function gameRoutes(app: FastifyInstance) {
     );
     const partyTurnExtraction = extractLeadingThinkingBlocks(result.content || "");
     const raw = partyTurnExtraction.content;
+    if (partyTurnExtraction.thinking) {
+      logger.debug(
+        "[game/party-turn] Thinking tokens (%d chars):\n%s",
+        partyTurnExtraction.thinking.length,
+        partyTurnExtraction.thinking,
+      );
+    }
 
     // Extract and apply reputation tags from party response
     const repRegex = /\[reputation:\s*npc="([^"]+)"\s*action="([^"]+)"\]/gi;
@@ -2929,9 +2987,9 @@ export async function gameRoutes(app: FastifyInstance) {
         const freshChat = await chats.getById(input.chatId);
         const freshMeta = freshChat ? parseMeta(freshChat.metadata) : meta;
         await chats.updateMetadata(input.chatId, { ...freshMeta, gameNpcs: updatedNpcs });
-        console.log(`[party-turn] Applied ${repActions.length} reputation change(s)`);
+        logger.info(`[party-turn] Applied ${repActions.length} reputation change(s)`);
       } catch (err) {
-        console.warn("[party-turn] Failed to apply reputation:", err);
+        logger.warn(err, "[party-turn] Failed to apply reputation");
       }
     }
 
@@ -3015,7 +3073,7 @@ export async function gameRoutes(app: FastifyInstance) {
       conn.openrouterProvider,
       conn.maxTokensOverride,
     );
-    console.log(
+    logger.debug(
       "[game/scene-wrap] chatId=%s, model=%s, narration=%d chars",
       input.chatId,
       conn.model,
@@ -3035,12 +3093,20 @@ export async function gameRoutes(app: FastifyInstance) {
       ),
     );
 
-    const raw = extractLeadingThinkingBlocks(result.content || "").content;
-    console.log("[game/scene-wrap] Response (%d chars): %s", raw.length, raw);
+    const sceneWrapExtraction = extractLeadingThinkingBlocks(result.content || "");
+    const raw = sceneWrapExtraction.content;
+    logger.debug("[game/scene-wrap] Response (%d chars): %s", raw.length, raw);
+    if (sceneWrapExtraction.thinking) {
+      logger.debug(
+        "[game/scene-wrap] Thinking tokens (%d chars):\n%s",
+        sceneWrapExtraction.thinking.length,
+        sceneWrapExtraction.thinking,
+      );
+    }
 
     try {
       const rawParsed = parseJSON(raw);
-      console.log("[game/scene-wrap] Parsed keys: %s", Object.keys(rawParsed as Record<string, unknown>).join(", "));
+      logger.debug("[game/scene-wrap] Parsed keys: %s", Object.keys(rawParsed as Record<string, unknown>).join(", "));
 
       // Post-process: fuzzy-match prose → real tags, normalise expressions,
       // and filter widget updates to valid IDs (same as sidecar route).
@@ -3095,9 +3161,9 @@ export async function gameRoutes(app: FastifyInstance) {
       const imgConnId = (meta.gameImageConnectionId as string) || null;
 
       if (!enableGen) {
-        console.log("[game/scene-wrap] asset-gen skipped: enableSpriteGeneration=false");
+        logger.debug("[game/scene-wrap] asset-gen skipped: enableSpriteGeneration=false");
       } else if (!imgConnId) {
-        console.log("[game/scene-wrap] asset-gen skipped: no gameImageConnectionId configured");
+        logger.debug("[game/scene-wrap] asset-gen skipped: no gameImageConnectionId configured");
       }
 
       if (enableGen && imgConnId && parsed && typeof parsed === "object") {
@@ -3129,9 +3195,9 @@ export async function gameRoutes(app: FastifyInstance) {
                 );
 
               if (tagExists) {
-                console.log(`[game/scene-wrap] bg "${chosenBg}" already in manifest, skipping generation`);
+                logger.debug(`[game/scene-wrap] bg "${chosenBg}" already in manifest, skipping generation`);
               } else {
-                console.log(`[game/scene-wrap] bg "${chosenBg}" not in manifest, generating…`);
+                logger.debug(`[game/scene-wrap] bg "${chosenBg}" not in manifest, generating…`);
               }
 
               if (!tagExists) {
@@ -3269,12 +3335,12 @@ export async function gameRoutes(app: FastifyInstance) {
             // Count NPCs that still need a portrait so logs make it clear what
             // the client's follow-up /generate-assets call will (or won't) do.
             const unresolvedNpcCount = npcs.filter((n) => !n.avatarUrl && n.name).length;
-            console.log(
+            logger.debug(
               `[game/scene-wrap] asset-gen summary: bg=${chosenBg ?? "none"}, npcs(library-resolved)=${libResolvedNpcs.length}, npcs(deferred to /generate-assets)=${unresolvedNpcCount}`,
             );
           }
         } catch (genErr) {
-          console.warn("[game/scene-wrap] Asset generation error (non-fatal):", genErr);
+          logger.warn(genErr, "[game/scene-wrap] Asset generation error (non-fatal)");
         }
       }
 
@@ -3292,8 +3358,8 @@ export async function gameRoutes(app: FastifyInstance) {
       }
 
       return { result: parsed };
-    } catch {
-      console.warn("[game/scene-wrap] Failed to parse LLM response as JSON:", raw.slice(0, 200));
+    } catch (err) {
+      logger.warn(err, "[game/scene-wrap] Failed to parse LLM response as JSON: %s", raw.slice(0, 200));
       return { result: null, raw };
     }
   });
