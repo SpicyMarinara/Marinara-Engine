@@ -55,6 +55,7 @@ export const createLorebookEntrySchema = z.object({
   lorebookId: z.string(),
   name: z.string().min(1).max(200),
   content: z.string().default(""),
+  description: z.string().default(""),
   keys: z.array(z.string()).default([]),
   secondaryKeys: z.array(z.string()).default([]),
   enabled: z.boolean().default(true),
@@ -88,6 +89,7 @@ export const createLorebookEntrySchema = z.object({
 export const updateLorebookEntrySchema = z.object({
   name: z.string().min(1).max(200).optional(),
   content: z.string().optional(),
+  description: z.string().optional(),
   keys: z.array(z.string()).optional(),
   secondaryKeys: z.array(z.string()).optional(),
   enabled: z.boolean().optional(),

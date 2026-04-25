@@ -30,6 +30,8 @@ export const lorebookEntries = sqliteTable("lorebook_entries", {
     .references(() => lorebooks.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   content: text("content").notNull().default(""),
+  /** Short summary used by the knowledge-router agent to decide if this entry is relevant */
+  description: text("description").notNull().default(""),
   /** JSON array of primary keywords */
   keys: text("keys").notNull().default("[]"),
   /** JSON array of secondary keywords */

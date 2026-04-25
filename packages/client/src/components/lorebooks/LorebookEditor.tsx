@@ -281,6 +281,7 @@ export function LorebookEditor() {
         entryId: editingEntryId,
         name: entryForm.name,
         content: entryForm.content,
+        description: entryForm.description,
         keys: entryForm.keys,
         secondaryKeys: entryForm.secondaryKeys,
         enabled: entryForm.enabled,
@@ -430,6 +431,21 @@ export function LorebookEditor() {
                 onChange={(e) => updateEntryForm({ name: e.target.value })}
                 className="w-full rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
                 placeholder="Entry name"
+              />
+            </FieldGroup>
+
+            {/* Description */}
+            <FieldGroup
+              label="Description"
+              icon={FileText}
+              help="Brief summary of what this entry is about. Used by the Knowledge Router agent to decide whether to inject this entry — not sent to the main AI as content."
+            >
+              <textarea
+                value={entryForm.description ?? ""}
+                onChange={(e) => updateEntryForm({ description: e.target.value })}
+                rows={2}
+                className="w-full resize-y rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                placeholder="Brief summary of what this entry is about (used by Knowledge Router agent)."
               />
             </FieldGroup>
 

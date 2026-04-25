@@ -218,6 +218,7 @@ export function createLorebooksStorage(db: DB) {
         lorebookId: input.lorebookId,
         name: input.name,
         content: input.content ?? "",
+        description: input.description ?? "",
         keys: JSON.stringify(input.keys ?? []),
         secondaryKeys: JSON.stringify(input.secondaryKeys ?? []),
         enabled: String(input.enabled ?? true),
@@ -256,6 +257,7 @@ export function createLorebooksStorage(db: DB) {
       const updates: Record<string, unknown> = { updatedAt: now() };
       if (input.name !== undefined) updates.name = input.name;
       if (input.content !== undefined) updates.content = input.content;
+      if (input.description !== undefined) updates.description = input.description;
       if (input.keys !== undefined) updates.keys = JSON.stringify(input.keys);
       if (input.secondaryKeys !== undefined) updates.secondaryKeys = JSON.stringify(input.secondaryKeys);
       if (input.enabled !== undefined) updates.enabled = String(input.enabled);

@@ -522,6 +522,11 @@ const COLUMN_MIGRATIONS: ColumnMigration[] = [
     column: "max_tokens_override",
     definition: "INTEGER",
   },
+  {
+    table: "lorebook_entries",
+    column: "description",
+    definition: "TEXT NOT NULL DEFAULT ''",
+  },
 ];
 
 export async function runMigrations(db: DB) {

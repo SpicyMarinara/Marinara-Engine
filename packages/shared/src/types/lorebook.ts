@@ -48,6 +48,8 @@ export interface LorebookEntry {
   name: string;
   /** The actual content injected into the prompt */
   content: string;
+  /** Short summary used by the knowledge-router agent to decide if this entry is relevant */
+  description: string;
   /** Primary trigger keywords (supports regex) */
   keys: string[];
   /** Secondary / optional keywords */
