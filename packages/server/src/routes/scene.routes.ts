@@ -570,11 +570,10 @@ export async function sceneRoutes(app: FastifyInstance) {
         if (activeSwipe) {
           content = activeSwipe.content ?? content;
           extra = activeSwipe.extra ?? extra;
-          swipeExtra = activeSwipe.extra;
+          swipeExtra = activeSwipe.extra ?? extra;
           createdAt = activeSwipe.createdAt ?? createdAt;
         }
       }
-      swipeExtra ??= extra;
 
       copiedMessages.push({
         role: msg.role as "user" | "assistant" | "system" | "narrator",
