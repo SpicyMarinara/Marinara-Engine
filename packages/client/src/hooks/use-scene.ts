@@ -20,6 +20,7 @@ import type {
   SceneFullPlan,
 } from "@marinara-engine/shared";
 
+/** Provides scene lifecycle mutations and the scene-to-roleplay fork action. */
 export function useScene() {
   const qc = useQueryClient();
   const setActiveChatId = useChatStore((s) => s.setActiveChatId);
@@ -138,7 +139,12 @@ export function useScene() {
     [qc, setActiveChatId],
   );
 
-  /** Fork a scene into a standalone roleplay chat. */
+  /**
+   * Fork a scene into a standalone roleplay chat.
+   *
+   * The ref guard prevents duplicate clone/convert requests from rapid clicks
+   * while `isForking` lets the UI disable the relevant controls.
+   */
   const forkScene = useCallback(
     async (
       sceneChatId: string,

@@ -111,6 +111,7 @@ const EditTextarea = memo(function EditTextarea({
   );
 });
 
+/** Props for a single rendered chat message, including optional scene fork actions. */
 interface ChatMessageProps {
   message: Message & { swipes?: Array<{ id: string; content: string }> };
   isStreaming?: boolean;

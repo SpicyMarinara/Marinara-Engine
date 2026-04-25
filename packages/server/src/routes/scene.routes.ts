@@ -130,11 +130,13 @@ function listAvailableBackgrounds(): string[] {
   return readdirSync(BG_DIR).filter((f) => ALLOWED_BG_EXTS.has(extname(f).toLowerCase()));
 }
 
+/** Parse chat metadata regardless of whether storage returned JSON text or an object. */
 function parseMetadata(chat: { metadata?: string | Record<string, unknown> | null }): Record<string, unknown> {
   if (!chat.metadata) return {};
   return typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : chat.metadata;
 }
 
+/** Normalize stored character IDs into a string array for copied roleplay chats. */
 function parseCharacterIds(characterIds: unknown): string[] {
   if (Array.isArray(characterIds)) return characterIds.map(String);
   if (typeof characterIds === "string") {
@@ -148,6 +150,7 @@ function parseCharacterIds(characterIds: unknown): string[] {
   return [];
 }
 
+/** Scene lifecycle keys that must not be copied into standalone roleplay metadata. */
 const SCENE_FORK_METADATA_EXCLUDE = new Set([
   "sceneOriginChatId",
   "sceneInitiatorCharId",
@@ -163,6 +166,7 @@ const SCENE_FORK_METADATA_EXCLUDE = new Set([
   "sceneBusyCharIds",
 ]);
 
+/** Copy only safe non-scene metadata when creating a standalone roleplay fork. */
 function buildRoleplayForkMetadata(sceneMeta: Record<string, unknown>) {
   const next: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(sceneMeta)) {
@@ -172,6 +176,7 @@ function buildRoleplayForkMetadata(sceneMeta: Record<string, unknown>) {
   return next;
 }
 
+/** Build hidden continuity context from user-safe scene fields for the forked chat. */
 function buildForkContextMessage(sceneMeta: Record<string, unknown>, includePreSceneSummary: boolean) {
   if (!includePreSceneSummary) return null;
 
@@ -196,6 +201,7 @@ function buildForkContextMessage(sceneMeta: Record<string, unknown>, includePreS
 // Routes
 // ──────────────────────────────────────────────
 
+/** Register routes for planning, creating, ending, and forking scenes. */
 export async function sceneRoutes(app: FastifyInstance) {
   const chats = createChatsStorage(app.db);
   const connections = createConnectionsStorage(app.db);
@@ -480,7 +486,8 @@ export async function sceneRoutes(app: FastifyInstance) {
 
   // Copy an active scene into a standalone roleplay chat. Clone leaves the
   // original scene running; convert detaches and deletes the original scene
-  // without generating summaries or character memory.
+  // without generating summaries or character memory. The new chat preserves
+  // narrative continuity only; scene lifecycle metadata is stripped.
   app.post<{ Body: SceneForkRequest }>("/fork", async (req, reply) => {
     const {
       sceneChatId,
@@ -507,10 +514,14 @@ export async function sceneRoutes(app: FastifyInstance) {
     if (!isActiveScene && !originChatId) {
       return reply.status(400).send({ error: "Not a scene chat" });
     }
+    // Convert needs an origin to clear active scene state; clone can copy an
+    // orphaned scene-like chat without altering its source.
     if (mode === "convert" && !originChatId) {
       return reply.status(400).send({ error: "convert requires originChatId" });
     }
 
+    // Sort explicitly before validating/slicing `upToMessageId` so "clone from
+    // here" always copies a chronological prefix even if storage ordering changes.
     const sceneMessages = (await chats.listMessages(sceneChatId)).sort(
       (a: { createdAt: string }, b: { createdAt: string }) =>
         new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
@@ -548,6 +559,8 @@ export async function sceneRoutes(app: FastifyInstance) {
 
     const continuity = buildForkContextMessage(sceneMeta, includePreSceneSummary);
     if (continuity) {
+      // Hidden narrator context remains available to prompt assembly while
+      // staying out of the standalone roleplay transcript.
       copiedMessages.push({
         role: "narrator",
         characterId: null,
@@ -583,6 +596,8 @@ export async function sceneRoutes(app: FastifyInstance) {
         if (activeSwipe) {
           content = activeSwipe.content ?? content;
           extra = activeSwipe.extra ?? extra;
+          // Keep swipe metadata independent; createMessagesBatch supplies the
+          // empty default when the selected swipe has no metadata of its own.
           swipeExtra = activeSwipe.extra;
           createdAt = activeSwipe.createdAt ?? createdAt;
         }

@@ -34,11 +34,13 @@ function resolveTimestamps(overrides?: TimestampOverrides | null) {
   };
 }
 
+/** Serialize optional JSON columns while preserving already-encoded metadata. */
 function serializeJsonField(value: unknown, fallback: Record<string, unknown>) {
   if (value === undefined || value === null) return JSON.stringify(fallback);
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
+/** Create the chat storage facade used by routes and importers. */
 export function createChatsStorage(db: DB) {
   return {
     async list() {
@@ -221,6 +223,11 @@ export function createChatsStorage(db: DB) {
     /**
      * Bulk-insert messages in a single transaction. Much faster than one-by-one
      * createMessage calls (especially on Windows/NTFS where each transaction fsync is expensive).
+     *
+     * Callers may pass `createdAt`, message `extra`, and swipe `swipeExtra`
+     * when cloning/importing existing transcripts so attachments, persona
+     * snapshots, hidden context flags, and original timestamps survive the copy.
+     *
      * Does NOT return the created messages or update chat.updatedAt per message —
      * caller should update chat.updatedAt once after the batch.
      */

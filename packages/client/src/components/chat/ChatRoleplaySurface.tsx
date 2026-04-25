@@ -213,6 +213,7 @@ function RegeneratingMessageContent({
   return <ChatMessage message={{ ...msg, extra: cleanExtra, content: streamBuffer || "" }} isStreaming {...rest} />;
 }
 
+/** True for stored context messages that should feed generation but not render in the transcript. */
 function isHiddenFromUser(message: MessageWithSwipes) {
   const extra = typeof message.extra === "string" ? JSON.parse(message.extra) : (message.extra ?? {});
   return extra.hiddenFromUser === true;
@@ -543,6 +544,7 @@ function AuthorNotesButton({ chatId, chatMeta }: { chatId: string | null; chatMe
   );
 }
 
+/** Props for the full roleplay surface, including scene lifecycle and fork controls. */
 type RoleplaySurfaceProps = {
   activeChatId: string;
   chat: ChatData | null | undefined;

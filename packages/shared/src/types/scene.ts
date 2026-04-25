@@ -104,17 +104,23 @@ export interface SceneAbandonResponse {
   originChatId: string;
 }
 
+/** Scene fork behavior: clone preserves the source scene, convert consumes it. */
 export type SceneForkMode = "clone" | "convert";
 
-/** Request body for POST /scene/fork. */
+/**
+ * Request body for POST /scene/fork.
+ *
+ * Forking preserves roleplay continuity, messages, and safe roleplay settings,
+ * but intentionally does not copy scene lifecycle metadata into the new chat.
+ */
 export interface SceneForkRequest {
   /** The scene (roleplay) chat to copy into a standalone roleplay. */
   sceneChatId: string;
   /** Clone keeps the original scene active; convert detaches and discards it. */
   mode: SceneForkMode;
-  /** Clone only: copy scene messages up to and including this message. */
+  /** Clone only: copy scene messages chronologically up to and including this message. */
   upToMessageId?: string;
-  /** Include origin conversation and relationship context as a narrator note. */
+  /** Include origin conversation and relationship context as a hidden narrator note. */
   includePreSceneSummary?: boolean;
   /** Include scene participation guidance messages when copying scene messages. */
   includeParticipationGuide?: boolean;
