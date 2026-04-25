@@ -877,8 +877,13 @@ export function stripGmTagsKeepReadables(content: string): string {
     .replace(/\[party-turn\]/gi, "")
     .replace(/\[party-chat\]/gi, "")
     .replace(/\[dice:\s*[^\]]+\]/gi, "");
-  // Quote-aware catch-all for unknown tags, keeping Note/Book inline
-  text = stripUnknownBracketTags(text, (name) => name === "Note" || name === "Book");
+  // Quote-aware catch-all for unknown tags, keeping Note/Book inline.
+  // Case-insensitive to match extractBalancedTags (which lowercases the prefix);
+  // otherwise `[note:]` / `[book:]` would slip past extraction and get stripped.
+  text = stripUnknownBracketTags(text, (name) => {
+    const lower = name.toLowerCase();
+    return lower === "note" || lower === "book";
+  });
   // Balanced bracket stripping for non-readable tags
   text = stripBalancedTag(text, "[map_update:");
   text = stripBalancedTag(text, "[choices:");
