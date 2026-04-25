@@ -199,6 +199,7 @@ async function executeAgentWithTools(
   const MAX_TOOL_ROUNDS = 5;
   const loopMessages = [...initialMessages];
   let totalTokens = 0;
+  const debugAgentsEnabled = isDebugAgentsEnabled();
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const result = await provider.chatComplete(loopMessages, {
@@ -238,12 +239,18 @@ async function executeAgentWithTools(
     // Execute each tool call and append results
     for (const tc of result.toolCalls) {
       logger.info("[agent-tools] %s calling: %s", config.type, tc.function.name);
-      if (isDebugAgentsEnabled()) {
+      if (debugAgentsEnabled) {
         logger.debug("[agent-tools] %s args: %s", config.type, formatToolPayloadForLog(tc.function.arguments));
       }
-      const toolResult = await toolContext.executeToolCall(tc);
+      let toolResult: string;
+      try {
+        toolResult = await toolContext.executeToolCall(tc);
+      } catch (err) {
+        logger.error(err, "[agent-tools] %s %s failed", config.type, tc.function.name);
+        throw err;
+      }
       logger.info("[agent-tools] %s %s completed", config.type, tc.function.name);
-      if (isDebugAgentsEnabled()) {
+      if (debugAgentsEnabled) {
         logger.debug("[agent-tools] %s result: %s", config.type, formatToolPayloadForLog(toolResult));
       }
       loopMessages.push({
