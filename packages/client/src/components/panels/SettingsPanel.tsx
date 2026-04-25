@@ -321,6 +321,8 @@ function GeneralSettings() {
         </div>
         <div className="flex items-center gap-1.5">
           <button
+            type="button"
+            aria-pressed={defaultOpenChatTab === "roleplay"}
             onClick={() => setDefaultOpenChatTab("roleplay")}
             className={cn(
               "rounded-md px-2 py-1 text-[0.625rem] font-medium transition-all",
@@ -332,6 +334,8 @@ function GeneralSettings() {
             Roleplay
           </button>
           <button
+            type="button"
+            aria-pressed={defaultOpenChatTab === "conversation"}
             onClick={() => setDefaultOpenChatTab("conversation")}
             className={cn(
               "rounded-md px-2 py-1 text-[0.625rem] font-medium transition-all",
@@ -343,6 +347,8 @@ function GeneralSettings() {
             Conversations
           </button>
           <button
+            type="button"
+            aria-pressed={defaultOpenChatTab === "game"}
             onClick={() => setDefaultOpenChatTab("game")}
             className={cn(
               "rounded-md px-2 py-1 text-[0.625rem] font-medium transition-all",
