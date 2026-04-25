@@ -35,6 +35,7 @@ function makeEntry(overrides: Partial<LorebookEntry> = {}): LorebookEntry {
     lorebookId: "book-1",
     name: "Entry",
     content: "Lore entry",
+    description: "",
     keys: ["keyword"],
     secondaryKeys: [],
     enabled: true,

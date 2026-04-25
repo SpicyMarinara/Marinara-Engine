@@ -108,6 +108,7 @@ const CREATE_TABLES: string[] = [
     lorebook_id TEXT NOT NULL REFERENCES lorebooks(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     content TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
     keys TEXT NOT NULL DEFAULT '[]',
     secondary_keys TEXT NOT NULL DEFAULT '[]',
     enabled TEXT NOT NULL DEFAULT 'true',
