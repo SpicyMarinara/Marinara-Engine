@@ -77,6 +77,15 @@ export function useTestMessage() {
   });
 }
 
+export function useTestImageGeneration() {
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<{ success: boolean; base64: string | null; mimeType: string | null; latencyMs: number; prompt: string; error?: string }>(
+        `/connections/${id}/test-image`,
+      ),
+  });
+}
+
 export function useFetchModels() {
   return useMutation({
     mutationFn: (id: string) => api.get<{ models: Array<{ id: string; name: string }> }>(`/connections/${id}/models`),

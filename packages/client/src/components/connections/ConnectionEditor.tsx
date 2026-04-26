@@ -11,6 +11,7 @@ import {
   useDeleteConnection,
   useTestConnection,
   useTestMessage,
+  useTestImageGeneration,
   useFetchModels,
 } from "../../hooks/use-connections";
 import {
@@ -33,6 +34,7 @@ import {
   Bot,
   ChevronDown,
   ExternalLink,
+  ImageIcon,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { showConfirmDialog } from "../../lib/app-dialogs";
@@ -70,6 +72,7 @@ export function ConnectionEditor() {
   const deleteConnection = useDeleteConnection();
   const testConnection = useTestConnection();
   const testMessage = useTestMessage();
+  const testImageGeneration = useTestImageGeneration();
   const fetchModels = useFetchModels();
   const { data: allConnections } = useConnections();
 
@@ -108,12 +111,21 @@ export function ConnectionEditor() {
     latencyMs: number;
     error?: string;
   } | null>(null);
+  const [imgTestResult, setImgTestResult] = useState<{
+    success: boolean;
+    base64: string | null;
+    mimeType: string | null;
+    latencyMs: number;
+    prompt: string;
+    error?: string;
+  } | null>(null);
 
   // Model search
   const [modelSearch, setModelSearch] = useState("");
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const modelTriggerRef = useRef<HTMLDivElement>(null);
   const modelSearchInputRef = useRef<HTMLInputElement>(null);
+  const comfyWorkflowTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [dropdownRect, setDropdownRect] = useState<{ top: number; left: number; width: number; maxH: number } | null>(
     null,
   );
@@ -188,7 +200,48 @@ export function ConnectionEditor() {
     setSaveError(null);
     setTestResult(null);
     setMsgResult(null);
+    setImgTestResult(null);
   }, [conn]);
+
+  const comfyWorkflowValidation = useMemo(() => {
+    const wf = localComfyuiWorkflow;
+    if (!wf.trim()) return null;
+    try {
+      JSON.parse(wf);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Extract character offset. "at position 123", "at line 5 column 12"
+      let charPos: number | null = null;
+      const byPos = msg.match(/at position (\d+)/);
+      if (byPos) {
+        charPos = parseInt(byPos[1]!, 10);
+      } else {
+        const byLineCol = msg.match(/at line (\d+) column[^\d]*(\d+)/i);
+        if (byLineCol) {
+          const targetLine = parseInt(byLineCol[1]!, 10) - 1;
+          const targetCol = parseInt(byLineCol[2]!, 10) - 1;
+          const lines = wf.split("\n");
+          let offset = 0;
+          for (let i = 0; i < Math.min(targetLine, lines.length); i++) offset += lines[i]!.length + 1;
+          charPos = offset + targetCol;
+        }
+      }
+      const lineNum = charPos !== null ? wf.slice(0, charPos).split("\n").length : null;
+      const labelMsg = lineNum !== null ? `Invalid JSON on line ${lineNum}` : "Invalid JSON";
+      const label = labelMsg + ": " + msg.split("\n")[0];
+      return { parseError: true as const, label, charPos };
+    }
+    const KNOWN_SUBS = [
+      { token: "%prompt%", label: "%prompt%", critical: true },
+      { token: "%negative_prompt%", label: "%negative_prompt%", critical: false },
+      { token: "%width%", label: "%width%", critical: false },
+      { token: "%height%", label: "%height%", critical: false },
+      { token: "%seed%", label: "%seed%", critical: false },
+      { token: "%model%", label: "%model%", critical: false },
+    ];
+    const missing = KNOWN_SUBS.filter(({ token }) => !wf.includes(token));
+    return { parseError: false as const, missing };
+  }, [localComfyuiWorkflow]);
 
   const effectiveImageGenerationSource = useMemo(() => {
     if (localProvider !== "image_generation") return "";
@@ -351,6 +404,26 @@ export function ConnectionEditor() {
     });
   }, [connectionDetailId, dirty, handleSave, testMessage]);
 
+  const handleTestImage = useCallback(async () => {
+    if (!connectionDetailId) return;
+    if (dirty) {
+      try {
+        await handleSave();
+      } catch {
+        return;
+      }
+    }
+    setImgTestResult(null);
+    testImageGeneration.mutate(connectionDetailId, {
+      onSuccess: (data) =>
+        setImgTestResult(
+          data as { success: boolean; base64: string | null; mimeType: string | null; latencyMs: number; prompt: string; error?: string },
+        ),
+      onError: (err) =>
+        setImgTestResult({ success: false, base64: null, mimeType: null, latencyMs: 0, prompt: "", error: err instanceof Error ? err.message : "Failed" }),
+    });
+  }, [connectionDetailId, dirty, handleSave, testImageGeneration]);
+
   const handleFetchModels = useCallback(async () => {
     if (!connectionDetailId) return;
     setFetchError(null);
@@ -387,6 +460,14 @@ export function ConnectionEditor() {
   }, []);
 
   const markDirty = useCallback(() => setDirty(true), []);
+
+  const handleJumpToJsonError = useCallback(() => {
+    const ta = comfyWorkflowTextareaRef.current;
+    if (!ta || !comfyWorkflowValidation || !comfyWorkflowValidation.parseError) return;
+    const pos = comfyWorkflowValidation.charPos ?? 0;
+    ta.focus();
+    ta.setSelectionRange(pos, pos);
+  }, [comfyWorkflowValidation]);
 
   const providerDef = PROVIDERS[localProvider];
   const isImageGenerationProvider = localProvider === "image_generation";
@@ -1025,14 +1106,55 @@ export function ConnectionEditor() {
               help="Paste a custom ComfyUI workflow JSON (API format). Use placeholders: %prompt%, %negative_prompt%, %width%, %height%, %seed%, %model%. Leave empty to use the built-in default txt2img workflow."
             >
               <textarea
+                ref={comfyWorkflowTextareaRef}
                 value={localComfyuiWorkflow}
                 onChange={(e) => {
                   setLocalComfyuiWorkflow(e.target.value);
                   markDirty();
                 }}
                 placeholder='Paste workflow JSON here (exported from ComfyUI via "Save (API Format)")…'
-                className="w-full rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-xs font-mono outline-none ring-1 ring-[var(--border)] transition-shadow placeholder:text-[var(--muted-foreground)]/50 focus:ring-sky-400/50 min-h-[120px] max-h-[300px] resize-y"
+                className={cn(
+                  "w-full rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-xs font-mono outline-none ring-1 transition-shadow placeholder:text-[var(--muted-foreground)]/50 min-h-[120px] max-h-[300px] resize-y",
+                  comfyWorkflowValidation?.parseError
+                    ? "ring-red-400/60 focus:ring-red-400"
+                    : "ring-[var(--border)] focus:ring-sky-400/50",
+                )}
               />
+              {comfyWorkflowValidation?.parseError && (
+                <p className="mt-1 flex items-start gap-1 text-[0.625rem] text-red-400">
+                  <AlertCircle size="0.625rem" className="mt-px shrink-0" />
+                  {comfyWorkflowValidation.charPos !== null ? (
+                    <button
+                      onClick={handleJumpToJsonError}
+                      className="underline decoration-dotted cursor-pointer text-left hover:text-red-300"
+                    >
+                      {comfyWorkflowValidation.label}
+                    </button>
+                  ) : (
+                    comfyWorkflowValidation.label
+                  )}
+                </p>
+              )}
+              {comfyWorkflowValidation && !comfyWorkflowValidation.parseError && comfyWorkflowValidation.missing.length > 0 && (
+                <p className="mt-1 flex items-start gap-1 text-[0.625rem] text-amber-400">
+                  <AlertCircle size="0.625rem" className="mt-px shrink-0" />
+                  <span>
+                    {comfyWorkflowValidation.missing.some((m) => m.critical) && (
+                      <><strong>%prompt%</strong> placeholder not found — prompts won&apos;t be injected. </>
+                    )}
+                    {comfyWorkflowValidation.missing.some((m) => !m.critical) && (
+                      <>
+                        Unused:{" "}
+                        {comfyWorkflowValidation.missing
+                          .filter((m) => !m.critical)
+                          .map((m) => m.label)
+                          .join(", ")}
+                        .
+                      </>
+                    )}
+                  </span>
+                </p>
+              )}
               <p className="text-[0.55rem] text-[var(--muted-foreground)] mt-1">
                 Export your workflow from ComfyUI using <strong>Save (API Format)</strong> in the menu. Placeholders
                 like <code>%prompt%</code> will be replaced at generation time.
@@ -1270,6 +1392,21 @@ export function ConnectionEditor() {
                   Send Test Message
                 </button>
               )}
+              {localProvider === "image_generation" && (
+                <button
+                  onClick={handleTestImage}
+                  disabled={testImageGeneration.isPending || dirty}
+                  className="flex items-center gap-1.5 rounded-xl bg-violet-400/10 px-4 py-2.5 text-xs font-medium text-violet-400 ring-1 ring-violet-400/20 transition-all hover:bg-violet-400/20 active:scale-[0.98] disabled:opacity-50"
+                  title={dirty ? "Save first to test image generation" : undefined}
+                >
+                  {testImageGeneration.isPending ? (
+                    <Loader2 size="0.8125rem" className="animate-spin" />
+                  ) : (
+                    <ImageIcon size="0.8125rem" />
+                  )}
+                  Test Image
+                </button>
+              )}
             </div>
 
             <p className="text-[0.625rem] text-[var(--muted-foreground)]">
@@ -1278,6 +1415,12 @@ export function ConnectionEditor() {
                 <>
                   {" "}
                   <strong>Send Test Message</strong> sends "hi" to the model and shows the response.
+                </>
+              )}
+              {localProvider === "image_generation" && (
+                <>
+                  {" "}
+                  <strong>Test Image</strong> generates a 512×512 test image (requires saving first).
                 </>
               )}
             </p>
@@ -1298,6 +1441,22 @@ export function ConnectionEditor() {
                   </div>
                 ) : (
                   <span className="text-[var(--destructive)]">{msgResult.error || "No response received"}</span>
+                )}
+              </TestResultCard>
+            )}
+
+            {/* Image test result */}
+            {imgTestResult && (
+              <TestResultCard label="Test Image" success={imgTestResult.success} latencyMs={imgTestResult.latencyMs}>
+                {imgTestResult.success && imgTestResult.base64 && imgTestResult.mimeType ? (
+                  <img
+                    src={`data:${imgTestResult.mimeType};base64,${imgTestResult.base64}`}
+                    title={imgTestResult.prompt}
+                    className="mt-2 max-w-full rounded-lg"
+                    style={{ maxHeight: 300 }}
+                  />
+                ) : (
+                  <span className="text-[var(--destructive)]">{imgTestResult.error || "No image returned"}</span>
                 )}
               </TestResultCard>
             )}

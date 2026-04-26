@@ -279,6 +279,49 @@ export async function connectionsRoutes(app: FastifyInstance) {
     }
   });
 
+  // ── Test image generation — generates a small fixed test image ──
+  app.post<{ Params: { id: string } }>("/:id/test-image", async (req, reply) => {
+    const conn = await storage.getWithKey(req.params.id);
+    if (!conn) return reply.status(404).send({ error: "Connection not found" });
+    if (conn.provider !== "image_generation") {
+      return reply.status(400).send({ error: "Not an image generation connection" });
+    }
+
+    const { PROVIDERS } = await import("@marinara-engine/shared");
+    const providerDef = PROVIDERS[conn.provider as keyof typeof PROVIDERS];
+    const baseUrl = (conn.baseUrl || providerDef?.defaultBaseUrl || "").replace(/\/+$/, "");
+
+    const { generateImage } = await import("../services/image/image-generation.js");
+    const imgModel = (conn as any).model || "";
+    const imgApiKey = conn.apiKey || "";
+    const imgSource = (conn as any).imageGenerationSource || imgModel;
+    const imgServiceHint = (conn as any).imageService || imgSource;
+
+    const BASE_PROMPT = "plate of spaghetti with marinara sauce";
+    const effectivePrompt = [BASE_PROMPT].filter(Boolean).join(" ");
+
+    const start = Date.now();
+    try {
+      const result = await generateImage(imgModel, baseUrl, imgApiKey, imgServiceHint, {
+        prompt: BASE_PROMPT,
+        model: imgModel || undefined,
+        width: 512,
+        height: 512,
+        comfyWorkflow: (conn as any).comfyuiWorkflow || undefined,
+      });
+      return { success: true, base64: result.base64, mimeType: result.mimeType, latencyMs: Date.now() - start, prompt: effectivePrompt };
+    } catch (err) {
+      return {
+        success: false,
+        base64: null,
+        mimeType: null,
+        latencyMs: Date.now() - start,
+        prompt: effectivePrompt,
+        error: err instanceof Error ? err.message : "Unknown error",
+      };
+    }
+  });
+
   // ── Test message — sends "hi" to the model and returns the response ──
   app.post<{ Params: { id: string } }>("/:id/test-message", async (req, reply) => {
     const conn = await storage.getWithKey(req.params.id);
