@@ -6,132 +6,142 @@ import { PROFESSOR_MARI_ID } from "@marinara-engine/shared";
 import { useChatStore } from "../../stores/chat.store";
 import { useChat } from "../../hooks/use-chats";
 
-/** Minimum visible duration so fast command runs (single DB write) still register. */
+/** Minimum visible duration so fast phases (single DB write) still register. */
 const MIN_VISIBLE_MS = 600;
 
+type MariPhase = "thinking" | "updating" | "idle";
+
+const PHASE_LABEL: Record<Exclude<MariPhase, "idle">, string> = {
+  thinking: "Mari is thinking…",
+  updating: "Mari is updating your stuff…",
+};
+
 /**
- * Visible-while-working signal for the post-stream command window.
+ * Visible-while-working signal for Mari's two work phases:
  *
- * Mari's embedded commands (create_character, update_character, fetch, …)
- * execute in a server-side loop after her reply finishes streaming. During
- * that window the UI is otherwise silent — no tokens, no typing indicator —
- * so a user who asked her to modify their data can't tell whether she's
- * still working or stalled.
+ * 1. `thinking` — Mari is generating her reply (token streaming has begun).
+ * 2. `updating` — Mari is running embedded commands (create_character,
+ *    update_character, fetch, …) in the post-stream loop.
  *
- * The server emits `assistant_commands_start` / `assistant_commands_end`
- * SSE events around the command loop; `commandsExecutingChatId` mirrors
- * that window. We only surface the indicator in chats where Mari is a
- * participant so non-Mari commands (schedule_update, cross_post, etc.)
- * don't mistakenly trigger a "Mari is thinking" pill.
+ * Without this pill the UI is otherwise silent during those phases, so a
+ * user who asked her to do something can't tell whether she's still working
+ * or stalled.
  *
- * The store is observed via Zustand's direct `subscribe` rather than a
- * selector hook: simple DB commands complete in a fraction of a tick, so
- * the start and end state updates land in the same React batch and the
- * component would never render the intermediate active state. The direct
- * subscribe fires once per state change, capturing both transitions.
+ * Transport: window CustomEvents `marinara:mari-phase` dispatched by
+ * use-generate.ts. We previously tried a Zustand subscribeWithSelector
+ * subscription; in this codebase that combination has documented timing
+ * issues with React 19 batching that drop fast transitions (see
+ * GameSurface.tsx for the same workaround). CustomEvents fire synchronously
+ * and outside React's batching, so the indicator reliably observes every
+ * phase change.
  *
- * A minimum visible duration (MIN_VISIBLE_MS) keeps the pill on-screen
- * long enough to perceive even when a command finishes in under a
- * millisecond.
+ * A minimum visible duration keeps each phase on-screen long enough to
+ * perceive even when it finishes in under a millisecond.
  */
+function isMariParticipant(activeChat: unknown): boolean {
+  // characterIds arrives as an array (typed) or a JSON-encoded string
+  // (raw SQLite column) depending on the endpoint that produced it.
+  const raw = (activeChat as { characterIds?: unknown } | null | undefined)?.characterIds;
+  if (Array.isArray(raw)) return raw.includes(PROFESSOR_MARI_ID);
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) && parsed.includes(PROFESSOR_MARI_ID);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 export const MariThinkingIndicator = memo(function MariThinkingIndicator() {
   const activeChatId = useChatStore((s) => s.activeChatId);
   const { data: activeChat } = useChat(activeChatId);
+  const isMariChat = useMemo(() => isMariParticipant(activeChat), [activeChat]);
 
-  const isMariChat = useMemo(() => {
-    // characterIds can arrive as an array or a JSON-encoded string depending on endpoint.
-    const raw = (activeChat as { characterIds?: unknown } | null | undefined)?.characterIds;
-    if (Array.isArray(raw)) return raw.includes(PROFESSOR_MARI_ID);
-    if (typeof raw === "string") {
-      try {
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) && parsed.includes(PROFESSOR_MARI_ID);
-      } catch {
-        return false;
-      }
-    }
-    return false;
-  }, [activeChat]);
-
-  const [visible, setVisible] = useState(false);
-  const shownAtRef = useRef(0);
-  /**
-   * chatId that owns the currently-visible pill. Used to bypass the
-   * minimum-duration hide when the user switches away to a different chat —
-   * otherwise a lingering timer would briefly show "Mari is thinking…" in a
-   * chat where nothing is executing.
-   */
+  const [phase, setPhase] = useState<MariPhase>("idle");
+  const phaseShownAtRef = useRef(0);
   const visibleChatIdRef = useRef<string | null>(null);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeChatIdRef = useRef(activeChatId);
+  activeChatIdRef.current = activeChatId;
+  const isMariChatRef = useRef(isMariChat);
+  isMariChatRef.current = isMariChat;
 
+  // Hide immediately when the user leaves a Mari chat — the pill belongs to
+  // the previous chat and shouldn't linger into a chat that doesn't even
+  // qualify for the indicator.
   useEffect(() => {
-    if (!isMariChat) {
+    if (isMariChat) return;
+    if (hideTimerRef.current) {
+      clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+    visibleChatIdRef.current = null;
+    setPhase("idle");
+  }, [isMariChat]);
+
+  // If the active chat changes while the pill is showing for a different
+  // chat, hide it immediately — don't let the min-duration timer leak the
+  // pill into an unrelated chat.
+  useEffect(() => {
+    if (visibleChatIdRef.current && visibleChatIdRef.current !== activeChatId) {
       if (hideTimerRef.current) {
         clearTimeout(hideTimerRef.current);
         hideTimerRef.current = null;
       }
       visibleChatIdRef.current = null;
-      setVisible(false);
-      return;
+      setPhase("idle");
     }
+  }, [activeChatId]);
 
-    const evaluate = () => {
-      const { commandsExecutingChatIds, activeChatId: currentActive } = useChatStore.getState();
-      const shouldShow = !!currentActive && commandsExecutingChatIds.has(currentActive);
-      if (shouldShow) {
-        if (hideTimerRef.current) {
-          clearTimeout(hideTimerRef.current);
-          hideTimerRef.current = null;
-        }
-        // Reset the minimum-duration start only when the pill first opens
-        // (or re-opens for a different chat) — not on every re-evaluate.
-        if (visibleChatIdRef.current !== currentActive) {
-          shownAtRef.current = Date.now();
-        }
-        visibleChatIdRef.current = currentActive;
-        setVisible(true);
-      } else {
-        // If the user switched away from the chat that owns the visible
-        // pill, hide immediately — don't let the minimum-duration timer
-        // linger into a chat where nothing is executing.
-        if (visibleChatIdRef.current && currentActive !== visibleChatIdRef.current) {
-          if (hideTimerRef.current) {
-            clearTimeout(hideTimerRef.current);
-            hideTimerRef.current = null;
-          }
-          visibleChatIdRef.current = null;
-          setVisible(false);
-          return;
-        }
+  useEffect(() => {
+    const onPhase = (e: Event) => {
+      const detail = (e as CustomEvent<{ chatId?: string; phase?: MariPhase }>).detail;
+      const chatId = detail?.chatId;
+      const nextPhase = detail?.phase;
+      if (!chatId || !nextPhase) return;
+
+      // Idle event from a chat we don't own — nothing to hide here.
+      if (nextPhase === "idle" && visibleChatIdRef.current !== chatId) return;
+
+      if (nextPhase === "idle") {
         if (hideTimerRef.current) return;
-        // Nothing currently owns the pill, so there's nothing to hide — avoid
-        // scheduling a no-op setTimeout that would later fire setVisible(false)
-        // on already-hidden state.
-        if (!visibleChatIdRef.current) return;
-        const elapsed = Date.now() - shownAtRef.current;
+        const elapsed = Date.now() - phaseShownAtRef.current;
         const remaining = Math.max(0, MIN_VISIBLE_MS - elapsed);
         hideTimerRef.current = setTimeout(() => {
           hideTimerRef.current = null;
           visibleChatIdRef.current = null;
-          setVisible(false);
+          setPhase("idle");
         }, remaining);
+        return;
       }
+
+      // thinking / updating — only show in the chat the user is looking at,
+      // and only if Mari is a participant.
+      if (!isMariChatRef.current) return;
+      if (chatId !== activeChatIdRef.current) return;
+
+      if (hideTimerRef.current) {
+        clearTimeout(hideTimerRef.current);
+        hideTimerRef.current = null;
+      }
+      phaseShownAtRef.current = Date.now();
+      visibleChatIdRef.current = chatId;
+      setPhase(nextPhase);
     };
 
-    evaluate();
-    const unsubChatIds = useChatStore.subscribe((s) => s.commandsExecutingChatIds, evaluate);
-    const unsubActive = useChatStore.subscribe((s) => s.activeChatId, evaluate);
+    window.addEventListener("marinara:mari-phase", onPhase);
     return () => {
-      unsubChatIds();
-      unsubActive();
+      window.removeEventListener("marinara:mari-phase", onPhase);
       if (hideTimerRef.current) {
         clearTimeout(hideTimerRef.current);
         hideTimerRef.current = null;
       }
     };
-  }, [isMariChat]);
+  }, []);
 
-  if (!visible) return null;
+  if (phase === "idle") return null;
 
   return (
     <div
@@ -144,7 +154,7 @@ export const MariThinkingIndicator = memo(function MariThinkingIndicator() {
         <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse [animation-delay:200ms]" />
         <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse [animation-delay:400ms]" />
       </span>
-      <span>Mari is thinking…</span>
+      <span>{PHASE_LABEL[phase]}</span>
     </div>
   );
 });

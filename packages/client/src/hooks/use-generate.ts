@@ -540,11 +540,18 @@ export function useGenerate() {
         rafId = requestAnimationFrame(tick);
       };
 
-      // Safety net: guarantees the "Mari is thinking…" indicator clears for
-      // this chat on every termination path (done, error, abort, unexpected
+      // Safety net: guarantees the Mari work-status pill clears for this
+      // chat on every termination path (done, error, abort, unexpected
       // throw). The assistant_commands_end SSE event is still the primary
       // clear; this just keeps state sane when the stream dies mid-window.
-      const clearCommandsExecutingForThisChat = () => setCommandsExecuting(params.chatId, false);
+      const clearCommandsExecutingForThisChat = () => {
+        setCommandsExecuting(params.chatId, false);
+        window.dispatchEvent(
+          new CustomEvent("marinara:mari-phase", {
+            detail: { chatId: params.chatId, phase: "idle" },
+          }),
+        );
+      };
 
       try {
         const userStatus = useUIStore.getState().userStatus;
@@ -560,6 +567,7 @@ export function useGenerate() {
         )) {
           switch (event.type) {
             case "token": {
+              const isFirstToken = !receivedContent;
               receivedContent = true;
               // Always clear per-chat indicators so switching back shows nothing
               useChatStore.getState().setPerChatTyping(params.chatId, null);
@@ -568,6 +576,16 @@ export function useGenerate() {
                 setTypingCharacterName(null); // Clear typing indicator once response starts
                 setDelayedCharacterInfo(null); // Clear delayed indicator too
                 useChatStore.getState().setGenerationPhase(null); // Clear phase indicator
+              }
+              // Fire the "Mari is thinking…" pill on the first token — that's
+              // the same moment "X is typing…" clears, so the two indicators
+              // never overlap.
+              if (isFirstToken) {
+                window.dispatchEvent(
+                  new CustomEvent("marinara:mari-phase", {
+                    detail: { chatId: params.chatId, phase: "thinking" },
+                  }),
+                );
               }
 
               let chunk = event.data as string;
@@ -1068,6 +1086,11 @@ export function useGenerate() {
 
             case "assistant_commands_start": {
               setCommandsExecuting(params.chatId, true);
+              window.dispatchEvent(
+                new CustomEvent("marinara:mari-phase", {
+                  detail: { chatId: params.chatId, phase: "updating" },
+                }),
+              );
               break;
             }
 
@@ -1367,6 +1390,7 @@ export function useGenerate() {
     [
       qc,
       setStreaming,
+      setCommandsExecuting,
       setStreamBuffer,
       clearStreamBuffer,
       setRegenerateMessageId,
