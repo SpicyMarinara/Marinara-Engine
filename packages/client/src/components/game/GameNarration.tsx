@@ -1,7 +1,16 @@
 // ──────────────────────────────────────────────
 // Game: Narration Area (VN-style segmented box)
 // ──────────────────────────────────────────────
-import { useEffect, useMemo, useState, useCallback, useRef, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+  useRef,
+  type ReactNode,
+  type MouseEvent as ReactMouseEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import DOMPurify from "dompurify";
 import { MessageCircle, RefreshCw, ScrollText, X, Package, Pencil, Check, Play, Pause, Trash2 } from "lucide-react";
 import { cn } from "../../lib/utils";
@@ -1892,18 +1901,36 @@ export function GameNarration({
                         sourceMessageId === latestAssistant.id &&
                         liveSegmentIndex >= 0 &&
                         liveSegmentIndex !== activeIndex;
-                      const handleSegRowClick = canJumpToSeg
-                        ? (e: ReactMouseEvent<HTMLDivElement>) => {
-                            const target = e.target as HTMLElement;
-                            if (target.closest("button, input, textarea, a")) return;
-                            setActiveIndex(liveSegmentIndex);
-                            setVisibleChars(getSegmentStartVisibleChars(liveSegmentIndex));
-                            setLogsOpen(false);
-                            setEditingLogSeg(null);
-                            logScrolledRef.current = false;
+                      const performJump = () => {
+                        setActiveIndex(liveSegmentIndex);
+                        setVisibleChars(getSegmentStartVisibleChars(liveSegmentIndex));
+                        setLogsOpen(false);
+                        setEditingLogSeg(null);
+                        logScrolledRef.current = false;
+                        playClickSfx();
+                      };
+                      const isInteractiveTarget = (target: EventTarget | null) =>
+                        target instanceof HTMLElement && !!target.closest("button, input, textarea, a");
+                      const jumpRowProps = canJumpToSeg
+                        ? {
+                            role: "button" as const,
+                            tabIndex: 0,
+                            title: "Jump back to this segment",
+                            onClick: (e: ReactMouseEvent<HTMLDivElement>) => {
+                              if (isInteractiveTarget(e.target)) return;
+                              performJump();
+                            },
+                            onKeyDown: (e: ReactKeyboardEvent<HTMLDivElement>) => {
+                              if (e.key !== "Enter" && e.key !== " ") return;
+                              if (isInteractiveTarget(e.target)) return;
+                              e.preventDefault();
+                              performJump();
+                            },
                           }
-                        : undefined;
-                      const jumpRowClasses = canJumpToSeg ? "cursor-pointer hover:ring-1 hover:ring-white/15" : "";
+                        : null;
+                      const jumpRowClasses = canJumpToSeg
+                        ? "cursor-pointer hover:ring-1 hover:ring-white/15 focus:outline-none focus-visible:ring-1 focus-visible:ring-white/30"
+                        : "";
                       const canEditMessage = !!onEditMessage && !!sourceMessageId && sourceRole === "user";
                       const canEditSegment =
                         !!onEditSegment &&
@@ -2045,8 +2072,7 @@ export function GameNarration({
                         return (
                           <div
                             key={seg.id}
-                            onClick={handleSegRowClick}
-                            title={canJumpToSeg ? "Jump back to this segment" : undefined}
+                            {...(jumpRowProps ?? {})}
                             className={cn(
                               "group/logseg relative flex gap-2 rounded-lg border px-3 py-2",
                               seg.partyType === "thought"
@@ -2131,8 +2157,7 @@ export function GameNarration({
                         return (
                           <div
                             key={seg.id}
-                            onClick={handleSegRowClick}
-                            title={canJumpToSeg ? "Jump back to this segment" : undefined}
+                            {...(jumpRowProps ?? {})}
                             className={cn(
                               "group/logseg relative rounded-lg border border-cyan-400/15 bg-cyan-950/15 px-3 py-2",
                               isActiveSeg && "ring-1 ring-[var(--primary)]/40",
@@ -2156,8 +2181,7 @@ export function GameNarration({
                         return (
                           <div
                             key={seg.id}
-                            onClick={handleSegRowClick}
-                            title={canJumpToSeg ? "Jump back to this segment" : undefined}
+                            {...(jumpRowProps ?? {})}
                             className={cn(
                               "group/logseg relative rounded-lg border border-amber-400/15 bg-amber-950/15 px-3 py-2",
                               isActiveSeg && "ring-1 ring-[var(--primary)]/40",
@@ -2187,8 +2211,7 @@ export function GameNarration({
                       return (
                         <div
                           key={seg.id}
-                          onClick={handleSegRowClick}
-                          title={canJumpToSeg ? "Jump back to this segment" : undefined}
+                          {...(jumpRowProps ?? {})}
                           className={cn(
                             "group/logseg relative rounded-lg border border-white/5 bg-black/20 px-3 py-2",
                             isActiveSeg && "ring-1 ring-[var(--primary)]/40",
