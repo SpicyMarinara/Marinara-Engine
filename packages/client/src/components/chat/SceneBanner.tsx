@@ -106,11 +106,23 @@ export function EndSceneBar({
 }: {
   sceneChatId: string;
   originChatId?: string;
-  onConclude: (id: string) => void;
+  onConclude: (id: string) => void | Promise<void>;
   onAbandon?: (id: string) => void;
 }) {
   const setActiveChatId = useChatStore((s) => s.setActiveChatId);
+  const [confirmEnd, setConfirmEnd] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [isEnding, setIsEnding] = useState(false);
+
+  const handleConfirmEnd = async () => {
+    if (isEnding) return;
+    setIsEnding(true);
+    try {
+      await onConclude(sceneChatId);
+    } finally {
+      setIsEnding(false);
+    }
+  };
 
   return (
     <div className="flex items-center justify-center gap-2 py-1.5">
@@ -129,22 +141,56 @@ export function EndSceneBar({
           Back to conversation
         </button>
       )}
-      <button
-        onClick={() => onConclude(sceneChatId)}
-        className="flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-medium transition-all hover:opacity-80"
-        style={{
-          background: "var(--card)",
-          color: "var(--card-foreground)",
-          border: "1px solid var(--border)",
-        }}
-        title="End the scene and generate a summary"
-      >
-        <Film size={14} />
-        End Scene
-      </button>
+      {!confirmEnd && (
+        <button
+          onClick={() => {
+            setConfirmDiscard(false);
+            setConfirmEnd(true);
+          }}
+          className="flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-medium transition-all hover:opacity-80"
+          style={{
+            background: "var(--card)",
+            color: "var(--card-foreground)",
+            border: "1px solid var(--border)",
+          }}
+          title="End the scene and generate a summary"
+        >
+          <Film size={14} />
+          End Scene
+        </button>
+      )}
+      {confirmEnd && (
+        <div className="flex items-center gap-1.5">
+          <span className="text-[0.6875rem] text-[var(--foreground)]">End and save summary?</span>
+          <button
+            onClick={handleConfirmEnd}
+            disabled={isEnding}
+            className="rounded-lg px-2 py-0.5 text-[0.6875rem] font-medium transition-all hover:opacity-80"
+            style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
+          >
+            {isEnding ? "Saving..." : "Yes"}
+          </button>
+          <button
+            onClick={() => setConfirmEnd(false)}
+            disabled={isEnding}
+            className="rounded-lg px-2 py-0.5 text-[0.6875rem] font-medium transition-all hover:opacity-80"
+            style={{
+              background: "var(--card)",
+              color: "var(--card-foreground)",
+              border: "1px solid var(--border)",
+            }}
+          >
+            No
+          </button>
+        </div>
+      )}
       {onAbandon && !confirmDiscard && (
         <button
-          onClick={() => setConfirmDiscard(true)}
+          onClick={() => {
+            setConfirmEnd(false);
+            setConfirmDiscard(true);
+          }}
+          disabled={isEnding}
           className="flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-medium transition-all hover:opacity-80"
           style={{
             color: "var(--muted-foreground)",
