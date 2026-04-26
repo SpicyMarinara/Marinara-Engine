@@ -126,6 +126,21 @@ export const ANTHROPIC_MODELS: KnownModel[] = [
   { id: "claude-3-haiku-20240307", name: "claude-3-haiku-20240307", context: 200000, maxOutput: 4096 },
 ];
 
+// ── Claude (Subscription via Claude Agent SDK) ──
+// Models reachable through the local `claude` CLI auth (Pro / Max). Anthropic
+// gates which model IDs are available per plan tier; the SDK surfaces a clear
+// error if the signed-in plan can't run the requested model. We keep this list
+// to the current tool-eligible families to avoid offering retired aliases that
+// the subscription path no longer accepts.
+export const CLAUDE_SUBSCRIPTION_MODELS: KnownModel[] = [
+  { id: "claude-opus-4-7", name: "Claude Opus 4.7", context: 1000000, maxOutput: 128000 },
+  { id: "claude-opus-4-6", name: "Claude Opus 4.6", context: 1000000, maxOutput: 32000 },
+  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", context: 1000000, maxOutput: 32000 },
+  { id: "claude-opus-4-5", name: "Claude Opus 4.5", context: 1000000, maxOutput: 32000 },
+  { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", context: 1000000, maxOutput: 16000 },
+  { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", context: 200000, maxOutput: 8192 },
+];
+
 // ── Google AI Studio (from #model_google_select) ──
 
 export const GOOGLE_MODELS: KnownModel[] = [
@@ -515,6 +530,7 @@ export function inferImageSource(model: string, baseUrl: string): string {
 export const MODEL_LISTS: Record<APIProvider, KnownModel[]> = {
   openai: OPENAI_MODELS,
   anthropic: ANTHROPIC_MODELS,
+  claude_subscription: CLAUDE_SUBSCRIPTION_MODELS,
   google: GOOGLE_MODELS,
   mistral: MISTRAL_MODELS,
   cohere: COHERE_MODELS,

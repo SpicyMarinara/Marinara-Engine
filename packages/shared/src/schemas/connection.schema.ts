@@ -6,6 +6,7 @@ import { z } from "zod";
 export const apiProviderSchema = z.enum([
   "openai",
   "anthropic",
+  "claude_subscription",
   "google",
   "mistral",
   "cohere",

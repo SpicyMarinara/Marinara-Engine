@@ -556,6 +556,34 @@ export function ConnectionEditor() {
             </div>
           </FieldGroup>
 
+          {/* ── Claude (Subscription) — prerequisites notice ── */}
+          {localProvider === "claude_subscription" && (
+            <div className="rounded-xl bg-sky-400/5 px-3 py-2.5 ring-1 ring-sky-400/30">
+              <p className="flex items-start gap-1.5 text-[0.6875rem] text-sky-300">
+                <AlertCircle size="0.75rem" className="mt-px shrink-0" />
+                <span>
+                  Routes chat through your local <strong>Claude Code</strong> install so it bills against your
+                  Anthropic <strong>Pro / Max</strong> subscription instead of an API key. Prerequisites on the
+                  Marinara host:
+                </span>
+              </p>
+              <ol className="mt-1.5 ml-4 list-decimal space-y-0.5 text-[0.625rem] text-[var(--muted-foreground)]">
+                <li>
+                  Install Claude Code:{" "}
+                  <code className="rounded bg-[var(--secondary)] px-1">npm i -g @anthropic-ai/claude-code</code>
+                </li>
+                <li>
+                  Sign in once: <code className="rounded bg-[var(--secondary)] px-1">claude login</code>
+                </li>
+                <li>API Key and Base URL are not required — leave them blank.</li>
+              </ol>
+              <p className="mt-1.5 text-[0.625rem] text-[var(--muted-foreground)]">
+                Subscription auth is the same mechanism Visual Studio Code and other Anthropic-endorsed IDE integrations
+                use. Embeddings are not available on this provider; configure a separate connection for embedding work.
+              </p>
+            </div>
+          )}
+
           {/* ── OpenRouter Provider Preference ── */}
           {localProvider === "openrouter" && (
             <FieldGroup
@@ -600,13 +628,22 @@ export function ConnectionEditor() {
                 markDirty();
               }}
               type="password"
-              className="w-full rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-              placeholder={conn ? "••••••••  (leave empty to keep existing key)" : "Enter API key…"}
+              className="w-full rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-70"
+              placeholder={
+                localProvider === "claude_subscription"
+                  ? "Not used — managed by the Claude Agent SDK"
+                  : conn
+                    ? "••••••••  (leave empty to keep existing key)"
+                    : "Enter API key…"
+              }
+              disabled={localProvider === "claude_subscription"}
             />
-            <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
-              Your key is encrypted at rest. Leave blank when editing to keep the existing key.
-            </p>
-            {API_KEY_LINKS[localProvider] && (
+            {localProvider !== "claude_subscription" && (
+              <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
+                Your key is encrypted at rest. Leave blank when editing to keep the existing key.
+              </p>
+            )}
+            {localProvider !== "claude_subscription" && API_KEY_LINKS[localProvider] && (
               <a
                 href={API_KEY_LINKS[localProvider]!.url}
                 target="_blank"
@@ -621,6 +658,12 @@ export function ConnectionEditor() {
               <p className="mt-1.5 text-[0.625rem] text-[var(--muted-foreground)]">
                 For local models (Ollama, LM Studio, KoboldCpp, etc.) you can leave this empty — just set the Base URL
                 below.
+              </p>
+            )}
+            {localProvider === "claude_subscription" && (
+              <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
+                Authentication is read from your local{" "}
+                <code className="rounded bg-[var(--secondary)] px-1">claude</code> CLI session.
               </p>
             )}
           </FieldGroup>
@@ -638,11 +681,22 @@ export function ConnectionEditor() {
                 markDirty();
               }}
               className="w-full rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm font-mono ring-1 ring-[var(--border)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-              placeholder={providerDef?.defaultBaseUrl || "https://api.example.com/v1"}
+              placeholder={
+                localProvider === "claude_subscription"
+                  ? "Not used — managed by the Claude Agent SDK"
+                  : providerDef?.defaultBaseUrl || "https://api.example.com/v1"
+              }
+              disabled={localProvider === "claude_subscription"}
             />
             {providerDef?.defaultBaseUrl && !localBaseUrl && (
               <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
                 Default: {providerDef.defaultBaseUrl}
+              </p>
+            )}
+            {localProvider === "claude_subscription" && (
+              <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
+                The Claude Agent SDK selects the endpoint automatically based on your local{" "}
+                <code className="rounded bg-[var(--secondary)] px-1">claude</code> CLI auth.
               </p>
             )}
             {localProvider === "custom" && (
@@ -653,12 +707,15 @@ export function ConnectionEditor() {
                 <code className="rounded bg-[var(--secondary)] px-1">http://localhost:5001/v1</code>
               </p>
             )}
-            <p className="mt-1.5 flex items-start gap-1 text-[0.625rem] text-amber-400/80">
-              <AlertCircle size="0.625rem" className="mt-px shrink-0" />
-              <span>
-                Only use URLs from providers you trust. A malicious endpoint could intercept your messages and API keys.
-              </span>
-            </p>
+            {localProvider !== "claude_subscription" && (
+              <p className="mt-1.5 flex items-start gap-1 text-[0.625rem] text-amber-400/80">
+                <AlertCircle size="0.625rem" className="mt-px shrink-0" />
+                <span>
+                  Only use URLs from providers you trust. A malicious endpoint could intercept your messages and API
+                  keys.
+                </span>
+              </p>
+            )}
             {localProvider === "custom" && (
               <p className="mt-1.5 flex items-start gap-1 text-[0.625rem] text-sky-400/80">
                 <AlertCircle size="0.625rem" className="mt-px shrink-0" />
@@ -1012,7 +1069,7 @@ export function ConnectionEditor() {
           )}
 
           {/* ── Max Tokens Override ── */}
-          {localProvider !== "image_generation" && (
+          {localProvider !== "image_generation" && localProvider !== "claude_subscription" && (
             <FieldGroup
               label="Max Tokens Override"
               icon={<Zap size="0.875rem" className="text-amber-400" />}
@@ -1113,7 +1170,7 @@ export function ConnectionEditor() {
           </FieldGroup>
 
           {/* ── Embedding Model (for lorebook vectorization) ── */}
-          {localProvider !== "image_generation" && (
+          {localProvider !== "image_generation" && localProvider !== "claude_subscription" && (
             <FieldGroup
               label="Embedding Model"
               icon={<Server size="0.875rem" className="text-violet-400" />}

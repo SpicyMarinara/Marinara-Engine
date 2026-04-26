@@ -3,6 +3,7 @@
 // ──────────────────────────────────────────────
 import { OpenAIProvider } from "./providers/openai.provider.js";
 import { AnthropicProvider } from "./providers/anthropic.provider.js";
+import { ClaudeSubscriptionProvider } from "./providers/claude-subscription.provider.js";
 import { GoogleProvider } from "./providers/google.provider.js";
 import type { BaseLLMProvider } from "./base-provider.js";
 
@@ -36,6 +37,14 @@ export function createLLMProvider(
       return new OpenAIProvider(baseUrl, apiKey, normalizedMaxContext, openrouterProvider, normalizedMaxTokensOverride);
     case "anthropic":
       return new AnthropicProvider(baseUrl, apiKey, normalizedMaxContext, openrouterProvider, normalizedMaxTokensOverride);
+    case "claude_subscription":
+      return new ClaudeSubscriptionProvider(
+        baseUrl,
+        apiKey,
+        normalizedMaxContext,
+        openrouterProvider,
+        normalizedMaxTokensOverride,
+      );
     case "google":
       return new GoogleProvider(baseUrl, apiKey, normalizedMaxContext, openrouterProvider, normalizedMaxTokensOverride);
     default:

@@ -34,6 +34,18 @@ export const PROVIDERS: Record<APIProvider, ProviderDefinition> = {
     usesAuthHeader: false,
     apiKeyHeader: "x-api-key",
   },
+  claude_subscription: {
+    id: "claude_subscription",
+    name: "Claude (Subscription)",
+    // No base URL — the Claude Agent SDK reads credentials stored locally by the
+    // Claude Code CLI (`claude login`) and routes requests through Anthropic's
+    // first-party endpoints on behalf of the signed-in Pro / Max account.
+    defaultBaseUrl: "",
+    modelsEndpoint: "",
+    supportsStreaming: true,
+    usesAuthHeader: false,
+    apiKeyHeader: null,
+  },
   google: {
     id: "google",
     name: "Google Gemini",
