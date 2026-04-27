@@ -728,9 +728,11 @@ export const ChatInput = memo(function ChatInput({
             onClick={() => setCharPickerOpen((v) => !v)}
             className={cn(
               "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
-              charPickerOpen
-                ? "text-foreground bg-foreground/10"
-                : "text-foreground/40 hover:bg-foreground/10 hover:text-foreground/70",
+              guideGenerations && hasInput
+                ? "text-[var(--primary)] bg-[var(--primary)]/15 ring-1 ring-[var(--primary)]/30 hover:bg-[var(--primary)]/20"
+                : charPickerOpen
+                  ? "text-foreground bg-foreground/10"
+                  : "text-foreground/40 hover:bg-foreground/10 hover:text-foreground/70",
             )}
             title={(guideGenerations && hasInput) ? "Trigger character response (guided)" : "Trigger character response"}
           >

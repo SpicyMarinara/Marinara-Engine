@@ -271,7 +271,11 @@ export const ConversationMessage = memo(function ConversationMessage({
   const editRef = useRef<HTMLTextAreaElement>(null);
   const hasInput = useChatStore((s) => s.currentInput.trim().length > 0);
   const guideGenerations = useUIStore((s) => s.guideGenerations);
-  const regenerateButtonTitle = (guideGenerations && hasInput) ? "Regenerate (guided)" : "Regenerate";
+  const isGuided = guideGenerations && hasInput;
+  const regenerateButtonTitle = isGuided ? "Regenerate (guided)" : "Regenerate";
+  const regenerateGuidedClass = isGuided
+    ? "text-[var(--primary)] bg-[var(--primary)]/15 ring-1 ring-[var(--primary)]/30 hover:text-[var(--primary)] hover:bg-[var(--primary)]/20"
+    : undefined;
 
   // Translation
   const { translate, translations, translating } = useTranslate();
@@ -739,6 +743,7 @@ export const ConversationMessage = memo(function ConversationMessage({
             icon={<RefreshCw size="0.75rem" />}
             onClick={() => onRegenerate?.(message.id)}
             title={regenerateButtonTitle}
+            className={regenerateGuidedClass}
           />
           {isLastAssistantMessage && (
             <MsgAction icon={<Eye size="0.75rem" />} onClick={() => onPeekPrompt?.()} title="Peek prompt" />
@@ -1017,6 +1022,7 @@ export const ConversationMessage = memo(function ConversationMessage({
               icon={<RefreshCw size="0.75rem" />}
               onClick={() => onRegenerate?.(message.id)}
               title={regenerateButtonTitle}
+              className={regenerateGuidedClass}
             />
           )}
           {isLastAssistantMessage && !isUser && (

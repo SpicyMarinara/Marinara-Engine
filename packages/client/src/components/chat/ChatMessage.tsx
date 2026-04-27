@@ -477,7 +477,11 @@ export const ChatMessage = memo(function ChatMessage({
     })),
   );
   const hasInput = useChatStore((s) => s.currentInput.trim().length > 0);
-  const regenerateButtonTitle = (guideGenerations && hasInput) ? "Regenerate (guided)" : "Regenerate";
+  const isGuided = guideGenerations && hasInput;
+  const regenerateButtonTitle = isGuided ? "Regenerate (guided)" : "Regenerate";
+  const regenerateGuidedClass = isGuided
+    ? "text-[var(--primary)] bg-[var(--primary)]/15 ring-1 ring-[var(--primary)]/30 hover:text-[var(--primary)]"
+    : undefined;
 
   // Build reusable text style objects (memoized to avoid unnecessary DOM updates)
   const textStrokeStyle = useMemo<React.CSSProperties>(
@@ -1393,6 +1397,7 @@ export const ChatMessage = memo(function ChatMessage({
                 icon={<RefreshCw size="0.6875rem" />}
                 onClick={() => onRegenerate?.(message.id)}
                 title={regenerateButtonTitle}
+                className={regenerateGuidedClass}
                 dark
               />
               <ActionBtn
@@ -1729,6 +1734,7 @@ export const ChatMessage = memo(function ChatMessage({
               icon={<RefreshCw size="0.625rem" />}
               onClick={() => onRegenerate?.(message.id)}
               title={regenerateButtonTitle}
+              className={regenerateGuidedClass}
             />
             <ActionBtn
               icon={<Flag size="0.625rem" />}
