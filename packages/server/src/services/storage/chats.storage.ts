@@ -224,9 +224,11 @@ export function createChatsStorage(db: DB) {
      * Bulk-insert messages in a single transaction. Much faster than one-by-one
      * createMessage calls (especially on Windows/NTFS where each transaction fsync is expensive).
      *
-     * Callers may pass `createdAt`, message `extra`, and swipe `swipeExtra`
+     * Callers may pass `createdAt`, message `extra`, `activeSwipeIndex`,
+     * and either the first swipe's `swipeExtra` or the full `swipes` list
      * when cloning/importing existing transcripts so attachments, persona
-     * snapshots, hidden context flags, and original timestamps survive the copy.
+     * snapshots, hidden context flags, alternate swipes, and original
+     * timestamps survive the copy.
      *
      * Does NOT return the created messages or update chat.updatedAt per message —
      * caller should update chat.updatedAt once after the batch.
@@ -237,7 +239,14 @@ export function createChatsStorage(db: DB) {
         Omit<CreateMessageInput, "chatId"> & {
           createdAt?: string | null;
           extra?: unknown;
+          activeSwipeIndex?: number;
           swipeExtra?: unknown;
+          swipes?: Array<{
+            index: number;
+            content: string;
+            extra?: unknown;
+            createdAt?: string | null;
+          }>;
         }
       >,
       timestampOverrides?: TimestampOverrides | null,
@@ -265,7 +274,7 @@ export function createChatsStorage(db: DB) {
           role: input.role,
           characterId: input.characterId,
           content: input.content,
-          activeSwipeIndex: 0,
+          activeSwipeIndex: input.activeSwipeIndex ?? 0,
           extra: serializeJsonField(input.extra, {
             displayText: null,
             isGenerated: input.role !== "user",
@@ -274,14 +283,26 @@ export function createChatsStorage(db: DB) {
           }),
           createdAt: timestamp,
         });
-        swipeRows.push({
-          id: newId(),
-          messageId: id,
-          index: 0,
-          content: input.content,
-          extra: serializeJsonField(input.swipeExtra, {}),
-          createdAt: timestamp,
-        });
+        const inputSwipes = input.swipes?.length
+          ? [...input.swipes].sort((a, b) => a.index - b.index)
+          : [
+              {
+                index: 0,
+                content: input.content,
+                extra: input.swipeExtra,
+                createdAt: timestamp,
+              },
+            ];
+        for (const swipe of inputSwipes) {
+          swipeRows.push({
+            id: newId(),
+            messageId: id,
+            index: swipe.index,
+            content: swipe.content,
+            extra: serializeJsonField(swipe.extra, {}),
+            createdAt: normalizeTimestampOverrides({ createdAt: swipe.createdAt })?.createdAt ?? timestamp,
+          });
+        }
       }
 
       const lastTimestamp = latestTrustedTimestamp(createdTimestamps) ?? batchTimestamps.updatedAt;
@@ -293,6 +314,8 @@ export function createChatsStorage(db: DB) {
       const CHUNK = 500;
       for (let i = 0; i < msgRows.length; i += CHUNK) {
         await db.insert(messages).values(msgRows.slice(i, i + CHUNK));
+      }
+      for (let i = 0; i < swipeRows.length; i += CHUNK) {
         await db.insert(messageSwipes).values(swipeRows.slice(i, i + CHUNK));
       }
       await db.update(chats).set({ updatedAt: lastTimestamp }).where(eq(chats.id, chatId));

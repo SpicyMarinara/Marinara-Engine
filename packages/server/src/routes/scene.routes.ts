@@ -556,7 +556,14 @@ export async function sceneRoutes(app: FastifyInstance) {
         characterId: string | null;
         content: string;
         extra?: unknown;
+        activeSwipeIndex?: number;
         swipeExtra?: unknown;
+        swipes?: Array<{
+          index: number;
+          content: string;
+          extra?: unknown;
+          createdAt?: string | null;
+        }>;
         createdAt?: string | null;
       }> = [];
 
@@ -592,20 +599,26 @@ export async function sceneRoutes(app: FastifyInstance) {
         let extra = msg.extra;
         let swipeExtra: unknown = undefined;
         let createdAt = msg.createdAt;
-        if (msg.activeSwipeIndex > 0) {
-          const swipes = await chats.getSwipes(msg.id);
-          const activeSwipe = swipes.find(
-            (s: { index: number; content?: string; extra?: unknown; createdAt?: string }) =>
-              s.index === msg.activeSwipeIndex,
-          );
-          if (activeSwipe) {
-            content = activeSwipe.content ?? content;
-            extra = activeSwipe.extra ?? extra;
-            // Keep swipe metadata independent; createMessagesBatch supplies the
-            // empty default when the selected swipe has no metadata of its own.
-            swipeExtra = activeSwipe.extra;
-            createdAt = activeSwipe.createdAt ?? createdAt;
-          }
+        const swipes = await chats.getSwipes(msg.id);
+        const copiedSwipes = swipes.map(
+          (swipe: { index: number; content: string; extra?: unknown; createdAt?: string | null }) => ({
+            index: swipe.index,
+            content: swipe.content,
+            extra: swipe.extra,
+            createdAt: swipe.createdAt,
+          }),
+        );
+        const activeSwipe = swipes.find(
+          (s: { index: number; content?: string; extra?: unknown; createdAt?: string }) =>
+            s.index === msg.activeSwipeIndex,
+        );
+        if (activeSwipe) {
+          content = activeSwipe.content ?? content;
+          extra = activeSwipe.extra ?? extra;
+          // Keep swipe metadata independent; createMessagesBatch supplies the
+          // empty default when the selected swipe has no metadata of its own.
+          swipeExtra = activeSwipe.extra;
+          createdAt = activeSwipe.createdAt ?? createdAt;
         }
 
         copiedMessages.push({
@@ -613,7 +626,9 @@ export async function sceneRoutes(app: FastifyInstance) {
           characterId: msg.characterId,
           content,
           extra,
+          activeSwipeIndex: msg.activeSwipeIndex,
           swipeExtra,
+          swipes: copiedSwipes,
           createdAt,
         });
 
