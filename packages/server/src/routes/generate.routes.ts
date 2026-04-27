@@ -3668,7 +3668,12 @@ export async function generateRoutes(app: FastifyInstance) {
         for (const ct of customFiltered) {
           const existingSource = registeredToolSources.get(ct.name);
           if (existingSource) {
-            throw new Error(`Duplicate tool name "${ct.name}" from custom tool collides with existing ${existingSource} tool`);
+            logger.warn(
+              '[tools] Skipping custom tool "%s" because it collides with existing %s tool',
+              ct.name,
+              existingSource,
+            );
+            continue;
           }
           registeredToolSources.set(ct.name, "custom");
 
@@ -3726,9 +3731,11 @@ export async function generateRoutes(app: FastifyInstance) {
             });
           } catch (error) {
             registeredToolSources.delete(ct.name);
-            console.warn(
-              `[tools] Skipping custom tool "${ct.name}" with invalid parameter schema: ${error instanceof Error ? error.message : "unknown error"}`,
-              ct.parametersSchema,
+            logger.warn(
+              '[tools] Skipping custom tool "%s" with invalid parameter schema: %s %s',
+              ct.name,
+              error instanceof Error ? error.message : "unknown error",
+              String(ct.parametersSchema),
             );
           }
         }
@@ -3740,12 +3747,12 @@ export async function generateRoutes(app: FastifyInstance) {
       const chatAllowsSpotify = Array.from(resolvedToolNames).some((name) => spotifyToolNames.has(name));
       const anyAgentAllowsSpotify = resolvedAgents.some((agent) => {
         const agentSettings = typeof agent.settings === "string" ? JSON.parse(agent.settings) : agent.settings || {};
-        const agentEnabledNames =
-          (agentSettings?.enabledTools as string[]) || (DEFAULT_AGENT_TOOLS[agent.type] as string[]) || [];
+        const agentEnabledNames = Array.isArray(agentSettings.enabledTools) ? (agentSettings.enabledTools as string[]) : [];
         const agentResolvedNames = agentEnabledNames.filter((name) => resolvedToolNames.has(name));
         return agentResolvedNames.some((name) => spotifyToolNames.has(name));
       });
       const needsSpotify = enableTools && (chatAllowsSpotify || anyAgentAllowsSpotify);
+      // Look beyond resolved agents only to reuse stored Spotify credentials when Spotify tools are allowed.
       const spotifyAgent = needsSpotify
         ? (resolvedAgents.find((a) => a.type === "spotify") ??
             enabledConfigs.find((cfg: any) => cfg.type === "spotify") ??
@@ -3799,7 +3806,7 @@ export async function generateRoutes(app: FastifyInstance) {
                     spotifyExpiresAt: refreshedExpiresAt,
                   },
                 })
-                .catch(() => {});
+                .catch((err) => logger.warn(err, "[spotify] failed to persist refreshed tokens"));
             }
           } catch {
             /* ignore refresh errors */
@@ -3835,8 +3842,7 @@ export async function generateRoutes(app: FastifyInstance) {
         if (agent.toolContext) continue;
 
         const agentSettings = typeof agent.settings === "string" ? JSON.parse(agent.settings) : agent.settings || {};
-        const agentEnabledNames =
-          (agentSettings?.enabledTools as string[]) || (DEFAULT_AGENT_TOOLS[agent.type] as string[]) || [];
+        const agentEnabledNames = Array.isArray(agentSettings.enabledTools) ? (agentSettings.enabledTools as string[]) : [];
         if (agentEnabledNames.length === 0) continue;
 
         const agentTools = (toolDefs ?? []).filter((td) => agentEnabledNames.includes(td.function.name));
