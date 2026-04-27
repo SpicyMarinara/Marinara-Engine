@@ -2158,10 +2158,14 @@ export async function generateRoutes(app: FastifyInstance) {
       const resolvedAgents: ResolvedAgent[] = [];
       // Cache per-connection providers so agents sharing the same connection batch together
       const agentProviderCache = new Map<string, { provider: BaseLLMProvider; model: string }>();
-      agentProviderCache.set(LOCAL_SIDECAR_CONNECTION_ID, {
-        provider: getLocalSidecarProvider(),
-        model: LOCAL_SIDECAR_MODEL,
-      });
+      const localSidecarAvailableForTrackers =
+        sidecarModelService.getConfig().useForTrackers && sidecarModelService.getConfiguredModelRef() !== null;
+      if (localSidecarAvailableForTrackers) {
+        agentProviderCache.set(LOCAL_SIDECAR_CONNECTION_ID, {
+          provider: getLocalSidecarProvider(),
+          model: LOCAL_SIDECAR_MODEL,
+        });
+      }
 
       // Check if there's a connection marked as default for all agents
       const defaultAgentConn = await connections.getDefaultForAgents();
@@ -2190,7 +2194,11 @@ export async function generateRoutes(app: FastifyInstance) {
         let agentModel = conn.model;
 
         // Resolve connection: per-agent override > default-for-agents > chat connection
-        const effectiveConnectionId = cfg.connectionId ?? defaultAgentConn?.id ?? null;
+        let effectiveConnectionId = cfg.connectionId ?? defaultAgentConn?.id ?? null;
+        if (effectiveConnectionId === LOCAL_SIDECAR_CONNECTION_ID && !localSidecarAvailableForTrackers) {
+          effectiveConnectionId =
+            cfg.connectionId === LOCAL_SIDECAR_CONNECTION_ID ? (defaultAgentConn?.id ?? null) : null;
+        }
         if (effectiveConnectionId) {
           const cached = agentProviderCache.get(effectiveConnectionId);
           if (cached) {

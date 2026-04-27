@@ -27,6 +27,7 @@ import { getDataDir } from "../../utils/data-dir.js";
 import { downloadFileWithProgress, fetchJson, isAbortError } from "./sidecar-download.js";
 import { mlxRuntimeService } from "./mlx-runtime.service.js";
 import { sidecarRuntimeService } from "./sidecar-runtime.service.js";
+import { assertSupportedLlamaCppModelPath, isSupportedLlamaCppModelFilename } from "./sidecar-model-files.js";
 
 export const MODELS_DIR = join(getDataDir(), "models");
 export const CUSTOM_MODELS_DIR = join(MODELS_DIR, "custom");
@@ -441,7 +442,7 @@ class SidecarModelService {
   }
 
   isEnabled(): boolean {
-    return this.config.useForGameScene;
+    return this.config.useForGameScene || this.config.useForTrackers;
   }
 
   getResolvedBackend(): SidecarBackend {
@@ -583,7 +584,9 @@ class SidecarModelService {
     }
 
     const entries = await this.fetchRepoTree(repo);
-    const ggufEntries = entries.filter((entry) => entry.type === "file" && entry.path?.toLowerCase().endsWith(".gguf"));
+    const ggufEntries = entries.filter(
+      (entry) => entry.type === "file" && entry.path && isSupportedLlamaCppModelFilename(entry.path),
+    );
     if (ggufEntries.length === 0) {
       return [];
     }
@@ -647,6 +650,7 @@ class SidecarModelService {
     if (!selected) {
       throw new Error("Selected GGUF was not found in that repository");
     }
+    assertSupportedLlamaCppModelPath(selected.path);
 
     const relativePath = join("custom", `${slugifyRepo(repo)}__${selected.filename}`).replace(/\\/g, "/");
     const destination = this.resolveModelPath(relativePath);

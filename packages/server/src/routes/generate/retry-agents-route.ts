@@ -11,6 +11,7 @@ import type { ResolvedAgent } from "../../services/agents/agent-pipeline.js";
 import { executeAgent, executeAgentBatch } from "../../services/agents/agent-executor.js";
 import { getLocalSidecarProvider, LOCAL_SIDECAR_MODEL } from "../../services/llm/local-sidecar.js";
 import { createLLMProvider } from "../../services/llm/provider-registry.js";
+import { sidecarModelService } from "../../services/sidecar/sidecar-model.service.js";
 import { createAgentsStorage } from "../../services/storage/agents.storage.js";
 import { createCharactersStorage } from "../../services/storage/characters.storage.js";
 import { createChatsStorage } from "../../services/storage/chats.storage.js";
@@ -275,16 +276,18 @@ async function resolveRetryAgents(args: {
     conn.maxTokensOverride,
   );
   const resolvedAgents: ResolvedRetryAgent[] = [];
+  const localSidecarAvailableForTrackers =
+    sidecarModelService.getConfig().useForTrackers && sidecarModelService.getConfiguredModelRef() !== null;
 
   for (const cfg of enabledConfigs) {
     let agentProvider = provider;
     let agentModel = conn.model;
 
     if (cfg.connectionId) {
-      if (cfg.connectionId === LOCAL_SIDECAR_CONNECTION_ID) {
+      if (cfg.connectionId === LOCAL_SIDECAR_CONNECTION_ID && localSidecarAvailableForTrackers) {
         agentProvider = getLocalSidecarProvider();
         agentModel = LOCAL_SIDECAR_MODEL;
-      } else {
+      } else if (cfg.connectionId !== LOCAL_SIDECAR_CONNECTION_ID) {
         const agentConn = await conns.getWithKey(cfg.connectionId as string);
         if (agentConn) {
           const agentBaseUrl = resolveBaseUrl(agentConn);
