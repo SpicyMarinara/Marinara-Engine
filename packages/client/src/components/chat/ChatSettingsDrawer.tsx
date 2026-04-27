@@ -218,6 +218,7 @@ export function ChatSettingsDrawer({
   const { retryAgents } = useGenerate();
   const agentProcessing = useAgentStore((s) => s.isProcessing);
   const scheduleGenerationPreferences = useUIStore((s) => s.scheduleGenerationPreferences);
+  const setScheduleGenerationPreferences = useUIStore((s) => s.setScheduleGenerationPreferences);
 
   const { data: allCharacters } = useCharacters();
   const { data: characterGroups } = useCharacterGroups();
@@ -2014,6 +2015,25 @@ export function ChatSettingsDrawer({
                   )}
                 </div>
 
+                {/* Schedule generation preferences — free-form authorial guidance */}
+                <label className="flex flex-col gap-1.5">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+                    <Sparkles size="0.75rem" className="text-[var(--primary)]" />
+                    Schedule generation preferences
+                    <HelpTooltip text="Free-form guidance that steers how character schedules are generated. Both directives ('no characters past midnight') and factual constraints ('I work 9-5') work. This setting is global — it applies to every conversation chat." />
+                  </span>
+                  <textarea
+                    value={scheduleGenerationPreferences}
+                    onChange={(e) => setScheduleGenerationPreferences(e.target.value)}
+                    placeholder="e.g. Make everyone go to sleep before midnight. Give characters free time 10am-noon. I work 9-5 on weekdays."
+                    className="min-h-[5rem] resize-y rounded-lg border border-[var(--border)] bg-[var(--secondary)] p-2.5 text-[0.6875rem] text-[var(--foreground)] outline-none transition-colors focus:border-[var(--primary)]/50 placeholder:text-[var(--muted-foreground)]/40"
+                  />
+                  <p className="text-[0.59375rem] text-[var(--muted-foreground)]/70">
+                    Global setting. Applies to every conversation chat&apos;s next schedule regeneration — manual or
+                    weekly auto.
+                  </p>
+                </label>
+
                 {/* Active schedule-generation preference indicator */}
                 {scheduleGenerationPreferences.trim() && (
                   <div
@@ -2029,7 +2049,7 @@ export function ChatSettingsDrawer({
                         “{scheduleGenerationPreferences.trim()}”
                       </p>
                       <p className="mt-1 text-[0.59375rem] text-[var(--muted-foreground)]/70">
-                        Will be applied the next time schedules are regenerated. Edit in Settings → General.
+                        Will be applied the next time schedules are regenerated.
                       </p>
                     </div>
                   </div>

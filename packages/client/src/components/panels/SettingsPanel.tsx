@@ -195,9 +195,6 @@ function GeneralSettings() {
   const setMessagesPerPage = useUIStore((s) => s.setMessagesPerPage);
   const boldDialogue = useUIStore((s) => s.boldDialogue);
   const setBoldDialogue = useUIStore((s) => s.setBoldDialogue);
-  const scheduleGenerationPreferences = useUIStore((s) => s.scheduleGenerationPreferences);
-  const setScheduleGenerationPreferences = useUIStore((s) => s.setScheduleGenerationPreferences);
-
   return (
     <div className="flex flex-col gap-3">
       <div className="text-xs text-[var(--muted-foreground)]">General application settings.</div>
@@ -384,24 +381,6 @@ function GeneralSettings() {
           'When on, text inside dialogue quotation marks ("like this", 「like this」, or 『like this』) is bolded in addition to its dialogue highlight color. Turn it off to keep the color without bold.'
         }
       />
-
-      {/* Schedule Generation Preferences (Conversation mode) */}
-      <label className="flex flex-col gap-1">
-        <span className="inline-flex items-center gap-1 text-xs font-medium">
-          Schedule generation preferences
-          <HelpTooltip text="Free-form guidance that steers how character schedules are generated in Conversation mode. Both directives ('no characters past midnight') and factual constraints ('I work 9-5') work." />
-        </span>
-        <textarea
-          value={scheduleGenerationPreferences}
-          onChange={(e) => setScheduleGenerationPreferences(e.target.value)}
-          placeholder="e.g. Make everyone go to sleep before midnight. Give characters free time 10am-noon. I work 9-5 on weekdays."
-          className="min-h-[6rem] resize-y rounded-lg border border-[var(--border)] bg-[var(--secondary)] p-3 text-xs text-[var(--foreground)] outline-none transition-colors focus:border-[var(--primary)]/50 placeholder:text-white/20"
-        />
-        <p className="text-[0.625rem] text-[var(--muted-foreground)]">
-          Changes apply the next time schedules are regenerated — manually from a chat&apos;s settings, or automatically
-          each week.
-        </p>
-      </label>
 
       {/* Game Assets Folders */}
       <div className="rounded-xl bg-[var(--secondary)]/50 p-4 ring-1 ring-[var(--border)]">
