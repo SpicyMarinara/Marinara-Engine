@@ -57,7 +57,7 @@ Tools like [Tailscale](https://tailscale.com/) give each device a stable IP addr
 
 Marinara Engine supports a wide range of LLM and image generation providers:
 
-- **LLM:** OpenAI, Anthropic, Google, OpenRouter, NanoGPT, Mistral, Cohere, Pollinations, Together AI, NovelAI, and any custom OpenAI-compatible endpoint (Ollama, LM Studio, KoboldCpp, etc.)
+- **LLM:** OpenAI, Anthropic, Anthropic via Claude Pro / Max subscription (through the local Claude Agent SDK), Google, OpenRouter, NanoGPT, Mistral, Cohere, Pollinations, Together AI, NovelAI, and any custom OpenAI-compatible endpoint (Ollama, LM Studio, KoboldCpp, etc.)
 - **Image generation:** Stability AI, ComfyUI, AUTOMATIC1111 / SD Web UI, and providers that support image output through their chat API
 
 You can configure multiple connections at once and assign different providers per chat. API keys are encrypted at rest with AES-256.

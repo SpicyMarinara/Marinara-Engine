@@ -51,6 +51,23 @@ export function createGameStateStorage(db: DB) {
       return rows[0] ?? null;
     },
 
+    /** Chat-scoped variant of getByMessage (avoids cross-chat collisions for messageId=""). */
+    async getByChatAndMessage(chatId: string, messageId: string, swipeIndex: number = 0) {
+      const rows = await db
+        .select()
+        .from(gameStateSnapshots)
+        .where(
+          and(
+            eq(gameStateSnapshots.chatId, chatId),
+            eq(gameStateSnapshots.messageId, messageId),
+            eq(gameStateSnapshots.swipeIndex, swipeIndex),
+          ),
+        )
+        .orderBy(desc(gameStateSnapshots.createdAt))
+        .limit(1);
+      return rows[0] ?? null;
+    },
+
     /** Batch-fetch committed snapshots for multiple messages. Returns a Map of messageId → row. */
     async getCommittedForMessages(messageIds: string[]) {
       if (messageIds.length === 0) return new Map<string, typeof gameStateSnapshots.$inferSelect>();

@@ -310,6 +310,7 @@ export function useGenerate() {
   const qc = useQueryClient();
   // Use individual selectors to avoid re-rendering on every store change
   const setStreaming = useChatStore((s) => s.setStreaming);
+  const setMariPhase = useChatStore((s) => s.setMariPhase);
   const setStreamBuffer = useChatStore((s) => s.setStreamBuffer);
   const clearStreamBuffer = useChatStore((s) => s.clearStreamBuffer);
   const setRegenerateMessageId = useChatStore((s) => s.setRegenerateMessageId);
@@ -539,6 +540,19 @@ export function useGenerate() {
         rafId = requestAnimationFrame(tick);
       };
 
+      // Safety net: guarantees the Mari work-status pill clears for this
+      // chat on every termination path (done, error, abort, unexpected
+      // throw). The assistant_commands_end SSE event is still the primary
+      // clear; this just keeps state sane when the stream dies mid-window.
+      const clearMariPhaseForThisChat = () => {
+        setMariPhase(params.chatId, "idle");
+        window.dispatchEvent(
+          new CustomEvent("marinara:mari-phase", {
+            detail: { chatId: params.chatId, phase: "idle" },
+          }),
+        );
+      };
+
       try {
         const userStatus = useUIStore.getState().userStatus;
 
@@ -553,6 +567,7 @@ export function useGenerate() {
         )) {
           switch (event.type) {
             case "token": {
+              const isFirstToken = !receivedContent;
               receivedContent = true;
               // Always clear per-chat indicators so switching back shows nothing
               useChatStore.getState().setPerChatTyping(params.chatId, null);
@@ -561,6 +576,18 @@ export function useGenerate() {
                 setTypingCharacterName(null); // Clear typing indicator once response starts
                 setDelayedCharacterInfo(null); // Clear delayed indicator too
                 useChatStore.getState().setGenerationPhase(null); // Clear phase indicator
+              }
+              // Fire the "Mari is thinking…" pill on the first token — that's
+              // the same moment "X is typing…" clears, so the two indicators
+              // never overlap. Also seed the per-chat phase in the store so
+              // the indicator can restore the pill on chat-switch-back.
+              if (isFirstToken) {
+                setMariPhase(params.chatId, "thinking");
+                window.dispatchEvent(
+                  new CustomEvent("marinara:mari-phase", {
+                    detail: { chatId: params.chatId, phase: "thinking" },
+                  }),
+                );
               }
 
               let chunk = event.data as string;
@@ -1059,6 +1086,21 @@ export function useGenerate() {
               break;
             }
 
+            case "assistant_commands_start": {
+              setMariPhase(params.chatId, "updating");
+              window.dispatchEvent(
+                new CustomEvent("marinara:mari-phase", {
+                  detail: { chatId: params.chatId, phase: "updating" },
+                }),
+              );
+              break;
+            }
+
+            case "assistant_commands_end": {
+              clearMariPhaseForThisChat();
+              break;
+            }
+
             case "assistant_action": {
               const actionData = event.data as { action: string; [key: string]: unknown };
               if (actionData.action === "persona_created") {
@@ -1089,6 +1131,7 @@ export function useGenerate() {
 
             case "done": {
               if (isActiveChat()) setProcessing(false);
+              clearMariPhaseForThisChat();
               break;
             }
 
@@ -1136,6 +1179,7 @@ export function useGenerate() {
               // Flush pending text so the user sees what arrived before the error
               flushTypewriterBuffer();
               if (isActiveChat()) setProcessing(false);
+              clearMariPhaseForThisChat();
               showError((event.data as string) || "Generation failed");
               window.dispatchEvent(new CustomEvent("marinara:generation-error", { detail: { chatId: params.chatId } }));
               break;
@@ -1175,6 +1219,9 @@ export function useGenerate() {
         showError(msg);
         window.dispatchEvent(new CustomEvent("marinara:generation-error", { detail: { chatId: params.chatId } }));
       } finally {
+        // Stream has terminated (done, error, abort, or unexpected throw) —
+        // guarantee the Mari indicator clears even if the end SSE never arrived.
+        clearMariPhaseForThisChat();
         // Cancel any pending animation frame to prevent leaks
         cancelAnimationFrame(rafId);
 
@@ -1345,6 +1392,7 @@ export function useGenerate() {
     [
       qc,
       setStreaming,
+      setMariPhase,
       setStreamBuffer,
       clearStreamBuffer,
       setRegenerateMessageId,

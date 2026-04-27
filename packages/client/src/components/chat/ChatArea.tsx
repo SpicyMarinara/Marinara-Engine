@@ -38,6 +38,7 @@ import { api } from "../../lib/api-client";
 import { parseCharacterDisplayData } from "../../lib/character-display";
 import { showConfirmDialog } from "../../lib/app-dialogs";
 import { useGameStateStore } from "../../stores/game-state.store";
+import { toast } from "sonner";
 import { BookOpen, HelpCircle, MessageSquare, Theater } from "lucide-react";
 import type { SpritePlacement, SpriteSide } from "@marinara-engine/shared";
 import { useUIStore } from "../../stores/ui.store";
@@ -903,6 +904,63 @@ export function ChatArea() {
     isLoadingMoreRef.current = true;
     fetchNextPage();
   }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+
+  // ── /goto command: paginate older pages until target message is loaded, then scroll to it
+  const gotoRequest = useChatStore((s) => s.gotoRequest);
+  useEffect(() => {
+    if (!gotoRequest || gotoRequest.chatId !== activeChatId) return;
+    if (!messages) return;
+
+    const targetNumber = gotoRequest.messageNumber;
+    if (totalMessageCount > 0 && targetNumber > totalMessageCount) {
+      toast.error(`Message #${targetNumber} doesn't exist — this chat has ${totalMessageCount} messages.`);
+      useChatStore.getState().clearGotoRequest();
+      return;
+    }
+
+    const targetIndex = targetNumber - 1; // 0-based global index
+    if (targetIndex >= messageOffset) {
+      const targetId = messageIdByOrderIndex.get(targetIndex);
+      if (!targetId) {
+        useChatStore.getState().clearGotoRequest();
+        return;
+      }
+      // Wait one frame so newly-loaded messages are painted before scrolling.
+      const raf = requestAnimationFrame(() => {
+        const el = document.querySelector(`[data-message-id="${CSS.escape(targetId)}"]`);
+        if (el instanceof HTMLElement) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          userScrolledAwayRef.current = true; // suppress auto-scroll-to-bottom hijacking the jump
+        }
+        useChatStore.getState().clearGotoRequest();
+      });
+      return () => cancelAnimationFrame(raf);
+    }
+
+    // Target is older than the loaded window — fetch the next (older) page.
+    if (hasNextPage && !isFetchingNextPage) {
+      // Only engage the roleplay-surface scroll-preservation handshake when that
+      // surface is actually mounted; otherwise the flag would be set forever.
+      if (scrollRef.current) {
+        prevScrollHeightRef.current = scrollRef.current.scrollHeight;
+        isLoadingMoreRef.current = true;
+      }
+      fetchNextPage();
+    } else if (!hasNextPage) {
+      // Nothing more to load but we still didn't reach the target — give up.
+      useChatStore.getState().clearGotoRequest();
+    }
+  }, [
+    gotoRequest,
+    activeChatId,
+    messages,
+    messageOffset,
+    messageIdByOrderIndex,
+    totalMessageCount,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  ]);
 
   // ═══════════════════════════════════════════════
   // Empty state (no active chat)

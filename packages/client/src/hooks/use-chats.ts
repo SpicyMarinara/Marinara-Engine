@@ -163,9 +163,18 @@ export function useUpdateChat() {
       personaId?: string | null;
       characterIds?: string[];
     }) => api.patch<Chat>(`/chats/${id}`, data),
-    onSuccess: (_data, vars) => {
+    onSuccess: (updatedChat, vars) => {
       qc.invalidateQueries({ queryKey: chatKeys.detail(vars.id) });
       qc.invalidateQueries({ queryKey: chatKeys.list() });
+
+      // Patch the group cache so the branch selector dropdown reflects renames
+      // (and any other field changes) without waiting for a chat switch.
+      if (updatedChat?.groupId) {
+        qc.setQueryData<Chat[]>(chatKeys.group(updatedChat.groupId), (existing) =>
+          existing?.map((chat) => (chat.id === vars.id ? updatedChat : chat)),
+        );
+      }
+      qc.invalidateQueries({ queryKey: [...chatKeys.all, "group"] });
     },
   });
 }

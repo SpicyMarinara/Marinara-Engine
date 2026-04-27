@@ -1060,8 +1060,12 @@ export async function chatsRoutes(app: FastifyInstance) {
       await storage.updateMetadata(newChat.id, settingsToKeep);
     }
 
-    // Copy messages from source chat, using the active swipe's content
+    // Copy messages from source chat, using the active swipe's content.
+    // Preserve each message's original createdAt timestamp so ordering and
+    // display times remain identical to the source chat.
     const msgs = await storage.listMessages(req.params.id);
+    const sourceToBranchedMessageId = new Map<string, string>();
+
     for (const msg of msgs) {
       // Resolve the content from the active swipe (may differ from msg.content
       // if the user swiped to an alternative response)
@@ -1072,14 +1076,116 @@ export async function chatsRoutes(app: FastifyInstance) {
         if (activeSwipe) content = activeSwipe.content;
       }
 
-      await storage.createMessage({
-        chatId: newChat.id,
-        role: msg.role as "user" | "assistant" | "system" | "narrator",
-        characterId: msg.characterId,
-        content,
-      });
+      const created = await storage.createMessage(
+        {
+          chatId: newChat.id,
+          role: msg.role as "user" | "assistant" | "system" | "narrator",
+          characterId: msg.characterId,
+          content,
+        },
+        { createdAt: msg.createdAt as string },
+      );
+
+      if (created) {
+        sourceToBranchedMessageId.set(msg.id, created.id);
+
+        // Preserve per-message metadata (displayText, generationInfo, etc.)
+        try {
+          const extraObj = typeof msg.extra === "string" ? JSON.parse(msg.extra) : (msg.extra ?? {});
+          if (extraObj && typeof extraObj === "object") {
+            await storage.updateMessageExtra(created.id, extraObj as Record<string, unknown>);
+          }
+        } catch {
+          // Ignore malformed extra payloads rather than failing the branch.
+        }
+      }
+
       // Stop if we hit the specified message
       if (upToMessageId && msg.id === upToMessageId) break;
+    }
+
+    // Fix updatedAt: createMessage sets the chat's updatedAt to each message's
+    // (preserved) timestamp, so after the loop the branched chat's updatedAt is
+    // the last source message's original time. Reset it to now so the branch
+    // appears at the top of the chat list as a freshly created chat.
+    await storage.update(newChat.id, {});
+
+    // Copy game-state snapshots from the source chat for every copied message.
+    // Each snapshot is keyed by (chatId, messageId, swipeIndex), so we must re-associate
+    // them to the new branch's message IDs. Copying all snapshots (not just the latest)
+    // ensures that branching a branch at an earlier point finds the correct tracker state
+    // for that specific message, not just the latest snapshot in the source chat.
+    if (sourceToBranchedMessageId.size > 0) {
+      const { createGameStateStorage } = await import("../services/storage/game-state.storage.js");
+      const gameStateStore = createGameStateStorage(app.db);
+
+      // Helper to create a snapshot re-keyed for the new branch.
+      const copySnapshot = async (
+        snapshot: NonNullable<Awaited<ReturnType<typeof gameStateStore.getByMessage>>>,
+        targetMessageId: string,
+        targetSwipeIndex: number,
+      ) => {
+        try {
+          const overrides =
+            snapshot.manualOverrides && typeof snapshot.manualOverrides === "string"
+              ? (JSON.parse(snapshot.manualOverrides) as Record<string, string>)
+              : null;
+          await gameStateStore.create(
+            {
+              chatId: newChat.id,
+              messageId: targetMessageId,
+              swipeIndex: targetSwipeIndex,
+              date: (snapshot.date as string) ?? null,
+              time: (snapshot.time as string) ?? null,
+              location: (snapshot.location as string) ?? null,
+              weather: (snapshot.weather as string) ?? null,
+              temperature: (snapshot.temperature as string) ?? null,
+              presentCharacters:
+                typeof snapshot.presentCharacters === "string"
+                  ? JSON.parse(snapshot.presentCharacters)
+                  : (snapshot.presentCharacters ?? []),
+              recentEvents:
+                typeof snapshot.recentEvents === "string"
+                  ? JSON.parse(snapshot.recentEvents)
+                  : (snapshot.recentEvents ?? []),
+              playerStats:
+                snapshot.playerStats == null
+                  ? null
+                  : typeof snapshot.playerStats === "string"
+                    ? JSON.parse(snapshot.playerStats)
+                    : snapshot.playerStats,
+              personaStats:
+                snapshot.personaStats == null
+                  ? null
+                  : typeof snapshot.personaStats === "string"
+                    ? JSON.parse(snapshot.personaStats)
+                    : snapshot.personaStats,
+              committed: (snapshot.committed as any) === 1,
+            } as any,
+            overrides,
+          );
+        } catch {
+          // Ignore individual snapshot copy failures; branching should still succeed.
+        }
+      };
+
+      for (const [srcMsgId, branchedMsgId] of sourceToBranchedMessageId) {
+        const srcMsg = msgs.find((m) => m.id === srcMsgId);
+        if (!srcMsg) continue;
+
+        const snapshot = await gameStateStore.getByMessage(srcMsgId, srcMsg.activeSwipeIndex);
+        if (snapshot) {
+          await copySnapshot(snapshot, branchedMsgId, 0);
+        }
+      }
+
+      // Also copy the bootstrap snapshot (messageId: "") if one exists.
+      // This is created when tracker state is set manually before any generation,
+      // and is not tied to any specific message.
+      const bootstrap = await gameStateStore.getByChatAndMessage(req.params.id, "", 0);
+      if (bootstrap) {
+        await copySnapshot(bootstrap, "", 0);
+      }
     }
 
     // Return the fully-updated chat (including copied metadata)

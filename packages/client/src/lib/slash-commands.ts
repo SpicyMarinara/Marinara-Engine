@@ -335,6 +335,22 @@ const COMMANDS: SlashCommand[] = [
     },
   },
   {
+    name: "goto",
+    aliases: ["jump", "scroll"],
+    description: "Scroll to a specific message number (e.g. /goto 27)",
+    usage: "/goto <number>",
+    local: true,
+    async execute(args, ctx) {
+      const raw = args.trim();
+      const n = Number.parseInt(raw, 10);
+      if (!raw || !Number.isFinite(n) || n < 1 || String(n) !== raw) {
+        return { handled: true, feedback: "Usage: /goto <positive message number> (e.g. /goto 27)" };
+      }
+      useChatStore.getState().requestGotoMessage(ctx.chatId, n);
+      return { handled: true };
+    },
+  },
+  {
     name: "help",
     description: "Show available slash commands",
     usage: "/help",

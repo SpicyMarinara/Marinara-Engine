@@ -104,6 +104,56 @@ export interface ParsedGmTags {
 }
 
 /**
+ * Strip any unknown `[word: ...]` tag the model invents. Walks the text
+ * tracking quote state and bracket depth so JSON content like
+ * `[some_tag: {"x":[1,2]}]` is removed entirely. The naive
+ * `/\[\w+:[^\]]*\]/g` stops at the FIRST `]` and leaves `}]` trailing.
+ *
+ * `keep` is an optional predicate — return true to skip stripping for
+ * tag names that should remain in place (e.g. Note, Book).
+ */
+function stripUnknownBracketTags(text: string, keep?: (tagName: string) => boolean): string {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === "[") {
+      // Look ahead for `\w+:` — minimum signature of a model-invented tag
+      let j = i + 1;
+      while (j < text.length && /[A-Za-z0-9_]/.test(text[j]!)) j++;
+      const tagName = text.slice(i + 1, j);
+      if (j > i + 1 && text[j] === ":" && (!keep || !keep(tagName))) {
+        // Walk to balanced `]`, respecting `"`/`'` strings (and `\` escapes)
+        let depth = 1;
+        let inString: '"' | "'" | null = null;
+        let escaped = false;
+        let k = j + 1;
+        for (; k < text.length; k++) {
+          const c = text[k]!;
+          if (escaped) { escaped = false; continue; }
+          if (c === "\\") { escaped = true; continue; }
+          if (inString) { if (c === inString) inString = null; continue; }
+          if (c === '"' || c === "'") { inString = c; continue; }
+          if (c === "[") depth++;
+          else if (c === "]") {
+            depth--;
+            if (depth === 0) break;
+          }
+        }
+        if (k < text.length) {
+          // Found the balanced closing `]` — drop the whole tag
+          i = k + 1;
+          continue;
+        }
+        // Unbalanced (truncated/streaming) — leave the `[` in place and move on
+      }
+    }
+    out += text[i];
+    i++;
+  }
+  return out;
+}
+
+/**
  * Remove all instances of a bracket-enclosed tag whose content may contain
  * nested brackets (e.g. JSON arrays/objects).  Counts `[` / `]` so the match
  * extends to the *balanced* closing bracket rather than the first `]`.
@@ -751,8 +801,10 @@ export function parseGmTags(content: string): ParsedGmTags {
   // [dice: ...] — informational dice results
   text = text.replace(/\[dice:\s*[^\]]+\]/gi, "");
 
-  // Catch-all: strip any remaining [tag: ...] brackets the model may invent
-  text = text.replace(/\[\w+:[^\]]*\]/g, "");
+  // Catch-all: strip any remaining [tag: ...] brackets the model may invent.
+  // Quote-aware bracket-balanced walk so JSON content like `[x: {"y":[1]}]`
+  // is removed entirely instead of stopping at the first inner `]`.
+  text = stripUnknownBracketTags(text);
 
   // Remove orphaned ] on a line by itself (from partially-stripped multi-line tags)
   text = text.replace(/^\s*\]\s*$/gm, "");
@@ -784,9 +836,9 @@ export function stripGmTags(content: string): string {
     .replace(/\[party_add:\s*[^\]]+\]/gi, "")
     .replace(/\[party-turn\]/gi, "")
     .replace(/\[party-chat\]/gi, "")
-    .replace(/\[dice:\s*[^\]]+\]/gi, "")
-    // Catch-all: strip any remaining [tag: ...] brackets the model may invent
-    .replace(/\[\w+:[^\]]*\]/g, "");
+    .replace(/\[dice:\s*[^\]]+\]/gi, "");
+  // Quote-aware catch-all for any remaining [tag: ...] the model may invent
+  text = stripUnknownBracketTags(text);
   // Balanced bracket stripping for tags whose content may contain nested []
   text = stripBalancedTag(text, "[map_update:");
   text = stripBalancedTag(text, "[choices:");
@@ -824,9 +876,14 @@ export function stripGmTagsKeepReadables(content: string): string {
     .replace(/\[party_add:\s*[^\]]+\]/gi, "")
     .replace(/\[party-turn\]/gi, "")
     .replace(/\[party-chat\]/gi, "")
-    .replace(/\[dice:\s*[^\]]+\]/gi, "")
-    // Catch-all: strip unknown [tag: ...] except [Note:] and [Book:]
-    .replace(/\[(?!Note:|Book:)\w+:[^\]]*\]/g, "");
+    .replace(/\[dice:\s*[^\]]+\]/gi, "");
+  // Quote-aware catch-all for unknown tags, keeping Note/Book inline.
+  // Case-insensitive to match extractBalancedTags (which lowercases the prefix);
+  // otherwise `[note:]` / `[book:]` would slip past extraction and get stripped.
+  text = stripUnknownBracketTags(text, (name) => {
+    const lower = name.toLowerCase();
+    return lower === "note" || lower === "book";
+  });
   // Balanced bracket stripping for non-readable tags
   text = stripBalancedTag(text, "[map_update:");
   text = stripBalancedTag(text, "[choices:");

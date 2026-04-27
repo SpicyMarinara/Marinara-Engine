@@ -1951,6 +1951,43 @@ export async function generateRoutes(app: FastifyInstance) {
         }
       }
 
+      // ── Lorebook injection for preset-less roleplay / visual_novel ──
+      // Conversation mode handles this above; game mode handles it below;
+      // preset-driven chats get lorebook content via the preset assembler.
+      if (!presetId && (chatMode === "roleplay" || chatMode === "visual_novel")) {
+        sendProgress("lorebooks");
+        const scanMessages = mappedMessages.map((m) => ({
+          role: m.role as "user" | "assistant" | "system",
+          content: m.content,
+        }));
+        const lorebookResult = await processLorebooks(app.db, scanMessages, null, {
+          chatId: input.chatId,
+          characterIds,
+          activeLorebookIds: chatActiveLorebookIds,
+          chatEmbedding: chatContextEmbedding,
+          entryStateOverrides:
+            (chatMeta.entryStateOverrides as Record<string, { ephemeral?: number | null; enabled?: boolean }>) ??
+            undefined,
+        });
+
+        if (lorebookResult.updatedEntryStateOverrides) {
+          chatMeta.entryStateOverrides = lorebookResult.updatedEntryStateOverrides;
+          await chats.updateMetadata(input.chatId, chatMeta);
+        }
+        const loreContent = [lorebookResult.worldInfoBefore, lorebookResult.worldInfoAfter]
+          .filter(Boolean)
+          .join("\n");
+        if (loreContent) {
+          const loreBlock = `<lore>\n${loreContent}\n</lore>`;
+          const firstUserIdx = finalMessages.findIndex((m) => m.role === "user" || m.role === "assistant");
+          const insertAt = firstUserIdx >= 0 ? firstUserIdx : finalMessages.length;
+          finalMessages.splice(insertAt, 0, { role: "system" as const, content: loreBlock });
+        }
+        if (lorebookResult.depthEntries.length > 0) {
+          finalMessages = injectAtDepth(finalMessages, lorebookResult.depthEntries);
+        }
+      }
+
       // ── Author's Notes injection ──
       const authorNotes = (chatMeta.authorNotes as string | undefined)?.trim();
       if (authorNotes) {
@@ -6120,6 +6157,11 @@ export async function generateRoutes(app: FastifyInstance) {
       // Character Command Execution (Conversation mode)
       // ────────────────────────────────────────
       if (collectedCommands.length > 0 && !abortController.signal.aborted) {
+        trySendSseEvent(reply, {
+          type: "assistant_commands_start",
+          data: { count: collectedCommands.length },
+        });
+        try {
         for (const { command, characterId, messageId } of collectedCommands) {
           try {
             if (command.type === "schedule_update") {
@@ -6937,6 +6979,12 @@ export async function generateRoutes(app: FastifyInstance) {
           } catch (cmdErr) {
             logger.error(cmdErr, `[commands] Error processing ${command.type} command`);
           }
+        }
+        } finally {
+          trySendSseEvent(reply, {
+            type: "assistant_commands_end",
+            data: {},
+          });
         }
       }
 

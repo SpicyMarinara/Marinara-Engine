@@ -68,6 +68,28 @@ export async function connectionsRoutes(app: FastifyInstance) {
 
     const start = Date.now();
     try {
+      // Claude (Subscription) has no HTTP endpoint — verify the local SDK
+      // can be loaded and that an auth source exists, then return success.
+      if (conn.provider === "claude_subscription") {
+        try {
+          await import("@anthropic-ai/claude-agent-sdk");
+        } catch (err) {
+          return {
+            success: false,
+            message: `Claude Agent SDK unavailable: ${err instanceof Error ? err.message : "Unknown error"}`,
+            latencyMs: Date.now() - start,
+            modelName: null,
+          };
+        }
+        return {
+          success: true,
+          message:
+            "Claude Agent SDK loaded. The first chat will fail if `claude login` has not been run on this host.",
+          latencyMs: Date.now() - start,
+          modelName: conn.model,
+        };
+      }
+
       // Simple models list fetch to verify the key works
       const { PROVIDERS } = await import("@marinara-engine/shared");
       const provider = PROVIDERS[conn.provider as keyof typeof PROVIDERS];
@@ -136,6 +158,14 @@ export async function connectionsRoutes(app: FastifyInstance) {
     if (!conn) return reply.status(404).send({ error: "Connection not found" });
 
     try {
+      // Claude (Subscription) has no remote /models endpoint — return the
+      // curated static list for the subscription path.
+      if (conn.provider === "claude_subscription") {
+        const { MODEL_LISTS } = await import("@marinara-engine/shared");
+        const models = MODEL_LISTS.claude_subscription.map((m) => ({ id: m.id, name: m.name }));
+        return { models };
+      }
+
       const { PROVIDERS } = await import("@marinara-engine/shared");
       const provider = PROVIDERS[conn.provider as keyof typeof PROVIDERS];
       const baseUrl = conn.baseUrl || provider?.defaultBaseUrl || "";
@@ -262,7 +292,9 @@ export async function connectionsRoutes(app: FastifyInstance) {
     const providerDef = PROVIDERS[conn.provider as keyof typeof PROVIDERS];
     const baseUrl = (conn.baseUrl || providerDef?.defaultBaseUrl || "").replace(/\/+$/, "");
 
-    if (!baseUrl) {
+    // Claude (Subscription) is HTTP-less — the SDK manages the endpoint, so
+    // skip the baseUrl precondition. Every other provider still requires one.
+    if (!baseUrl && conn.provider !== "claude_subscription") {
       return reply.status(400).send({ error: "No base URL configured" });
     }
 

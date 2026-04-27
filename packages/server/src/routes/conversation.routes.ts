@@ -32,6 +32,9 @@ import {
 
 function resolveBaseUrl(connection: { baseUrl: string | null; provider: string }): string {
   if (connection.baseUrl) return connection.baseUrl;
+  // Claude (Subscription) routes through the local Claude Agent SDK and has no
+  // HTTP endpoint — return a sentinel so the downstream baseUrl gate passes.
+  if (connection.provider === "claude_subscription") return "claude-agent-sdk://local";
   const providerDef = PROVIDERS[connection.provider as keyof typeof PROVIDERS];
   return providerDef?.defaultBaseUrl ?? "";
 }

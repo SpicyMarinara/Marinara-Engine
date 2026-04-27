@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Globe, Loader2, PenLine, X } from "lucide-react";
 import { useUpdateChatMetadata } from "../../hooks/use-chats";
 import { useActiveLorebookEntries } from "../../hooks/use-lorebooks";
@@ -104,10 +104,38 @@ export function AuthorNotesPanel({
   const [depthStr, setDepthStr] = useState(String((chatMeta.authorNotesDepth as number) ?? 4));
   const updateMeta = useUpdateChatMetadata();
 
+  const latestRef = useRef({ notes, depthStr });
+  latestRef.current = { notes, depthStr };
+  const baselineRef = useRef({
+    notes: (chatMeta.authorNotes as string) ?? "",
+    depth: (chatMeta.authorNotesDepth as number) ?? 4,
+  });
+  const mutateRef = useRef(updateMeta.mutate);
+  mutateRef.current = updateMeta.mutate;
+
   useEffect(() => {
     setNotes((chatMeta.authorNotes as string) ?? "");
     setDepthStr(String((chatMeta.authorNotesDepth as number) ?? 4));
+    baselineRef.current = {
+      notes: (chatMeta.authorNotes as string) ?? "",
+      depth: (chatMeta.authorNotesDepth as number) ?? 4,
+    };
   }, [chatMeta.authorNotes, chatMeta.authorNotesDepth]);
+
+  // Outside-click closes the popover via mousedown, which unmounts the
+  // textarea before its onBlur (the only save trigger) can fire. Flush
+  // the pending edit from the unmount cleanup so typed content survives.
+  useEffect(() => {
+    const capturedChatId = chatId;
+    return () => {
+      const { notes: n, depthStr: d } = latestRef.current;
+      const nextDepth = Math.max(0, parseInt(d, 10) || 0);
+      const base = baselineRef.current;
+      if (n !== base.notes || nextDepth !== base.depth) {
+        mutateRef.current({ id: capturedChatId, authorNotes: n, authorNotesDepth: nextDepth });
+      }
+    };
+  }, [chatId]);
 
   const depth = parseInt(depthStr, 10) || 0;
   const handleSave = () => {

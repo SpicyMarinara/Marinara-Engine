@@ -6,6 +6,7 @@
 export type APIProvider =
   | "openai"
   | "anthropic"
+  | "claude_subscription"
   | "google"
   | "mistral"
   | "cohere"

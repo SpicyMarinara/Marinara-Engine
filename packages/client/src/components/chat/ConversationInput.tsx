@@ -24,6 +24,7 @@ import { QuickPersonaSwitcher } from "./QuickPersonaSwitcher";
 import { QuickSwitcherMobile } from "./QuickSwitcherMobile";
 import { EmojiPicker } from "../ui/EmojiPicker";
 import { GifPicker } from "../ui/GifPicker";
+import { MariThinkingIndicator } from "./MariThinkingIndicator";
 
 interface Attachment {
   type: string;
@@ -625,6 +626,9 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
           ))}
         </div>
       )}
+
+      {/* Mari command-execution indicator */}
+      <MariThinkingIndicator />
 
       {/* Input bar */}
       <div

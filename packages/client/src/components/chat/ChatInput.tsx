@@ -25,6 +25,7 @@ import { EmojiPicker } from "../ui/EmojiPicker";
 import { QuickConnectionSwitcher } from "./QuickConnectionSwitcher";
 import { QuickPersonaSwitcher } from "./QuickPersonaSwitcher";
 import { QuickSwitcherMobile } from "./QuickSwitcherMobile";
+import { MariThinkingIndicator } from "./MariThinkingIndicator";
 
 interface Attachment {
   type: string; // MIME type
@@ -614,6 +615,9 @@ export const ChatInput = memo(function ChatInput({
           ))}
         </div>
       )}
+
+      {/* Mari command-execution indicator */}
+      <MariThinkingIndicator />
 
       {/* Main input container */}
       <div
