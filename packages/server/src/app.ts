@@ -86,7 +86,8 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
   // bundled MarinaraLauncher.exe so pinning to the taskbar groups the
   // running console under the pinned icon. Idempotent and fire-and-forget.
   try {
-    const installDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+    // app.ts compiles to <installDir>/packages/server/dist/app.js — three levels up from dist/.
+    const installDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
     migrateTaskbarShortcuts(installDir);
   } catch (err) {
     app.log.warn({ err }, "taskbar shortcut migration skipped");
