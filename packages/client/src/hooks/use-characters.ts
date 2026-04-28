@@ -273,10 +273,10 @@ export function useUpdatePersona() {
         if (!updatedId) return old;
 
         return old.map((p) => {
-          const row = p as { id?: string };
+          const row = p as Record<string, unknown> & { id?: string };
           if (row?.id !== updatedId) return p;
           if (!updatedPersona || typeof updatedPersona !== "object") return p;
-          return { ...row, ...(updatedPersona as object) };
+          return { ...row, ...(updatedPersona as Record<string, unknown>) };
         });
       });
 
