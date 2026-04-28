@@ -427,10 +427,14 @@ const jannyProvider: ProviderConfig = {
     // Fetch a one-time search token from the server (token is scraped from JannyAI's
     // public Astro bundle). The actual MeiliSearch POST runs from the BROWSER so that
     // Cloudflare sees a real browser TLS fingerprint + the user's cf_clearance cookie.
-    const tokenRes = await fetch("/api/bot-browser/janny/token");
-    if (!tokenRes.ok) throw new Error("Could not obtain JannyAI token");
-    const { token } = await tokenRes.json();
-    if (!token) throw new Error("JannyAI token unavailable");
+    const fetchToken = async (force = false): Promise<string> => {
+      const tokenRes = await fetch(`/api/bot-browser/janny/token${force ? "?force=1" : ""}`);
+      if (!tokenRes.ok) throw new Error("Could not obtain JannyAI token");
+      const { token: t } = await tokenRes.json();
+      if (!t) throw new Error("JannyAI token unavailable");
+      return t;
+    };
+    let token = await fetchToken();
 
     const sortMap: Record<string, string[]> = {
       newest: ["createdAtStamp:desc"],
@@ -483,16 +487,28 @@ const jannyProvider: ProviderConfig = {
       // pair with `credentials: "include"` — that combination blocks the response
       // entirely. cf_clearance won't ride along, but the upstream has historically
       // let cross-origin requests with browser TLS + UA through anyway.
-      const res = await fetch("https://search.jannyai.com/multi-search", {
-        method: "POST",
-        headers: {
-          Accept: "*/*",
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "x-meilisearch-client": "Meilisearch instant-meilisearch (v0.19.0) ; Meilisearch JavaScript (v0.41.0)",
-        },
-        body: JSON.stringify(body),
-      });
+      const doFetch = (authToken: string) =>
+        fetch("https://search.jannyai.com/multi-search", {
+          method: "POST",
+          headers: {
+            Accept: "*/*",
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${authToken}`,
+            "x-meilisearch-client": "Meilisearch instant-meilisearch (v0.19.0) ; Meilisearch JavaScript (v0.41.0)",
+          },
+          body: JSON.stringify(body),
+        });
+      let res = await doFetch(token);
+      // If the cached token has been rotated upstream, MeiliSearch returns 401/403.
+      // Force a server-side re-scrape and retry once.
+      if (res.status === 401 || res.status === 403) {
+        try {
+          token = await fetchToken(true);
+          res = await doFetch(token);
+        } catch {
+          /* fall through to error handling below */
+        }
+      }
       if (!res.ok) {
         if (res.status === 403) {
           throw new Error(

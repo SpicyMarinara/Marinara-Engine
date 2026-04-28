@@ -31,17 +31,22 @@ function jannySearchHeaders(token: string): Record<string, string> {
 }
 
 let cachedToken: string = "";
-// When the scrape fails we still hand back JANNY_FALLBACK_TOKEN so callers don't
-// stall, but we mark that fact and only keep that result for a short TTL so a
-// transient scrape failure can't poison the cache until process restart.
+// Fresh scraped tokens get a 5-minute TTL; fallback tokens get 1 minute. Both
+// expire so that if Janny rotates the MeiliSearch token (or our scrape was a
+// transient miss), the next request re-scrapes. The client can also force-busts
+// via `GET /janny/token?force=1` after seeing a 401/403 from MeiliSearch.
 let cachedTokenIsFallback = false;
 let cachedTokenAt = 0;
 const FALLBACK_TOKEN_TTL_MS = 60_000;
+const SCRAPED_TOKEN_TTL_MS = 5 * 60_000;
 let inFlightTokenFetch: Promise<string> | null = null;
 
 async function fetchJannyPage(path: string): Promise<string | null> {
   // Direct fetch first; fall back to corsproxy.io when Cloudflare blocks our IP.
   // Each fetch gets its own 15s kill-switch so a hung upstream can't pin a request open.
+  // Note: `return await` (not bare `return`) so the abort timeout stays armed
+  // until body consumption finishes — otherwise an upstream that sends headers
+  // then stalls the body would slip past the kill-switch.
   const directController = new AbortController();
   const directTimeout = setTimeout(() => directController.abort(), 15_000);
   try {
@@ -49,7 +54,7 @@ async function fetchJannyPage(path: string): Promise<string | null> {
       headers: { "User-Agent": BROWSER_UA, Accept: "text/html,application/xhtml+xml,*/*" },
       signal: directController.signal,
     });
-    if (direct.ok) return direct.text();
+    if (direct.ok) return await direct.text();
   } catch {
     /* fall through */
   } finally {
@@ -66,7 +71,7 @@ async function fetchJannyPage(path: string): Promise<string | null> {
         signal: proxyController.signal,
       },
     );
-    if (proxied.ok) return proxied.text();
+    if (proxied.ok) return await proxied.text();
   } catch {
     /* fall through */
   } finally {
@@ -110,15 +115,18 @@ async function scrapeToken(): Promise<{ token: string; isFallback: boolean }> {
   return { token: JANNY_FALLBACK_TOKEN, isFallback: true };
 }
 
-async function getSearchToken(): Promise<string> {
-  // Honor a cached fresh-scrape result indefinitely; honor a cached fallback
-  // only for FALLBACK_TOKEN_TTL_MS so a transient scrape failure can't poison
-  // /janny/token until process restart.
-  if (cachedToken) {
-    if (!cachedTokenIsFallback || Date.now() - cachedTokenAt < FALLBACK_TOKEN_TTL_MS) {
-      return cachedToken;
-    }
+async function getSearchToken(force = false): Promise<string> {
+  // Both fresh and fallback caches get a TTL so a rotated upstream token can't
+  // pin /janny/token to a dead value forever. `force` lets the client trigger
+  // an immediate re-scrape after it sees a 401/403 from MeiliSearch.
+  if (cachedToken && !force) {
+    const ttlMs = cachedTokenIsFallback ? FALLBACK_TOKEN_TTL_MS : SCRAPED_TOKEN_TTL_MS;
+    if (Date.now() - cachedTokenAt < ttlMs) return cachedToken;
+  }
+  if (force || cachedToken) {
     cachedToken = "";
+    cachedTokenIsFallback = false;
+    cachedTokenAt = 0;
   }
   if (inFlightTokenFetch) return inFlightTokenFetch;
   inFlightTokenFetch = scrapeToken().then(({ token, isFallback }) => {
@@ -182,8 +190,11 @@ export async function botBrowserJannyRoutes(app: FastifyInstance) {
   // (Server-side search.jannyai.com calls are blocked by Cloudflare. The upstream
   // SillyTavern extension works because the request comes from the user's browser,
   // which carries cf_clearance and a real TLS fingerprint. We do the same.)
-  app.get("/janny/token", async () => {
-    const token = await getSearchToken();
+  // `?force=1` busts the cache and re-scrapes — the client uses this after a
+  // 401/403 from MeiliSearch so a rotated upstream token can be recovered.
+  app.get<{ Querystring: { force?: string } }>("/janny/token", async (req) => {
+    const force = req.query.force === "1" || req.query.force === "true";
+    const token = await getSearchToken(force);
     return { token };
   });
 
