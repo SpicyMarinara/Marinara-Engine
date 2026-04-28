@@ -320,6 +320,17 @@ const CREATE_TABLES: string[] = [
     height INTEGER,
     created_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS character_images (
+    id TEXT PRIMARY KEY NOT NULL,
+    character_id TEXT NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+    file_path TEXT NOT NULL,
+    prompt TEXT NOT NULL DEFAULT '',
+    provider TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    width INTEGER,
+    height INTEGER,
+    created_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS ooc_influences (
     id TEXT PRIMARY KEY NOT NULL,
     source_chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
