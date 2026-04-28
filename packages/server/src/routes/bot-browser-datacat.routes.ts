@@ -204,7 +204,24 @@ export async function botBrowserDatacatRoutes(app: FastifyInstance) {
     const path = (req.params as Record<string, string>)["*"];
     if (!path) throw new Error("Missing avatar path");
 
-    const url = path.startsWith("http") ? path : `${DATACAT_IMAGE_BASE}${path}`;
+    // Whitelist the upstream avatar host. Without this, an absolute URL in `path`
+    // would let `/datacat/avatar/*` proxy to any address (SSRF — internal services,
+    // metadata endpoints, etc.).
+    let url: string;
+    if (path.startsWith("http")) {
+      let parsed: URL;
+      try {
+        parsed = new URL(path);
+      } catch {
+        return reply.status(400).send({ error: "Invalid avatar URL" });
+      }
+      if (parsed.protocol !== "https:" || parsed.hostname !== "ella.janitorai.com") {
+        return reply.status(400).send({ error: "Unsupported avatar host" });
+      }
+      url = parsed.toString();
+    } else {
+      url = `${DATACAT_IMAGE_BASE}${path}`;
+    }
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15_000);

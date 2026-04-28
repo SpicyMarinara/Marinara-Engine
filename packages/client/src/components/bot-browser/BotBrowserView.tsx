@@ -78,6 +78,8 @@ interface ProviderConfig {
   icon: string;
   sortOptions: SortOption[];
   defaultSort: string;
+  /** Items per page returned by the provider's search. Used by the shared paginator. */
+  pageSize: number;
   features: FilterFeature[];
   hasSortDirection: boolean;
   hasTokenFilters: boolean;
@@ -289,6 +291,7 @@ const chubProvider: ProviderConfig = {
   icon: "✦",
   siteName: "Chub",
   defaultSort: "popular_all",
+  pageSize: 48,
   sortOptions: [
     { value: "popular_all", label: "👑 Most Downloaded", group: "Popular" },
     { value: "popular_week", label: "🔥 Hot This Week", group: "Popular" },
@@ -397,6 +400,7 @@ const jannyProvider: ProviderConfig = {
   icon: "🤖",
   siteName: "JannyAI",
   defaultSort: "newest",
+  pageSize: 80,
   sortOptions: [
     { value: "newest", label: "🆕 Newest", group: "Date" },
     { value: "oldest", label: "🕐 Oldest", group: "Date" },
@@ -476,6 +480,10 @@ const jannyProvider: ProviderConfig = {
 
       const res = await fetch("https://search.jannyai.com/multi-search", {
         method: "POST",
+        // Cross-origin POST: required so the browser actually sends cf_clearance +
+        // any other jannyai.com cookies the user already has — that's what gets us
+        // past Cloudflare's bot challenge. Without this the workaround is a no-op.
+        credentials: "include",
         headers: {
           Accept: "*/*",
           "Content-Type": "application/json",
@@ -668,6 +676,7 @@ const chartavernProvider: ProviderConfig = {
   icon: "🍺",
   siteName: "CharacterTavern",
   defaultSort: "most_popular",
+  pageSize: 60,
   sortOptions: [
     { value: "most_popular", label: "🔥 Most Popular" },
     { value: "trending", label: "📈 Trending" },
@@ -756,6 +765,7 @@ const pygmalionProvider: ProviderConfig = {
   icon: "🔥",
   siteName: "Pygmalion",
   defaultSort: "downloads",
+  pageSize: 48,
   sortOptions: [
     { value: "downloads", label: "⬇️ Downloads" },
     { value: "stars", label: "⭐ Stars" },
@@ -856,6 +866,7 @@ const wyvernProvider: ProviderConfig = {
   icon: "🐉",
   siteName: "Wyvern",
   defaultSort: "popular",
+  pageSize: 48,
   sortOptions: [
     { value: "popular", label: "🔥 Popular" },
     { value: "nsfw-popular", label: "🔞 Popular NSFW" },
@@ -1014,6 +1025,7 @@ const datacatProvider: ProviderConfig = {
   icon: "🐱",
   siteName: "DataCat",
   defaultSort: "relevance",
+  pageSize: 80,
   sortOptions: [
     { value: "relevance", label: "🔍 Relevance" },
     { value: "fresh", label: "🔥 Fresh" },
@@ -1556,7 +1568,7 @@ export function BotBrowserView() {
     provider.extraToggles.filter((t) => extraToggles[t.key]).length;
   const hasActiveFeatures = activeFeatureCount > 0;
   const canAddCustomTag = tagSearch.trim().length >= 2 && !includeTags.includes(tagSearch.trim().toLowerCase());
-  const perPage = sourceId === "chub" ? 48 : sourceId === "janny" ? 80 : sourceId === "chartavern" ? 60 : 48;
+  const perPage = provider.pageSize;
   const totalPages = Math.max(1, Math.ceil(totalCount / perPage));
 
   const sortGroups = useMemo(() => {

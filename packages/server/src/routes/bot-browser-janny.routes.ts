@@ -35,22 +35,36 @@ let inFlightTokenFetch: Promise<string> | null = null;
 
 async function fetchJannyPage(path: string): Promise<string | null> {
   // Direct fetch first; fall back to corsproxy.io when Cloudflare blocks our IP.
+  // Each fetch gets its own 15s kill-switch so a hung upstream can't pin a request open.
+  const directController = new AbortController();
+  const directTimeout = setTimeout(() => directController.abort(), 15_000);
   try {
     const direct = await fetch(`${JANNY_SITE_BASE}${path}`, {
       headers: { "User-Agent": BROWSER_UA, Accept: "text/html,application/xhtml+xml,*/*" },
+      signal: directController.signal,
     });
     if (direct.ok) return direct.text();
   } catch {
     /* fall through */
+  } finally {
+    clearTimeout(directTimeout);
   }
+
+  const proxyController = new AbortController();
+  const proxyTimeout = setTimeout(() => proxyController.abort(), 15_000);
   try {
     const proxied = await fetch(
       `https://corsproxy.io/?url=${encodeURIComponent(`${JANNY_SITE_BASE}${path}`)}`,
-      { headers: { Accept: "text/html,application/xhtml+xml,*/*" } },
+      {
+        headers: { Accept: "text/html,application/xhtml+xml,*/*" },
+        signal: proxyController.signal,
+      },
     );
     if (proxied.ok) return proxied.text();
   } catch {
     /* fall through */
+  } finally {
+    clearTimeout(proxyTimeout);
   }
   return null;
 }
@@ -131,6 +145,11 @@ async function backfillFromSearch(name: string, charId: string): Promise<JannyMe
       body: JSON.stringify(body),
       signal: controller.signal,
     });
+    if (res.status === 401 || res.status === 403) {
+      // Mirror the search-route behavior so the next call re-scrapes a fresh token.
+      cachedToken = "";
+      return null;
+    }
     if (!res.ok) return null;
     const data = (await res.json()) as { results?: Array<{ hits?: JannyMeiliHit[] }> };
     const hits = data?.results?.[0]?.hits || [];
