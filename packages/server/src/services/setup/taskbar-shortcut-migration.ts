@@ -17,6 +17,11 @@ import { logger } from "../../lib/logger.js";
 const AUMID = "Pasta-Devs.MarinaraEngine";
 const SHORTCUT_TITLE = "Marinara Engine";
 
+// Hard timeout per child-process hop. The migration runs synchronously on
+// the server boot path, so a stalled powershell.exe or hung COM shortcut
+// API must not be allowed to hold startup hostage indefinitely.
+const SPAWN_TIMEOUT_MS = 5_000;
+
 function readShortcutTarget(lnkPath: string): string | null {
   const cmd =
     "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:LNK); " +
@@ -24,7 +29,12 @@ function readShortcutTarget(lnkPath: string): string | null {
   const res = spawnSync(
     "powershell.exe",
     ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", cmd],
-    { encoding: "utf8", env: { ...process.env, LNK: lnkPath }, windowsHide: true },
+    {
+      encoding: "utf8",
+      env: { ...process.env, LNK: lnkPath },
+      windowsHide: true,
+      timeout: SPAWN_TIMEOUT_MS,
+    },
   );
   if (res.status !== 0) return null;
   return (res.stdout ?? "").trim() || null;
@@ -49,6 +59,7 @@ function rewriteShortcut(lnkPath: string, exe: string, args: string, workDir: st
       encoding: "utf8",
       env: { ...process.env, LNK: lnkPath, EXE: exe, ARGS: args, WD: workDir, ICON: icon },
       windowsHide: true,
+      timeout: SPAWN_TIMEOUT_MS,
     },
   );
   return res.status === 0;
@@ -61,7 +72,12 @@ function readShortcutIconLocation(lnkPath: string): string | null {
   const res = spawnSync(
     "powershell.exe",
     ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", cmd],
-    { encoding: "utf8", env: { ...process.env, LNK: lnkPath }, windowsHide: true },
+    {
+      encoding: "utf8",
+      env: { ...process.env, LNK: lnkPath },
+      windowsHide: true,
+      timeout: SPAWN_TIMEOUT_MS,
+    },
   );
   if (res.status !== 0) return null;
   return (res.stdout ?? "").trim() || null;
@@ -79,13 +95,17 @@ function repairShortcutIcon(lnkPath: string, icon: string): boolean {
       encoding: "utf8",
       env: { ...process.env, LNK: lnkPath, ICON: icon },
       windowsHide: true,
+      timeout: SPAWN_TIMEOUT_MS,
     },
   );
   return res.status === 0;
 }
 
 function stampAumid(launcherExe: string, lnkPath: string): boolean {
-  const res = spawnSync(launcherExe, ["--stamp-lnk", lnkPath, AUMID], { windowsHide: true });
+  const res = spawnSync(launcherExe, ["--stamp-lnk", lnkPath, AUMID], {
+    windowsHide: true,
+    timeout: SPAWN_TIMEOUT_MS,
+  });
   return res.status === 0;
 }
 
