@@ -49,3 +49,22 @@ test("leaves system runtimes unchanged", () => {
 
   assert.equal(env.LD_LIBRARY_PATH, "/usr/lib");
 });
+
+test("prepends bundled runtime directories to PATH on Windows", () => {
+  const env = buildLlamaProcessEnv(
+    {
+      source: "bundled",
+      directoryPath: "C:\\Marinara\\sidecar-runtime\\b8934-win-x64-cuda",
+      serverPath: "C:\\Marinara\\sidecar-runtime\\b8934-win-x64-cuda\\llama-server.exe",
+    },
+    "win32",
+    {
+      PATH: "C:\\Windows\\System32",
+    },
+  );
+
+  assert.equal(
+    env.PATH,
+    `C:\\Marinara\\sidecar-runtime\\b8934-win-x64-cuda${delimiter}C:\\Windows\\System32`,
+  );
+});

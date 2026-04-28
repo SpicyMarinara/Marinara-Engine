@@ -10,6 +10,7 @@ import { buildLlamaArgs, buildLlamaStartupPlans } from "./sidecar-launch-plan.js
 import { buildLlamaProcessEnv } from "./sidecar-runtime-env.js";
 import { mlxRuntimeService, type MlxRuntimeInstall } from "./mlx-runtime.service.js";
 import { sidecarRuntimeService, type SidecarRuntimeInstall } from "./sidecar-runtime.service.js";
+import { assertSupportedLlamaCppModelPath } from "./sidecar-model-files.js";
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -460,6 +461,7 @@ class SidecarProcessService {
     if (!existsSync(modelPath)) {
       throw new Error("The selected sidecar model file is missing. Please download it again.");
     }
+    assertSupportedLlamaCppModelPath(modelPath);
 
     let activeRuntime: SidecarRuntimeInstall | null = runtime;
     const attemptedVariants = new Set<string>();

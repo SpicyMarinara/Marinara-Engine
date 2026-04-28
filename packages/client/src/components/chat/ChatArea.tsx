@@ -374,27 +374,43 @@ export function ChatArea() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chat?.id, msgPageCount]);
 
-  // Restore per-chat background from metadata when switching chats.
-  // If the new chat has a saved background, apply it; otherwise keep the current
-  // background so newly-created chats don't flash to black.
+  // Sync chat background from metadata when switching chats. Set the UI store
+  // to whatever the chat's metadata says — including null. The previous version
+  // only set on truthy values, leaving the global chatBackground stale when
+  // switching to a chat whose metadata has been cleared, which made a removed
+  // background re-appear after a chat switch round-trip.
   useEffect(() => {
-    const bg = chatMeta.background as string | undefined;
-    if (bg) {
-      useUIStore.getState().setChatBackground(`/api/backgrounds/file/${encodeURIComponent(bg)}`);
-    }
+    if (!chat?.id) return;
+    const bg = chatMeta.background as string | null | undefined;
+    useUIStore
+      .getState()
+      .setChatBackground(bg ? `/api/backgrounds/file/${encodeURIComponent(bg)}` : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chat?.id]);
 
   // Persist background choice to chat metadata so it survives page refresh.
   // Catches all sources: manual picker, background agent, scene commands, slash commands.
-  // Only persist non-null backgrounds — never write null to metadata (avoids wiping
-  // the user's background when opening a new chat that hasn't had one set yet).
+  // When the user clears the background, we must persist null so the removal
+  // sticks across chat switches; otherwise the restore effect re-applies the
+  // stale saved background. We only write null when metadata already had a
+  // background — that way a global UI background carried over from a previous
+  // chat doesn't pollute a fresh chat's metadata on switch.
   const bgPersistTimer = useRef<ReturnType<typeof setTimeout>>(null);
   useEffect(() => {
-    if (!chat?.id || !chatBackground) return;
+    if (!chat?.id) return;
+    const savedFilename = (chatMeta.background as string | null | undefined) ?? null;
+
+    if (!chatBackground) {
+      if (savedFilename === null) return;
+      if (bgPersistTimer.current) clearTimeout(bgPersistTimer.current);
+      bgPersistTimer.current = setTimeout(() => {
+        updateMeta.mutate({ id: chat!.id, background: null });
+      }, 500);
+      return;
+    }
+
     const filename = decodeURIComponent(chatBackground.replace(/^\/api\/backgrounds\/file\//, ""));
-    // Skip if metadata already matches (avoids pointless writes on restore)
-    if (filename === (chatMeta.background ?? null)) return;
+    if (filename === savedFilename) return;
     if (bgPersistTimer.current) clearTimeout(bgPersistTimer.current);
     bgPersistTimer.current = setTimeout(() => {
       updateMeta.mutate({ id: chat!.id, background: filename });

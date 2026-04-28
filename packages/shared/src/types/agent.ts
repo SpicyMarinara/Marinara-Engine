@@ -506,6 +506,7 @@ export const DEFAULT_AGENT_TOOLS: Record<string, string[]> = {
   "persona-stats": ["update_game_state"],
   html: [],
   "chat-summary": [],
+  // Also used server-side to identify Spotify tools that require token refresh.
   spotify: [
     "spotify_get_playlists",
     "spotify_get_playlist_tracks",

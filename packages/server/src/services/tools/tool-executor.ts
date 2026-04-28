@@ -31,18 +31,20 @@ export interface SpotifyCredentials {
   accessToken: string;
 }
 
+export interface ToolExecutionContext {
+  gameState?: Record<string, unknown>;
+  customTools?: CustomToolDef[];
+  searchLorebook?: LorebookSearchFn;
+  spotify?: SpotifyCredentials;
+}
+
 /**
  * Execute a batch of tool calls, returning results for each.
  * Supports built-in tools and user-defined custom tools.
  */
 export async function executeToolCalls(
   toolCalls: LLMToolCall[],
-  context?: {
-    gameState?: Record<string, unknown>;
-    customTools?: CustomToolDef[];
-    searchLorebook?: LorebookSearchFn;
-    spotify?: SpotifyCredentials;
-  },
+  context?: ToolExecutionContext,
 ): Promise<ToolExecutionResult[]> {
   const results: ToolExecutionResult[] = [];
 
@@ -78,12 +80,7 @@ export async function executeToolCalls(
 async function executeSingleTool(
   name: string,
   args: Record<string, unknown>,
-  context?: {
-    gameState?: Record<string, unknown>;
-    customTools?: CustomToolDef[];
-    searchLorebook?: LorebookSearchFn;
-    spotify?: SpotifyCredentials;
-  },
+  context?: ToolExecutionContext,
 ): Promise<unknown> {
   switch (name) {
     case "roll_dice":

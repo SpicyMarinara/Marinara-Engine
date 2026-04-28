@@ -96,6 +96,16 @@ if /I "!OLD_HEAD!"=="!TARGET_HEAD!" (
     echo  [OK] Already up to date
     goto :skip_update
 )
+:: Drop known-safe untracked files that older installer versions placed in
+:: $INSTDIR but are now also tracked in the repo. Without this, git merge
+:: --ff-only refuses to overwrite them and the auto-update silently fails.
+:: The repo copies are byte-identical to what the installer wrote, so this
+:: is non-destructive — git restores them as tracked files after the merge.
+if exist "app-icon.ico" (
+    git ls-files --error-unmatch "app-icon.ico" >nul 2>&1
+    if errorlevel 1 del /q "app-icon.ico" >nul 2>&1
+)
+
 :: Stash any tracked local changes so the fast-forward update doesn't fail
 set "STASHED=0"
 set "STASH_REF="

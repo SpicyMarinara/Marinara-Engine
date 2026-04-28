@@ -214,8 +214,18 @@ export function useUpdateChatMetadata() {
   return useMutation({
     mutationFn: ({ id, ...metadata }: { id: string; [key: string]: unknown }) =>
       api.patch<Chat>(`/chats/${id}/metadata`, metadata),
-    onSuccess: (_data, vars) => {
-      qc.invalidateQueries({ queryKey: chatKeys.detail(vars.id) });
+    onSuccess: (data, vars) => {
+      // Write the server response straight into the detail cache. Plain
+      // invalidation alone leaves stale data in place when no observer is
+      // mounted to trigger a refetch (e.g. user navigated away after firing
+      // the mutation), causing later renders to re-read the pre-mutation
+      // value — which is what made cleared chat backgrounds reappear after
+      // a chat switch round-trip.
+      if (data) {
+        qc.setQueryData(chatKeys.detail(vars.id), data);
+      } else {
+        qc.invalidateQueries({ queryKey: chatKeys.detail(vars.id) });
+      }
       qc.invalidateQueries({ queryKey: chatKeys.list() });
     },
   });

@@ -2,6 +2,7 @@ import { delimiter, dirname } from "path";
 
 type LlamaRuntimeEnvInput = {
   serverPath: string;
+  directoryPath?: string;
   source: string | null | undefined;
 };
 
@@ -31,6 +32,8 @@ export function buildLlamaProcessEnv(
     env.LD_LIBRARY_PATH = prependPathEntry(env.LD_LIBRARY_PATH, runtimeDir);
   } else if (platform === "darwin") {
     env.DYLD_LIBRARY_PATH = prependPathEntry(env.DYLD_LIBRARY_PATH, runtimeDir);
+  } else if (platform === "win32") {
+    env.PATH = prependPathEntry(prependPathEntry(env.PATH, runtimeDir), runtime.directoryPath ?? runtimeDir);
   }
 
   return env;
