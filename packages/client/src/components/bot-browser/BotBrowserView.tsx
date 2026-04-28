@@ -1055,8 +1055,9 @@ const datacatProvider: ProviderConfig = {
     const tagIds = p.includeTags.length > 0 ? datacatTagNamesToIds(p.includeTags) : [];
 
     // Fresh = trending, Relevance = recent-public (which is the "Characters" tab on
-    // datacat.run — supports tag filtering and shows the full library).
-    const useFresh = p.sort === "fresh" && tagIds.length === 0 && !p.query;
+    // datacat.run — supports tag filtering and shows the full library). DataCat
+    // has no free-text search endpoint, so `p.query` is ignored for this provider.
+    const useFresh = p.sort === "fresh" && tagIds.length === 0;
 
     let list: any[] = [];
     let totalCount = 0;
@@ -1073,7 +1074,12 @@ const datacatProvider: ProviderConfig = {
       // Response shape: { success, sortBy, windows: { last24h: { count, characters: [...] }, thisWeek: {...} } }
       const last24h = data?.windows?.last24h || data?.last24h;
       list = Array.isArray(last24h) ? last24h : last24h?.characters || [];
-      totalCount = data?.windows?.last24h?.count ?? list.length;
+      // /fresh ignores `page` — the upstream `count` describes the full window
+      // even when the response only carries `limit24` items. Reporting that as
+      // `totalCount` would let the paginator advertise pages 2+ that just replay
+      // the same window. Clamp to the actual returned slice so pagination
+      // disables itself once the user reaches the end.
+      totalCount = list.length;
     } else {
       const offset = Math.max(0, (p.page - 1) * 80);
       const params = new URLSearchParams({ limit: "80", offset: String(offset) });
@@ -1085,14 +1091,11 @@ const datacatProvider: ProviderConfig = {
       totalCount = data?.totalCount || list.length;
     }
 
-    // Client-side query filter (DataCat REST has no full-text search on these endpoints)
-    if (p.query) {
-      const q = p.query.toLowerCase();
-      list = list.filter((c: any) => {
-        const name = (c.chat_name || c.name || "").toLowerCase();
-        return name.includes(q);
-      });
-    }
+    // No client-side query filter for DataCat: upstream has no full-text search
+    // endpoint, and filtering only the current 80-row page would be misleading
+    // (a character on page 2 would still show "no results" on page 1). The UI
+    // disables the search input for this provider — see the search input render.
+
     // DataCat is NSFW-only — every character is tagged NSFW upstream, so filtering
     // by nsfw=false would always return an empty list. Skip the filter entirely.
     // Client-side excludeTags filter
@@ -1885,13 +1888,23 @@ export function BotBrowserView() {
                   />
                   <input
                     type="text"
-                    value={query}
+                    value={sourceId === "datacat" ? "" : query}
                     onChange={(e) => {
                       setQuery(e.target.value);
                       setPage(1);
                     }}
-                    placeholder="Search characters..."
-                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--secondary)] py-2 pl-9 pr-8 text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none transition-colors focus:border-[var(--primary)]"
+                    disabled={sourceId === "datacat"}
+                    placeholder={
+                      sourceId === "datacat"
+                        ? "DataCat doesn't support text search — filter by tag instead"
+                        : "Search characters..."
+                    }
+                    title={
+                      sourceId === "datacat"
+                        ? "DataCat has no full-text search endpoint. Use tags to narrow results."
+                        : undefined
+                    }
+                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--secondary)] py-2 pl-9 pr-8 text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none transition-colors focus:border-[var(--primary)] disabled:cursor-not-allowed disabled:opacity-60"
                   />
                   {query && (
                     <button
