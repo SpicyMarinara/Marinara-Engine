@@ -222,6 +222,8 @@ export function AgentEditor() {
 
   // Knowledge Retrieval agent — lorebook source selector
   const isKnowledgeRetrievalAgent = agentDetailId === "knowledge-retrieval" || dbConfig?.type === "knowledge-retrieval";
+  // Knowledge Router agent — also uses the lorebook source selector (file picker stays Retrieval-only)
+  const isKnowledgeRouterAgent = agentDetailId === "knowledge-router" || dbConfig?.type === "knowledge-router";
   const { data: allLorebooks } = useLorebooks();
   const { data: allKnowledgeSources } = useKnowledgeSources();
   const uploadSource = useUploadKnowledgeSource();
@@ -993,12 +995,16 @@ export function AgentEditor() {
             </FieldGroup>
           )}
 
-          {/* ── Knowledge Source Lorebooks (only for Knowledge Retrieval agent) ── */}
-          {isKnowledgeRetrievalAgent && (
+          {/* ── Knowledge Source Lorebooks (Knowledge Retrieval + Knowledge Router) ── */}
+          {(isKnowledgeRetrievalAgent || isKnowledgeRouterAgent) && (
             <FieldGroup
               label="Knowledge Sources"
               icon={<BookOpen size="0.875rem" className="text-amber-400" />}
-              help="Select lorebooks and/or upload files for this agent to scan. Supported file types: .txt, .md, .csv, .json, .xml, .html, .pdf"
+              help={
+                isKnowledgeRouterAgent
+                  ? "Select lorebooks for this agent to route over. The router picks relevant entries by id and they're injected verbatim."
+                  : "Select lorebooks and/or upload files for this agent to scan. Supported file types: .txt, .md, .csv, .json, .xml, .html, .pdf"
+              }
             >
               <div className="space-y-4">
                 {/* ── Lorebooks ── */}
@@ -1048,7 +1054,8 @@ export function AgentEditor() {
                   )}
                 </div>
 
-                {/* ── Uploaded Files ── */}
+                {/* ── Uploaded Files (Knowledge Retrieval only) ── */}
+                {isKnowledgeRetrievalAgent && (
                 <div className="space-y-1.5">
                   <p className="text-[0.6875rem] font-medium text-white/60">Files</p>
                   {/* File list */}
@@ -1153,6 +1160,7 @@ export function AgentEditor() {
                     )}
                   </button>
                 </div>
+                )}
 
                 {/* Summary */}
                 {(localSourceLorebookIds.length > 0 || localSourceFileIds.length > 0) && (
