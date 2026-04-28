@@ -3972,10 +3972,14 @@ export async function generateRoutes(app: FastifyInstance) {
         const isRouter = agentType === "knowledge-router";
         const heading = isRouter ? "Knowledge Router" : "Knowledge Retrieval";
         const tag = isRouter ? "knowledge_router" : "knowledge_retrieval";
+        // Honor all three wrapFormat values (the previous KR-only injection had
+        // a markdown-or-xml-fallback bug that "none" silently fell into).
         const wrapped =
-          wrapFormat === "markdown"
-            ? `\n\n## ${heading}\n${text}`
-            : `\n\n<${tag}>\n${text}\n</${tag}>`;
+          wrapFormat === "none"
+            ? `\n\n${text}`
+            : wrapFormat === "markdown"
+              ? `\n\n## ${heading}\n${text}`
+              : `\n\n<${tag}>\n${text}\n</${tag}>`;
         const lastUserIdx = findLastIndex(finalMessages, "user");
         if (lastUserIdx >= 0) {
           const target = finalMessages[lastUserIdx]!;
@@ -4047,16 +4051,16 @@ export async function generateRoutes(app: FastifyInstance) {
                 // Emit agent_error so the client closes the pending state opened by
                 // agent_start above — without this the UI shows the agent as forever-
                 // running. (Mirrors the Illustrator agent's failure protocol.)
+                // Use trySendSseEvent rather than reply.raw.write so a disconnected
+                // client doesn't turn this caught failure back into a rejected promise.
                 logger.warn(err, "[knowledge-retrieval] failed — continuing generation without retrieved context");
-                reply.raw.write(
-                  `data: ${JSON.stringify({
-                    type: "agent_error",
-                    data: {
-                      agentType: "knowledge-retrieval",
-                      error: err instanceof Error ? err.message : "Knowledge retrieval failed",
-                    },
-                  })}\n\n`,
-                );
+                trySendSseEvent(reply, {
+                  type: "agent_error",
+                  data: {
+                    agentType: "knowledge-retrieval",
+                    error: err instanceof Error ? err.message : "Knowledge retrieval failed",
+                  },
+                });
                 return null;
               }
             })()
@@ -4096,16 +4100,16 @@ export async function generateRoutes(app: FastifyInstance) {
                 // Emit agent_error so the client closes the pending state opened by
                 // agent_start above — without this the UI shows the agent as forever-
                 // running. (Mirrors the Illustrator agent's failure protocol.)
+                // Use trySendSseEvent rather than reply.raw.write so a disconnected
+                // client doesn't turn this caught failure back into a rejected promise.
                 logger.warn(err, "[knowledge-router] failed — continuing generation without routed context");
-                reply.raw.write(
-                  `data: ${JSON.stringify({
-                    type: "agent_error",
-                    data: {
-                      agentType: "knowledge-router",
-                      error: err instanceof Error ? err.message : "Knowledge router failed",
-                    },
-                  })}\n\n`,
-                );
+                trySendSseEvent(reply, {
+                  type: "agent_error",
+                  data: {
+                    agentType: "knowledge-router",
+                    error: err instanceof Error ? err.message : "Knowledge router failed",
+                  },
+                });
                 return null;
               }
             })()
