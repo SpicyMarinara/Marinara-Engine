@@ -3403,12 +3403,21 @@ export async function generateRoutes(app: FastifyInstance) {
           const sourceIds = (knowledgeRouterAgent.settings.sourceLorebookIds as string[]) ?? [];
           if (sourceIds.length > 0) {
             const entries = await lorebooksStore.listEntriesByLorebooks(sourceIds);
+            // Honor per-chat entry state overrides (a user can disable a specific
+            // entry for this chat without touching the global lorebook). Without this
+            // the router could route over an entry the user explicitly silenced.
+            const entryStateOverrides =
+              (chatMeta.entryStateOverrides as Record<string, { enabled?: boolean }>) ?? {};
             // Skip disabled entries (off-limits) and constant entries (already injected
             // unconditionally by the standard activation pipeline — routing them
             // would duplicate work).
             knowledgeRouterEntries = entries.filter(
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              (e: any) => e.enabled !== false && e.constant !== true,
+              (e: any) => {
+                const overrideEnabled = entryStateOverrides[e.id]?.enabled;
+                const isEnabled = overrideEnabled ?? e.enabled !== false;
+                return isEnabled && e.constant !== true;
+              },
             );
           }
         } catch {
@@ -3992,31 +4001,39 @@ export async function generateRoutes(app: FastifyInstance) {
           : Promise.resolve(null);
 
         // Build the knowledge router promise
+        // Wrapped in try/catch so a router failure (LLM error, parse error, etc.)
+        // never aborts the whole generation — routing is an optional enhancement,
+        // not a critical dependency.
         const krRouterPromise = shouldRunRouter
           ? (async () => {
-              reply.raw.write(
-                `data: ${JSON.stringify({ type: "agent_start", data: { phase: "pre_generation", agentType: "knowledge-router" } })}\n\n`,
-              );
-              const routerConfig = {
-                id: knowledgeRouterAgent!.id,
-                type: knowledgeRouterAgent!.type,
-                name: knowledgeRouterAgent!.name,
-                phase: knowledgeRouterAgent!.phase,
-                promptTemplate: knowledgeRouterAgent!.promptTemplate,
-                connectionId: knowledgeRouterAgent!.connectionId,
-                settings: knowledgeRouterAgent!.settings,
-              };
               const _tRouter = Date.now();
-              const routerResult = await executeKnowledgeRouter(
-                routerConfig,
-                agentContext,
-                knowledgeRouterAgent!.provider,
-                knowledgeRouterAgent!.model,
-                knowledgeRouterEntries,
-              );
-              sendAgentEvent(routerResult);
-              logger.debug(`[timing] Knowledge router: ${Date.now() - _tRouter}ms`);
-              return routerResult;
+              try {
+                reply.raw.write(
+                  `data: ${JSON.stringify({ type: "agent_start", data: { phase: "pre_generation", agentType: "knowledge-router" } })}\n\n`,
+                );
+                const routerConfig = {
+                  id: knowledgeRouterAgent!.id,
+                  type: knowledgeRouterAgent!.type,
+                  name: knowledgeRouterAgent!.name,
+                  phase: knowledgeRouterAgent!.phase,
+                  promptTemplate: knowledgeRouterAgent!.promptTemplate,
+                  connectionId: knowledgeRouterAgent!.connectionId,
+                  settings: knowledgeRouterAgent!.settings,
+                };
+                const routerResult = await executeKnowledgeRouter(
+                  routerConfig,
+                  agentContext,
+                  knowledgeRouterAgent!.provider,
+                  knowledgeRouterAgent!.model,
+                  knowledgeRouterEntries,
+                );
+                sendAgentEvent(routerResult);
+                logger.debug(`[timing] Knowledge router: ${Date.now() - _tRouter}ms`);
+                return routerResult;
+              } catch (err) {
+                logger.warn(err, "[knowledge-router] failed — continuing generation without routed context");
+                return null;
+              }
             })()
           : Promise.resolve(null);
 
@@ -4141,8 +4158,12 @@ export async function generateRoutes(app: FastifyInstance) {
             contextInjections.push({ agentType: "knowledge-router", text: routerText });
           }
         }
-      } else if (hasPreGenAgents && input.regenerateMessageId) {
-        // Regeneration — try to reuse cached context injections from the original generation
+      } else if (input.regenerateMessageId) {
+        // Regeneration — try to reuse cached context injections from the original generation.
+        // This must run regardless of whether `hasPreGenAgents` is true, because the cached
+        // injections may have come from agents in `EXCLUDED_FROM_PIPELINE` (knowledge-retrieval,
+        // knowledge-router) — which `hasPreGenAgents` excludes. Without this, a chat whose
+        // only pre-gen agent is KR or Router would silently drop the lore on every regen.
         const regenExtra = parseExtra(regenMsg?.extra);
         const rawCached = regenExtra.contextInjections as AgentInjection[] | string[] | undefined;
 
@@ -4172,7 +4193,7 @@ export async function generateRoutes(app: FastifyInstance) {
               })}\n\n`,
             );
           }
-        } else {
+        } else if (hasPreGenAgents) {
           const hasContextInjectionAgents = resolvedAgents.some(
             (a) => a.phase === "pre_generation" && !EXCLUDED_FROM_PIPELINE.has(a.type),
           );
