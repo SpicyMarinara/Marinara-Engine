@@ -31,6 +31,12 @@ function jannySearchHeaders(token: string): Record<string, string> {
 }
 
 let cachedToken: string = "";
+// When the scrape fails we still hand back JANNY_FALLBACK_TOKEN so callers don't
+// stall, but we mark that fact and only keep that result for a short TTL so a
+// transient scrape failure can't poison the cache until process restart.
+let cachedTokenIsFallback = false;
+let cachedTokenAt = 0;
+const FALLBACK_TOKEN_TTL_MS = 60_000;
 let inFlightTokenFetch: Promise<string> | null = null;
 
 async function fetchJannyPage(path: string): Promise<string | null> {
@@ -69,10 +75,10 @@ async function fetchJannyPage(path: string): Promise<string | null> {
   return null;
 }
 
-async function scrapeToken(): Promise<string> {
+async function scrapeToken(): Promise<{ token: string; isFallback: boolean }> {
   try {
     const html = await fetchJannyPage("/characters/search");
-    if (!html) return JANNY_FALLBACK_TOKEN;
+    if (!html) return { token: JANNY_FALLBACK_TOKEN, isFallback: true };
 
     // Resolve client-config bundle path: either inlined directly in the page,
     // or imported by the SearchPage chunk (Janny's bundler split changed in 2026).
@@ -95,22 +101,32 @@ async function scrapeToken(): Promise<string> {
       const cfgJs = await fetchJannyPage(configPath);
       if (cfgJs) {
         const tokenMatch = cfgJs.match(/"([a-f0-9]{64})"/);
-        if (tokenMatch?.[1]) return tokenMatch[1];
+        if (tokenMatch?.[1]) return { token: tokenMatch[1], isFallback: false };
       }
     }
   } catch {
     // fall through to fallback
   }
-  return JANNY_FALLBACK_TOKEN;
+  return { token: JANNY_FALLBACK_TOKEN, isFallback: true };
 }
 
 async function getSearchToken(): Promise<string> {
-  if (cachedToken) return cachedToken;
+  // Honor a cached fresh-scrape result indefinitely; honor a cached fallback
+  // only for FALLBACK_TOKEN_TTL_MS so a transient scrape failure can't poison
+  // /janny/token until process restart.
+  if (cachedToken) {
+    if (!cachedTokenIsFallback || Date.now() - cachedTokenAt < FALLBACK_TOKEN_TTL_MS) {
+      return cachedToken;
+    }
+    cachedToken = "";
+  }
   if (inFlightTokenFetch) return inFlightTokenFetch;
-  inFlightTokenFetch = scrapeToken().then((t) => {
-    cachedToken = t;
+  inFlightTokenFetch = scrapeToken().then(({ token, isFallback }) => {
+    cachedToken = token;
+    cachedTokenIsFallback = isFallback;
+    cachedTokenAt = Date.now();
     inFlightTokenFetch = null;
-    return t;
+    return token;
   });
   return inFlightTokenFetch;
 }
