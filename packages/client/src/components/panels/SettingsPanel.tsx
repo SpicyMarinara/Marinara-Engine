@@ -50,7 +50,7 @@ import {
   RefreshCw,
   ExternalLink,
 } from "lucide-react";
-import { useClearAllData, useExpungeData, type ExpungeScope } from "../../hooks/use-chats";
+import { useClearAllData, useExpungeData, useUpdateChatMetadata, type ExpungeScope } from "../../hooks/use-chats";
 import { useChatStore } from "../../stores/chat.store";
 import { chatKeys } from "../../hooks/use-chats";
 import { HelpTooltip } from "../ui/HelpTooltip";
@@ -415,7 +415,25 @@ function AppearanceSettings() {
   const visualTheme = useUIStore((s) => s.visualTheme);
   const setVisualTheme = useUIStore((s) => s.setVisualTheme);
   const chatBackground = useUIStore((s) => s.chatBackground);
-  const setChatBackground = useUIStore((s) => s.setChatBackground);
+  const setChatBackgroundRaw = useUIStore((s) => s.setChatBackground);
+  const activeChatId = useChatStore((s) => s.activeChatId);
+  const updateMeta = useUpdateChatMetadata();
+  // Persist background changes to the active chat's metadata immediately so
+  // a clear (or pick) survives chat switches and page reloads. The effect-based
+  // persist in ChatArea covers other sources (agents/scene/slash commands), but
+  // for the Settings UI we wire the mutation directly to the click to remove
+  // any timing ambiguity around clearing.
+  const setChatBackground = useCallback(
+    (url: string | null) => {
+      setChatBackgroundRaw(url);
+      if (!activeChatId) return;
+      const filename = url
+        ? decodeURIComponent(url.replace(/^\/api\/backgrounds\/file\//, ""))
+        : null;
+      updateMeta.mutate({ id: activeChatId, background: filename });
+    },
+    [setChatBackgroundRaw, activeChatId, updateMeta],
+  );
   const fontFamily = useUIStore((s) => s.fontFamily);
   const setFontFamily = useUIStore((s) => s.setFontFamily);
   const convoGradientFrom = useUIStore((s) => s.convoGradientFrom);
