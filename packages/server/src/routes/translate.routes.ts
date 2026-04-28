@@ -68,6 +68,8 @@ async function translateWithAI(
     const providerDef = PROVIDERS[conn.provider as keyof typeof PROVIDERS];
     baseUrl = providerDef?.defaultBaseUrl ?? "";
   }
+  // Claude (Subscription) uses the local Claude Agent SDK; no HTTP endpoint.
+  if (!baseUrl && conn.provider === "claude_subscription") baseUrl = "claude-agent-sdk://local";
   if (!baseUrl) {
     throw Object.assign(new Error("No base URL configured for this connection"), { statusCode: 400 });
   }
