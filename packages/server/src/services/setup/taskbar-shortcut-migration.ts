@@ -141,12 +141,16 @@ export function migrateTaskbarShortcuts(installDir: string): void {
     }
   }
 
-  // Icon source — sourced from installer/ subfolder which is always tracked in
-  // the repo. Earlier versions used a tracked copy at the repo root, but that
-  // collided with the untracked copy that the original installer wrote to
+  // Icon source — sourced from win/installer/ subfolder which is always tracked
+  // in the repo. Earlier versions used a tracked copy at the repo root, but
+  // that collided with the untracked copy that the original installer wrote to
   // $INSTDIR — blocking git pull for existing users. Sourcing from the
   // subfolder avoids the path that the installer uses at the install root.
-  const iconPath = join(installDir, "installer", "app-icon.ico");
+  const iconPath = join(installDir, "win", "installer", "app-icon.ico");
+  // Older migrations targeted the icon at <installDir>/installer/app-icon.ico
+  // (before the win/ reorganization). Self-heal recognizes that path and
+  // repairs it to the new location.
+  const legacyIconPath = join(installDir, "installer", "app-icon.ico");
   const iconLocation = `${iconPath},0`;
   const argsLine = `${AUMID} "${startBat}" "${SHORTCUT_TITLE}"`;
   const workDir = installDir;
@@ -161,12 +165,15 @@ export function migrateTaskbarShortcuts(installDir: string): void {
     }
 
     if (pathsEqual(currentTarget, launcherExe)) {
-      // Already migrated. Self-heal: if its IconLocation file no longer exists
-      // (e.g. an earlier migration pointed at $INSTDIR\app-icon.ico, which was
-      // tracked then later removed from the repo), repair it.
+      // Already migrated. Self-heal the IconLocation if it points at a path
+      // that no longer exists OR at the legacy installer/ path that the
+      // win/ reorganization moved. Either way, repoint at the canonical
+      // win/installer/app-icon.ico.
       const currentIcon = readShortcutIconLocation(lnk);
       const currentIconPath = (currentIcon ?? "").replace(/,\d+$/, "");
-      if (currentIconPath && !existsSync(currentIconPath) && existsSync(iconPath)) {
+      const isLegacyPath = currentIconPath ? pathsEqual(currentIconPath, legacyIconPath) : false;
+      const isMissing = currentIconPath ? !existsSync(currentIconPath) : false;
+      if ((isLegacyPath || isMissing) && existsSync(iconPath)) {
         if (repairShortcutIcon(lnk, iconLocation)) {
           logger.info("Repaired taskbar shortcut icon: %s", lnk);
         } else {

@@ -112,11 +112,11 @@ const DERIVED_VERSION_FILES = [
     render: (content, version) => updateSharedDefaults(content, version),
   },
   {
-    path: "installer/installer.nsi",
+    path: "win/installer/installer.nsi",
     render: (content, version) => updateInstallerNsi(content, version),
   },
   {
-    path: "installer/install.bat",
+    path: "win/installer/install.bat",
     render: (content, version) => updateInstallerBat(content, version),
   },
   {

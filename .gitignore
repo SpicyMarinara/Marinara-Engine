@@ -44,4 +44,4 @@ packages/server/data/
 release/
 
 # Installer artifacts are published on GitHub Releases, not tracked in source
-installer/*.exe
+win/installer/*.exe

@@ -18,10 +18,12 @@ android:
       - any-glob-to-any-file:
           - android/**
 
-installer:
+windows:
   - changed-files:
       - any-glob-to-any-file:
-          - installer/**
+          - win/**
+          - MarinaraLauncher.exe
+          - start.bat
 
 docs:
   - changed-files:

@@ -24,7 +24,8 @@ on:
       - "start-termux.sh"
       # Platform-specific sources
       - "android/**"
-      - "installer/**"
+      - "win/**"
+      - "MarinaraLauncher.exe"
       # GitHub community files
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/PULL_REQUEST_TEMPLATE/**"

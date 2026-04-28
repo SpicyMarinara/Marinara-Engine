@@ -32,8 +32,8 @@ This file is a thin maintainer note for contributors using Claude. Canonical wor
   - `packages/server/package.json`
   - `packages/shared/package.json`
   - `packages/shared/src/constants/defaults.ts`
-  - `installer/installer.nsi`
-  - `installer/install.bat`
+  - `win/installer/installer.nsi`
+  - `win/installer/install.bat`
   - `android/app/build.gradle`
 
 Android-specific rule:
