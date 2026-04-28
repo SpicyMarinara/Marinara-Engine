@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────
 // Service: Image Generation
 // ──────────────────────────────────────────────
-// Calls image generation APIs (OpenAI DALL-E, Pollinations, Stability, etc.)
+// Calls image generation APIs (OpenAI DALL-E, Pollinations, Stability, OpenRouter, etc.)
 // based on a user's configured image_generation connection.
 
 import { existsSync, mkdirSync, writeFileSync } from "fs";
@@ -56,6 +56,7 @@ const EXPLICIT_IMAGE_SOURCES = new Set([
   "comfyui",
   "automatic1111",
   "gemini_image",
+  "openrouter",
 ]);
 
 function normalizeExplicitImageSource(serviceHint: string): string {
@@ -110,6 +111,8 @@ export async function generateImage(
       return generateAutomatic1111(baseUrl, request);
     case "gemini_image":
       return generateViaChatCompletions(baseUrl, apiKey, request);
+    case "openrouter":
+      return generateOpenRouter(baseUrl, apiKey, request);
     default:
       // Fallback: try OpenAI-compatible endpoint
       return generateOpenAI(baseUrl, apiKey, request);
@@ -516,6 +519,131 @@ async function generateViaChatCompletions(
     ext = "webp";
   }
 
+  return { base64, mimeType, ext };
+}
+
+// ── OpenRouter ──
+
+/**
+ * Generate an image via OpenRouter's image-output models (Gemini 2.5 Flash Image, FLUX, etc.).
+ * OpenRouter exposes them through /chat/completions and returns the image as a base64 data URL
+ * inside `choices[0].message.images[0].image_url.url` when the request includes
+ * `modalities: ["image", "text"]`. Reference images are passed as multimodal `image_url` parts.
+ */
+async function generateOpenRouter(
+  baseUrl: string,
+  apiKey: string,
+  request: ImageGenRequest,
+): Promise<ImageGenResult> {
+  const url = `${baseUrl.replace(/\/+$/, "")}/chat/completions`;
+
+  // Build multimodal content: reference images first (data URLs), then the text prompt.
+  const refImages = request.referenceImages?.length
+    ? request.referenceImages
+    : request.referenceImage
+      ? [request.referenceImage]
+      : [];
+  let messageContent: string | Array<Record<string, unknown>>;
+  if (refImages.length > 0) {
+    const parts: Array<Record<string, unknown>> = refImages.map((b64) => ({
+      type: "image_url",
+      image_url: { url: `data:image/png;base64,${b64}` },
+    }));
+    parts.push({ type: "text", text: request.prompt });
+    messageContent = parts;
+  } else {
+    messageContent = request.prompt;
+  }
+
+  const model = request.model || "google/gemini-2.5-flash-image";
+  const body: Record<string, unknown> = {
+    model,
+    modalities: ["image", "text"],
+    messages: [{ role: "user", content: messageContent }],
+    stream: false,
+  };
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      // OpenRouter recommends these for attribution; harmless if absent.
+      "HTTP-Referer": process.env.OPENROUTER_REFERER ?? "https://marinara-engine.local",
+      "X-Title": process.env.OPENROUTER_TITLE ?? "Marinara Engine",
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => "Unknown error");
+    throw new Error(`OpenRouter image generation failed (${resp.status}): ${sanitizeErrorText(errText)}`);
+  }
+
+  const data = (await resp.json()) as {
+    choices?: Array<{
+      message?: {
+        content?: string | Array<Record<string, unknown>>;
+        images?: Array<{ type?: string; image_url?: { url?: string } }>;
+      };
+    }>;
+  };
+
+  const message = data.choices?.[0]?.message;
+  const imageEntry = message?.images?.find((img) => img?.image_url?.url);
+  let imageUrl = imageEntry?.image_url?.url;
+
+  // Fallback 1: some routes embed the image as an `image_url` part directly inside `content`.
+  if (!imageUrl && Array.isArray(message?.content)) {
+    for (const part of message.content) {
+      const partUrl = (part as { image_url?: { url?: string } })?.image_url?.url;
+      if (typeof partUrl === "string") {
+        imageUrl = partUrl;
+        break;
+      }
+    }
+  }
+
+  // Fallback 2: legacy markdown / plain URL inside text content (older proxies).
+  if (!imageUrl && typeof message?.content === "string") {
+    const mdMatch = message.content.match(/!\[[^\]]*\]\(([^)]+)\)/);
+    imageUrl = mdMatch?.[1] ?? message.content.match(/https?:\/\/\S+\.(png|jpg|jpeg|webp)/i)?.[0];
+  }
+
+  if (!imageUrl) {
+    const preview =
+      typeof message?.content === "string" ? message.content.slice(0, 200) : JSON.stringify(message ?? {}).slice(0, 200);
+    throw new Error(`No image found in OpenRouter response: ${preview}`);
+  }
+
+  // Inline base64 data URL: parse mime + payload directly.
+  const dataUrlMatch = imageUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (dataUrlMatch) {
+    const mimeType = dataUrlMatch[1]!;
+    const base64 = dataUrlMatch[2]!;
+    const ext =
+      mimeType === "image/jpeg" ? "jpg" : mimeType === "image/webp" ? "webp" : mimeType === "image/gif" ? "gif" : "png";
+    return { base64, mimeType, ext };
+  }
+
+  // Otherwise it's a remote URL — download and detect the type from headers/extension.
+  const imgResp = await fetch(imageUrl, { signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT) });
+  if (!imgResp.ok) {
+    throw new Error(`Failed to download OpenRouter image (${imgResp.status})`);
+  }
+  const arrayBuffer = await imgResp.arrayBuffer();
+  const base64 = Buffer.from(arrayBuffer).toString("base64");
+  const contentType = imgResp.headers.get("content-type") ?? "";
+  let mimeType = "image/png";
+  let ext = "png";
+  if (contentType.includes("jpeg") || contentType.includes("jpg") || /\.jpe?g($|\?)/i.test(imageUrl)) {
+    mimeType = "image/jpeg";
+    ext = "jpg";
+  } else if (contentType.includes("webp") || /\.webp($|\?)/i.test(imageUrl)) {
+    mimeType = "image/webp";
+    ext = "webp";
+  }
   return { base64, mimeType, ext };
 }
 

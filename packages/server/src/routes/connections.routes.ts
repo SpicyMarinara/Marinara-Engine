@@ -246,7 +246,9 @@ export async function connectionsRoutes(app: FastifyInstance) {
         };
       }
 
-      let modelsUrl = `${baseUrl}${provider?.modelsEndpoint ?? "/models"}`;
+      // Use `||` so image_generation's empty modelsEndpoint falls back to /models
+      // (same as POST /:id/test). `??` would keep "" and hit the provider root HTML.
+      let modelsUrl = `${baseUrl}${provider?.modelsEndpoint || "/models"}`;
       if (conn.provider === "google") {
         modelsUrl += `?key=${conn.apiKey}`;
       }
