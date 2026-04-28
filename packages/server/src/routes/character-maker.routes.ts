@@ -54,6 +54,8 @@ export async function characterMakerRoutes(app: FastifyInstance) {
       const providerDef = PROVIDERS[conn.provider as keyof typeof PROVIDERS];
       baseUrl = providerDef?.defaultBaseUrl ?? "";
     }
+    // Claude (Subscription) uses the local Claude Agent SDK; no HTTP endpoint.
+    if (!baseUrl && conn.provider === "claude_subscription") baseUrl = "claude-agent-sdk://local";
     if (!baseUrl) {
       return reply.status(400).send({ error: "No base URL configured for this connection" });
     }

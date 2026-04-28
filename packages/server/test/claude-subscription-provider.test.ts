@@ -91,7 +91,7 @@ test("streams text deltas and merges them into the yielded chunks", async () => 
   assert.equal(calls[0]!.options.includePartialMessages, true);
   assert.deepEqual(calls[0]!.options.tools, []);
   assert.equal(calls[0]!.options.permissionMode, "bypassPermissions");
-  assert.equal(calls[0]!.options.maxTurns, 1);
+  assert.equal("maxTurns" in calls[0]!.options, false);
   assert.equal(calls[0]!.options.model, "claude-opus-4-5");
 });
 

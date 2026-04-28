@@ -67,6 +67,9 @@ async function resolveConnection(
     const providerDef = PROVIDERS[conn.provider as keyof typeof PROVIDERS];
     baseUrl = providerDef?.defaultBaseUrl ?? "";
   }
+  // Claude (Subscription) uses the local Claude Agent SDK and has no HTTP
+  // endpoint — return a sentinel so the gate passes. The provider ignores it.
+  if (!baseUrl && conn.provider === "claude_subscription") baseUrl = "claude-agent-sdk://local";
   if (!baseUrl) throw new Error("No base URL configured for this connection");
 
   return { conn, baseUrl };
