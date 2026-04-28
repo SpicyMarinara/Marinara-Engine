@@ -96,6 +96,7 @@ import {
   persistLorebookKeeperUpdates,
   resolveLorebookKeeperTarget,
 } from "./generate/lorebook-keeper-utils.js";
+import { registerDryRunRoute } from "./generate/dry-run-route.js";
 import { registerRetryAgentsRoute } from "./generate/retry-agents-route.js";
 import { sendSseEvent, startSseReply, trySendSseEvent } from "./generate/sse.js";
 import {
@@ -7091,5 +7092,6 @@ export async function generateRoutes(app: FastifyInstance) {
     return reply.send({ aborted: true });
   });
 
+  await registerDryRunRoute(app);
   await registerRetryAgentsRoute(app);
 }
