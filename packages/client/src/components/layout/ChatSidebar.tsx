@@ -24,6 +24,7 @@ import {
   Square as SquareIcon,
   ArrowUpDown,
   Tag,
+  Pencil,
 } from "lucide-react";
 import { useChats, useCreateChat, useDeleteChat, useDeleteChatGroup } from "../../hooks/use-chats";
 import { useConnections } from "../../hooks/use-connections";
@@ -1153,18 +1154,23 @@ function FolderRow({
   return (
     <Reorder.Item value={folder.id} dragListener={false} dragControls={dragControls} as="div" className="flex flex-col">
       {/* Folder header */}
-      <div className="group relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 hover:bg-[var(--sidebar-accent)]/40">
-        <div
-          onPointerDown={(e) => dragControls.start(e)}
-          className="cursor-grab touch-none opacity-0 transition-opacity active:cursor-grabbing group-hover:opacity-100 max-md:opacity-100"
+      <div
+          onClick={() => onToggleCollapse(folder)}
+          className="group relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 hover:bg-[var(--sidebar-accent)]/40"
         >
-          <GripVertical size="0.625rem" className="text-[var(--muted-foreground)]" />
-        </div>
-        <button onClick={() => onToggleCollapse(folder)} className="p-0.5 text-[var(--muted-foreground)]">
-          <ChevronRight size="0.75rem" className={cn("transition-transform", !folder.collapsed && "rotate-90")} />
-        </button>
-        <div className="h-2 w-2 rounded-full flex-shrink-0" style={{ backgroundColor: folder.color || "#6b7280" }} />
-        {renaming ? (
+          <div
+            onPointerDown={(e) => dragControls.start(e)}
+            className="cursor-grab touch-none opacity-0 transition-opacity active:cursor-grabbing group-hover:opacity-100 max-md:opacity-100"
+          >
+            <GripVertical size="0.625rem" className="text-[var(--muted-foreground)]" />
+          </div>
+          <ChevronRight size="0.75rem" className={cn("text-[var(--muted-foreground)] transition-transform", !folder.collapsed && "rotate-90")} />
+          <div
+            className="h-2 w-2 rounded-full flex-shrink-0 cursor-pointer"
+            style={{ backgroundColor: folder.color || "#6b7280" }}
+            title={folder.name}
+          />
+          {renaming ? (
           <input
             autoFocus
             value={renameValue}
@@ -1186,19 +1192,24 @@ function FolderRow({
             className="flex-1 bg-transparent text-xs font-medium text-[var(--foreground)] outline-none"
           />
         ) : (
-          <span
-            onClick={() => {
-              setRenameValue(folder.name);
-              setRenaming(true);
-            }}
-            className="flex-1 cursor-text truncate text-xs font-medium text-[var(--muted-foreground)]"
-          >
+          <span className="flex-1 cursor-pointer truncate text-xs font-medium text-[var(--muted-foreground)]">
             {folder.name}
           </span>
         )}
         {entries.length > 0 && (
           <span className="text-[0.5625rem] text-[var(--muted-foreground)]">{entries.length}</span>
         )}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setRenameValue(folder.name);
+            setRenaming(true);
+          }}
+          className="shrink-0 rounded-md p-1 opacity-0 transition-all hover:bg-[var(--accent)] group-hover:opacity-100 max-md:opacity-100"
+          title="Rename folder"
+        >
+          <Pencil size="0.75rem" className="text-[var(--muted-foreground)]" />
+        </button>
         <button
           onClick={(e) => {
             e.stopPropagation();
