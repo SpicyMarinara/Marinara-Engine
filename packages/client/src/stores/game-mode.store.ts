@@ -273,18 +273,29 @@ export const useGameModeStore = create<GameModeStore>((set) => ({
     }),
   patchNpcAvatars: (avatars) =>
     set((s) => {
+      let modified = false;
       const nextNpcs = s.npcs.map((npc) => {
         const match = avatars.find((a) => a.name.toLowerCase() === npc.name.toLowerCase());
-        return match && !npc.avatarUrl ? { ...npc, avatarUrl: match.avatarUrl } : npc;
+        if (match && !npc.avatarUrl) {
+          modified = true;
+          return { ...npc, avatarUrl: match.avatarUrl };
+        }
+        return npc; // preserve reference — no churn
       });
 
       for (const avatar of avatars) {
         const exists = nextNpcs.some((npc) => npc.name.toLowerCase() === avatar.name.toLowerCase());
         if (!exists) {
           nextNpcs.push(buildTrackedNpcStub(avatar.name, avatar.avatarUrl));
+          modified = true;
         }
       }
 
+      // Return the SAME state reference when nothing actually changed.
+      // Zustand skips subscriber notification on reference equality, which
+      // prevents infinite render loops caused by useEffect → store update →
+      // useSyncExternalStore synchronous re-subscription → repeat.
+      if (!modified) return s;
       return { npcs: nextNpcs };
     }),
   setSetupActive: (active) => set({ isSetupActive: active }),

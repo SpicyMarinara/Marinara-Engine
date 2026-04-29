@@ -1391,18 +1391,26 @@ export function GameNarration({
   ]);
 
   // Report active speaker to parent for sprite viewport
+  // Guard against infinite re-render: skip callback if the resolved speaker hasn't changed,
+  // even when dependency refs churn (e.g. unstable speakerAvatarInfos from store).
+  const lastReportedSpeakerRef = useRef<string | null>(undefined);
   useEffect(() => {
     if (!onActiveSpeakerChange) return;
-    if (!active || active.type !== "dialogue" || !active.speaker) {
-      onActiveSpeakerChange(null);
-      return;
-    }
-    const avatar = findNamedMapValue(speakerAvatarInfos, active.speaker);
-    if (avatar) {
-      onActiveSpeakerChange({ name: active.speaker, avatarUrl: avatar.url, expression: active.sprite });
-    } else {
-      onActiveSpeakerChange(null);
-    }
+
+    const next =
+      !active || active.type !== "dialogue" || !active.speaker
+        ? null
+        : (() => {
+            const avatar = findNamedMapValue(speakerAvatarInfos, active.speaker);
+            return avatar
+              ? { name: active.speaker, avatarUrl: avatar.url, expression: active.sprite }
+              : null;
+          })();
+
+    const nextKey = next?.name ?? null;
+    if (nextKey === lastReportedSpeakerRef.current) return;
+    lastReportedSpeakerRef.current = nextKey;
+    onActiveSpeakerChange(next);
   }, [active, speakerAvatarInfos, onActiveSpeakerChange]);
 
   // How many segments are prepended before the actual GM narration segments
