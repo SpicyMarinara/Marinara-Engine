@@ -31,7 +31,7 @@ import {
   useRecruitPartyMember,
   useRemovePartyMember,
 } from "../../hooks/use-game";
-import { useDeleteChat, useUpdateChatMetadata, useUpdateMessage } from "../../hooks/use-chats";
+import { useCreateMessage, useDeleteChat, useUpdateChatMetadata, useUpdateMessage } from "../../hooks/use-chats";
 import { useGenerate } from "../../hooks/use-generate";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { spriteKeys, type SpriteInfo } from "../../hooks/use-characters";
@@ -3513,6 +3513,116 @@ export function GameSurface({
     [updateMessage],
   );
 
+  const [gameInputFocusToken, setGameInputFocusToken] = useState(0);
+  // Two-stage interrupt:
+  //   1. Player clicks Interrupt → narration pauses (modal pre-empts further reading)
+  //      and we stash a *candidate* with the truncation we'd apply on commit.
+  //   2. Modal confirms via Yes ("risky") or Force Interrupt ("force"). On commit
+  //      we move the candidate into `pendingInterrupt` with a mode tag. Risky mode
+  //      tells the GM (system message) about the interrupt; force mode does not.
+  // Nothing is mutated server-side until the player presses Send.
+  const [interruptCandidate, setInterruptCandidate] = useState<{
+    chatId: string | null;
+    messageId: string | null;
+    truncatedContent: string | null;
+  } | null>(null);
+  const [interruptModalOpen, setInterruptModalOpen] = useState(false);
+  const [pendingInterrupt, setPendingInterrupt] = useState<{
+    chatId: string | null;
+    messageId: string | null;
+    truncatedContent: string | null;
+    mode: "risky" | "force";
+  } | null>(null);
+
+  const createMessage = useCreateMessage(activeChatId);
+
+  const handleInterruptRequest = useCallback(
+    ({ messageId, truncatedContent }: { messageId: string | null; truncatedContent: string | null }) => {
+      setInterruptCandidate({ chatId: activeChatId, messageId, truncatedContent });
+      setInterruptModalOpen(true);
+    },
+    [activeChatId],
+  );
+
+  const handleInterruptCancel = useCallback(() => {
+    setPendingInterrupt(null);
+    setInterruptCandidate(null);
+    setInterruptModalOpen(false);
+  }, []);
+
+  const closeInterruptModal = useCallback(() => {
+    // Player declined ("No"): clear candidate so narration can resume.
+    setInterruptModalOpen(false);
+    setInterruptCandidate(null);
+  }, []);
+
+  const confirmInterrupt = useCallback(
+    (mode: "risky" | "force") => {
+      if (!interruptCandidate) {
+        setInterruptModalOpen(false);
+        return;
+      }
+      useChatStore.getState().stopGeneration();
+      setPendingInterrupt({ ...interruptCandidate, mode });
+      setInterruptModalOpen(false);
+      setInterruptCandidate(null);
+      setGameInputFocusToken((t) => t + 1);
+    },
+    [interruptCandidate],
+  );
+
+  // If the assistant message changes (new GM turn arrived) or the player switches chats,
+  // any pending anchor is stale — drop it.
+  const pendingInterruptMessageId = pendingInterrupt?.messageId ?? null;
+  const pendingInterruptChatId = pendingInterrupt?.chatId ?? null;
+  useEffect(() => {
+    if (!pendingInterrupt) return;
+    if (pendingInterruptChatId !== activeChatId) {
+      setPendingInterrupt(null);
+      return;
+    }
+    const latestAssistantId = latestAssistantMsg?.id ?? null;
+    if (pendingInterruptMessageId && latestAssistantId && pendingInterruptMessageId !== latestAssistantId) {
+      setPendingInterrupt(null);
+      return;
+    }
+    if (pendingInterruptMessageId) {
+      const stillExists = messages.some((m) => m.id === pendingInterruptMessageId);
+      if (!stillExists) setPendingInterrupt(null);
+    }
+  }, [
+    activeChatId,
+    latestAssistantMsg?.id,
+    messages,
+    pendingInterrupt,
+    pendingInterruptChatId,
+    pendingInterruptMessageId,
+  ]);
+
+  // Same staleness rules apply to the unconfirmed candidate.
+  useEffect(() => {
+    if (!interruptCandidate) return;
+    if (interruptCandidate.chatId !== activeChatId) {
+      setInterruptCandidate(null);
+      setInterruptModalOpen(false);
+      return;
+    }
+    const latestAssistantId = latestAssistantMsg?.id ?? null;
+    if (interruptCandidate.messageId && latestAssistantId && interruptCandidate.messageId !== latestAssistantId) {
+      setInterruptCandidate(null);
+      setInterruptModalOpen(false);
+    }
+  }, [activeChatId, interruptCandidate, latestAssistantMsg?.id]);
+
+  // The narration pauses while the modal is open (pre-confirm) OR while a
+  // pending interrupt is in flight (post-confirm, awaiting send/Resume).
+  // `interruptCommitted` is the post-confirm subset — it gates the Resume button
+  // and the early input reveal so neither shows behind the confirmation modal.
+  const interruptPending =
+    (interruptModalOpen || !!pendingInterrupt) && (pendingInterrupt?.chatId ?? activeChatId) === activeChatId;
+  const interruptCommitted = !!pendingInterrupt && pendingInterrupt.chatId === activeChatId;
+  const pendingInterruptMode = pendingInterrupt?.mode ?? null;
+
   // Party members from setup config
   const partyMembers = useMemo(() => {
     const config = chatMeta.gameSetupConfig as Record<string, unknown> | undefined;
@@ -4348,12 +4458,44 @@ export function GameSurface({
   );
 
   const handleSendGameTurn = useCallback(
-    (
+    async (
       message: string,
       attachments?: Array<{ type: string; data: string }>,
       options?: { commitPendingMove?: boolean },
     ) => {
       if (!sessionInteractive) return;
+      // Commit a pending interrupt: persist the truncated GM message before generating
+      // so the server-side prompt build doesn't see segments the player never read. We
+      // await so the PATCH (and the optional risky-mode system message) land before
+      // /generate reads from the DB.
+      const activeInterrupt = pendingInterrupt && pendingInterrupt.chatId === activeChatId ? pendingInterrupt : null;
+      if (activeInterrupt && activeInterrupt.messageId && activeInterrupt.truncatedContent !== null) {
+        try {
+          await updateMessage.mutateAsync({
+            messageId: activeInterrupt.messageId,
+            content: activeInterrupt.truncatedContent,
+          });
+        } catch {
+          toast.error("Failed to commit the interrupt. Please try again.");
+          return;
+        }
+      }
+      // Risky mode tells the GM about the interrupt via a one-line system message.
+      // Force mode skips this on purpose — the GM only sees a shorter prior turn and
+      // the player's new input, so it has no idea anything was cut.
+      if (activeInterrupt && activeInterrupt.mode === "risky") {
+        try {
+          await createMessage.mutateAsync({
+            role: "system",
+            content:
+              "[Interrupt] The player attempts to interrupt the Game Master mid-action. Their following turn cuts in before the GM's planned events could occur. Treat their interjection as an in-fiction interruption — the situation may resist them, and the attempt can fail depending on context. If the player includes a dice roll, let the result determine whether the interruption succeeds or how it lands.",
+          });
+        } catch {
+          toast.error("Failed to mark the risky interrupt. Please try again.");
+          return;
+        }
+      }
+      setPendingInterrupt(null);
       if (options?.commitPendingMove && pendingMapMove) {
         moveOnMap.mutate({ chatId: activeChatId, position: pendingMapMove.position, mapId: activeMapId });
       }
@@ -4362,7 +4504,17 @@ export function GameSurface({
         setPendingMapMove(null);
       }
     },
-    [activeChatId, activeMapId, moveOnMap, pendingMapMove, sendMessage, sessionInteractive],
+    [
+      activeChatId,
+      activeMapId,
+      createMessage,
+      moveOnMap,
+      pendingInterrupt,
+      pendingMapMove,
+      sendMessage,
+      sessionInteractive,
+      updateMessage,
+    ],
   );
 
   useEffect(() => {
@@ -5622,6 +5774,10 @@ export function GameSurface({
                           segmentEdits={segmentEdits}
                           segmentDeletes={segmentDeletes}
                           onEditSegment={handleEditSegment}
+                          onInterruptRequest={handleInterruptRequest}
+                          onInterruptCancel={handleInterruptCancel}
+                          interruptPending={interruptPending}
+                          interruptCommitted={interruptCommitted}
                           inputSlot={
                             <GameInput
                               onSend={handleSendGameTurn}
@@ -5633,6 +5789,8 @@ export function GameSurface({
                               isStreaming={isStreaming}
                               inline
                               draftKey={activeChatId}
+                              focusToken={gameInputFocusToken}
+                              interruptMode={pendingInterruptMode}
                             />
                           }
                         />
@@ -5680,6 +5838,10 @@ export function GameSurface({
                       segmentEdits={segmentEdits}
                       segmentDeletes={segmentDeletes}
                       onEditSegment={handleEditSegment}
+                      onInterruptRequest={handleInterruptRequest}
+                      onInterruptCancel={handleInterruptCancel}
+                      interruptPending={interruptPending}
+                      interruptCommitted={interruptCommitted}
                       inputSlot={
                         <GameInput
                           onSend={handleSendGameTurn}
@@ -5691,6 +5853,8 @@ export function GameSurface({
                           isStreaming={isStreaming}
                           inline
                           draftKey={activeChatId}
+                          focusToken={gameInputFocusToken}
+                          interruptMode={pendingInterruptMode}
                         />
                       }
                     />
@@ -5916,6 +6080,49 @@ export function GameSurface({
           }
         />
       )}
+
+      <Modal open={interruptModalOpen} onClose={closeInterruptModal} title="Attempt to Interrupt?" width="max-w-md">
+        <div className="flex flex-col gap-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-500/15">
+              <AlertTriangle size="1.125rem" className="text-red-300" />
+            </div>
+            <p className="text-sm text-[var(--muted-foreground)]">
+              Interruption attempts can go badly depending on the situation. Force Interrupt cuts in cleanly without
+              telling the GM it was an interrupt — Yes attempts an in-fiction interruption that the GM may resist.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              onClick={closeInterruptModal}
+              className="rounded-lg bg-[var(--secondary)] px-3 py-1.5 text-xs font-medium text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+            >
+              No
+            </button>
+            <button
+              onClick={() => confirmInterrupt("force")}
+              className="rounded-lg px-3 py-1.5 text-xs font-semibold ring-1 transition-colors"
+              style={{
+                color: "#20C20E",
+                backgroundColor: "rgba(32, 194, 14, 0.12)",
+                borderColor: "rgba(32, 194, 14, 0.35)",
+                boxShadow: "0 0 0 1px rgba(32, 194, 14, 0.35) inset",
+              }}
+              title="Cut in without telling the GM it was an interrupt"
+            >
+              Force Interrupt
+            </button>
+            <button
+              onClick={() => confirmInterrupt("risky")}
+              className="rounded-lg bg-red-500/20 px-3 py-1.5 text-xs font-semibold text-red-200 ring-1 ring-red-500/40 transition-colors hover:bg-red-500/30"
+              title="Attempt an in-fiction interruption — outcomes can fail"
+            >
+              Yes
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={confirmEndSessionOpen}

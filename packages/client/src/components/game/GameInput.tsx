@@ -34,6 +34,14 @@ interface GameInputProps {
   inline?: boolean;
   /** Key for persisting the input draft to sessionStorage (e.g. chatId) */
   draftKey?: string;
+  /** Increment to request focus on the textarea (used by the Interrupt button to jump the player into typing). */
+  focusToken?: number;
+  /**
+   * When set, the input renders in interrupt-commit mode. `risky` paints the bar red,
+   * highlights the dice button with a glow, and shows a "using dice recommended" hint.
+   * `force` keeps the normal styling — the GM won't be told this is an interrupt.
+   */
+  interruptMode?: "risky" | "force" | null;
 }
 
 const QUICK_DICE = ["d20", "d6", "2d6", "d10", "d100", "d4", "d8", "d12"];
@@ -48,6 +56,8 @@ export function GameInput({
   isStreaming,
   inline,
   draftKey,
+  focusToken,
+  interruptMode,
 }: GameInputProps) {
   const enterToSend = useUIStore((s) => s.enterToSendGame);
   const storageKey = draftKey ? `game-input-draft:${draftKey}` : null;
@@ -77,6 +87,18 @@ export function GameInput({
     if (addressMode !== "party" || hasPartyMembers) return;
     setAddressMode("scene");
   }, [addressMode, hasPartyMembers]);
+
+  // Honors focus requests even if the input was disabled at the time the
+  // token bumped (e.g. Interrupt clicked while `isStreaming` is still true) —
+  // we re-attempt the focus once `disabled` flips to false.
+  const lastFocusedTokenRef = useRef(0);
+  useEffect(() => {
+    if (!focusToken) return;
+    if (lastFocusedTokenRef.current === focusToken) return;
+    if (disabled) return;
+    inputRef.current?.focus();
+    lastFocusedTokenRef.current = focusToken;
+  }, [focusToken, disabled]);
 
   useEffect(() => {
     if (!addressMenuOpen) return;
@@ -201,10 +223,29 @@ export function GameInput({
     [updateText],
   );
 
+  const riskyInterrupt = interruptMode === "risky";
+  const forceInterrupt = interruptMode === "force";
+
   return (
     <div
-      className={inline ? "" : "border-t border-[var(--border)] bg-[var(--card)]"}
-      style={inline ? undefined : { minHeight: 61 }}
+      className={cn(
+        inline ? "" : "border-t border-[var(--border)] bg-[var(--card)]",
+        riskyInterrupt &&
+          "rounded-xl ring-1 ring-red-500/40 bg-red-500/5 shadow-[0_0_18px_-6px_rgba(248,113,113,0.55)]",
+        forceInterrupt && "rounded-xl ring-1",
+      )}
+      style={
+        forceInterrupt
+          ? {
+              ...(inline ? {} : { minHeight: 61 }),
+              boxShadow: "0 0 18px -6px rgba(32, 194, 14, 0.6)",
+              backgroundColor: "rgba(32, 194, 14, 0.04)",
+              ["--tw-ring-color" as never]: "rgba(32, 194, 14, 0.45)",
+            }
+          : inline
+            ? undefined
+            : { minHeight: 61 }
+      }
     >
       {/* Dice picker */}
       {showDice && (
@@ -415,6 +456,19 @@ export function GameInput({
         )}
 
         {/* Right: Dice, Emoji (desktop), Send */}
+        {riskyInterrupt && !queuedDice && (
+          <span className="hidden text-[0.625rem] font-medium uppercase tracking-wide text-red-300/80 sm:inline">
+            using dice recommended
+          </span>
+        )}
+        {forceInterrupt && (
+          <span
+            className="hidden text-[0.625rem] font-medium uppercase tracking-wide sm:inline"
+            style={{ color: "#20C20E", opacity: 0.9 }}
+          >
+            force interrupting
+          </span>
+        )}
         <button
           onClick={() => setShowDice(!showDice)}
           className={cn(
@@ -422,8 +476,11 @@ export function GameInput({
             showDice
               ? "text-[var(--foreground)]/80 hover:bg-foreground/10"
               : "text-[var(--foreground)]/50 hover:bg-foreground/10 hover:text-[var(--foreground)]/70",
+            riskyInterrupt &&
+              !queuedDice &&
+              "animate-pulse text-red-300 ring-1 ring-red-400/60 shadow-[0_0_12px_-2px_rgba(248,113,113,0.85)] hover:text-red-200",
           )}
-          title="Roll dice"
+          title={riskyInterrupt && !queuedDice ? "Roll dice — recommended for an interrupt attempt" : "Roll dice"}
         >
           <Dices size={18} />
         </button>

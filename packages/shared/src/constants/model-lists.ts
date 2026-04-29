@@ -513,6 +513,7 @@ export function inferImageSource(model: string, baseUrl: string): string {
     return m;
   }
   if (m === "drawthings") return "automatic1111";
+  if (u.includes("nano-gpt.com")) return "nanogpt";
   if (m.startsWith("dall-e") || m.startsWith("gpt-image") || u.includes("openai.com")) return "openai";
   if (m.startsWith("sd3") || u.includes("stability.ai")) return "stability";
   if (m.includes("nai-diffusion") || u.includes("novelai.net")) return "novelai";
@@ -526,7 +527,6 @@ export function inferImageSource(model: string, baseUrl: string): string {
   if (m.includes("gemini") && m.includes("image")) return "gemini_image";
   if (m.includes("imagen")) return "gemini_image";
   // OpenAI-compatible fallback (works for most proxies)
-  if (u.includes("nano-gpt.com")) return "nanogpt";
   return "openai";
 }
 

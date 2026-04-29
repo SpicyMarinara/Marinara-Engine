@@ -23,6 +23,7 @@ import {
   Check,
   Play,
   Pause,
+  Square,
   Trash2,
   Volume2,
   VolumeX,
@@ -214,6 +215,28 @@ interface GameNarrationProps {
   autoPlayBlocked?: boolean;
   /** Effective game-mode TTS playback volume, 0–1. */
   gameVoiceVolume?: number;
+  /**
+   * Player hit the "Interrupt!" button. Soft-pauses narration: the parent
+   * stops generation, records the interrupt anchor, and only truncates the
+   * GM message when the player actually sends their next turn. `messageId`
+   * + `truncatedContent` describe what truncation *would* be applied; the
+   * parent stashes them until commit (send) or cancel (Resume).
+   */
+  onInterruptRequest?: (info: { messageId: string | null; truncatedContent: string | null }) => void;
+  /** Player hit "Resume" — discard the pending interrupt and continue narration. */
+  onInterruptCancel?: () => void;
+  /**
+   * True while the narration is paused for an interrupt — covers both the pre-confirm
+   * modal phase and the post-confirm waiting-to-send phase. Drives auto-play snapshot
+   * and hides Play/Next.
+   */
+  interruptPending?: boolean;
+  /**
+   * True only after the player has confirmed (Yes or Force Interrupt). Drives the
+   * Resume button and the early reveal of the chat input. While the confirmation
+   * modal is open this stays false so the input bar doesn't appear behind the modal.
+   */
+  interruptCommitted?: boolean;
 }
 
 /** Regex matching explicit {effect:text} tags used by AnimatedText. */
@@ -505,6 +528,10 @@ export function GameNarration({
   onNpcPortraitClick,
   autoPlayBlocked,
   gameVoiceVolume = 1,
+  onInterruptRequest,
+  onInterruptCancel,
+  interruptPending,
+  interruptCommitted,
 }: GameNarrationProps) {
   const { translations, translating } = useTranslate();
   const [activeIndex, setActiveIndex] = useState(0);
@@ -1876,29 +1903,120 @@ export function GameNarration({
   const NARRATION_META_BTN =
     "flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--muted)]/20 px-2.5 py-1 text-xs text-[var(--foreground)]/75 transition-colors hover:bg-[var(--muted)]/40 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10";
 
-  // Shared Next + auto-play control group used by dialogue, narration, and readable boxes
-  const navControls = (
-    <div className="flex items-stretch gap-1">
-      <button
-        onClick={() => setAutoPlay((v) => !v)}
-        className={cn(
-          "flex items-center justify-center self-stretch rounded-lg border px-2 text-xs transition-colors",
-          autoPlay
-            ? "border-[var(--primary)]/40 bg-[var(--primary)]/20 text-[var(--primary)]"
-            : "border-[var(--border)] bg-[var(--muted)]/20 text-[var(--foreground)]/70 hover:bg-[var(--muted)]/40 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10",
+  const handleInterrupt = useCallback(() => {
+    // Request only — the parent opens the confirmation modal. We don't pause
+    // here; the parent flips `interruptPending` once the player has confirmed
+    // (Yes or Force Interrupt), and the effect below handles the pause then.
+    let truncatedContent: string | null = null;
+    let truncatedMessageId: string | null = null;
+    if (latestAssistant) {
+      const editInfo = segmentEditInfoRef.current[activeIndex];
+      if (editInfo && editInfo.messageId === latestAssistant.id) {
+        const allSegs = parseNarrationSegments(latestAssistant, speakerColors);
+        if (editInfo.segmentIndex < allSegs.length - 1) {
+          let cutIndex = editInfo.segmentIndex;
+          while (cutIndex + 1 < allSegs.length) {
+            const nextSegment = allSegs[cutIndex + 1];
+            if (nextSegment?.partyType !== "side" && nextSegment?.partyType !== "extra") break;
+            cutIndex += 1;
+          }
+          const next = truncateMessageContentAtSegment(latestAssistant.content || "", cutIndex);
+          if (next && next !== latestAssistant.content) {
+            truncatedContent = next;
+            truncatedMessageId = latestAssistant.id;
+          }
+        }
+      }
+    }
+    onInterruptRequest?.({ messageId: truncatedMessageId, truncatedContent });
+  }, [activeIndex, latestAssistant, onInterruptRequest, speakerColors]);
+
+  const handleResume = useCallback(() => {
+    onInterruptCancel?.();
+  }, [onInterruptCancel]);
+
+  // Auto-play snapshot/restore: when `interruptPending` flips on we save the
+  // current auto-play state and pause; when it flips off (Resume, send, modal
+  // dismissed, new GM turn arrived, chat switched) we restore exactly what it
+  // was. Also snaps the typewriter so the pause anchor lands at a clean
+  // segment boundary.
+  const autoPlayBeforeInterruptRef = useRef(false);
+  const prevInterruptPendingRef = useRef(false);
+  useEffect(() => {
+    const wasPending = prevInterruptPendingRef.current;
+    const isPending = !!interruptPending;
+    prevInterruptPendingRef.current = isPending;
+    if (!wasPending && isPending) {
+      autoPlayBeforeInterruptRef.current = autoPlay;
+      setAutoPlay(false);
+      if (active) {
+        const dispLen = effectDisplayLength(active.content);
+        setVisibleChars(dispLen);
+        twRef.current.pos = dispLen;
+      }
+    } else if (wasPending && !isPending) {
+      if (autoPlayBeforeInterruptRef.current) {
+        setAutoPlay(true);
+      }
+      autoPlayBeforeInterruptRef.current = false;
+    }
+  }, [active, autoPlay, interruptPending]);
+
+  // Shared Next + auto-play control group used by dialogue, narration, and readable boxes.
+  // The red Interrupt button swaps to a yellow Resume button only AFTER the player
+  // confirms in the modal (interruptCommitted). While the modal is still open we keep
+  // the red button visible so it doesn't look like the interrupt already happened.
+  const showInterruptControls = !narrationComplete && !partyTurnPending && !!onInterruptRequest;
+  const showNav = !narrationComplete && !isStreaming && !interruptPending;
+  const navControls =
+    !showInterruptControls && !showNav ? null : (
+      <div className="flex items-stretch gap-1">
+        {showInterruptControls && !interruptCommitted && (
+          <button
+            onClick={handleInterrupt}
+            className="flex items-center gap-1 self-stretch rounded-lg border border-red-500/40 bg-red-500/15 px-2 text-xs font-semibold text-red-200 transition-colors hover:bg-red-500/25 hover:text-red-50 sm:px-2.5 dark:border-red-500/40 dark:bg-red-500/15 dark:text-red-200 dark:hover:bg-red-500/25"
+            title="Pause the GM so you can write back. Nothing is committed until you send."
+            aria-label="Interrupt"
+          >
+            <Square size={11} fill="currentColor" />
+            <span className="hidden sm:inline">Interrupt!</span>
+          </button>
         )}
-        title={autoPlay ? "Pause auto-play" : "Auto-play segments"}
-      >
-        {autoPlay ? <Pause size={12} /> : <Play size={12} />}
-      </button>
-      <button
-        onClick={nextSegment}
-        className="flex items-center justify-center self-stretch rounded-lg border border-[var(--border)] bg-[var(--muted)]/20 px-3 text-xs font-semibold text-[var(--foreground)]/75 transition-colors hover:bg-[var(--muted)]/40 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
-      >
-        {!doneTyping ? "Reveal" : "Next"}
-      </button>
-    </div>
-  );
+        {showInterruptControls && interruptCommitted && (
+          <button
+            onClick={handleResume}
+            className="flex items-center gap-1 self-stretch rounded-lg border border-amber-400/40 bg-amber-400/15 px-2 text-xs font-semibold text-amber-100 transition-colors hover:bg-amber-400/25 hover:text-amber-50 sm:px-2.5 dark:border-amber-400/40 dark:bg-amber-400/15 dark:text-amber-100 dark:hover:bg-amber-400/25"
+            title="Resume narration — your interrupt has not been committed."
+            aria-label="Resume"
+          >
+            <Play size={11} fill="currentColor" />
+            <span className="hidden sm:inline">Resume</span>
+          </button>
+        )}
+        {showNav && (
+          <>
+            <button
+              onClick={() => setAutoPlay((v) => !v)}
+              className={cn(
+                "flex items-center justify-center self-stretch rounded-lg border px-2 text-xs transition-colors",
+                autoPlay
+                  ? "border-[var(--primary)]/40 bg-[var(--primary)]/20 text-[var(--primary)]"
+                  : "border-[var(--border)] bg-[var(--muted)]/20 text-[var(--foreground)]/70 hover:bg-[var(--muted)]/40 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10",
+              )}
+              title={autoPlay ? "Pause auto-play" : "Auto-play segments"}
+            >
+              {autoPlay ? <Pause size={12} /> : <Play size={12} />}
+            </button>
+            <button
+              onClick={nextSegment}
+              className="flex items-center justify-center self-stretch rounded-lg border border-[var(--border)] bg-[var(--muted)]/20 px-3 text-xs font-semibold text-[var(--foreground)]/75 transition-colors hover:bg-[var(--muted)]/40 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+            >
+              {!doneTyping ? "Reveal" : "Next"}
+            </button>
+          </>
+        )}
+      </div>
+    );
 
   return (
     <div className="relative flex min-h-0 flex-1 items-end px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-20 md:pt-24 sm:px-6 md:pb-4">
@@ -2172,12 +2290,12 @@ export function GameNarration({
                     className={cn(NARRATION_META_BTN, "disabled:opacity-40")}
                   >
                     <ScrollText size={12} />
-                    Logs
+                    <span className="hidden sm:inline">Logs</span>
                   </button>
                   {onOpenInventory && (
                     <button onClick={onOpenInventory} className={cn("relative", NARRATION_META_BTN)}>
                       <Package size={12} />
-                      Inventory
+                      <span className="hidden sm:inline">Inventory</span>
                       {(inventoryCount ?? 0) > 0 && (
                         <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-0.5 text-[0.55rem] font-bold text-black">
                           {inventoryCount}
@@ -2186,7 +2304,7 @@ export function GameNarration({
                     </button>
                   )}
                 </div>
-                {!narrationComplete && !isStreaming && !partyTurnPending && navControls}
+                {navControls}
               </div>
             </>
           )}
@@ -2268,12 +2386,12 @@ export function GameNarration({
                     className={cn(NARRATION_META_BTN, "disabled:opacity-40")}
                   >
                     <ScrollText size={12} />
-                    Logs
+                    <span className="hidden sm:inline">Logs</span>
                   </button>
                   {onOpenInventory && (
                     <button onClick={onOpenInventory} className={cn("relative", NARRATION_META_BTN)}>
                       <Package size={12} />
-                      Inventory
+                      <span className="hidden sm:inline">Inventory</span>
                       {(inventoryCount ?? 0) > 0 && (
                         <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-0.5 text-[0.55rem] font-bold text-black">
                           {inventoryCount}
@@ -2282,7 +2400,7 @@ export function GameNarration({
                     </button>
                   )}
                 </div>
-                {!narrationComplete && !isStreaming && navControls}
+                {navControls}
               </div>
             </>
           )}
@@ -2324,18 +2442,23 @@ export function GameNarration({
                     className={cn(NARRATION_META_BTN, "disabled:opacity-40")}
                   >
                     <ScrollText size={12} />
-                    Logs
+                    <span className="hidden sm:inline">Logs</span>
                   </button>
                 </div>
-                {!narrationComplete && !isStreaming && navControls}
+                {navControls}
               </div>
             </>
           )}
 
-          {/* Inline input — appears inside the narration box once all segments are read */}
-          {!scenePreparing && narrationComplete && !isStreaming && !partyTurnPending && inputSlot && (
-            <div className="mt-2">{inputSlot}</div>
-          )}
+          {/* Inline input — appears inside the narration box once all segments are read,
+              or after the player has CONFIRMED an interrupt (not just opened the modal).
+              Gating on `interruptCommitted` (not `interruptPending`) keeps the input bar
+              from showing in the background while the confirmation modal is still open. */}
+          {!scenePreparing &&
+            (narrationComplete || interruptCommitted) &&
+            !isStreaming &&
+            !partyTurnPending &&
+            inputSlot && <div className="mt-2">{inputSlot}</div>}
 
           {/* Also show input when no narration at all (start of scene) */}
           {!scenePreparing && !active && !isStreaming && !sceneAnalysisFailed && inputSlot && (
@@ -2347,7 +2470,7 @@ export function GameNarration({
                     className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-white/75 transition-colors hover:bg-white/10"
                   >
                     <ScrollText size={12} />
-                    Logs
+                    <span className="hidden sm:inline">Logs</span>
                   </button>
                 </div>
               )}
@@ -3035,6 +3158,125 @@ function normalizeInlineVnDialogueLines(source: string): string {
     );
 }
 
+type TruncationLine = {
+  text: string;
+  originalStart: number;
+  originalEnd: number;
+};
+
+function findReadableBlockEnd(source: string, start: number): number {
+  let depth = 0;
+  for (let i = start; i < source.length; i++) {
+    if (source[i] === "[") depth++;
+    else if (source[i] === "]") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function splitTextIntoBoundedLines(text: string, originalStart: number): TruncationLine[] {
+  const lines: TruncationLine[] = [];
+  let lineStart = 0;
+
+  for (let i = 0; i <= text.length; i++) {
+    if (i < text.length && text[i] !== "\n") continue;
+    const rawLine = text.slice(lineStart, i);
+    const lineText = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    lines.push({
+      text: lineText,
+      originalStart: originalStart + lineStart,
+      originalEnd: originalStart + lineStart + lineText.length,
+    });
+    lineStart = i + 1;
+  }
+
+  return lines;
+}
+
+function splitInlineVnDialogueLineMetadata(line: TruncationLine): TruncationLine[] {
+  const headerRe = /\[[^\]]+\]\s*\[(?:main|side|extra|action|thought|whisper(?::[^\]]+)?)\]\s*(?:\[[^\]]+\])?\s*:/gi;
+  const pieces: TruncationLine[] = [];
+  let chunkStart = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = headerRe.exec(line.text))) {
+    if (match.index > chunkStart && /\s/.test(line.text[match.index - 1] ?? "")) {
+      pieces.push({
+        text: line.text.slice(chunkStart, match.index),
+        originalStart: line.originalStart + chunkStart,
+        originalEnd: line.originalStart + match.index,
+      });
+      chunkStart = match.index;
+    }
+  }
+  pieces.push({
+    text: line.text.slice(chunkStart),
+    originalStart: line.originalStart + chunkStart,
+    originalEnd: line.originalEnd,
+  });
+
+  return pieces.flatMap((piece) => {
+    const splitRe =
+      /^(\s*\[[^\]]+\]\s*\[(?:main|side|extra|whisper(?::[^\]]+)?)\]\s*(?:\[[^\]]+\])?\s*:\s*(?:"[^"]*"|“[^”]*”|«[^»]*»))\s+(?=\S)/i;
+    const split = splitRe.exec(piece.text);
+    if (!split || split[1].length >= piece.text.length) return [piece];
+
+    const splitAt = split[1].length;
+    return [
+      {
+        text: piece.text.slice(0, splitAt),
+        originalStart: piece.originalStart,
+        originalEnd: piece.originalStart + splitAt,
+      },
+      {
+        text: piece.text.slice(splitAt).trimStart(),
+        originalStart: piece.originalStart + splitAt + (piece.text.slice(splitAt).match(/^\s*/)?.[0].length ?? 0),
+        originalEnd: piece.originalEnd,
+      },
+    ];
+  });
+}
+
+function buildTruncationLines(rawContent: string): TruncationLine[] {
+  const chunks: TruncationLine[] = [];
+  const readableTagRe = /\[(?:Note|Book):/gi;
+  let cursor = 0;
+  let placeholderIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = readableTagRe.exec(rawContent))) {
+    const start = match.index;
+    const end = findReadableBlockEnd(rawContent, start);
+    if (end < 0) continue;
+
+    if (start > cursor) {
+      chunks.push(...splitTextIntoBoundedLines(rawContent.slice(cursor, start), cursor));
+    }
+    chunks.push({
+      text: `__READABLE_${placeholderIndex}__`,
+      originalStart: start,
+      originalEnd: end + 1,
+    });
+    placeholderIndex += 1;
+    cursor = end + 1;
+    readableTagRe.lastIndex = cursor;
+  }
+
+  if (cursor < rawContent.length) {
+    chunks.push(...splitTextIntoBoundedLines(rawContent.slice(cursor), cursor));
+  }
+
+  return chunks.flatMap((chunk) => {
+    if (/^__READABLE_\d+__$/.test(chunk.text)) return [chunk];
+    return splitInlineVnDialogueLineMetadata(chunk).map((line) => ({
+      ...line,
+      text: stripGmTagsKeepReadables(line.text),
+    }));
+  });
+}
+
 function parseNarrationSegments(message: NarrationMessage, speakerColors: Map<string, string>): NarrationSegment[] {
   // Use stripGmTagsKeepReadables so [Note:] and [Book:] stay inline for position-aware display.
   // Extract them first as placeholders so multi-line readables don't break line-based parsing.
@@ -3240,6 +3482,68 @@ function parseNarrationSegments(message: NarrationMessage, speakerColors: Map<st
   }
 
   return parsed;
+}
+
+/**
+ * Truncate an assistant message's raw content so that it ends just after the
+ * Nth segment (inclusive) that `parseNarrationSegments` would emit. Used by
+ * the Interrupt feature so the model on the next turn can't see narration
+ * the player never read.
+ *
+ * The parser-facing text is normalized for segment detection, but the returned
+ * string is always a byte-for-byte prefix of the original raw content.
+ */
+function truncateMessageContentAtSegment(rawContent: string, segmentIndexInclusive: number): string {
+  if (segmentIndexInclusive < 0) return "";
+
+  const lines = buildTruncationLines(rawContent || "");
+  const readablePlaceholderRe = /^__READABLE_(\d+)__$/;
+  const narrationRegex = /^\s*Narration\s*:\s*(.+)$/i;
+  const legacyDialogueRegex = /^\s*Dialogue\s*\[([^\]]+)\]\s*(?:\[([^\]]+)\])?\s*:\s*(.+)$/i;
+  const compactDialogueRegex = /^\s*\[([^\]]+)\]\s*(?:\[([^\]]+)\])?\s*:\s*(.+)$/;
+  const partyLineRegex =
+    /^\s*\[([^\]]+)\]\s*\[(main|side|extra|action|thought|whisper(?::([^\]]+))?)\]\s*(?:\[([^\]]+)\])?\s*:\s*(.+)$/i;
+
+  const target = segmentIndexInclusive + 1;
+  let segmentCount = 0;
+  let pendingFallback = false;
+  let lastIncludedLineIdx = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (segmentCount >= target) break;
+    const line = lines[i]!.text.trim();
+
+    if (!line) {
+      if (pendingFallback) {
+        segmentCount++;
+        pendingFallback = false;
+      }
+      continue;
+    }
+
+    const isSpecial =
+      readablePlaceholderRe.test(line) ||
+      partyLineRegex.test(line) ||
+      narrationRegex.test(line) ||
+      legacyDialogueRegex.test(line) ||
+      compactDialogueRegex.test(line);
+
+    if (isSpecial) {
+      if (pendingFallback) {
+        segmentCount++;
+        pendingFallback = false;
+        if (segmentCount >= target) break;
+      }
+      segmentCount++;
+      lastIncludedLineIdx = i;
+    } else {
+      pendingFallback = true;
+      lastIncludedLineIdx = i;
+    }
+  }
+
+  if (lastIncludedLineIdx < 0) return rawContent;
+  return rawContent.slice(0, lines[lastIncludedLineIdx]!.originalEnd);
 }
 
 /**
