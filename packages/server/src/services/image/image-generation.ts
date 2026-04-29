@@ -94,8 +94,9 @@ export async function generateImage(
   const resolvedSource = resolveImageBackend(source, baseUrl, serviceHint, request.model);
   switch (resolvedSource) {
     case "openai":
-    case "nanogpt":
       return generateOpenAI(baseUrl, apiKey, request);
+    case "nanogpt":
+      return generateNanoGPT(baseUrl, apiKey, request);
     case "pollinations":
       return generatePollinations(request);
     case "stability":
@@ -138,6 +139,81 @@ function isOpenAIGptImageModel(model?: string): boolean {
   return !!model && /^gpt-image-(?:1|1\.5|2)(?:$|-)/i.test(model.trim());
 }
 
+function imageDataUrlFromReference(reference: string): string {
+  const trimmed = reference.trim();
+  if (trimmed.startsWith("data:")) return trimmed;
+  const base64 = trimmed.replace(/\s+/g, "");
+  return `data:${detectImageMimeType(base64)};base64,${base64}`;
+}
+
+function detectImageMimeType(base64: string): string {
+  const bytes = Buffer.from(base64.slice(0, 64), "base64");
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return "image/gif";
+  return "image/png";
+}
+
+function nanoGPTImagesUrl(baseUrl: string): string {
+  const trimmed = baseUrl.replace(/\/+$/, "");
+  try {
+    const parsed = new URL(trimmed);
+    const path = parsed.pathname.replace(/\/+$/, "");
+    if (path.endsWith("/images/generations")) {
+      // Keep user-supplied full endpoint URLs, but normalize the legacy /api/v1 prefix below.
+    } else if (path === "" || path === "/" || path.endsWith("/api")) {
+      parsed.pathname = "/v1/images/generations";
+    } else if (path.endsWith("/api/v1")) {
+      parsed.pathname = `${path.slice(0, -"/api/v1".length)}/v1/images/generations`;
+    } else if (path.endsWith("/v1")) {
+      parsed.pathname = `${path}/images/generations`;
+    } else {
+      parsed.pathname = `${path}/images/generations`;
+    }
+    parsed.pathname = parsed.pathname.replace(/\/api\/v1\/images\/generations$/, "/v1/images/generations");
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return `${trimmed}/images/generations`;
+  }
+}
+
+async function downloadImageUrl(imageUrl: string): Promise<ImageGenResult> {
+  const imgResp = await fetch(imageUrl, { signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT) });
+  if (!imgResp.ok) {
+    throw new Error(`Failed to download generated image (${imgResp.status})`);
+  }
+
+  const arrayBuffer = await imgResp.arrayBuffer();
+  const base64 = Buffer.from(arrayBuffer).toString("base64");
+
+  const contentType = imgResp.headers.get("content-type") ?? "";
+  let mimeType = "image/png";
+  let ext = "png";
+  if (contentType.includes("jpeg") || contentType.includes("jpg") || imageUrl.match(/\.jpe?g/i)) {
+    mimeType = "image/jpeg";
+    ext = "jpg";
+  } else if (contentType.includes("webp") || imageUrl.match(/\.webp/i)) {
+    mimeType = "image/webp";
+    ext = "webp";
+  }
+
+  return { base64, mimeType, ext };
+}
+
 async function generateOpenAI(baseUrl: string, apiKey: string, request: ImageGenRequest): Promise<ImageGenResult> {
   const url = `${baseUrl.replace(/\/+$/, "")}/images/generations`;
   const usesGptImageApi = isOpenAIGptImageModel(request.model);
@@ -175,6 +251,54 @@ async function generateOpenAI(baseUrl: string, apiKey: string, request: ImageGen
   if (!b64) throw new Error("No image data in OpenAI response");
 
   return { base64: b64, mimeType: "image/png", ext: "png" };
+}
+
+async function generateNanoGPT(baseUrl: string, apiKey: string, request: ImageGenRequest): Promise<ImageGenResult> {
+  const url = nanoGPTImagesUrl(baseUrl);
+  const body: Record<string, unknown> = {
+    prompt: request.prompt,
+    n: 1,
+    size: `${request.width ?? 1024}x${request.height ?? 1024}`,
+    response_format: "b64_json",
+  };
+  if (request.model) body.model = request.model;
+  if (request.negativePrompt) body.negative_prompt = request.negativePrompt;
+
+  const references = request.referenceImages?.length
+    ? request.referenceImages
+    : request.referenceImage
+      ? [request.referenceImage]
+      : [];
+  if (request.model?.toLowerCase().includes("flux-kontext")) {
+    body.kontext_max_mode = true;
+  }
+  if (references.length === 1) {
+    body.imageDataUrl = imageDataUrlFromReference(references[0]!);
+  } else if (references.length > 1) {
+    body.imageDataUrls = references.map(imageDataUrlFromReference);
+  }
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => "Unknown error");
+    throw new Error(`NanoGPT image generation failed (${resp.status}): ${sanitizeErrorText(errText)}`);
+  }
+
+  const data = (await resp.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+  const result = data.data?.[0];
+  if (result?.b64_json) return { base64: result.b64_json, mimeType: "image/png", ext: "png" };
+  if (result?.url) return downloadImageUrl(result.url);
+
+  throw new Error("No image data in NanoGPT response");
 }
 
 async function generatePollinations(request: ImageGenRequest): Promise<ImageGenResult> {
@@ -506,28 +630,7 @@ async function generateViaChatCompletions(
     throw new Error(`No image URL found in proxy response: ${content.slice(0, 200)}`);
   }
 
-  // Download the image
-  const imgResp = await fetch(imageUrl, { signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT) });
-  if (!imgResp.ok) {
-    throw new Error(`Failed to download generated image (${imgResp.status})`);
-  }
-
-  const arrayBuffer = await imgResp.arrayBuffer();
-  const base64 = Buffer.from(arrayBuffer).toString("base64");
-
-  // Detect mime type from URL extension or content-type header
-  const contentType = imgResp.headers.get("content-type") ?? "";
-  let mimeType = "image/png";
-  let ext = "png";
-  if (contentType.includes("jpeg") || contentType.includes("jpg") || imageUrl.match(/\.jpe?g/i)) {
-    mimeType = "image/jpeg";
-    ext = "jpg";
-  } else if (contentType.includes("webp") || imageUrl.match(/\.webp/i)) {
-    mimeType = "image/webp";
-    ext = "webp";
-  }
-
-  return { base64, mimeType, ext };
+  return downloadImageUrl(imageUrl);
 }
 
 // ── ComfyUI ──

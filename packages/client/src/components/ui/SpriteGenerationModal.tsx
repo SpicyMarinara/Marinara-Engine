@@ -277,7 +277,7 @@ export function SpriteGenerationModal({
   useEffect(() => {
     setAppearance(defaultAppearance ?? "");
     setReferenceImages([]);
-    setUseCurrentAvatarReference(false);
+    setUseCurrentAvatarReference(!!defaultAvatarUrl);
     setStep(0);
     setGeneratedSheet(null);
     setCells([]);

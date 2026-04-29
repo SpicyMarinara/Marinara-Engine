@@ -4,7 +4,8 @@
 import type { FastifyInstance } from "fastify";
 import { existsSync, mkdirSync, createReadStream, readdirSync, unlinkSync, statSync, readFileSync } from "fs";
 import { writeFile, mkdir, readdir, unlink } from "fs/promises";
-import { join, extname } from "path";
+import { dirname, extname, isAbsolute, join, relative, resolve } from "path";
+import { fileURLToPath } from "url";
 import { DATA_DIR } from "../utils/data-dir.js";
 
 // sharp is an optional dependency — native prebuilds don't exist for all platforms
@@ -56,6 +57,9 @@ import { generateImage } from "../services/image/image-generation.js";
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
 
 const SPRITES_ROOT = join(DATA_DIR, "sprites");
+const ROUTE_DIR = dirname(fileURLToPath(import.meta.url));
+const CLIENT_PUBLIC_DIR = resolve(ROUTE_DIR, "../../../client/public");
+const CLIENT_DIST_DIR = resolve(ROUTE_DIR, "../../../client/dist");
 
 function ensureDir(dir: string) {
   if (!existsSync(dir)) {
@@ -284,7 +288,39 @@ function extractBase64ImageData(input: string): string {
   return trimmed;
 }
 
-/** Accepts data URL, raw base64, or /api/avatars/file/<filename> URL and returns base64 if resolvable. */
+function normalizeLocalImagePath(input: string): string {
+  const value = input.trim();
+  if (!value) return "";
+  if (value.startsWith("/")) return value.split("?")[0] ?? value;
+  try {
+    const url = new URL(value);
+    return url.pathname;
+  } catch {
+    return value.split("?")[0] ?? value;
+  }
+}
+
+function readSafeNestedFile(root: string, pathSegments: string[]): string | undefined {
+  if (pathSegments.length === 0) return undefined;
+  const decoded = pathSegments.map((segment) => decodeURIComponent(segment));
+  if (
+    decoded.some((segment) => !segment || segment.includes("..") || segment.includes("/") || segment.includes("\\"))
+  ) {
+    return undefined;
+  }
+  const diskPath = resolve(root, ...decoded);
+  const normalizedRoot = resolve(root);
+  const relativePath = relative(normalizedRoot, diskPath);
+  if (relativePath.startsWith("..") || relativePath === "" || isAbsolute(relativePath)) return undefined;
+  try {
+    if (!existsSync(diskPath)) return undefined;
+    return readFileSync(diskPath).toString("base64");
+  } catch {
+    return undefined;
+  }
+}
+
+/** Accepts data URL, raw base64, or local avatar/sprite URL and returns base64 if resolvable. */
 function resolveReferenceImageBase64(input?: string): string | undefined {
   if (!input?.trim()) return undefined;
   const value = input.trim();
@@ -296,18 +332,59 @@ function resolveReferenceImageBase64(input?: string): string | undefined {
     return looksLikeBase64(b64) ? b64 : undefined;
   }
 
-  if (value.startsWith("/api/avatars/file/")) {
-    const filenameRaw = value.split("/").pop()?.split("?")[0];
+  const path = normalizeLocalImagePath(value);
+  if (path.startsWith("/api/avatars/file/")) {
+    const filenameRaw = path.split("/").pop();
     if (!filenameRaw) return undefined;
     const filename = decodeURIComponent(filenameRaw);
     if (filename.includes("..") || filename.includes("/") || filename.includes("\\")) return undefined;
-    const diskPath = join(DATA_DIR, "avatars", filename);
     try {
+      const diskPath = join(DATA_DIR, "avatars", filename);
       if (!existsSync(diskPath)) return undefined;
       return readFileSync(diskPath).toString("base64");
     } catch {
       return undefined;
     }
+  }
+
+  if (path.startsWith("/api/avatars/npc/")) {
+    const parts = path.split("/").filter(Boolean);
+    const chatId = parts[3] ? decodeURIComponent(parts[3]) : "";
+    const filename = parts[4] ? decodeURIComponent(parts[4]) : "";
+    if (!chatId || !filename) return undefined;
+    if (
+      chatId.includes("..") ||
+      chatId.includes("/") ||
+      chatId.includes("\\") ||
+      filename.includes("..") ||
+      filename.includes("/") ||
+      filename.includes("\\")
+    ) {
+      return undefined;
+    }
+    try {
+      const diskPath = join(DATA_DIR, "avatars", "npc", chatId, filename);
+      if (!existsSync(diskPath)) return undefined;
+      return readFileSync(diskPath).toString("base64");
+    } catch {
+      return undefined;
+    }
+  }
+
+  if (path.startsWith("/sprites/")) {
+    const segments = path.split("/").filter(Boolean).slice(1);
+    return (
+      readSafeNestedFile(join(CLIENT_PUBLIC_DIR, "sprites"), segments) ??
+      readSafeNestedFile(join(CLIENT_DIST_DIR, "sprites"), segments)
+    );
+  }
+
+  if (path.startsWith("/api/sprites/")) {
+    const parts = path.split("/").filter(Boolean);
+    const characterId = parts[2] ? decodeURIComponent(parts[2]) : "";
+    const filename = parts[4] ? decodeURIComponent(parts[4]) : "";
+    if (!characterId || !filename) return undefined;
+    return readSafeNestedFile(SPRITES_ROOT, [characterId, filename]);
   }
 
   if (looksLikeBase64(value)) return value;
