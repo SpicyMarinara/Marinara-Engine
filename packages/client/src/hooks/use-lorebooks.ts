@@ -87,12 +87,13 @@ export function useLorebookEntries(lorebookId: string | null) {
  * this hook through the current UI, but a duplicate would otherwise register
  * the same query twice and inflate aggregate counts in the consumer.
  *
- * `isError` surfaces if ANY per-lorebook query failed. Consumers should treat
- * the entries array as incomplete in that case rather than computing
- * aggregates over the partial set (which would silently misrepresent reality).
+ * **`entries` is `undefined` until every query has succeeded.** That's a
+ * deliberate API choice: returning a partial array on error would silently
+ * mislead any consumer that forgot to check `isError`. The type system now
+ * forces consumers to handle the unknown case.
  */
 export function useEntriesAcrossLorebooks(lorebookIds: string[]): {
-  entries: LorebookEntry[];
+  entries: LorebookEntry[] | undefined;
   isLoading: boolean;
   isError: boolean;
   error: unknown;
@@ -107,7 +108,10 @@ export function useEntriesAcrossLorebooks(lorebookIds: string[]): {
   const isLoading = queries.some((q) => q.isLoading);
   const isError = queries.some((q) => q.isError);
   const error = queries.find((q) => q.isError)?.error ?? null;
-  const entries = queries.flatMap((q) => q.data ?? []);
+  // Empty input is trivially "complete" — return [] so consumers can treat
+  // "no selection" as a valid known state instead of an unresolved one.
+  const allSucceeded = queries.length === 0 || queries.every((q) => q.isSuccess);
+  const entries = allSucceeded ? queries.flatMap((q) => q.data ?? []) : undefined;
   return { entries, isLoading, isError, error };
 }
 

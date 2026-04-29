@@ -238,18 +238,18 @@ export function AgentEditor() {
   // Knowledge Router agent — also uses the lorebook source selector (file picker stays Retrieval-only)
   const isKnowledgeRouterAgent = agentDetailId === "knowledge-router" || dbConfig?.type === "knowledge-router";
 
-  // Detect when both knowledge agents are configured. Shows a soft warning so
-  // users don't accidentally run both in parallel (which works but does
-  // overlapping work and bloats the prompt). Requires BOTH agents to have
-  // saved config rows — opening a built-in agent's editor for the first time
-  // (before saving) shouldn't trigger a warning about the *other* one being
-  // configured, since this one isn't yet.
+  // Detect when both knowledge agents will actually run in parallel. Shows a
+  // soft warning so users don't accidentally do overlapping work that bloats
+  // the prompt with two injection blocks. Requires BOTH agents to have saved
+  // config rows AND be enabled — a saved-but-disabled config doesn't run, so
+  // pairing one disabled config with one active config wouldn't actually
+  // produce the parallel-run problem the warning is about.
   const bothKnowledgeAgentsConfigured = useMemo(() => {
     if (!agentConfigs) return false;
-    const rows = agentConfigs as AgentConfigRow[];
-    const configuredTypes = new Set(rows.map((c) => c.type));
     if (!isKnowledgeRouterAgent && !isKnowledgeRetrievalAgent) return false;
-    return configuredTypes.has("knowledge-router") && configuredTypes.has("knowledge-retrieval");
+    const rows = agentConfigs as AgentConfigRow[];
+    const enabledTypes = new Set(rows.filter((c) => c.enabled === "true").map((c) => c.type));
+    return enabledTypes.has("knowledge-router") && enabledTypes.has("knowledge-retrieval");
   }, [agentConfigs, isKnowledgeRetrievalAgent, isKnowledgeRouterAgent]);
 
   const { data: allLorebooks } = useLorebooks();
@@ -262,11 +262,13 @@ export function AgentEditor() {
     isLoading: routerEntriesLoading,
     isError: routerEntriesError,
   } = useEntriesAcrossLorebooks(isKnowledgeRouterAgent ? localSourceLorebookIds : []);
-  // descriptionCoverage is non-null whenever there's something to display — including
-  // the zero-entry case (renders as "No entries yet"). Returning null only when there
-  // are no selected lorebooks at all keeps the badge gated to "user has selected sources".
+  // `descriptionCoverage` is non-null whenever there's something to display —
+  // including the zero-entry case (renders as "No entries yet"). Returns null
+  // when there's no selection, when entries are still loading/erroring (so the
+  // hook hasn't given us a complete set yet), or when the agent isn't the router.
   const descriptionCoverage = useMemo(() => {
     if (localSourceLorebookIds.length === 0) return null;
+    if (!routerSourceEntries) return null; // hook returned undefined → still loading or errored
     const total = routerSourceEntries.length;
     const withDescription = routerSourceEntries.filter((e) => e.description?.trim().length > 0).length;
     const ratio = total > 0 ? withDescription / total : 0;
