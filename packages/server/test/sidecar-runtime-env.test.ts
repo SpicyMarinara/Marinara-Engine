@@ -66,3 +66,20 @@ test("prepends bundled runtime directories to PATH on Windows", () => {
 
   assert.equal(env.PATH, `C:\\Marinara\\sidecar-runtime\\b8934-win-x64-cuda${win32.delimiter}C:\\Windows\\System32`);
 });
+
+test("modifies existing Path key instead of creating a duplicate PATH key on Windows", () => {
+  const env = buildLlamaProcessEnv(
+    {
+      source: "bundled",
+      directoryPath: "C:\\Marinara\\sidecar-runtime\\b8934-win-x64-cuda",
+      serverPath: "C:\\Marinara\\sidecar-runtime\\b8934-win-x64-cuda\\llama-server.exe",
+    },
+    "win32",
+    {
+      Path: "C:\\Windows\\System32",
+    },
+  );
+
+  assert.ok(!("PATH" in env), "should not create a duplicate PATH key");
+  assert.equal(env.Path, `C:\\Marinara\\sidecar-runtime\\b8934-win-x64-cuda${win32.delimiter}C:\\Windows\\System32`);
+});

@@ -29,8 +29,14 @@ export function buildLlamaProcessEnv(
 
   if (platform === "win32") {
     const runtimeDir = win32.dirname(runtime.serverPath);
-    env.PATH = prependPathEntry(
-      prependPathEntry(env.PATH, runtimeDir, win32.delimiter),
+    // Windows exposes process.env as a case-insensitive Proxy, but spreading
+    // it into a plain object preserves the native key casing (typically "Path").
+    // Writing to env.PATH when the real key is "Path" creates a duplicate,
+    // causing the child process to lose its system PATH and breaking DLL
+    // resolution for CUDA and other GPU backends.
+    const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+    env[pathKey] = prependPathEntry(
+      prependPathEntry(env[pathKey], runtimeDir, win32.delimiter),
       runtime.directoryPath ?? runtimeDir,
       win32.delimiter,
     );
