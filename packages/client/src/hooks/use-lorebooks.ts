@@ -82,10 +82,15 @@ export function useLorebookEntries(lorebookId: string | null) {
  * is cached independently, so repeated calls with overlapping IDs reuse cached
  * data. Returns the flattened entry array plus loading state — useful for the
  * Knowledge Router's description-coverage badge.
+ *
+ * Deduplicates IDs defensively before issuing queries — duplicates can't reach
+ * this hook through the current UI, but a duplicate would otherwise register
+ * the same query twice and inflate aggregate counts in the consumer.
  */
 export function useEntriesAcrossLorebooks(lorebookIds: string[]) {
+  const uniqueIds = Array.from(new Set(lorebookIds));
   const queries = useQueries({
-    queries: lorebookIds.map((id) => ({
+    queries: uniqueIds.map((id) => ({
       queryKey: lorebookKeys.entries(id),
       queryFn: () => api.get<LorebookEntry[]>(`/lorebooks/${id}/entries`),
     })),

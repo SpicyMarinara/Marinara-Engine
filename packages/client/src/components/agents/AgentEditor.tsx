@@ -240,18 +240,16 @@ export function AgentEditor() {
 
   // Detect when both knowledge agents are configured. Shows a soft warning so
   // users don't accidentally run both in parallel (which works but does
-  // overlapping work and bloats the prompt). Fires when editing either agent
-  // and a saved config exists for the other one.
-  const otherKnowledgeAgentConfigured = useMemo(() => {
+  // overlapping work and bloats the prompt). Requires BOTH agents to have
+  // saved config rows — opening a built-in agent's editor for the first time
+  // (before saving) shouldn't trigger a warning about the *other* one being
+  // configured, since this one isn't yet.
+  const bothKnowledgeAgentsConfigured = useMemo(() => {
     if (!agentConfigs) return false;
     const rows = agentConfigs as AgentConfigRow[];
-    if (isKnowledgeRouterAgent) {
-      return rows.some((c) => c.type === "knowledge-retrieval");
-    }
-    if (isKnowledgeRetrievalAgent) {
-      return rows.some((c) => c.type === "knowledge-router");
-    }
-    return false;
+    const configuredTypes = new Set(rows.map((c) => c.type));
+    if (!isKnowledgeRouterAgent && !isKnowledgeRetrievalAgent) return false;
+    return configuredTypes.has("knowledge-router") && configuredTypes.has("knowledge-retrieval");
   }, [agentConfigs, isKnowledgeRetrievalAgent, isKnowledgeRouterAgent]);
 
   const { data: allLorebooks } = useLorebooks();
@@ -545,7 +543,7 @@ export function AgentEditor() {
           without crashing, but they do overlapping work and bloat the prompt
           with two injection blocks. The warning surfaces this so users either
           choose one or knowingly accept the cost. */}
-      {otherKnowledgeAgentConfigured && (
+      {bothKnowledgeAgentsConfigured && (
         <div className="flex items-center gap-2 bg-amber-500/10 px-4 py-2 text-xs text-amber-400">
           <AlertCircle size="0.8125rem" />
           <span className="flex-1">
