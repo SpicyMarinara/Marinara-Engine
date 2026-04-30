@@ -42,7 +42,9 @@ interface RoleplayHUDProps {
   chatId: string;
   characterCount: number;
   layout?: HudPosition;
+  isStreaming: boolean;
   onRetriggerTrackers?: () => void;
+  onRerunSingleTracker?: (agentType: string) => void;
   onRetryFailedAgents?: () => void;
   /** When true, tracker agents are manual — show a trigger button in the widget strip */
   manualTrackers?: boolean;
@@ -77,7 +79,9 @@ export function RoleplayHUD({
   chatId,
   characterCount: _characterCount,
   layout = "top",
+  isStreaming,
   onRetriggerTrackers,
+  onRerunSingleTracker,
   onRetryFailedAgents,
   manualTrackers,
   mobileCompact,
@@ -106,6 +110,8 @@ export function RoleplayHUD({
   const dismissThoughtBubble = useAgentStore((s) => s.dismissThoughtBubble);
   const clearThoughtBubbles = useAgentStore((s) => s.clearThoughtBubbles);
   const resetAgentStore = useAgentStore((s) => s.reset);
+
+  const isTrackerBusy = isAgentProcessing || isStreaming;
 
   useEffect(() => {
     if (!chatId) return;
@@ -316,6 +322,8 @@ export function RoleplayHUD({
             onSaveWeather={(v) => patchField("weather", v)}
             onSaveTemperature={(v) => patchField("temperature", v)}
             layout={layout}
+            onRerunSingleTracker={onRerunSingleTracker}
+            isTrackerRetryBusy={isTrackerBusy}
           />
         )}
 
@@ -346,6 +354,8 @@ export function RoleplayHUD({
             onUpdateQuests={(q) => patchPlayerStats("activeQuests", q)}
             customTrackerFields={customTrackerFields}
             onUpdateCustomTracker={(fields) => patchPlayerStats("customTrackerFields", fields)}
+            onRerunSingleTracker={onRerunSingleTracker}
+            isTrackerRetryBusy={isTrackerBusy}
           />
         )}
 
@@ -356,14 +366,14 @@ export function RoleplayHUD({
               e.preventDefault();
               onRetriggerTrackers();
             }}
-            disabled={isAgentProcessing}
+            disabled={isTrackerBusy}
             className={cn(
               MOBILE_HUD_BTN,
               "justify-center text-[0.5625rem] font-medium",
-              isAgentProcessing ? "text-purple-600 dark:text-purple-300" : "text-[var(--muted-foreground)]",
+              isTrackerBusy ? "text-purple-600 dark:text-purple-300" : "text-[var(--muted-foreground)]",
             )}
           >
-            <RefreshCw size="0.875rem" className={cn("shrink-0 h-4 w-4", isAgentProcessing && "animate-spin")} />
+            <RefreshCw size="0.875rem" className={cn("shrink-0 h-4 w-4", isTrackerBusy && "animate-spin")} />
           </button>
         )}
       </div>
@@ -383,6 +393,8 @@ export function RoleplayHUD({
             onSaveWeather={(v) => patchField("weather", v)}
             onSaveTemperature={(v) => patchField("temperature", v)}
             layout={layout}
+            onRerunSingleTracker={onRerunSingleTracker}
+            isTrackerRetryBusy={isTrackerBusy}
           />
         )}
 
@@ -393,6 +405,8 @@ export function RoleplayHUD({
             status={personaStatus}
             onUpdateStatus={(status) => patchPlayerStats("status", status)}
             layout={layout}
+            onRerunSingleTracker={onRerunSingleTracker}
+            isTrackerRetryBusy={isTrackerBusy}
           />
         )}
 
@@ -407,6 +421,8 @@ export function RoleplayHUD({
             }}
             chatId={chatId}
             layout={layout}
+            onRerunSingleTracker={onRerunSingleTracker}
+            isTrackerRetryBusy={isTrackerBusy}
           />
         )}
 
@@ -419,7 +435,13 @@ export function RoleplayHUD({
         )}
 
         {enabledAgentTypes.has("quest") && (
-          <QuestsWidget quests={activeQuests} onUpdate={(q) => patchPlayerStats("activeQuests", q)} layout={layout} />
+          <QuestsWidget
+            quests={activeQuests}
+            onUpdate={(q) => patchPlayerStats("activeQuests", q)}
+            layout={layout}
+            onRerunSingleTracker={onRerunSingleTracker}
+            isTrackerRetryBusy={isTrackerBusy}
+          />
         )}
 
         {enabledAgentTypes.has("custom-tracker") && (
@@ -427,6 +449,8 @@ export function RoleplayHUD({
             fields={customTrackerFields}
             onUpdate={(fields) => patchPlayerStats("customTrackerFields", fields)}
             layout={layout}
+            onRerunSingleTracker={onRerunSingleTracker}
+            isTrackerRetryBusy={isTrackerBusy}
           />
         )}
 
@@ -437,11 +461,11 @@ export function RoleplayHUD({
               e.preventDefault();
               onRetriggerTrackers();
             }}
-            disabled={isAgentProcessing}
-            className={cn(WIDGET, isAgentProcessing ? "text-purple-300" : "text-[var(--muted-foreground)]")}
-            title={isAgentProcessing ? "Trackers running…" : "Run Trackers"}
+            disabled={isTrackerBusy}
+            className={cn(WIDGET, isTrackerBusy ? "text-purple-300" : "text-[var(--muted-foreground)]")}
+            title={isTrackerBusy ? "Trackers running…" : "Run Trackers"}
           >
-            <RefreshCw size="0.875rem" className={cn(isAgentProcessing && "animate-spin")} />
+            <RefreshCw size="0.875rem" className={cn(isTrackerBusy && "animate-spin")} />
           </button>
         )}
       </div>
@@ -662,6 +686,8 @@ function CombinedPlayerWidget({
   onUpdateQuests,
   customTrackerFields,
   onUpdateCustomTracker,
+  onRerunSingleTracker,
+  isTrackerRetryBusy,
 }: {
   layout?: HudPosition;
   showPersona: boolean;
@@ -680,6 +706,8 @@ function CombinedPlayerWidget({
   onUpdateQuests: (quests: QuestProgress[]) => void;
   customTrackerFields: CustomTrackerField[];
   onUpdateCustomTracker: (fields: CustomTrackerField[]) => void;
+  onRerunSingleTracker?: (agentType: string) => void;
+  isTrackerRetryBusy?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -726,6 +754,8 @@ function CombinedPlayerWidget({
             customTrackerFields={customTrackerFields}
             onUpdateCustomTracker={onUpdateCustomTracker}
             onClose={() => setOpen(false)}
+            onRerunSingleTracker={onRerunSingleTracker}
+            isTrackerRetryBusy={isTrackerRetryBusy}
           />
         </Suspense>
       </WidgetPopover>
@@ -843,11 +873,15 @@ function CharactersWidget({
   onUpdate,
   chatId,
   layout = "top",
+  onRerunSingleTracker,
+  isTrackerRetryBusy,
 }: {
   characters: PresentCharacter[];
   onUpdate: (chars: PresentCharacter[]) => void;
   chatId: string;
   layout?: HudPosition;
+  onRerunSingleTracker?: (agentType: string) => void;
+  isTrackerRetryBusy?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -886,7 +920,13 @@ function CharactersWidget({
         className="w-72 max-h-80 overflow-y-auto"
       >
         <Suspense fallback={<DeferredHUDPanelFallback label="Loading characters…" />}>
-          <CharactersPanel characters={characters} onUpdate={onUpdate} chatId={chatId} />
+          <CharactersPanel
+            characters={characters}
+            onUpdate={onUpdate}
+            chatId={chatId}
+            onRerunSingleTracker={onRerunSingleTracker}
+            isTrackerRetryBusy={isTrackerRetryBusy}
+          />
         </Suspense>
       </WidgetPopover>
     </div>
@@ -901,12 +941,16 @@ function PersonaStatsWidget({
   status,
   onUpdateStatus,
   layout = "top",
+  onRerunSingleTracker,
+  isTrackerRetryBusy,
 }: {
   bars: CharacterStat[];
   onUpdate: (bars: CharacterStat[]) => void;
   status: string;
   onUpdateStatus: (status: string) => void;
   layout?: HudPosition;
+  onRerunSingleTracker?: (agentType: string) => void;
+  isTrackerRetryBusy?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -952,7 +996,14 @@ function PersonaStatsWidget({
         className="w-60 max-h-80 overflow-y-auto"
       >
         <Suspense fallback={<DeferredHUDPanelFallback label="Loading persona stats…" />}>
-          <PersonaStatsPanel bars={bars} onUpdate={onUpdate} status={status} onUpdateStatus={onUpdateStatus} />
+          <PersonaStatsPanel
+            bars={bars}
+            onUpdate={onUpdate}
+            status={status}
+            onUpdateStatus={onUpdateStatus}
+            onRerunSingleTracker={onRerunSingleTracker}
+            isTrackerRetryBusy={isTrackerRetryBusy}
+          />
         </Suspense>
       </WidgetPopover>
     </div>
@@ -965,10 +1016,14 @@ function CustomTrackerWidget({
   fields,
   onUpdate,
   layout = "top",
+  onRerunSingleTracker,
+  isTrackerRetryBusy,
 }: {
   fields: CustomTrackerField[];
   onUpdate: (fields: CustomTrackerField[]) => void;
   layout?: HudPosition;
+  onRerunSingleTracker?: (agentType: string) => void;
+  isTrackerRetryBusy?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -1027,7 +1082,12 @@ function CustomTrackerWidget({
         className="w-72 max-h-80 overflow-y-auto"
       >
         <Suspense fallback={<DeferredHUDPanelFallback label="Loading custom tracker…" />}>
-          <CustomTrackerPanel fields={fields} onUpdate={onUpdate} />
+          <CustomTrackerPanel
+            fields={fields}
+            onUpdate={onUpdate}
+            onRerunSingleTracker={onRerunSingleTracker}
+            isTrackerRetryBusy={isTrackerRetryBusy}
+          />
         </Suspense>
       </WidgetPopover>
     </div>
@@ -1114,10 +1174,14 @@ function QuestsWidget({
   quests,
   onUpdate,
   layout = "top",
+  onRerunSingleTracker,
+  isTrackerRetryBusy,
 }: {
   quests: QuestProgress[];
   onUpdate: (quests: QuestProgress[]) => void;
   layout?: HudPosition;
+  onRerunSingleTracker?: (agentType: string) => void;
+  isTrackerRetryBusy?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -1157,7 +1221,12 @@ function QuestsWidget({
         className="w-72 max-h-96 overflow-y-auto"
       >
         <Suspense fallback={<DeferredHUDPanelFallback label="Loading quests…" />}>
-          <QuestsPanel quests={quests} onUpdate={onUpdate} />
+          <QuestsPanel
+            quests={quests}
+            onUpdate={onUpdate}
+            onRerunSingleTracker={onRerunSingleTracker}
+            isTrackerRetryBusy={isTrackerRetryBusy}
+          />
         </Suspense>
       </WidgetPopover>
     </div>
@@ -1292,6 +1361,8 @@ function CombinedWorldWidget({
   onSaveWeather,
   onSaveTemperature,
   layout,
+  onRerunSingleTracker,
+  isTrackerRetryBusy,
 }: {
   location: string;
   date: string;
@@ -1304,6 +1375,8 @@ function CombinedWorldWidget({
   onSaveWeather: (v: string) => void;
   onSaveTemperature: (v: string) => void;
   layout: "top" | "left" | "right";
+  onRerunSingleTracker?: (agentType: string) => void;
+  isTrackerRetryBusy?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -1508,6 +1581,8 @@ function CombinedWorldWidget({
             pinColor={pinColor}
             tempColor={tempColor}
             onClose={() => setOpen(false)}
+            onRerunSingleTracker={onRerunSingleTracker}
+            isTrackerRetryBusy={isTrackerRetryBusy}
           />
         </Suspense>
       </WidgetPopover>

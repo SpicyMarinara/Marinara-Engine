@@ -700,6 +700,16 @@ export function ChatArea() {
     await retryAgents(activeChatId, types);
   }, [activeChatId, isStreaming, agentProcessing, enabledAgentTypes, retryAgents]);
 
+  const handleRerunSingleTracker = useCallback(
+    async (agentType: string) => {
+      if (!activeChatId || isStreaming || agentProcessing) return;
+      const trackerIds = new Set(BUILT_IN_AGENTS.filter((a) => a.category === "tracker").map((a) => a.id));
+      if (!trackerIds.has(agentType) || !enabledAgentTypes.has(agentType)) return;
+      await retryAgents(activeChatId, [agentType]);
+    },
+    [activeChatId, isStreaming, agentProcessing, enabledAgentTypes, retryAgents],
+  );
+
   const handleSetActiveSwipe = useCallback(
     (messageId: string, index: number) => {
       setActiveSwipe.mutate(
@@ -1456,6 +1466,7 @@ export function ChatArea() {
           onToggleSelectMessage={handleToggleSelectMessage}
           onSummaryContextSizeChange={handleSummaryContextSizeChange}
           onRerunTrackers={handleRerunTrackers}
+          onRerunSingleTracker={handleRerunSingleTracker}
           onStartEncounter={() => startEncounter()}
           onConcludeScene={() => concludeScene(activeChatId)}
           onAbandonScene={() => abandonScene(activeChatId)}
