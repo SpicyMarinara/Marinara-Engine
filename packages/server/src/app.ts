@@ -61,8 +61,13 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
   const db = await getDB();
   app.decorate("db", db);
   app.addHook("onClose", async () => {
-    await sidecarProcessService.stop();
-    await closeDB();
+    try {
+      await sidecarProcessService.stop();
+    } catch (err) {
+      app.log.error(err, "Failed to stop sidecar during shutdown");
+    } finally {
+      await closeDB();
+    }
   });
 
   // ── Migrations (add missing columns to existing tables) ──
