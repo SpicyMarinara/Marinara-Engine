@@ -16,19 +16,19 @@ async function main() {
 
   const shutdown = async (signal: NodeJS.Signals) => {
     if (isShuttingDown) {
-      app.log.warn("Received %s while shutdown is already in progress", signal);
-      return;
+      logger.warn("Received %s while shutdown is already in progress", signal);
+      process.exit(1);
     }
 
     isShuttingDown = true;
-    app.log.info("Received %s; shutting down Marinara Engine", signal);
+    logger.info("Received %s; shutting down Marinara Engine", signal);
 
     try {
       await app.close();
-      app.log.info("Shutdown complete");
+      logger.info("Shutdown complete");
       process.exit(0);
     } catch (err) {
-      app.log.error(err, "Shutdown failed");
+      logger.error(err, "Shutdown failed");
       process.exit(1);
     }
   };
@@ -42,14 +42,14 @@ async function main() {
 
   try {
     await app.listen({ port, host });
-    app.log.info(`Marinara Engine server listening on ${protocol}://${host}:${port}`);
+    logger.info(`Marinara Engine server listening on ${protocol}://${host}:${port}`);
   } catch (err) {
     if (isShuttingDown) {
-      app.log.info("Startup interrupted by shutdown");
+      logger.info("Startup interrupted by shutdown");
       return;
     }
 
-    app.log.error(err);
+    logger.error(err);
     process.exit(1);
   }
 }
