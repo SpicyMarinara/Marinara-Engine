@@ -1046,7 +1046,7 @@ export async function generateRoutes(app: FastifyInstance) {
         const now = new Date();
         const rolloverHour = Math.max(
           0,
-          Math.min(23, Math.floor((chatMeta.dayRolloverHour as number | undefined) ?? 4)),
+          Math.min(11, Math.floor((chatMeta.dayRolloverHour as number | undefined) ?? 4)),
         );
         const shifted = (ts: Date) => new Date(ts.getTime() - rolloverHour * 3_600_000);
         const logicalNow = shifted(now);

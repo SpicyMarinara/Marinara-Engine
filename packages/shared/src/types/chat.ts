@@ -198,7 +198,7 @@ export interface ChatMetadata {
   /** Per-week consolidated conversation summaries (key: Monday "DD.MM.YYYY"). */
   weekSummaries?: Record<string, WeekSummaryEntry>;
   /**
-   * Hour of day (0-23, local time) at which a conversation "day" rolls over for
+   * Hour of day (0-11, local time) at which a conversation "day" rolls over for
    * summarization. Messages sent before this hour are filed under the previous
    * day, so a late-night session isn't cut off mid-conversation. Default: 4.
    */
@@ -207,7 +207,7 @@ export interface ChatMetadata {
    * How many of the most recent messages to keep verbatim in the prompt even
    * after they've been summarized. Bridges the day boundary so characters can
    * pick up the actual flow of recent conversation, not just the gist. 0 disables.
-   * Default: 10.
+   * Valid range: 0-50. Default: 10.
    */
   summaryTailMessages?: number;
 
