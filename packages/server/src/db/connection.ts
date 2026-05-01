@@ -8,19 +8,27 @@ import { dirname } from "node:path";
 import { getDatabaseDriver, getDatabaseFilePath } from "../config/runtime-config.js";
 
 type DrizzleDB = ReturnType<typeof import("drizzle-orm/libsql").drizzle<typeof schema>>;
+type DbCleanup = () => void | Promise<void>;
 
 let dbPromise: Promise<DrizzleDB> | null = null;
+let dbCleanup: DbCleanup | null = null;
 
 async function createWithLibsql(dbPath: string): Promise<DrizzleDB> {
   const { createClient } = await import("@libsql/client");
   const { drizzle } = await import("drizzle-orm/libsql");
 
   const client = createClient({ url: `file:${dbPath}` });
-  await client.execute("PRAGMA journal_mode=WAL");
-  await client.execute("PRAGMA synchronous=NORMAL");
-  await client.execute("PRAGMA busy_timeout=5000");
-  await client.execute("PRAGMA foreign_keys=ON");
+  try {
+    await client.execute("PRAGMA journal_mode=WAL");
+    await client.execute("PRAGMA synchronous=NORMAL");
+    await client.execute("PRAGMA busy_timeout=5000");
+    await client.execute("PRAGMA foreign_keys=ON");
+  } catch (err) {
+    client.close();
+    throw err;
+  }
 
+  dbCleanup = () => client.close();
   return drizzle(client, { schema });
 }
 
@@ -29,10 +37,17 @@ async function createWithBetterSqlite3(dbPath: string): Promise<DrizzleDB> {
   const { drizzle } = await import("drizzle-orm/better-sqlite3");
 
   const sqlite = new Database(dbPath);
-  sqlite.pragma("journal_mode = WAL");
-  sqlite.pragma("synchronous = NORMAL");
-  sqlite.pragma("busy_timeout = 5000");
-  sqlite.pragma("foreign_keys = ON");
+  try {
+    sqlite.pragma("journal_mode = WAL");
+    sqlite.pragma("synchronous = NORMAL");
+    sqlite.pragma("busy_timeout = 5000");
+    sqlite.pragma("foreign_keys = ON");
+  } catch (err) {
+    sqlite.close();
+    throw err;
+  }
+
+  dbCleanup = () => sqlite.close();
 
   // Cast is safe — both Drizzle SQLite drivers share the same query API
   return drizzle(sqlite, { schema }) as unknown as DrizzleDB;
@@ -74,14 +89,16 @@ async function createWithSqlJs(dbPath: string): Promise<DrizzleDB> {
   const timer = setInterval(save, 30_000);
   timer.unref(); // Don't prevent process exit
 
-  // Save on clean shutdown
-  process.on("beforeExit", save);
-  for (const sig of ["SIGINT", "SIGTERM"] as const) {
-    process.once(sig, () => {
-      save();
-      process.exit(0);
-    });
-  }
+  // Save on natural process exit and Fastify shutdown.
+  const beforeExitHandler = () => save();
+  process.on("beforeExit", beforeExitHandler);
+
+  dbCleanup = () => {
+    clearInterval(timer);
+    process.off("beforeExit", beforeExitHandler);
+    save();
+    sqlDb.close();
+  };
 
   return drizzle(sqlDb, { schema }) as unknown as DrizzleDB;
 }
@@ -120,6 +137,35 @@ export async function getDB() {
     dbPromise = createDB(dbPath);
   }
   return dbPromise;
+}
+
+export async function closeDB() {
+  const activePromise = dbPromise;
+  if (!activePromise) {
+    return;
+  }
+
+  dbPromise = null;
+
+  try {
+    await activePromise;
+  } catch (err) {
+    logger.error(err, "[db] Failed to initialize database before shutdown");
+    dbCleanup = null;
+    return;
+  }
+
+  const cleanup = dbCleanup;
+  dbCleanup = null;
+  if (!cleanup) {
+    return;
+  }
+
+  try {
+    await cleanup();
+  } catch (err) {
+    logger.error(err, "[db] Failed to close database");
+  }
 }
 
 export type DB = DrizzleDB;

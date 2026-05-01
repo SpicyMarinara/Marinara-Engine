@@ -40,10 +40,6 @@ const hfRepoSchema = z
   .regex(/^[^/\s]+\/[^/\s]+$/, "Repository must be in owner/repo format");
 
 export const sidecarRoutes: FastifyPluginAsync = async (app) => {
-  app.addHook("onClose", async () => {
-    await sidecarProcessService.stop();
-  });
-
   app.get("/status", async () => {
     void sidecarProcessService
       .syncForCurrentConfig({ suppressKnownFailure: true, allowRuntimeInstall: false })

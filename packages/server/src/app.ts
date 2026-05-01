@@ -5,7 +5,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
-import { getDB, type DB } from "./db/connection.js";
+import { getDB, closeDB, type DB } from "./db/connection.js";
 import { registerRoutes } from "./routes/index.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { ipAllowlistHook } from "./middleware/ip-allowlist.js";
@@ -60,6 +60,10 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
   // ── Database ──
   const db = await getDB();
   app.decorate("db", db);
+  app.addHook("onClose", async () => {
+    await sidecarProcessService.stop();
+    await closeDB();
+  });
 
   // ── Migrations (add missing columns to existing tables) ──
   await runMigrations(db);

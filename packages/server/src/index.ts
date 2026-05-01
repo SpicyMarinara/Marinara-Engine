@@ -12,6 +12,33 @@ async function main() {
   const protocol = tls ? "https" : getServerProtocol();
   const port = getPort();
   const host = getHost();
+  let isShuttingDown = false;
+
+  const shutdown = async (signal: NodeJS.Signals) => {
+    if (isShuttingDown) {
+      app.log.warn("Received %s while shutdown is already in progress", signal);
+      return;
+    }
+
+    isShuttingDown = true;
+    app.log.info("Received %s; shutting down Marinara Engine", signal);
+
+    try {
+      await app.close();
+      app.log.info("Shutdown complete");
+      process.exit(0);
+    } catch (err) {
+      app.log.error(err, "Shutdown failed");
+      process.exit(1);
+    }
+  };
+
+  process.once("SIGTERM", () => {
+    void shutdown("SIGTERM");
+  });
+  process.once("SIGINT", () => {
+    void shutdown("SIGINT");
+  });
 
   try {
     await app.listen({ port, host });
