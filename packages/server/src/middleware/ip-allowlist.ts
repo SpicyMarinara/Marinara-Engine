@@ -172,6 +172,34 @@ function getAllowlist() {
   return cachedAllowlist.entries;
 }
 
+// ── Reusable predicates (shared with basic-auth) ──
+
+/** True if the given IP string is a loopback address. */
+export function isLoopbackIp(ip: string): boolean {
+  const bytes = ipToBytes(ip);
+  if (!bytes) return false;
+  for (const lb of LOOPBACK_CIDRS) {
+    if (matchesCIDR(bytes, lb)) return true;
+  }
+  return false;
+}
+
+/**
+ * True if the given IP is configured in the active IP_ALLOWLIST.
+ * Returns false when no allowlist is configured (so callers can decide
+ * what to do with "no list" vs "list says no").
+ */
+export function isInIpAllowlist(ip: string): boolean {
+  const allowlist = getAllowlist();
+  if (!allowlist) return false;
+  const bytes = ipToBytes(ip);
+  if (!bytes) return false;
+  for (const entry of allowlist) {
+    if (matchesCIDR(bytes, entry)) return true;
+  }
+  return false;
+}
+
 // ── Fastify onRequest hook ──
 
 export function ipAllowlistHook(request: FastifyRequest, reply: FastifyReply, done: () => void) {

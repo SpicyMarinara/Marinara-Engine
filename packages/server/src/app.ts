@@ -9,6 +9,7 @@ import { getDB, type DB } from "./db/connection.js";
 import { registerRoutes } from "./routes/index.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { ipAllowlistHook } from "./middleware/ip-allowlist.js";
+import { basicAuthHook } from "./middleware/basic-auth.js";
 import { runMigrations } from "./db/migrate.js";
 import { seedDefaultPreset } from "./db/seed.js";
 import { seedProfessorMari } from "./db/seed-mari.js";
@@ -102,6 +103,9 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
 
   // ── IP Allowlist ──
   app.addHook("onRequest", ipAllowlistHook);
+
+  // ── HTTP Basic Auth ──
+  app.addHook("onRequest", basicAuthHook);
 
   // ── Prevent caching of API JSON responses ──
   // Without explicit Cache-Control, browsers apply heuristic caching which

@@ -120,7 +120,28 @@ export function getDatabaseFilePath() {
 }
 
 export function getIpAllowlist() {
+  // Explicit off-switch lets users keep their list configured but
+  // temporarily disable enforcement without deleting the entries.
+  if (isDisabledFlag(process.env.IP_ALLOWLIST_ENABLED)) return null;
   return normalizeEnvValue(process.env.IP_ALLOWLIST);
+}
+
+export function getBasicAuthConfig() {
+  return {
+    user: normalizeEnvValue(process.env.BASIC_AUTH_USER),
+    pass: normalizeEnvValue(process.env.BASIC_AUTH_PASS),
+    realm: normalizeEnvValue(process.env.BASIC_AUTH_REALM) ?? "Marinara Engine",
+  };
+}
+
+/**
+ * Opt-in switch that lets the server accept unauthenticated remote
+ * connections (i.e. neither loopback nor IP_ALLOWLIST nor Basic Auth).
+ * Default false — protects users who accidentally expose the port.
+ */
+export function isUnauthenticatedRemoteAllowed() {
+  const value = (process.env.ALLOW_UNAUTHENTICATED_REMOTE ?? "").trim().toLowerCase();
+  return ["1", "true", "yes", "on"].includes(value);
 }
 
 export function isDebugAgentsEnabled() {

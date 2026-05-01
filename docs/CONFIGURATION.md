@@ -23,6 +23,11 @@ cp .env.example .env
 | `SSL_CERT`                       | _(empty)_                                                | Path to the TLS certificate. Set both `SSL_CERT` and `SSL_KEY` to enable HTTPS.                                                                                |
 | `SSL_KEY`                        | _(empty)_                                                | Path to the TLS private key.                                                                                                                                   |
 | `IP_ALLOWLIST`                   | _(empty)_                                                | Comma-separated IPs or CIDRs to allow. Loopback is always allowed.                                                                                             |
+| `IP_ALLOWLIST_ENABLED`           | `true`                                                   | Master switch for `IP_ALLOWLIST`. Set to `false`, `0`, `no`, or `off` to keep the list configured but disable enforcement.                                     |
+| `BASIC_AUTH_USER`                | _(empty)_                                                | Username for HTTP Basic Auth. Set both `BASIC_AUTH_USER` and `BASIC_AUTH_PASS` to require a password on every request. Leave either empty to disable auth.     |
+| `BASIC_AUTH_PASS`                | _(empty)_                                                | Password for HTTP Basic Auth. Use a strong, random value.                                                                                                      |
+| `BASIC_AUTH_REALM`               | `Marinara Engine`                                        | Realm string shown in the browser password prompt.                                                                                                             |
+| `ALLOW_UNAUTHENTICATED_REMOTE`   | `false`                                                  | When neither Basic Auth nor an `IP_ALLOWLIST` entry vouches for a remote IP, requests are refused by default. Set to `true` to allow unauthenticated remote access (NOT recommended on internet-facing servers). |
 | `GIPHY_API_KEY`                  | _(empty)_                                                | Optional Giphy API key. GIF search is unavailable when unset.                                                                                                  |
 
 ## Logging Levels
@@ -56,6 +61,53 @@ LOG_LEVEL=debug pnpm start
 ```
 
 > **Note:** Client-side (browser) logging uses the standard `console.*` API and is not controlled by `LOG_LEVEL`. Production client builds automatically strip `console.log` calls; only `console.warn` and `console.error` survive in the browser.
+
+## Access Control
+
+Marinara Engine ships with layered access-control mechanisms designed for users who expose the server beyond their local machine.
+
+### Safe-by-default lockdown
+
+By default, when no Basic Auth credentials are configured, the server **refuses connections from any remote IP** that is not in `IP_ALLOWLIST`. Loopback (`127.0.0.1`, `::1`) is always allowed, so local use is unaffected. This protects users who accidentally expose port 7860 to the public internet without setting up authentication.
+
+Remote callers in this state receive a `403 Forbidden` with a message describing the three ways out:
+
+1. Set `BASIC_AUTH_USER` and `BASIC_AUTH_PASS` (recommended for internet-facing servers).
+2. Add the remote IP / network to `IP_ALLOWLIST` (recommended for trusted LANs and VPNs like Tailscale).
+3. Set `ALLOW_UNAUTHENTICATED_REMOTE=true` to opt back into the legacy "anyone can connect" behaviour. Only do this if the network itself is already trusted (e.g. an isolated lab subnet).
+
+### IP Allowlist
+
+Restricts access at the network level. Set `IP_ALLOWLIST` to a comma-separated list of IPs or CIDR ranges:
+
+```
+IP_ALLOWLIST=192.168.1.0/24,203.0.113.42
+```
+
+When set, requests from any other address receive a `403 Forbidden`. Loopback addresses (`127.0.0.1`, `::1`) are **always** allowed so you cannot lock yourself out of local access.
+
+Set `IP_ALLOWLIST_ENABLED=false` to keep the list configured while temporarily disabling enforcement (useful when troubleshooting from a new IP).
+
+### HTTP Basic Auth
+
+Requires a username and password on every request. Set both `BASIC_AUTH_USER` and `BASIC_AUTH_PASS`:
+
+```
+BASIC_AUTH_USER=alice
+BASIC_AUTH_PASS=correct-horse-battery-staple
+```
+
+The browser will show a native password prompt the first time you visit the server and remember the credentials for the session. Leaving either variable empty disables auth.
+
+The following requests are **exempt** from Basic Auth so you cannot lock yourself or trusted networks out:
+
+- Loopback (`127.0.0.1`, `::1`) — if you're on the box itself, no password is needed.
+- Any IP listed in `IP_ALLOWLIST` — if you've already vouched for a network at the IP layer, no second factor is required.
+- The `/api/health` endpoint — so external uptime monitors and load balancers can probe the server without credentials.
+
+> **Always pair Basic Auth with HTTPS** when exposing the server to the public internet — Basic Auth credentials are only base64-encoded, not encrypted. Set `SSL_CERT` and `SSL_KEY`, or front Marinara with a TLS-terminating reverse proxy (nginx, Caddy, Traefik, Cloudflare Tunnel).
+
+For sensitive deployments, also consider Tailscale or Cloudflare Access — they avoid exposing the port to the open internet entirely.
 
 ## Notes
 
