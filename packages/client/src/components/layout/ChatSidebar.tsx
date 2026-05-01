@@ -1217,7 +1217,7 @@ function FolderRow({
               dragControls.start(e);
             }}
             onClick={(e) => e.stopPropagation()}
-            className="cursor-grab touch-none opacity-0 transition-opacity active:cursor-grabbing group-hover:opacity-100 max-md:opacity-100"
+            className="cursor-grab touch-none opacity-0 transition-opacity active:cursor-grabbing group-hover:opacity-100 max-md:opacity-100 select-none"
           >
             <GripVertical size="0.625rem" className="text-[var(--muted-foreground)]" />
           </div>
