@@ -79,7 +79,7 @@ export function useSettingsSync() {
             const parsed = JSON.parse(data.value);
             if (parsed && typeof parsed === "object") {
               // Migrate old flat gradient fields → per-scheme nested (v10 → v11).
-              if ("convoGradientFrom" in parsed) {
+              if ("convoGradientFrom" in parsed || "convoGradientTo" in parsed) {
                 parsed.convoGradient = {
                   dark: {
                     from: parsed.convoGradientFrom ?? "#0a0a0e",
