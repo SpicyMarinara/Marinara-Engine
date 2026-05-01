@@ -144,6 +144,15 @@ export function isUnauthenticatedRemoteAllowed() {
   return ["1", "true", "yes", "on"].includes(value);
 }
 
+/**
+ * Optional override for the no-auth-lockdown private-network exemption list.
+ * Comma-separated IPs / CIDRs. When set, REPLACES the built-in defaults
+ * (RFC 1918, CGNAT, link-local, IPv6 ULA). When unset, defaults are used.
+ */
+export function getTrustedPrivateNetworksOverride() {
+  return normalizeEnvValue(process.env.TRUSTED_PRIVATE_NETWORKS);
+}
+
 export function isDebugAgentsEnabled() {
   const value = normalizeEnvValue(process.env.DEBUG_AGENTS);
   return value === "1" || value?.toLowerCase() === "true";

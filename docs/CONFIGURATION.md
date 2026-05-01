@@ -28,6 +28,7 @@ cp .env.example .env
 | `BASIC_AUTH_PASS`                | _(empty)_                                                | Password for HTTP Basic Auth. Use a strong, random value.                                                                                                      |
 | `BASIC_AUTH_REALM`               | `Marinara Engine`                                        | Realm string shown in the browser password prompt.                                                                                                             |
 | `ALLOW_UNAUTHENTICATED_REMOTE`   | `false`                                                  | When neither Basic Auth nor an `IP_ALLOWLIST` entry vouches for a public-internet IP, requests are refused by default. Private-network IPs (RFC 1918, CGNAT, IPv6 ULA / link-local) are always allowed. Set to `true` to allow unauthenticated **public** access (NOT recommended on internet-facing servers). |
+| `TRUSTED_PRIVATE_NETWORKS`       | _(built-in defaults)_                                    | Comma-separated IPs / CIDRs that bypass the no-auth lockdown. When set, **replaces** the defaults (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`, `100.64.0.0/10`, `fc00::/7`, `fe80::/10`) — include any of the defaults you still want. Useful if you want to drop a range you consider untrusted (e.g. a publicly-routable corporate /16) or substitute your own list. |
 | `GIPHY_API_KEY`                  | _(empty)_                                                | Optional Giphy API key. GIF search is unavailable when unset.                                                                                                  |
 
 ## Logging Levels
@@ -85,6 +86,20 @@ Public callers in the locked-down state receive a `403 Forbidden` with a message
 3. Set `ALLOW_UNAUTHENTICATED_REMOTE=true` to opt back into the legacy "anyone can connect" behaviour for public IPs as well. Only do this if the network itself is already trusted.
 
 > Note: the private-network exemption applies only to the lockdown. Once you set Basic Auth credentials, the password is required from every IP except loopback and explicit `IP_ALLOWLIST` matches — including from your LAN. This matches the principle of least surprise: if you set a password, you mean it.
+
+#### Customising the private-network list
+
+The seven default ranges above cover the vast majority of LAN / Docker / Kubernetes / Tailscale setups. If they don't match your network — for example, you have a publicly-routable corporate `/16` that is technically outside RFC 1918 but you trust it, or you want to *drop* a range you consider hostile — set `TRUSTED_PRIVATE_NETWORKS` to a comma-separated list of IPs / CIDRs. This **replaces** the defaults entirely, so include any of them you still want:
+
+```
+# Trust only my office subnet and a single specific home IP
+TRUSTED_PRIVATE_NETWORKS=10.42.0.0/16,203.0.113.7
+
+# Strip 10.0.0.0/8 from the defaults but keep the rest
+TRUSTED_PRIVATE_NETWORKS=172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,100.64.0.0/10,fc00::/7,fe80::/10
+```
+
+When unset, the built-in defaults are used.
 
 ### IP Allowlist
 

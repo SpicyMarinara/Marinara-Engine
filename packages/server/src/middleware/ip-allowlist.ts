@@ -12,7 +12,7 @@
 // so you can never lock yourself out of local access.
 
 import type { FastifyRequest, FastifyReply } from "fastify";
-import { getIpAllowlist } from "../config/runtime-config.js";
+import { getIpAllowlist, getTrustedPrivateNetworksOverride } from "../config/runtime-config.js";
 import { logger } from "../lib/logger.js";
 
 // ── CIDR helpers ──
@@ -131,7 +131,12 @@ const LOOPBACK_CIDRS: CIDREntry[] = [parseCIDR("127.0.0.1")!, parseCIDR("::1")!]
 // Used by the safe-by-default Basic Auth lockdown to avoid breaking
 // LAN, Docker bridge, Kubernetes pod, and Tailscale traffic when no
 // auth is configured. Public IPs are NOT in this list.
-const PRIVATE_NETWORK_CIDRS: CIDREntry[] = [
+//
+// These are *defaults* — operators can override the entire list via the
+// TRUSTED_PRIVATE_NETWORKS env var (comma-separated IPs / CIDRs) to
+// strip ranges they consider untrusted (e.g. a publicly-routable
+// corporate /16) or to substitute their own list entirely.
+const DEFAULT_PRIVATE_NETWORK_CIDRS: CIDREntry[] = [
   parseCIDR("10.0.0.0/8")!, // RFC 1918
   parseCIDR("172.16.0.0/12")!, // RFC 1918 (covers Docker default bridge 172.17.0.0/16)
   parseCIDR("192.168.0.0/16")!, // RFC 1918
@@ -140,6 +145,39 @@ const PRIVATE_NETWORK_CIDRS: CIDREntry[] = [
   parseCIDR("fc00::/7")!, // RFC 4193 unique local (IPv6 ULA)
   parseCIDR("fe80::/10")!, // RFC 4291 IPv6 link-local
 ];
+
+let cachedPrivateNetworks: { raw: string | null; entries: CIDREntry[]; announced: boolean } | null = null;
+
+function getPrivateNetworkCidrs(): CIDREntry[] {
+  const raw = getTrustedPrivateNetworksOverride();
+  if (!cachedPrivateNetworks || cachedPrivateNetworks.raw !== raw) {
+    if (!raw) {
+      cachedPrivateNetworks = { raw: null, entries: DEFAULT_PRIVATE_NETWORK_CIDRS, announced: true };
+    } else {
+      const entries: CIDREntry[] = [];
+      for (const part of raw.split(",")) {
+        const trimmed = part.trim();
+        if (!trimmed) continue;
+        const cidr = parseCIDR(trimmed);
+        if (!cidr) {
+          logger.warn(`[trusted-private-networks] Ignoring invalid entry: "${trimmed}"`);
+          continue;
+        }
+        entries.push(cidr);
+      }
+      cachedPrivateNetworks = { raw, entries, announced: false };
+    }
+  }
+
+  if (cachedPrivateNetworks.raw && !cachedPrivateNetworks.announced) {
+    logger.info(
+      `[trusted-private-networks] Overriding default private-network list with: ${cachedPrivateNetworks.raw}`,
+    );
+    cachedPrivateNetworks.announced = true;
+  }
+
+  return cachedPrivateNetworks.entries;
+}
 
 // ── Build allowlist on startup ──
 
@@ -199,13 +237,14 @@ export function isLoopbackIp(ip: string): boolean {
 }
 
 /**
- * True if the given IP belongs to a private / non-routable range
- * (RFC 1918, CGNAT, IPv6 ULA, link-local). Public internet IPs return false.
+ * True if the given IP belongs to a trusted private / non-routable range.
+ * Defaults to RFC 1918, CGNAT, link-local, and IPv6 ULA — but the operator
+ * can override the entire list via the TRUSTED_PRIVATE_NETWORKS env var.
  */
 export function isPrivateNetworkIp(ip: string): boolean {
   const bytes = ipToBytes(ip);
   if (!bytes) return false;
-  for (const cidr of PRIVATE_NETWORK_CIDRS) {
+  for (const cidr of getPrivateNetworkCidrs()) {
     if (matchesCIDR(bytes, cidr)) return true;
   }
   return false;
