@@ -44,7 +44,7 @@ import { cn, getAvatarCropStyle } from "../../lib/utils";
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import type { Chat, ChatFolder, ChatMode } from "@marinara-engine/shared";
 import { Modal } from "../ui/Modal";
-import { Reorder, useDragControls } from "framer-motion";
+import { Reorder, useDragControls, motion, AnimatePresence } from "framer-motion";
 
 type ChatSortOption = "newest" | "oldest" | "name-asc" | "name-desc";
 
@@ -1204,84 +1204,94 @@ function FolderRow({
   const [renameValue, setRenameValue] = useState(folder.name);
 
   return (
-    <Reorder.Item value={folder.id} dragListener={false} dragControls={dragControls} as="div" className="flex flex-col">
-      {/* Folder header */}
-      <div
-        onClick={() => onToggleCollapse(folder)}
-        className="group relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 hover:bg-[var(--sidebar-accent)]/40"
-      >
+    <div className="flex flex-col">
+      {/* Folder header (draggable) */}
+      <Reorder.Item value={folder.id} dragListener={false} dragControls={dragControls} as="div">
         <div
-          onPointerDown={(e) => dragControls.start(e)}
-          className="cursor-grab touch-none opacity-0 transition-opacity active:cursor-grabbing group-hover:opacity-100 max-md:opacity-100"
+          onClick={() => onToggleCollapse(folder)}
+          className="group relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 hover:bg-[var(--sidebar-accent)]/40"
         >
-          <GripVertical size="0.625rem" className="text-[var(--muted-foreground)]" />
-        </div>
-        <ChevronRight
-          size="0.75rem"
-          className={cn("text-[var(--muted-foreground)] transition-transform", !folder.collapsed && "rotate-90")}
-        />
-        <div
-          className="h-2 w-2 rounded-full flex-shrink-0 cursor-pointer"
-          style={{ backgroundColor: folder.color || "#6b7280" }}
-          title={folder.name}
-        />
-        {renaming ? (
-          <input
-            autoFocus
-            value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
+          <div
+            onPointerDown={(e) => dragControls.start(e)}
+            className="cursor-grab touch-none opacity-0 transition-opacity active:cursor-grabbing group-hover:opacity-100 max-md:opacity-100"
+          >
+            <GripVertical size="0.625rem" className="text-[var(--muted-foreground)]" />
+          </div>
+          <ChevronRight
+            size="0.75rem"
+            className={cn("text-[var(--muted-foreground)] transition-transform", !folder.collapsed && "rotate-90")}
+          />
+          <div
+            className="h-2 w-2 rounded-full flex-shrink-0 cursor-pointer"
+            style={{ backgroundColor: folder.color || "#6b7280" }}
+            title={folder.name}
+          />
+          {renaming ? (
+            <input
+              autoFocus
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  onRename(folder.id, renameValue);
+                  setRenaming(false);
+                }
+                if (e.key === "Escape") {
+                  setRenaming(false);
+                  setRenameValue(folder.name);
+                }
+              }}
+              onBlur={() => {
                 onRename(folder.id, renameValue);
                 setRenaming(false);
-              }
-              if (e.key === "Escape") {
-                setRenaming(false);
-                setRenameValue(folder.name);
-              }
+              }}
+              className="flex-1 bg-transparent text-xs font-medium text-[var(--foreground)] outline-none"
+            />
+          ) : (
+            <span className="flex-1 cursor-pointer truncate text-xs font-medium text-[var(--muted-foreground)]">
+              {folder.name}
+            </span>
+          )}
+          {entries.length > 0 && (
+            <span className="text-[0.5625rem] text-[var(--muted-foreground)]">{entries.length}</span>
+          )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setRenameValue(folder.name);
+              setRenaming(true);
             }}
-            onBlur={() => {
-              onRename(folder.id, renameValue);
-              setRenaming(false);
+            className="shrink-0 rounded-md p-1 opacity-0 transition-all hover:bg-[var(--accent)] group-hover:opacity-100 max-md:opacity-100"
+            title="Rename folder"
+          >
+            <Pencil size="0.75rem" className="text-[var(--muted-foreground)]" />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(folder.id);
             }}
-            className="flex-1 bg-transparent text-xs font-medium text-[var(--foreground)] outline-none"
-          />
-        ) : (
-          <span className="flex-1 cursor-pointer truncate text-xs font-medium text-[var(--muted-foreground)]">
-            {folder.name}
-          </span>
-        )}
-        {entries.length > 0 && (
-          <span className="text-[0.5625rem] text-[var(--muted-foreground)]">{entries.length}</span>
-        )}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setRenameValue(folder.name);
-            setRenaming(true);
-          }}
-          className="shrink-0 rounded-md p-1 opacity-0 transition-all hover:bg-[var(--accent)] group-hover:opacity-100 max-md:opacity-100"
-          title="Rename folder"
-        >
-          <Pencil size="0.75rem" className="text-[var(--muted-foreground)]" />
-        </button>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete(folder.id);
-          }}
-          className="shrink-0 rounded-md p-1 opacity-0 transition-all hover:bg-[var(--destructive)]/20 group-hover:opacity-100 max-md:opacity-100"
-        >
-          <Trash2 size="0.75rem" className="text-[var(--destructive)]" />
-        </button>
-      </div>
-      {/* Folder contents */}
-      {!folder.collapsed && entries.length > 0 && (
-        <div className="ml-4 flex flex-col gap-0.5 border-l border-[var(--border)]/20 pl-1">
-          {entries.map(renderChatRow)}
+            className="shrink-0 rounded-md p-1 opacity-0 transition-all hover:bg-[var(--destructive)]/20 group-hover:opacity-100 max-md:opacity-100"
+          >
+            <Trash2 size="0.75rem" className="text-[var(--destructive)]" />
+          </button>
         </div>
-      )}
-    </Reorder.Item>
+      </Reorder.Item>
+      {/* Folder contents */}
+      <AnimatePresence mode="wait">
+        {!folder.collapsed && entries.length > 0 && (
+          <motion.div
+            className="ml-4 flex flex-col gap-0.5 border-l border-[var(--border)]/20 pl-1 overflow-hidden"
+            initial={{ height: 0, opacity: 0, y: -8 }}
+            animate={{ height: "auto", opacity: 1, y: 0 }}
+            exit={{ height: 0, opacity: 0, y: -8 }}
+            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+          >
+            {entries.map(renderChatRow)}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
