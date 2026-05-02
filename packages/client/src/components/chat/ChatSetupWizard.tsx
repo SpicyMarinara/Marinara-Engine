@@ -1035,12 +1035,20 @@ function RoleplaySetupWizard({ chat, onFinish }: ChatSetupWizardProps) {
     [chat.id, activeLorebookIds, updateMeta],
   );
 
-  // Default the shortcut dropdown to the Default preset once presets load
+  // Default the shortcut dropdown once presets load. Prefer (in order):
+  //  1) the preset already applied to this chat,
+  //  2) the user's starred / active preset for the mode,
+  //  3) the built-in Default preset.
   useEffect(() => {
     if (shortcutPresetId) return;
-    const def = chatPresetList.find((p) => p.isDefault);
-    if (def) setShortcutPresetId(def.id);
-  }, [chatPresetList, shortcutPresetId]);
+    if (chatPresetList.length === 0) return;
+    const appliedId = (metadata.appliedChatPresetId as string | undefined) ?? null;
+    const applied = appliedId ? chatPresetList.find((p) => p.id === appliedId) : null;
+    const starred = chatPresetList.find((p) => p.isActive);
+    const fallback = chatPresetList.find((p) => p.isDefault);
+    const pick = applied ?? starred ?? fallback;
+    if (pick) setShortcutPresetId(pick.id);
+  }, [chatPresetList, shortcutPresetId, metadata.appliedChatPresetId]);
 
   const [shortcutApplying, setShortcutApplying] = useState(false);
 

@@ -27,6 +27,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { useChats, useCreateChat, useDeleteChat, useDeleteChatGroup } from "../../hooks/use-chats";
+import { useChatPresets, useApplyChatPreset } from "../../hooks/use-chat-presets";
 import { useConnections } from "../../hooks/use-connections";
 import {
   useChatFolders,
@@ -112,6 +113,8 @@ export function ChatSidebar() {
   const { data: chats, isLoading } = useChats();
   const { data: connections } = useConnections();
   const createChat = useCreateChat();
+  const { data: chatPresetsData } = useChatPresets();
+  const applyChatPreset = useApplyChatPreset();
   const deleteChat = useDeleteChat();
   const deleteChatGroup = useDeleteChatGroup();
   const activeChatId = useChatStore((s) => s.activeChatId);
@@ -420,18 +423,40 @@ export function ChatSidebar() {
       if (hasAnyDetailOpen()) {
         closeAllDetails();
       }
+      // Resolve the user's starred default preset for this mode (only modes with presets).
+      const presets = chatPresetsData ?? [];
+      const presetMode: ChatMode | null = mode === "conversation" || mode === "roleplay" ? mode : null;
+      const starred = presetMode
+        ? (presets.find((p) => p.mode === presetMode && p.isActive && !p.isDefault) ?? null)
+        : null;
       createChat.mutate(
         { name: `New ${MODE_CONFIG[mode]?.label ?? mode}`, mode, characterIds: [] },
         {
-          onSuccess: (chat) => {
+          onSuccess: async (chat) => {
             setActiveChatId(chat.id);
+            if (starred) {
+              try {
+                await applyChatPreset.mutateAsync({ presetId: starred.id, chatId: chat.id });
+              } catch {
+                /* non-fatal — chat still opens with system defaults */
+              }
+            }
             useChatStore.getState().setShouldOpenSettings(true);
             useChatStore.getState().setShouldOpenWizard(true);
           },
         },
       );
     },
-    [connections, createChat, setActiveChatId, setPendingNewChatMode, hasAnyDetailOpen, closeAllDetails],
+    [
+      connections,
+      createChat,
+      setActiveChatId,
+      setPendingNewChatMode,
+      hasAnyDetailOpen,
+      closeAllDetails,
+      chatPresetsData,
+      applyChatPreset,
+    ],
   );
 
   const handleNewChatFromTab = useCallback(() => {

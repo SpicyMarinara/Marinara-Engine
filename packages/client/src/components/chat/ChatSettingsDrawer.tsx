@@ -43,6 +43,7 @@ import {
   FilePlus2,
   Upload,
   Download,
+  Star,
 } from "lucide-react";
 import { cn, getAvatarCropStyle, type AvatarCrop } from "../../lib/utils";
 import { showAlertDialog, showConfirmDialog, showPromptDialog } from "../../lib/app-dialogs";
@@ -86,6 +87,7 @@ import {
   useDeleteChatPreset,
   useApplyChatPreset,
   useImportChatPreset,
+  useSetActiveChatPreset,
 } from "../../hooks/use-chat-presets";
 import type { AgentPhase, ChatMode, ChatMemoryChunk, ChatPreset, ChatPresetSettings } from "@marinara-engine/shared";
 import { useAgentConfigs, useCreateAgent, useUpdateAgent, type AgentConfigRow } from "../../hooks/use-agents";
@@ -708,6 +710,7 @@ export function ChatSettingsDrawer({
   const deleteChatPreset = useDeleteChatPreset();
   const applyChatPreset = useApplyChatPreset();
   const importChatPreset = useImportChatPreset();
+  const setActiveChatPreset = useSetActiveChatPreset();
   const presetList = useMemo(() => (chatPresets ?? []) as ChatPreset[], [chatPresets]);
   const appliedPresetId = (metadata.appliedChatPresetId as string | undefined) ?? null;
   const selectedChatPreset = useMemo(() => {
@@ -808,6 +811,11 @@ export function ChatSettingsDrawer({
   const handleSelectPreset = (id: string) => {
     if (!id || id === selectedChatPreset?.id) return;
     applyChatPreset.mutate({ presetId: id, chatId: chat.id });
+  };
+
+  const handleToggleDefaultPreset = () => {
+    if (!selectedChatPreset || selectedChatPreset.isActive) return;
+    setActiveChatPreset.mutate(selectedChatPreset.id);
   };
 
   const handleSaveIntoPreset = () => {
@@ -1028,12 +1036,37 @@ export function ChatSettingsDrawer({
                   ))}
                 </select>
               )}
+              <button
+                onClick={handleToggleDefaultPreset}
+                disabled={!selectedChatPreset || selectedChatPreset.isActive || setActiveChatPreset.isPending}
+                title={
+                  !selectedChatPreset
+                    ? "Select a preset to mark it as default"
+                    : selectedChatPreset.isActive
+                      ? "This preset is the default for new chats in this mode"
+                      : "Mark this preset as default for new chats in this mode"
+                }
+                aria-pressed={!!selectedChatPreset?.isActive}
+                aria-label={selectedChatPreset?.isActive ? "Default preset" : "Mark as default preset"}
+                className={cn(
+                  "shrink-0 flex items-center justify-center rounded-md p-1.5 transition-colors disabled:cursor-not-allowed",
+                  selectedChatPreset?.isActive
+                    ? "text-yellow-400 disabled:opacity-100"
+                    : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-yellow-400 disabled:opacity-40",
+                )}
+              >
+                <Star
+                  size="0.875rem"
+                  fill={selectedChatPreset?.isActive ? "currentColor" : "none"}
+                  strokeWidth={selectedChatPreset?.isActive ? 1.5 : 2}
+                />
+              </button>
               <HelpTooltip
                 side="left"
                 text={
                   isConversation
-                    ? "Presets bundle this chat's connection, tools, translation, memory recall, advanced parameters, and other settings. Prompt presets are not applied in conversation mode. Characters, persona, lorebooks, sprites, summary, tags, and scene prompt stay tied to the chat."
-                    : "Presets bundle this chat's connection, prompt preset, agents, tools, translation, memory recall, advanced parameters, and other settings. They never touch your characters, persona, lorebooks, sprites, summary, tags, or scene prompt — those stay tied to the chat."
+                    ? "Presets bundle this chat's connection, tools, translation, memory recall, advanced parameters, and other settings. Prompt presets are not applied in conversation mode. Characters, persona, lorebooks, sprites, summary, tags, and scene prompt stay tied to the chat. Star a preset to use it as the default for new chats in this mode."
+                    : "Presets bundle this chat's connection, prompt preset, agents, tools, translation, memory recall, advanced parameters, and other settings. They never touch your characters, persona, lorebooks, sprites, summary, tags, or scene prompt — those stay tied to the chat. Star a preset to use it as the default for new chats in this mode."
                 }
               />
             </div>

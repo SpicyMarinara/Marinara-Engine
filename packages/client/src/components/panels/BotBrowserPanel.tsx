@@ -5,6 +5,7 @@ import { useState, useMemo, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCharacters } from "../../hooks/use-characters";
 import { useCreateChat, chatKeys } from "../../hooks/use-chats";
+import { useChatPresets, useApplyChatPreset } from "../../hooks/use-chat-presets";
 import { useUIStore } from "../../stores/ui.store";
 import { useChatStore } from "../../stores/chat.store";
 import { api } from "../../lib/api-client";
@@ -21,6 +22,8 @@ export function BotBrowserPanel() {
   const botBrowserOpen = useUIStore((s) => s.botBrowserOpen);
   const createChat = useCreateChat();
   const queryClient = useQueryClient();
+  const { data: chatPresetsData } = useChatPresets();
+  const applyChatPreset = useApplyChatPreset();
   const [search, setSearch] = useState("");
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -73,11 +76,24 @@ export function BotBrowserPanel() {
       altGreetings?: string[],
     ) => {
       const label = mode === "conversation" ? "Conversation" : "Roleplay";
+      // Resolve the user's starred default preset for this mode (if any other than the built-in Default).
+      const presets = chatPresetsData ?? [];
+      const presetMode = mode === "conversation" ? "conversation" : "roleplay";
+      const starred = presets.find((p) => p.mode === presetMode && p.isActive && !p.isDefault);
       createChat.mutate(
         { name: charName ? `${charName} — ${label}` : `New ${label}`, mode, characterIds: [charId] },
         {
           onSuccess: async (chat) => {
             useChatStore.getState().setActiveChatId(chat.id);
+            // Apply the user's starred default preset to the brand-new chat so its
+            // settings start where the user wants them.
+            if (starred) {
+              try {
+                await applyChatPreset.mutateAsync({ presetId: starred.id, chatId: chat.id });
+              } catch {
+                /* non-fatal — the chat still opens with system defaults */
+              }
+            }
             // Mirror the wizard's roleplay first-message behavior so the
             // character actually greets the user in the new chat.
             if (mode === "roleplay" && firstMes?.trim()) {
@@ -109,7 +125,7 @@ export function BotBrowserPanel() {
         },
       );
     },
-    [createChat, queryClient],
+    [createChat, queryClient, chatPresetsData, applyChatPreset],
   );
 
   return (

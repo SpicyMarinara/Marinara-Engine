@@ -14,6 +14,7 @@ import {
   useDuplicateCharacter,
 } from "../../hooks/use-characters";
 import { useUpdateChat, useCreateMessage, useCreateChat, chatKeys } from "../../hooks/use-chats";
+import { useChatPresets, useApplyChatPreset } from "../../hooks/use-chat-presets";
 import { api } from "../../lib/api-client";
 import { showConfirmDialog } from "../../lib/app-dialogs";
 import { useChatStore } from "../../stores/chat.store";
@@ -102,6 +103,8 @@ export function CharactersPanel() {
   const createMessage = useCreateMessage(activeChat?.id ?? null);
   const createChat = useCreateChat();
   const queryClient = useQueryClient();
+  const { data: chatPresetsData } = useChatPresets();
+  const applyChatPreset = useApplyChatPreset();
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -120,11 +123,24 @@ export function CharactersPanel() {
       altGreetings?: string[],
     ) => {
       const label = mode === "conversation" ? "Conversation" : "Roleplay";
+      // Resolve the user's starred default preset for this mode (skip the built-in Default — it's a no-op).
+      const presets = chatPresetsData ?? [];
+      const presetMode = mode === "conversation" ? "conversation" : "roleplay";
+      const starred = presets.find((p) => p.mode === presetMode && p.isActive && !p.isDefault);
       createChat.mutate(
         { name: charName ? `${charName} — ${label}` : `New ${label}`, mode, characterIds: [charId] },
         {
           onSuccess: async (chat) => {
             useChatStore.getState().setActiveChatId(chat.id);
+            // Apply the user's starred default preset to the new chat so its
+            // settings start where they want them.
+            if (starred) {
+              try {
+                await applyChatPreset.mutateAsync({ presetId: starred.id, chatId: chat.id });
+              } catch {
+                /* non-fatal — chat still opens with system defaults */
+              }
+            }
             // Mirror the wizard's roleplay first-message behavior — without this,
             // a quick-started roleplay would open with no greeting from the character.
             if (mode === "roleplay" && firstMes?.trim()) {
@@ -156,7 +172,7 @@ export function CharactersPanel() {
         },
       );
     },
-    [createChat, queryClient],
+    [createChat, queryClient, chatPresetsData, applyChatPreset],
   );
 
   const [search, setSearch] = useState("");

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Loader2, MessageCircle, Plug, X, BookOpen } from "lucide-react";
 import { useConnections } from "../../hooks/use-connections";
 import { useCreateChat } from "../../hooks/use-chats";
+import { useChatPresets, useApplyChatPreset } from "../../hooks/use-chat-presets";
 import { useChatStore } from "../../stores/chat.store";
 import { useUIStore } from "../../stores/ui.store";
 import { cn } from "../../lib/utils";
@@ -22,6 +23,8 @@ interface NewChatConnectionGateProps {
 export function NewChatConnectionGate({ mode, onClose }: NewChatConnectionGateProps) {
   const { data: connections, isLoading } = useConnections();
   const createChat = useCreateChat();
+  const { data: chatPresetsData } = useChatPresets();
+  const applyChatPreset = useApplyChatPreset();
   const openRightPanel = useUIStore((s) => s.openRightPanel);
   const [connectionId, setConnectionId] = useState<string>("");
 
@@ -38,6 +41,11 @@ export function NewChatConnectionGate({ mode, onClose }: NewChatConnectionGatePr
   const handleCreate = () => {
     if (!connectionId) return;
     const label = MODE_META[mode].label;
+    const presets = chatPresetsData ?? [];
+    const presetMode = mode === "conversation" || mode === "roleplay" ? mode : null;
+    const starred = presetMode
+      ? (presets.find((p) => p.mode === presetMode && p.isActive && !p.isDefault) ?? null)
+      : null;
     createChat.mutate(
       {
         name: `New ${label}`,
@@ -46,10 +54,17 @@ export function NewChatConnectionGate({ mode, onClose }: NewChatConnectionGatePr
         connectionId,
       },
       {
-        onSuccess: (chat) => {
+        onSuccess: async (chat) => {
           const store = useChatStore.getState();
           store.setPendingNewChatMode(null);
           store.setActiveChatId(chat.id);
+          if (starred) {
+            try {
+              await applyChatPreset.mutateAsync({ presetId: starred.id, chatId: chat.id });
+            } catch {
+              /* non-fatal — chat still opens with system defaults */
+            }
+          }
           store.setShouldOpenSettings(true);
           store.setShouldOpenWizard(true);
         },
