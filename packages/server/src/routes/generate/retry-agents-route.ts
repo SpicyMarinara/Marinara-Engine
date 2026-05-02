@@ -7,6 +7,8 @@ import {
   type AgentResult,
 } from "@marinara-engine/shared";
 import { eq } from "drizzle-orm";
+import { listCharacterSprites } from "../../services/game/sprite.service.js";
+import { DATA_DIR } from "../../utils/data-dir.js";
 import type { ResolvedAgent } from "../../services/agents/agent-pipeline.js";
 import { executeAgent, executeAgentBatch } from "../../services/agents/agent-executor.js";
 import { getLocalSidecarProvider, LOCAL_SIDECAR_MODEL } from "../../services/llm/local-sidecar.js";
@@ -114,6 +116,7 @@ async function buildRetryAgentContext(args: {
   chatMeta: Record<string, unknown>;
   recentMessages: any[];
   enabledConfigs: any[];
+  resolvedAgentTypes: Set<string>;
   lastAssistant: any;
   chars: ReturnType<typeof createCharactersStorage>;
   gameStateStore: ReturnType<typeof createGameStateStorage>;
@@ -126,6 +129,7 @@ async function buildRetryAgentContext(args: {
     chatMeta,
     recentMessages,
     enabledConfigs,
+    resolvedAgentTypes,
     lastAssistant,
     chars,
     gameStateStore,
@@ -231,6 +235,54 @@ async function buildRetryAgentContext(args: {
   const latestGS = await gameStateStore.getLatestCommitted(chatId);
   if (latestGS) {
     agentContext.gameState = parseGameStateRow(latestGS as Record<string, unknown>);
+  }
+
+  // If the expression agent is being retried, load available sprite expressions per character
+  if (resolvedAgentTypes.has("expression")) {
+    try {
+      const perChar: Array<{ characterId: string; characterName: string; expressions: string[] }> = [];
+      for (const char of agentContext.characters) {
+        const sprites = listCharacterSprites(char.id);
+        if (sprites && sprites.expressions.length > 0) {
+          perChar.push({ characterId: char.id, characterName: char.name, expressions: sprites.expressions });
+        }
+      }
+      if (perChar.length > 0) {
+        agentContext.memory._availableSprites = perChar;
+      }
+    } catch {
+      /* non-critical */
+    }
+  }
+
+  // If the background agent is being retried, load available backgrounds into context
+  if (resolvedAgentTypes.has("background")) {
+    try {
+      const { readdirSync, readFileSync, existsSync } = await import("fs");
+      const { join, extname } = await import("path");
+      const bgDir = join(DATA_DIR, "backgrounds");
+      if (existsSync(bgDir)) {
+        const exts = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif"]);
+        const files = readdirSync(bgDir).filter((f: string) => exts.has(extname(f).toLowerCase()));
+        let meta: Record<string, { originalName?: string; tags: string[] }> = {};
+        const metaPath = join(bgDir, "meta.json");
+        if (existsSync(metaPath)) {
+          try {
+            meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+          } catch {
+            /* */
+          }
+        }
+        agentContext.memory._availableBackgrounds = files.map((f: string) => ({
+          filename: f,
+          originalName: meta[f]?.originalName ?? null,
+          tags: meta[f]?.tags ?? [],
+        }));
+        agentContext.memory._currentBackground = chatMeta.background ?? null;
+      }
+    } catch {
+      /* non-critical */
+    }
   }
 
   return agentContext;
@@ -891,6 +943,23 @@ async function applyRetryResultEffects(args: {
         });
       }
     }
+
+    // ── EXPRESSION ENGINE: persist validated sprite expressions ──
+    // Validation already happened before SSE send; here we just persist to DB.
+    if (result.success && result.type === "sprite_change" && result.data && typeof result.data === "object") {
+      const spriteData = result.data as { expressions?: Array<{ characterId: string; expression: string }> };
+      const exprMap: Record<string, string> = {};
+      if (Array.isArray(spriteData.expressions)) {
+        for (const e of spriteData.expressions) exprMap[e.characterId] = e.expression;
+      }
+      try {
+        const chatsDb = createChatsStorage(app.db);
+        await chatsDb.updateMessageExtra(retryMessageId, { spriteExpressions: exprMap });
+        await chatsDb.updateSwipeExtra(retryMessageId, retrySwipeIndex, { spriteExpressions: exprMap });
+      } catch {
+        /* non-critical */
+      }
+    }
   }
 }
 
@@ -942,6 +1011,7 @@ export async function registerRetryAgentsRoute(app: FastifyInstance) {
           chatMeta,
           recentMessages,
           enabledConfigs,
+          resolvedAgentTypes: new Set(resolvedAgents.map((a) => a.resolved.type)),
           lastAssistant,
           chars,
           gameStateStore,
@@ -967,6 +1037,70 @@ export async function registerRetryAgentsRoute(app: FastifyInstance) {
               chatName: (chat as any).name,
             })
           : [];
+
+        // ── Pre-validate expression results before sending SSE events ──
+        // Validation must happen before the SSE send, otherwise the client receives
+        // unvalidated expressions that may not have matching sprite files.
+        for (const result of results) {
+          if (result.success && result.type === "sprite_change" && result.data && typeof result.data === "object") {
+            const spriteData = result.data as { expressions?: Array<{ characterId: string; characterName?: string; expression: string; transition?: string }> };
+            const availableSprites = agentContext.memory._availableSprites as
+              | Array<{ characterId: string; characterName: string; expressions: string[] }>
+              | undefined;
+            if (Array.isArray(spriteData.expressions) && Array.isArray(availableSprites)) {
+              spriteData.expressions = spriteData.expressions.filter((entry) => {
+                if (typeof entry.characterId !== "string" || typeof entry.expression !== "string") {
+                  logger.warn(`[retry-agents] Malformed expression entry — skipping`);
+                  return false;
+                }
+                let charSprites = availableSprites.find((s) => s.characterId === entry.characterId);
+                if (!charSprites) {
+                  const entryLower = entry.characterId.toLowerCase().replace(/[^a-z0-9]/g, "");
+                  charSprites = availableSprites.find((s) => {
+                    const nameLower = s.characterName.toLowerCase().replace(/[^a-z0-9]/g, "");
+                    return nameLower === entryLower || nameLower.includes(entryLower) || entryLower.includes(nameLower);
+                  });
+                  if (charSprites) {
+                    logger.warn(
+                      `[retry-agents] Expression agent used "${entry.characterId}" — resolved to ${charSprites.characterName} (${charSprites.characterId})`,
+                    );
+                    entry.characterId = charSprites.characterId;
+                  }
+                }
+                if (!charSprites) {
+                  logger.warn(
+                    `[retry-agents] Expression agent returned unknown character "${entry.characterId}" — removing`,
+                  );
+                  return false;
+                }
+                const exprLower = entry.expression.toLowerCase();
+                const exactMatch = charSprites.expressions.find((e) => e.toLowerCase() === exprLower);
+                if (exactMatch) {
+                  entry.expression = exactMatch;
+                  return true;
+                }
+                const fallback = charSprites.expressions.find(
+                  (e) => e.toLowerCase().includes(exprLower) || exprLower.includes(e.toLowerCase()),
+                );
+                if (fallback) {
+                  logger.warn(
+                    `[retry-agents] Expression agent chose "${entry.expression}" — correcting to closest match "${fallback}"`,
+                  );
+                  entry.expression = fallback;
+                } else {
+                  logger.warn(
+                    `[retry-agents] Expression agent chose "${entry.expression}" for ${charSprites.characterName} which doesn't exist — removing`,
+                  );
+                  return false;
+                }
+                return true;
+              });
+            } else if (!Array.isArray(availableSprites)) {
+              // No sprite catalog loaded — drop expressions entirely so unvalidated data is never forwarded
+              spriteData.expressions = [];
+            }
+          }
+        }
 
         for (const result of results) {
           const cfg = resolvedAgents.find((entry) => entry.resolved.type === result.agentType)?.cfg;
