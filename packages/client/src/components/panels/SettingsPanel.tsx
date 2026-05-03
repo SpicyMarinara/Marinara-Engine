@@ -2073,7 +2073,7 @@ function ImportSettings() {
       {/* Profile import */}
       <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500/20 to-teal-500/20 px-3 py-3 text-xs font-semibold ring-1 ring-emerald-500/30 transition-all hover:ring-emerald-500/50 active:scale-[0.98]">
         <Download size="1rem" />
-        Import Profile (Full Export)
+        Import Profile (JSON)
         <input type="file" accept=".json" onChange={handleProfileImport} className="hidden" />
       </label>
 
@@ -2615,7 +2615,7 @@ function AdvancedSettings() {
         <div className="flex items-center gap-1.5">
           <Download size="0.75rem" className="text-[var(--muted-foreground)]" />
           <span className="text-xs font-medium">Backup & Export</span>
-          <HelpTooltip text="Download a full backup as a .zip archive (database + avatars, sprites, backgrounds, gallery, fonts, knowledge sources). Your browser will ask where to save it. Useful on mobile where the server's data folder isn't directly accessible." />
+          <HelpTooltip text="Download a full backup as a .zip archive (database + avatars, sprites, backgrounds, gallery, fonts, knowledge sources). Restoring the zip currently requires extracting it into the server's data folder manually; for a one-click migration of characters, personas, lorebooks, presets, agents, and themes, use Export Profile (JSON) instead." />
         </div>
         <button
           onClick={handleCreateBackup}
