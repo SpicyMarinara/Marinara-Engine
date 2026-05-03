@@ -19,6 +19,26 @@ export const lorebookScheduleSchema = z.object({
   activeLocations: z.array(z.string()).default([]),
 });
 
+// ──────────────────────────────────────────────
+// Folders — collapsible containers for entries
+// `parentFolderId` is reserved for a future nested-folder PR; v1 enforces
+// `null` at the route layer so the schema accepts the field but the server
+// rejects non-null values.
+// ──────────────────────────────────────────────
+export const createLorebookFolderSchema = z.object({
+  name: z.string().min(1).max(200),
+  enabled: z.boolean().default(true),
+  parentFolderId: z.string().nullable().default(null),
+  order: z.number().int().default(0),
+});
+
+export const updateLorebookFolderSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  enabled: z.boolean().optional(),
+  parentFolderId: z.string().nullable().optional(),
+  order: z.number().int().optional(),
+});
+
 export const createLorebookSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().default(""),
@@ -79,6 +99,8 @@ export const createLorebookEntrySchema = z.object({
   ephemeral: z.number().int().min(0).nullable().default(null),
   group: z.string().default(""),
   groupWeight: z.number().nullable().default(null),
+  /** Optional folder this entry belongs to. Null/omitted = root level. */
+  folderId: z.string().nullable().default(null),
   preventRecursion: z.boolean().default(false),
   locked: z.boolean().default(false),
   tag: z.string().default(""),
@@ -113,6 +135,7 @@ export const updateLorebookEntrySchema = z.object({
   ephemeral: z.number().int().min(0).nullable().optional(),
   group: z.string().optional(),
   groupWeight: z.number().nullable().optional(),
+  folderId: z.string().nullable().optional(),
   preventRecursion: z.boolean().optional(),
   locked: z.boolean().optional(),
   tag: z.string().optional(),
@@ -126,3 +149,5 @@ export type CreateLorebookInput = z.input<typeof createLorebookSchema>;
 export type UpdateLorebookInput = z.infer<typeof updateLorebookSchema>;
 export type CreateLorebookEntryInput = z.input<typeof createLorebookEntrySchema>;
 export type UpdateLorebookEntryInput = z.infer<typeof updateLorebookEntrySchema>;
+export type CreateLorebookFolderInput = z.input<typeof createLorebookFolderSchema>;
+export type UpdateLorebookFolderInput = z.infer<typeof updateLorebookFolderSchema>;
