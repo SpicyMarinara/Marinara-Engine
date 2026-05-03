@@ -3,7 +3,7 @@
 // ──────────────────────────────────────────────
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api-client";
-import type { Lorebook, LorebookEntry } from "@marinara-engine/shared";
+import type { Lorebook, LorebookEntry, LorebookFolder } from "@marinara-engine/shared";
 
 export const lorebookKeys = {
   all: ["lorebooks"] as const,
@@ -12,6 +12,7 @@ export const lorebookKeys = {
   detail: (id: string) => [...lorebookKeys.all, "detail", id] as const,
   entries: (lorebookId: string) => [...lorebookKeys.all, "entries", lorebookId] as const,
   entry: (entryId: string) => [...lorebookKeys.all, "entry", entryId] as const,
+  folders: (lorebookId: string) => [...lorebookKeys.all, "folders", lorebookId] as const,
   search: (q: string) => [...lorebookKeys.all, "search", q] as const,
 };
 
@@ -175,12 +176,94 @@ export function useBulkCreateEntries() {
 export function useReorderLorebookEntries() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ lorebookId, entryIds }: { lorebookId: string; entryIds: string[] }) =>
-      api.put<LorebookEntry[]>(`/lorebooks/${lorebookId}/entries/reorder`, { entryIds }),
+    mutationFn: ({
+      lorebookId,
+      entryIds,
+      folderId,
+    }: {
+      lorebookId: string;
+      entryIds: string[];
+      /**
+       * Container scope for the reorder. `undefined` renumbers every entry
+       * (legacy behavior). `null` reorders root-level entries only.
+       * A string ID reorders the entries inside that folder only.
+       */
+      folderId?: string | null;
+    }) =>
+      api.put<LorebookEntry[]>(`/lorebooks/${lorebookId}/entries/reorder`, {
+        entryIds,
+        ...(folderId !== undefined ? { folderId } : {}),
+      }),
     onSuccess: (entries, variables) => {
       qc.setQueryData(lorebookKeys.entries(variables.lorebookId), entries);
       qc.invalidateQueries({ queryKey: lorebookKeys.entries(variables.lorebookId) });
       qc.invalidateQueries({ queryKey: [...lorebookKeys.all, "active"] });
+    },
+  });
+}
+
+// ── Folders ──
+
+export function useLorebookFolders(lorebookId: string | null) {
+  return useQuery({
+    queryKey: lorebookKeys.folders(lorebookId ?? ""),
+    queryFn: () => api.get<LorebookFolder[]>(`/lorebooks/${lorebookId}/folders`),
+    enabled: !!lorebookId,
+  });
+}
+
+export function useCreateLorebookFolder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ lorebookId, ...data }: { lorebookId: string } & Record<string, unknown>) =>
+      api.post<LorebookFolder>(`/lorebooks/${lorebookId}/folders`, data),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: lorebookKeys.folders(variables.lorebookId) });
+    },
+  });
+}
+
+export function useUpdateLorebookFolder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      lorebookId,
+      folderId,
+      ...data
+    }: {
+      lorebookId: string;
+      folderId: string;
+    } & Record<string, unknown>) => api.patch<LorebookFolder>(`/lorebooks/${lorebookId}/folders/${folderId}`, data),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: lorebookKeys.folders(variables.lorebookId) });
+      // Toggling folder.enabled changes which entries activate during scan
+      qc.invalidateQueries({ queryKey: [...lorebookKeys.all, "active"] });
+    },
+  });
+}
+
+export function useDeleteLorebookFolder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ lorebookId, folderId }: { lorebookId: string; folderId: string }) =>
+      api.delete(`/lorebooks/${lorebookId}/folders/${folderId}`),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: lorebookKeys.folders(variables.lorebookId) });
+      // Removing a folder reparents its entries to root, so the entry list shape changes.
+      qc.invalidateQueries({ queryKey: lorebookKeys.entries(variables.lorebookId) });
+      qc.invalidateQueries({ queryKey: [...lorebookKeys.all, "active"] });
+    },
+  });
+}
+
+export function useReorderLorebookFolders() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ lorebookId, folderIds }: { lorebookId: string; folderIds: string[] }) =>
+      api.put<LorebookFolder[]>(`/lorebooks/${lorebookId}/folders/reorder`, { folderIds }),
+    onSuccess: (folders, variables) => {
+      qc.setQueryData(lorebookKeys.folders(variables.lorebookId), folders);
+      qc.invalidateQueries({ queryKey: lorebookKeys.folders(variables.lorebookId) });
     },
   });
 }
