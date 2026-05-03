@@ -12,7 +12,8 @@
 // - [memory: target="CharName", summary="description of the memory"]
 // - [scene: scenario="...", background="...", plan="..."] (initiate a mini-roleplay scene)
 // - [haptic: action="vibrate", intensity=0.5, duration=3] (haptic device feedback)
-// - <influence>text</influence> (OOC influence for connected roleplay)
+// - <influence>text</influence> (OOC influence for connected roleplay, one-shot)
+// - <note>text</note> (durable note for connected roleplay, persists until cleared)
 //
 // Assistant commands (Professor Mari):
 // - [create_persona: name="...", description="...", personality="...", appearance="..."]
@@ -65,6 +66,12 @@ export interface SceneCommand {
 export interface InfluenceCommand {
   type: "influence";
   /** The OOC influence text to inject into the connected roleplay */
+  content: string;
+}
+
+export interface NoteCommand {
+  type: "note";
+  /** The durable note text to persist in the connected roleplay's prompt until cleared */
   content: string;
 }
 
@@ -184,6 +191,7 @@ export type CharacterCommand =
   | MemoryCommand
   | SceneCommand
   | InfluenceCommand
+  | NoteCommand
   | HapticCommand
   | AssistantCommand;
 
@@ -195,6 +203,7 @@ const MEMORY_RE = /\[memory:\s*target="([^"]+)"\s*,\s*summary="([^"]+)"\]/gi;
 const SCENE_RE = /\[scene:\s*([^\]]+)\]/gi;
 const HAPTIC_RE = /\[haptic:\s*([^\]]+)\]/gi;
 const INFLUENCE_RE = /<influence>([\s\S]*?)<\/influence>/gi;
+const NOTE_RE = /<note>([\s\S]*?)<\/note>/gi;
 
 // Assistant command regexes
 const CREATE_PERSONA_RE = /\[create_persona:\s*([^\]]+)\]/gi;
@@ -362,6 +371,12 @@ export function parseCharacterCommands(content: string): {
     if (text) commands.push({ type: "influence", content: text });
   }
 
+  // Parse note commands (<note>text</note>)
+  for (const match of content.matchAll(NOTE_RE)) {
+    const text = stripConversationPromptTimestamps(match[1]!.trim());
+    if (text) commands.push({ type: "note", content: text });
+  }
+
   // Parse haptic commands
   for (const match of content.matchAll(HAPTIC_RE)) {
     const params = match[1]!;
@@ -483,6 +498,7 @@ export function parseCharacterCommands(content: string): {
     .replace(SCENE_RE, "")
     .replace(HAPTIC_RE, "")
     .replace(INFLUENCE_RE, "")
+    .replace(NOTE_RE, "")
     .replace(CREATE_PERSONA_RE, "")
     .replace(CREATE_CHARACTER_RE, "")
     .replace(UPDATE_CHARACTER_RE, "")

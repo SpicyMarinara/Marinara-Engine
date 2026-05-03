@@ -341,6 +341,14 @@ const CREATE_TABLES: string[] = [
     consumed TEXT NOT NULL DEFAULT 'false',
     created_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS conversation_notes (
+    id TEXT PRIMARY KEY NOT NULL,
+    source_chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    target_chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    anchor_message_id TEXT,
+    created_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS memory_chunks (
     id TEXT PRIMARY KEY NOT NULL,
     chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
@@ -574,6 +582,11 @@ export async function runMigrations(db: DB) {
   );
   await db.run(
     sql.raw(`CREATE INDEX IF NOT EXISTS idx_ooc_influences_target ON ooc_influences(target_chat_id, consumed)`),
+  );
+  await db.run(
+    sql.raw(
+      `CREATE INDEX IF NOT EXISTS idx_conversation_notes_target ON conversation_notes(target_chat_id, created_at)`,
+    ),
   );
   await db.run(
     sql.raw(`CREATE INDEX IF NOT EXISTS idx_memory_chunks_chat ON memory_chunks(chat_id, last_message_at DESC)`),

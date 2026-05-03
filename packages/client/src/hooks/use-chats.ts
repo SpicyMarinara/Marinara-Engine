@@ -12,6 +12,7 @@ import { clearBrowserRuntimeCaches } from "../lib/browser-runtime";
 import type {
   Chat,
   ChatMemoryChunk,
+  ConversationNote,
   Message,
   MessageSwipe,
   DaySummaryEntry,
@@ -25,6 +26,7 @@ export const chatKeys = {
   messages: (chatId: string) => [...chatKeys.all, "messages", chatId] as const,
   messageCount: (chatId: string) => [...chatKeys.all, "messageCount", chatId] as const,
   memories: (chatId: string) => [...chatKeys.all, "memories", chatId] as const,
+  notes: (chatId: string) => [...chatKeys.all, "notes", chatId] as const,
   group: (groupId: string) => [...chatKeys.all, "group", groupId] as const,
 };
 
@@ -123,6 +125,35 @@ export function useClearChatMemories(chatId: string | null) {
     mutationFn: () => api.delete(`/chats/${chatId}/memories`),
     onSuccess: () => {
       if (chatId) qc.invalidateQueries({ queryKey: chatKeys.memories(chatId) });
+    },
+  });
+}
+
+export function useChatNotes(chatId: string | null) {
+  return useQuery({
+    queryKey: chatKeys.notes(chatId ?? ""),
+    queryFn: () => api.get<ConversationNote[]>(`/chats/${chatId}/notes`),
+    enabled: !!chatId,
+    staleTime: 10_000,
+  });
+}
+
+export function useDeleteChatNote(chatId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (noteId: string) => api.delete(`/chats/${chatId}/notes/${noteId}`),
+    onSuccess: () => {
+      if (chatId) qc.invalidateQueries({ queryKey: chatKeys.notes(chatId) });
+    },
+  });
+}
+
+export function useClearChatNotes(chatId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete(`/chats/${chatId}/notes`),
+    onSuccess: () => {
+      if (chatId) qc.invalidateQueries({ queryKey: chatKeys.notes(chatId) });
     },
   });
 }

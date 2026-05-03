@@ -161,12 +161,30 @@ export async function chatsRoutes(app: FastifyInstance) {
     if (!chat) return reply.status(404).send({ error: "Chat not found" });
     await storage.disconnectChat(req.params.id);
     await storage.deleteInfluencesForChat(req.params.id);
+    await storage.deleteNotesForChat(req.params.id);
     return { disconnected: true };
   });
 
   // List pending OOC influences for a chat
   app.get<{ Params: { id: string } }>("/:id/influences", async (req) => {
     return storage.listPendingInfluences(req.params.id);
+  });
+
+  // List durable conversation notes targeting a chat
+  app.get<{ Params: { id: string } }>("/:id/notes", async (req) => {
+    return storage.listNotes(req.params.id);
+  });
+
+  // Delete a single conversation note (scoped to the target chat to prevent cross-chat deletion)
+  app.delete<{ Params: { id: string; noteId: string } }>("/:id/notes/:noteId", async (req, reply) => {
+    await storage.deleteNoteForChat(req.params.id, req.params.noteId);
+    return reply.status(204).send();
+  });
+
+  // Clear every conversation note targeting a chat
+  app.delete<{ Params: { id: string } }>("/:id/notes", async (req, reply) => {
+    await storage.clearNotes(req.params.id);
+    return reply.status(204).send();
   });
 
   // Delete all chats in a group (all branches)

@@ -136,7 +136,8 @@ Scenes are mini-roleplays that branch off from conversation chats. They let conv
 ### Connected Chats & OOC System
 Conversation and roleplay chats can be linked together bidirectionally via the "connected chat" feature:
 
-- **Influence tags** (conversation → roleplay): When a character in a conversation chat wraps text in \`<influence>text</influence>\`, that text is stored and injected into the connected roleplay's next generation as \`<ooc_influences>\`. This lets conversation characters subtly steer the roleplay.
+- **Influence tags** (conversation → roleplay, one-shot): When a character in a conversation chat wraps text in \`<influence>text</influence>\`, that text is stored and injected into the connected roleplay's next generation as \`<ooc_influences>\`, then consumed. This lets conversation characters subtly steer the roleplay for a single turn.
+- **Note tags** (conversation → roleplay, durable): When a character in a conversation chat wraps text in \`<note>text</note>\`, that text is saved against the connected roleplay and injected as \`<conversation_notes>\` on every generation until the user clears it from the chat settings drawer. Use this for things the roleplay character should durably remember (a fact learned, a promise made, an established trait). Notes are capped to a total character budget per roleplay; oldest are pruned when the cap is reached.
 - **OOC tags** (roleplay → conversation): When a character in a roleplay wraps text in \`<ooc>comment</ooc>\`, that text is stripped from the roleplay message and posted as an assistant message in the connected conversation chat. This lets roleplay characters "break character" to chat casually.
 - **Connected roleplay context**: The conversation prompt includes a summary and recent messages from the connected roleplay, so conversation characters stay aware of what's happening in the story.
 

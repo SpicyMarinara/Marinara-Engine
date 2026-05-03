@@ -28,6 +28,7 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 - Added the `/impersonate_prompt` command that allows you to change the impersonate prompt.
 - Added manual mode in Conversations that only makes the character respond when you ping them with `@name`.
 - Resizing sprites in game mode.
+- Conversation characters can now emit durable `<note>...</note>` tags for connected roleplay and game chats. Notes persist in the target chat's prompt until cleared from Chat Settings.
 
 ### Fixed
 

@@ -82,6 +82,23 @@ export const oocInfluences = sqliteTable("ooc_influences", {
   createdAt: text("created_at").notNull(),
 });
 
+export const conversationNotes = sqliteTable("conversation_notes", {
+  id: text("id").primaryKey(),
+  /** The conversation chat that emitted this note */
+  sourceChatId: text("source_chat_id")
+    .notNull()
+    .references(() => chats.id, { onDelete: "cascade" }),
+  /** The roleplay chat where this note will be durably injected */
+  targetChatId: text("target_chat_id")
+    .notNull()
+    .references(() => chats.id, { onDelete: "cascade" }),
+  /** The note text to inject on every roleplay turn until cleared */
+  content: text("content").notNull(),
+  /** The conversation message that produced this note (for traceability) */
+  anchorMessageId: text("anchor_message_id"),
+  createdAt: text("created_at").notNull(),
+});
+
 // ── Memory Chunks: embedded conversation fragments for semantic recall ──
 export const memoryChunks = sqliteTable("memory_chunks", {
   id: text("id").primaryKey(),

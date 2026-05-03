@@ -58,6 +58,7 @@ import {
   type SelfieCommand,
   type MemoryCommand,
   type InfluenceCommand,
+  type NoteCommand,
   type SceneCommand,
   type HapticCommand,
   type CreatePersonaCommand,
@@ -1909,6 +1910,11 @@ export async function generateRoutes(app: FastifyInstance) {
                 ``,
                 `Influences are injected into the roleplay's context before the next generation. Use them sparingly — only when conversation content genuinely should cross over into the roleplay.`,
                 `The influence tag is stripped from your visible message. The rest of your response is shown normally.`,
+                ``,
+                `If something said in this conversation should durably persist in the roleplay's context across many turns (a fact the character should keep remembering, a promise made, a secret revealed, a name learned), create a note tag instead of an influence:`,
+                `<note>fact, decision, or detail the roleplay character should keep remembering</note>`,
+                `Notes are shown to the roleplay character on every future turn until the user clears them. Use influences for one-shot mid-scene steering; use notes for things that should remain true going forward. Use notes sparingly — every saved note costs prompt budget on every roleplay turn.`,
+                `The note tag is stripped from your visible message.`,
                 `</connected_roleplay_instructions>`,
               ].join("\n");
           } else if (connectedChat && connectedChat.mode === "game") {
@@ -2001,6 +2007,11 @@ export async function generateRoutes(app: FastifyInstance) {
                 ``,
                 `Influences are injected into the game's context before the next generation. Use them sparingly — only when conversation content genuinely should cross over into the game.`,
                 `The influence tag is stripped from your visible message. The rest of your response is shown normally.`,
+                ``,
+                `If something said in this conversation should durably persist in the game's context across many turns (an established world fact, an ongoing party dynamic, a recurring NPC trait, a secret the GM should keep remembering), create a note tag instead of an influence:`,
+                `<note>fact, decision, or detail the game should keep remembering</note>`,
+                `Notes are shown to the game on every future turn until the user clears them. Use influences for one-shot mid-scene steering; use notes for things that should remain true going forward. Use notes sparingly — every saved note costs prompt budget on every game turn.`,
+                `The note tag is stripped from your visible message.`,
                 `</connected_game_instructions>`,
               ].join("\n");
           }
@@ -2151,6 +2162,37 @@ export async function generateRoutes(app: FastifyInstance) {
           // Mark influences as consumed
           for (const inf of pendingInfluences) {
             await chats.markInfluenceConsumed(inf.id);
+          }
+        }
+      }
+
+      // ── Roleplay/Game: inject durable conversation notes (persist until cleared) ──
+      // Same scene bypass as influences — scenes are self-contained.
+      if ((chatMode === "roleplay" || chatMode === "game") && chat.connectedChatId && !isSceneChat) {
+        const persistentNotes = await chats.listNotes(input.chatId);
+        if (persistentNotes.length > 0) {
+          const noteLines = persistentNotes
+            .map((n: any) => stripConversationPromptTimestamps(String(n.content ?? "")))
+            .filter((content: string) => content.length > 0)
+            .map((content: string) => `- ${content}`);
+
+          if (noteLines.length > 0) {
+            const noteBlock = [
+              `<conversation_notes>`,
+              chatMode === "game"
+                ? `Durable notes from a connected conversation. These persist across every turn until the user clears them and represent things the players have established as ongoing truth — character knowledge, world facts, recurring dynamics. Use them to inform NPC behavior, world state, and scene framing — don't reference them explicitly as "notes" in the narrative.`
+                : `Durable notes from a connected conversation. These persist across every turn until the user clears them and represent things the character has been told to durably remember about themselves, the user, or the world. Use them to inform behavior, knowledge, and reactions naturally — don't reference them explicitly as "notes" in the narrative.`,
+              ...noteLines,
+              `</conversation_notes>`,
+            ].join("\n");
+
+            // Inject before the last user message (parallel to the influence block)
+            const lastUserIdx = finalMessages.map((m) => m.role).lastIndexOf("user");
+            if (lastUserIdx >= 0) {
+              finalMessages.splice(lastUserIdx, 0, { role: "system" as const, content: noteBlock });
+            } else {
+              finalMessages.push({ role: "system" as const, content: noteBlock });
+            }
           }
         }
       }
@@ -7123,6 +7165,23 @@ export async function generateRoutes(app: FastifyInstance) {
                   );
                 } else {
                   logger.warn("[commands] Influence command used but no connected chat");
+                }
+              }
+
+              if (command.type === "note") {
+                // ── Note: persist a durable note in the connected roleplay's prompt ──
+                const noteCmd = command as NoteCommand;
+                const freshChat = await chats.getById(input.chatId);
+                const connectedId = freshChat?.connectedChatId as string | null;
+                if (connectedId) {
+                  const noteContent = stripConversationPromptTimestamps(noteCmd.content);
+                  if (!noteContent) continue;
+                  await chats.createNote(input.chatId, connectedId, noteContent, messageId);
+                  logger.info(
+                    `[commands] Conversation note saved for connected chat ${connectedId}: "${noteContent.slice(0, 80)}..."`,
+                  );
+                } else {
+                  logger.warn("[commands] Note command used but no connected chat");
                 }
               }
 

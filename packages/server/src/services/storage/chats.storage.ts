@@ -9,6 +9,7 @@ import {
   messageSwipes,
   chatImages,
   oocInfluences,
+  conversationNotes,
   agentRuns,
   agentMemory,
 } from "../../db/schema/index.js";
@@ -24,6 +25,9 @@ import {
 } from "../import/import-timestamps.js";
 
 const GALLERY_DIR = join(DATA_DIR, "gallery");
+
+/** Total character budget for durable conversation notes per roleplay chat. Oldest pruned on insert. */
+export const CONVERSATION_NOTES_BUDGET_CHARS = 4000;
 
 function resolveTimestamps(overrides?: TimestampOverrides | null) {
   const normalized = normalizeTimestampOverrides(overrides);
@@ -584,6 +588,71 @@ export function createChatsStorage(db: DB) {
     async deleteInfluencesForChat(chatId: string) {
       await db.delete(oocInfluences).where(eq(oocInfluences.sourceChatId, chatId));
       await db.delete(oocInfluences).where(eq(oocInfluences.targetChatId, chatId));
+    },
+
+    // ── Conversation Notes ──
+
+    /** Create a durable note from a conversation → its connected roleplay, then prune oldest past the char budget. */
+    async createNote(sourceChatId: string, targetChatId: string, content: string, anchorMessageId?: string) {
+      const id = newId();
+      await db.insert(conversationNotes).values({
+        id,
+        sourceChatId,
+        targetChatId,
+        content,
+        anchorMessageId: anchorMessageId ?? null,
+        createdAt: now(),
+      });
+
+      const all = await db
+        .select()
+        .from(conversationNotes)
+        .where(eq(conversationNotes.targetChatId, targetChatId))
+        .orderBy(desc(conversationNotes.createdAt), desc(conversationNotes.id));
+
+      const toDelete: string[] = [];
+      let total = 0;
+      for (let i = 0; i < all.length; i++) {
+        total += all[i]!.content.length;
+        // Always keep the newest note even if it alone exceeds the budget.
+        if (i > 0 && total > CONVERSATION_NOTES_BUDGET_CHARS) {
+          toDelete.push(all[i]!.id);
+        }
+      }
+      if (toDelete.length > 0) {
+        await db.delete(conversationNotes).where(inArray(conversationNotes.id, toDelete));
+      }
+
+      return id;
+    },
+
+    /** List all durable notes targeting a chat, oldest first (for stable prompt ordering).
+     *  `id` secondary sort gives deterministic ordering when timestamps tie (e.g. multiple
+     *  `<note>` tags emitted in a single character response within one millisecond). */
+    async listNotes(targetChatId: string) {
+      return db
+        .select()
+        .from(conversationNotes)
+        .where(eq(conversationNotes.targetChatId, targetChatId))
+        .orderBy(conversationNotes.createdAt, conversationNotes.id);
+    },
+
+    /** Delete a single note by id, scoped to its target chat. */
+    async deleteNoteForChat(targetChatId: string, id: string) {
+      await db
+        .delete(conversationNotes)
+        .where(and(eq(conversationNotes.targetChatId, targetChatId), eq(conversationNotes.id, id)));
+    },
+
+    /** Clear every note targeting a chat. */
+    async clearNotes(targetChatId: string) {
+      await db.delete(conversationNotes).where(eq(conversationNotes.targetChatId, targetChatId));
+    },
+
+    /** Delete all notes associated with a chat (as source or target). */
+    async deleteNotesForChat(chatId: string) {
+      await db.delete(conversationNotes).where(eq(conversationNotes.sourceChatId, chatId));
+      await db.delete(conversationNotes).where(eq(conversationNotes.targetChatId, chatId));
     },
   };
 }

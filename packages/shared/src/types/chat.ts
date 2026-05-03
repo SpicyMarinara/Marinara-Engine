@@ -301,3 +301,13 @@ export interface OocInfluence {
   consumed: boolean;
   createdAt: string;
 }
+
+/** A durable note emitted from a conversation chat that persists in the connected roleplay's prompt until cleared. */
+export interface ConversationNote {
+  id: string;
+  sourceChatId: string;
+  targetChatId: string;
+  content: string;
+  anchorMessageId: string;
+  createdAt: string;
+}
