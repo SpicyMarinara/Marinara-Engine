@@ -76,7 +76,9 @@ export async function chatFoldersRoutes(app: FastifyInstance) {
       const folder = await storage.getById(folderId);
       if (!folder) return reply.status(404).send({ error: "Folder not found" });
     }
-    const chat = await chatsStorage.update(chatId, { folderId });
+    // Propagate the folder to every branch in the group so later branch
+    // creation/deletion doesn't drop the tree back into Uncategorized.
+    const chat = await chatsStorage.setFolderForChat(chatId, folderId);
     return reply.send(chat);
   });
 
@@ -87,7 +89,11 @@ export async function chatFoldersRoutes(app: FastifyInstance) {
     const { orderedChatIds, folderId } = req.body;
     if (!Array.isArray(orderedChatIds)) return reply.status(400).send({ error: "orderedChatIds must be an array" });
     for (let i = 0; i < orderedChatIds.length; i++) {
-      await chatsStorage.update(orderedChatIds[i]!, { folderId, sortOrder: i + 1 });
+      const id = orderedChatIds[i]!;
+      // Update sortOrder on the visible representative chat, then propagate
+      // the folder assignment to its sibling branches.
+      await chatsStorage.update(id, { sortOrder: i + 1 });
+      await chatsStorage.setFolderForChat(id, folderId);
     }
     return reply.send({ ok: true });
   });

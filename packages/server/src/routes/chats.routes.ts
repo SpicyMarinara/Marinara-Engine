@@ -1169,7 +1169,10 @@ export async function chatsRoutes(app: FastifyInstance) {
     // (preserved) timestamp, so after the loop the branched chat's updatedAt is
     // the last source message's original time. Reset it to now so the branch
     // appears at the top of the chat list as a freshly created chat.
-    await storage.update(newChat.id, {});
+    // Also inherit the source chat's folder so the branch stays inside the
+    // same categorization tree (the new branch becomes the most-recently-
+    // updated row in its group, so the sidebar reads its folderId).
+    await storage.update(newChat.id, { folderId: sourceChat.folderId ?? null });
 
     // Copy game-state snapshots from the source chat for every copied message.
     // Each snapshot is keyed by (chatId, messageId, swipeIndex), so we must re-associate

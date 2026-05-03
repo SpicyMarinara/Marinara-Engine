@@ -97,6 +97,29 @@ export function createChatsStorage(db: DB) {
       return this.getById(id);
     },
 
+    /**
+     * Set the folder assignment for a chat, propagating to every branch that
+     * shares its groupId. The sidebar collapses each group to a single visible
+     * row whose folder is read from whichever branch is currently the
+     * representative — so when one branch is created or deleted and the rep
+     * shifts, every branch must already carry the same folderId or the whole
+     * tree falls back to Uncategorized.
+     *
+     * Sibling branches are updated without bumping updatedAt so categorizing
+     * a chat doesn't silently reorder its branch history.
+     */
+    async setFolderForChat(chatId: string, folderId: string | null) {
+      const chat = await this.getById(chatId);
+      if (!chat) return null;
+      if (chat.groupId) {
+        await db.update(chats).set({ folderId }).where(eq(chats.groupId, chat.groupId));
+        await db.update(chats).set({ updatedAt: now() }).where(eq(chats.id, chatId));
+      } else {
+        await db.update(chats).set({ folderId, updatedAt: now() }).where(eq(chats.id, chatId));
+      }
+      return this.getById(chatId);
+    },
+
     /** List all chats belonging to a group. */
     async listByGroup(groupId: string) {
       return db.select().from(chats).where(eq(chats.groupId, groupId)).orderBy(desc(chats.updatedAt));
