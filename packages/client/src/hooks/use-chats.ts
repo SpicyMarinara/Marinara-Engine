@@ -83,7 +83,11 @@ export function useChatMessages(chatId: string | null, pageSize: number = 0, ena
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => {
       if (pageSize <= 0 || lastPage.length < pageSize) return undefined;
-      return lastPage[0]?.createdAt;
+      const oldestLoaded = lastPage[0];
+      if (!oldestLoaded) return undefined;
+      return typeof oldestLoaded.rowid === "number"
+        ? `${oldestLoaded.createdAt}|${oldestLoaded.rowid}`
+        : oldestLoaded.createdAt;
     },
     enabled: !!chatId && enabled,
   });

@@ -214,6 +214,8 @@ export interface Message {
   activeSwipeIndex: number;
   /** Number of swipes for this message (0 or 1 = no alternatives) */
   swipeCount?: number;
+  /** Server-side SQLite row position used only for stable pagination cursors */
+  rowid?: number;
   createdAt: string;
   /** Extra display data */
   extra: MessageExtra;

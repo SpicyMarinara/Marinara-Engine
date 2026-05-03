@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────
 // Storage: Chats
 // ──────────────────────────────────────────────
-import { eq, desc, and, lt, gt, sql, count, inArray } from "drizzle-orm";
+import { eq, desc, and, lt, gt, sql, count, inArray, getTableColumns } from "drizzle-orm";
 import type { DB } from "../../db/connection.js";
 import {
   chats,
@@ -38,6 +38,18 @@ function resolveTimestamps(overrides?: TimestampOverrides | null) {
 function serializeJsonField(value: unknown, fallback: Record<string, unknown>) {
   if (value === undefined || value === null) return JSON.stringify(fallback);
   return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+function parseMessageCursor(before?: string): { createdAt: string; rowid: number } | null {
+  if (!before) return null;
+  const separatorIndex = before.indexOf("|");
+  if (separatorIndex <= 0 || separatorIndex === before.length - 1) return null;
+  const rowid = Number(before.slice(separatorIndex + 1));
+  if (!Number.isSafeInteger(rowid) || rowid < 1) return null;
+  return {
+    createdAt: before.slice(0, separatorIndex),
+    rowid,
+  };
 }
 
 /** Create the chat storage facade used by routes and importers. */
@@ -146,7 +158,11 @@ export function createChatsStorage(db: DB) {
     },
 
     async listMessages(chatId: string) {
-      const rows = await db.select().from(messages).where(eq(messages.chatId, chatId)).orderBy(messages.createdAt);
+      const rows = await db
+        .select({ ...getTableColumns(messages), rowid: sql<number>`messages.rowid`.as("rowid") })
+        .from(messages)
+        .where(eq(messages.chatId, chatId))
+        .orderBy(messages.createdAt, sql`messages.rowid`);
       const swipeCounts = await db
         .select({ messageId: messageSwipes.messageId, count: count() })
         .from(messageSwipes)
@@ -159,12 +175,19 @@ export function createChatsStorage(db: DB) {
     /** Paginated: returns the latest `limit` messages (optionally before a cursor). */
     async listMessagesPaginated(chatId: string, limit: number, before?: string) {
       const conditions = [eq(messages.chatId, chatId)];
-      if (before) conditions.push(lt(messages.createdAt, before));
+      const cursor = parseMessageCursor(before);
+      if (cursor) {
+        conditions.push(
+          sql`(${messages.createdAt} < ${cursor.createdAt} OR (${messages.createdAt} = ${cursor.createdAt} AND messages.rowid < ${cursor.rowid}))`,
+        );
+      } else if (before) {
+        conditions.push(lt(messages.createdAt, before));
+      }
       const rows = await db
-        .select()
+        .select({ ...getTableColumns(messages), rowid: sql<number>`messages.rowid`.as("rowid") })
         .from(messages)
         .where(and(...conditions))
-        .orderBy(desc(messages.createdAt))
+        .orderBy(desc(messages.createdAt), sql`messages.rowid desc`)
         .limit(limit);
       const reversed = rows.reverse();
       const ids = reversed.map((m) => m.id);

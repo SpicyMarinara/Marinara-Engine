@@ -156,7 +156,11 @@ import { stripGmTagsKeepReadables } from "../lib/game-tag-parser";
 import type { Chat, GameMap, Message } from "@marinara-engine/shared";
 
 function sortMessagesByCreatedAt(messages: Message[]): Message[] {
-  return [...messages].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  return [...messages].sort((a, b) => {
+    const createdAtOrder = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    if (createdAtOrder !== 0) return createdAtOrder;
+    return 0;
+  });
 }
 
 function upsertPersistedMessages(qc: QueryClient, chatId: string, incoming: Message[]) {
@@ -188,7 +192,7 @@ function upsertPersistedMessages(qc: QueryClient, chatId: string, incoming: Mess
       if (pages.length === 0) {
         pages.push(missing);
       } else {
-        pages[0] = [...pages[0], ...missing];
+        pages[0] = sortMessagesByCreatedAt([...pages[0], ...missing]);
       }
     }
 
@@ -217,7 +221,7 @@ function appendMissingPersistedMessages(qc: QueryClient, chatId: string, incomin
     if (pages.length === 0) {
       pages.push(missing);
     } else {
-      pages[0] = [...pages[0], ...missing];
+      pages[0] = sortMessagesByCreatedAt([...pages[0], ...missing]);
     }
 
     return { ...old, pages };
@@ -475,8 +479,8 @@ export function useGenerate() {
         qc.setQueryData<InfiniteData<Message[]>>(chatKeys.messages(params.chatId), (old) => {
           if (!old?.pages) return old;
           const pages = [...old.pages];
-          // First page holds newest messages — append to it
-          pages[0] = [...(pages[0] ?? []), optimisticMsg];
+          // First page holds newest messages; merge and re-sort to guarantee order.
+          pages[0] = sortMessagesByCreatedAt([...(pages[0] ?? []), optimisticMsg]);
           return { ...old, pages };
         });
       }
