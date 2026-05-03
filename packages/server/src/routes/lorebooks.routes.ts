@@ -142,19 +142,33 @@ export async function lorebooksRoutes(app: FastifyInstance) {
     return entry;
   });
 
-  app.post<{ Params: { id: string } }>("/:id/entries", async (req) => {
+  app.post<{ Params: { id: string } }>("/:id/entries", async (req, reply) => {
     const input = createLorebookEntrySchema.parse({
       ...(req.body as Record<string, unknown>),
       lorebookId: req.params.id,
     });
-    return storage.createEntry(input);
+    try {
+      return await storage.createEntry(input);
+    } catch (err) {
+      if (err instanceof Error && err.message === "folderId does not belong to this lorebook") {
+        return reply.status(400).send({ error: err.message });
+      }
+      throw err;
+    }
   });
 
   app.patch<{ Params: { id: string; entryId: string } }>("/:id/entries/:entryId", async (req, reply) => {
     const input = updateLorebookEntrySchema.parse(req.body);
-    const updated = await storage.updateEntry(req.params.entryId, input);
-    if (!updated) return reply.status(404).send({ error: "Entry not found" });
-    return updated;
+    try {
+      const updated = await storage.updateEntry(req.params.entryId, input);
+      if (!updated) return reply.status(404).send({ error: "Entry not found" });
+      return updated;
+    } catch (err) {
+      if (err instanceof Error && err.message === "folderId does not belong to this lorebook") {
+        return reply.status(400).send({ error: err.message });
+      }
+      throw err;
+    }
   });
 
   app.delete<{ Params: { lorebookId: string; entryId: string } }>(
@@ -219,13 +233,17 @@ export async function lorebooksRoutes(app: FastifyInstance) {
     if (input.parentFolderId !== undefined && input.parentFolderId !== null) {
       return reply.status(400).send({ error: "Nested folders are not supported in this version" });
     }
-    const updated = await storage.updateFolder(req.params.folderId, input);
+    // Scope by lorebookId so /lorebooks/A/folders/B can't update folder B if
+    // it actually belongs to lorebook X.
+    const updated = await storage.updateFolder(req.params.folderId, input, req.params.id);
     if (!updated) return reply.status(404).send({ error: "Folder not found" });
     return updated;
   });
 
   app.delete<{ Params: { id: string; folderId: string } }>("/:id/folders/:folderId", async (req, reply) => {
-    await storage.removeFolder(req.params.folderId);
+    // Scope by lorebookId so a request to /lorebooks/A/folders/B cannot
+    // reach a folder belonging to lorebook X and reparent its entries.
+    await storage.removeFolder(req.params.folderId, req.params.id);
     return reply.status(204).send();
   });
 
