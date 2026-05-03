@@ -1,15 +1,17 @@
 // ──────────────────────────────────────────────
 // Storage: Lorebooks
 // ──────────────────────────────────────────────
-import { eq, desc, and, like, inArray } from "drizzle-orm";
+import { eq, desc, and, like, inArray, asc } from "drizzle-orm";
 import type { DB } from "../../db/connection.js";
-import { lorebooks, lorebookEntries } from "../../db/schema/index.js";
+import { lorebooks, lorebookEntries, lorebookFolders } from "../../db/schema/index.js";
 import { newId, now } from "../../utils/id-generator.js";
 import type {
   CreateLorebookInput,
   UpdateLorebookInput,
   CreateLorebookEntryInput,
   UpdateLorebookEntryInput,
+  CreateLorebookFolderInput,
+  UpdateLorebookFolderInput,
 } from "@marinara-engine/shared";
 import { normalizeTimestampOverrides, type TimestampOverrides } from "../import/import-timestamps.js";
 
@@ -49,6 +51,7 @@ function parseEntryRow(row: Record<string, unknown>) {
     useRegex: row.useRegex === "true",
     locked: row.locked === "true",
     preventRecursion: row.preventRecursion === "true",
+    folderId: (row.folderId as string | null | undefined) ?? null,
     keys: JSON.parse((row.keys as string) || "[]"),
     secondaryKeys: JSON.parse((row.secondaryKeys as string) || "[]"),
     relationships: JSON.parse((row.relationships as string) || "{}"),
@@ -56,6 +59,14 @@ function parseEntryRow(row: Record<string, unknown>) {
     activationConditions: JSON.parse((row.activationConditions as string) || "[]"),
     schedule: row.schedule ? JSON.parse(row.schedule as string) : null,
     embedding: row.embedding ? JSON.parse(row.embedding as string) : null,
+  };
+}
+
+function parseFolderRow(row: Record<string, unknown>) {
+  return {
+    ...row,
+    enabled: row.enabled === "true",
+    parentFolderId: (row.parentFolderId as string | null | undefined) ?? null,
   };
 }
 
@@ -190,6 +201,12 @@ export function createLorebooksStorage(db: DB) {
      *  - Its `personaId` matches the chat's active persona
      *  - Its `chatId` matches the current chat
      * When no filters are provided, returns entries from ALL enabled lorebooks (legacy behavior).
+     *
+     * Folder gate: an entry whose `folderId` points at a disabled folder is
+     * excluded here, regardless of the entry's own `enabled` flag. The entry's
+     * own flag is preserved in the database — re-enabling the folder restores
+     * each entry's previous individual setting. Entries with a NULL `folderId`
+     * (root-level entries) are unaffected.
      */
     async listActiveEntries(filters?: {
       activeLorebookIds?: string[];
@@ -216,12 +233,24 @@ export function createLorebooksStorage(db: DB) {
 
       const bookIds = relevantBooks.map((b) => b.id);
       if (bookIds.length === 0) return [];
+
+      // Build the disabled-folder ID set for the relevant lorebooks. Done as
+      // an in-memory filter (rather than a SQL anti-join) because folder
+      // counts per book are small and this keeps the existing query shape.
+      const disabledFolderRows = await db
+        .select({ id: lorebookFolders.id })
+        .from(lorebookFolders)
+        .where(and(inArray(lorebookFolders.lorebookId, bookIds), eq(lorebookFolders.enabled, "false")));
+      const disabledFolderIds = new Set(disabledFolderRows.map((r) => r.id));
+
       const rows = await db
         .select()
         .from(lorebookEntries)
         .where(and(inArray(lorebookEntries.lorebookId, bookIds), eq(lorebookEntries.enabled, "true")))
         .orderBy(lorebookEntries.order);
-      return rows.map((r) => parseEntryRow(r as Record<string, unknown>));
+      const parsed = rows.map((r) => parseEntryRow(r as Record<string, unknown>));
+      if (disabledFolderIds.size === 0) return parsed;
+      return parsed.filter((e) => !e.folderId || !disabledFolderIds.has(e.folderId as string));
     },
 
     async getEntry(id: string) {
@@ -236,6 +265,7 @@ export function createLorebooksStorage(db: DB) {
       await db.insert(lorebookEntries).values({
         id,
         lorebookId: input.lorebookId,
+        folderId: input.folderId ?? null,
         name: input.name,
         content: input.content ?? "",
         description: input.description ?? "",
@@ -278,6 +308,7 @@ export function createLorebooksStorage(db: DB) {
       if (input.name !== undefined) updates.name = input.name;
       if (input.content !== undefined) updates.content = input.content;
       if (input.description !== undefined) updates.description = input.description;
+      if (input.folderId !== undefined) updates.folderId = input.folderId;
       if (input.keys !== undefined) updates.keys = JSON.stringify(input.keys);
       if (input.secondaryKeys !== undefined) updates.secondaryKeys = JSON.stringify(input.secondaryKeys);
       if (input.enabled !== undefined) updates.enabled = String(input.enabled);
@@ -330,18 +361,39 @@ export function createLorebooksStorage(db: DB) {
       return results;
     },
 
-    async reorderEntries(lorebookId: string, entryIds: string[]) {
-      const existingEntries = (await this.listEntries(lorebookId)).map((entry) => {
-        const row = entry as unknown as Record<string, unknown>;
-        return {
-          id: String(row.id),
-          order: typeof row.order === "number" ? row.order : Number(row.order ?? 0),
-        };
-      });
-      const orderById = new Map(existingEntries.map((entry) => [entry.id, entry.order]));
-      const existingIds = new Set(existingEntries.map((entry) => entry.id));
-      const orderedIds = entryIds.filter((id, index, ids) => existingIds.has(id) && ids.indexOf(id) === index);
-      const missingIds = existingEntries
+    /**
+     * Reorder entries inside a single container.
+     *
+     * `folderId` (undefined = legacy, null = root, string = inside that
+     * folder) scopes the reorder so that dragging within one container does
+     * not renumber entries in another. When `folderId` is undefined we keep
+     * the legacy behavior of renumbering every entry in the lorebook.
+     *
+     * Renumbering uses (index + 1) * 10 within the container, so each
+     * container's order space starts back at 10 — that's intentional and
+     * matches the user-facing "each folder is its own container" semantic
+     * (a folder at the top can hold high-Order entries without affecting
+     * root entries below it).
+     */
+    async reorderEntries(lorebookId: string, entryIds: string[], folderId?: string | null) {
+      const allEntries = (await this.listEntries(lorebookId)) as unknown as Array<Record<string, unknown>>;
+
+      const inScope =
+        folderId === undefined
+          ? allEntries
+          : allEntries.filter((row) => {
+              const rowFolder = (row.folderId as string | null | undefined) ?? null;
+              return rowFolder === folderId;
+            });
+
+      const scopeEntries = inScope.map((row) => ({
+        id: String(row.id),
+        order: typeof row.order === "number" ? row.order : Number(row.order ?? 0),
+      }));
+      const orderById = new Map(scopeEntries.map((entry) => [entry.id, entry.order]));
+      const scopeIds = new Set(scopeEntries.map((entry) => entry.id));
+      const orderedIds = entryIds.filter((id, index, ids) => scopeIds.has(id) && ids.indexOf(id) === index);
+      const missingIds = scopeEntries
         .map((entry) => entry.id)
         .filter((id) => !orderedIds.includes(id))
         .sort((leftId, rightId) => (orderById.get(leftId) ?? 0) - (orderById.get(rightId) ?? 0));
@@ -361,6 +413,103 @@ export function createLorebooksStorage(db: DB) {
     async removeEntry(id: string) {
       await db.delete(lorebookEntries).where(eq(lorebookEntries.id, id));
     },
+
+    // ── Folders ──
+
+    async listFolders(lorebookId: string) {
+      const rows = await db
+        .select()
+        .from(lorebookFolders)
+        .where(eq(lorebookFolders.lorebookId, lorebookId))
+        .orderBy(asc(lorebookFolders.order));
+      return rows.map((r) => parseFolderRow(r as Record<string, unknown>));
+    },
+
+    async getFolder(folderId: string) {
+      const rows = await db.select().from(lorebookFolders).where(eq(lorebookFolders.id, folderId));
+      const row = rows[0];
+      return row ? parseFolderRow(row as Record<string, unknown>) : null;
+    },
+
+    async createFolder(lorebookId: string, input: CreateLorebookFolderInput) {
+      const id = newId();
+      const timestamp = now();
+      // If the caller didn't pass an explicit order, append after existing folders
+      // so the new one shows up at the bottom of the folder block by default.
+      let order = input.order ?? 0;
+      if (input.order === undefined || input.order === 0) {
+        const existing = await db
+          .select({ order: lorebookFolders.order })
+          .from(lorebookFolders)
+          .where(eq(lorebookFolders.lorebookId, lorebookId));
+        if (existing.length > 0) {
+          order = Math.max(...existing.map((r) => r.order ?? 0)) + 10;
+        } else {
+          order = 10;
+        }
+      }
+      await db.insert(lorebookFolders).values({
+        id,
+        lorebookId,
+        name: input.name,
+        enabled: String(input.enabled ?? true),
+        // v1 ignores any non-null parentFolderId — caller is the route layer.
+        parentFolderId: input.parentFolderId ?? null,
+        order,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+      return this.getFolder(id);
+    },
+
+    async updateFolder(folderId: string, input: UpdateLorebookFolderInput) {
+      const updates: Record<string, unknown> = { updatedAt: now() };
+      if (input.name !== undefined) updates.name = input.name;
+      if (input.enabled !== undefined) updates.enabled = String(input.enabled);
+      if (input.parentFolderId !== undefined) updates.parentFolderId = input.parentFolderId;
+      if (input.order !== undefined) updates.order = input.order;
+      await db.update(lorebookFolders).set(updates).where(eq(lorebookFolders.id, folderId));
+      return this.getFolder(folderId);
+    },
+
+    /**
+     * Remove a folder. Entries inside the folder are NOT deleted — their
+     * `folderId` is reset to NULL (root level) so the user doesn't lose
+     * data when they remove a folder by accident.
+     */
+    async removeFolder(folderId: string) {
+      const folder = (await this.getFolder(folderId)) as Record<string, unknown> | null;
+      if (!folder) return;
+      const lorebookId = folder.lorebookId as string;
+      await db
+        .update(lorebookEntries)
+        .set({ folderId: null, updatedAt: now() })
+        .where(and(eq(lorebookEntries.lorebookId, lorebookId), eq(lorebookEntries.folderId, folderId)));
+      await db.delete(lorebookFolders).where(eq(lorebookFolders.id, folderId));
+    },
+
+    /** Renumber folders within a lorebook to match `folderIds` left-to-right. */
+    async reorderFolders(lorebookId: string, folderIds: string[]) {
+      const existing = (await this.listFolders(lorebookId)) as unknown as Array<{ id: string; order: number }>;
+      const orderById = new Map(existing.map((f) => [f.id, f.order]));
+      const existingIds = new Set(existing.map((f) => f.id));
+      const orderedIds = folderIds.filter((id, index, ids) => existingIds.has(id) && ids.indexOf(id) === index);
+      const missingIds = existing
+        .map((f) => f.id)
+        .filter((id) => !orderedIds.includes(id))
+        .sort((a, b) => (orderById.get(a) ?? 0) - (orderById.get(b) ?? 0));
+      const nextIds = [...orderedIds, ...missingIds];
+      const timestamp = now();
+      for (const [index, id] of nextIds.entries()) {
+        await db
+          .update(lorebookFolders)
+          .set({ order: (index + 1) * 10, updatedAt: timestamp })
+          .where(and(eq(lorebookFolders.id, id), eq(lorebookFolders.lorebookId, lorebookId)));
+      }
+      return this.listFolders(lorebookId);
+    },
+
+    // ── Search ──
 
     /** Search entries by keyword match in name/content/keys. */
     async searchEntries(query: string) {
