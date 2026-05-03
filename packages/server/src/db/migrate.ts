@@ -104,6 +104,16 @@ const CREATE_TABLES: string[] = [
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS lorebook_folders (
+    id TEXT PRIMARY KEY NOT NULL,
+    lorebook_id TEXT NOT NULL REFERENCES lorebooks(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    enabled TEXT NOT NULL DEFAULT 'true',
+    parent_folder_id TEXT,
+    "order" INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS lorebook_entries (
     id TEXT PRIMARY KEY NOT NULL,
     lorebook_id TEXT NOT NULL REFERENCES lorebooks(id) ON DELETE CASCADE,
@@ -558,6 +568,14 @@ const COLUMN_MIGRATIONS: ColumnMigration[] = [
     table: "lorebook_entries",
     column: "description",
     definition: "TEXT NOT NULL DEFAULT ''",
+  },
+  {
+    // Folder grouping. Nullable — entries with a NULL folder_id live at the
+    // lorebook root level. Not enforced as a foreign key in SQLite so folder
+    // deletion can simply set this back to NULL without cascade hassle.
+    table: "lorebook_entries",
+    column: "folder_id",
+    definition: "TEXT",
   },
 ];
 
