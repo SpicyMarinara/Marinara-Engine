@@ -23,7 +23,7 @@
     "start": "node packages/server/dist/index.js",
     "format": "prettier --write \"packages/**/*.{ts,tsx}\"",
     "lint": "pnpm -r run lint",
-    "test": "pnpm -r run test",
+    "test": "node ./scripts/check-windows-installer-layout.mjs && pnpm -r run test",
     "version:sync": "node ./scripts/sync-version.mjs",
     "version:check": "node ./scripts/check-version-drift.mjs",
     "guard:installer-artifacts": "node ./scripts/check-tracked-installers.mjs",
