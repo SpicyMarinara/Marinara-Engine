@@ -450,6 +450,10 @@ export function useGenerate() {
       mentionedCharacterNames?: string[];
       forCharacterId?: string;
       generationGuide?: string;
+      impersonatePresetId?: string;
+      impersonateConnectionId?: string;
+      impersonateBlockAgents?: boolean;
+      impersonatePromptTemplate?: string;
     }) => {
       // Prevent concurrent generations for the same chat. Different chats may
       // keep generating in the background while the user navigates elsewhere.

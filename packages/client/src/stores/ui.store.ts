@@ -267,6 +267,18 @@ interface UIState {
   /** Optional short activity shown with the user's status in Conversation mode. */
   userActivity: string;
 
+  // ── Impersonate Settings ──
+  /** Custom prompt template for /impersonate (empty = use server default). Persisted. */
+  impersonatePromptTemplate: string;
+  /** Show a quick /impersonate button in the chat input toolbar. Persisted. */
+  impersonateShowQuickButton: boolean;
+  /** Override preset used when impersonating (null = use chat default). Persisted. */
+  impersonatePresetId: string | null;
+  /** Override connection used when impersonating (null = use chat default). Persisted. */
+  impersonateConnectionId: string | null;
+  /** When true, suppress agent pipeline during impersonate. Persisted. */
+  impersonateBlockAgents: boolean;
+
   /** Transient: true when center content area is too narrow (overflow detected) */
   centerCompact: boolean;
 
@@ -363,6 +375,14 @@ interface UIState {
   setEnterToSendGame: (v: boolean) => void;
   setWeatherEffects: (v: boolean) => void;
   setHudPosition: (v: HudPosition) => void;
+
+  // Impersonate settings actions
+  setImpersonatePromptTemplate: (v: string) => void;
+  setImpersonateShowQuickButton: (v: boolean) => void;
+  setImpersonatePresetId: (id: string | null) => void;
+  setImpersonateConnectionId: (id: string | null) => void;
+  setImpersonateBlockAgents: (v: boolean) => void;
+
   /** Legacy migration helpers for browser-local custom themes. */
   setHasMigratedCustomThemesToServer: (v: boolean) => void;
   clearLegacyCustomThemes: () => void;
@@ -451,6 +471,11 @@ export function pickSyncedSettings(state: UIState) {
     rpNotificationSound: state.rpNotificationSound,
     customConversationPrompt: state.customConversationPrompt,
     scheduleGenerationPreferences: state.scheduleGenerationPreferences,
+    impersonatePromptTemplate: state.impersonatePromptTemplate,
+    impersonateShowQuickButton: state.impersonateShowQuickButton,
+    impersonatePresetId: state.impersonatePresetId,
+    impersonateConnectionId: state.impersonateConnectionId,
+    impersonateBlockAgents: state.impersonateBlockAgents,
     learnedGameSetupOptions: state.learnedGameSetupOptions,
   };
 }
@@ -551,6 +576,13 @@ export const useUIStore = create<UIState>()(
       userStatus: "active" as UserStatus,
       userActivity: "",
       centerCompact: false,
+
+      // Impersonate settings defaults
+      impersonatePromptTemplate: "",
+      impersonateShowQuickButton: false,
+      impersonatePresetId: null,
+      impersonateConnectionId: null,
+      impersonateBlockAgents: false,
 
       toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
@@ -824,6 +856,11 @@ export const useUIStore = create<UIState>()(
       setEnterToSendGame: (v) => set({ enterToSendGame: v }),
       setWeatherEffects: (v) => set({ weatherEffects: v }),
       setHudPosition: (v) => set({ hudPosition: v }),
+      setImpersonatePromptTemplate: (v) => set({ impersonatePromptTemplate: v }),
+      setImpersonateShowQuickButton: (v) => set({ impersonateShowQuickButton: v }),
+      setImpersonatePresetId: (id) => set({ impersonatePresetId: id }),
+      setImpersonateConnectionId: (id) => set({ impersonateConnectionId: id }),
+      setImpersonateBlockAgents: (v) => set({ impersonateBlockAgents: v }),
       setHasMigratedCustomThemesToServer: (v) => set({ hasMigratedCustomThemesToServer: v }),
       clearLegacyCustomThemes: () => set({ customThemes: [], activeCustomTheme: null }),
       setActiveCustomTheme: (id) => set({ activeCustomTheme: id }),
@@ -1006,8 +1043,13 @@ export const useUIStore = create<UIState>()(
             persisted.learnedGameSetupOptions = DEFAULT_GAME_SETUP_LEARNED_OPTIONS;
           }
         }
-        // v15 -> v16: opt-in output cleanup for incomplete final sentences.
+        // v15 -> v16: add impersonate settings and opt-in output cleanup for incomplete final sentences.
         if (version <= 15) {
+          if (persisted.impersonatePromptTemplate === undefined) persisted.impersonatePromptTemplate = "";
+          if (persisted.impersonateShowQuickButton === undefined) persisted.impersonateShowQuickButton = false;
+          if (persisted.impersonatePresetId === undefined) persisted.impersonatePresetId = null;
+          if (persisted.impersonateConnectionId === undefined) persisted.impersonateConnectionId = null;
+          if (persisted.impersonateBlockAgents === undefined) persisted.impersonateBlockAgents = false;
           if (persisted.trimIncompleteModelOutput === undefined) {
             persisted.trimIncompleteModelOutput = false;
           }
@@ -1091,6 +1133,11 @@ export const useUIStore = create<UIState>()(
         rpNotificationSound: state.rpNotificationSound,
         customConversationPrompt: state.customConversationPrompt,
         scheduleGenerationPreferences: state.scheduleGenerationPreferences,
+        impersonatePromptTemplate: state.impersonatePromptTemplate,
+        impersonateShowQuickButton: state.impersonateShowQuickButton,
+        impersonatePresetId: state.impersonatePresetId,
+        impersonateConnectionId: state.impersonateConnectionId,
+        impersonateBlockAgents: state.impersonateBlockAgents,
         learnedGameSetupOptions: state.learnedGameSetupOptions,
       }),
     },

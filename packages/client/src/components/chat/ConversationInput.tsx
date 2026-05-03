@@ -2,7 +2,7 @@
 // Chat: Conversation Input — Discord-style
 // ──────────────────────────────────────────────
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Send, Smile, StopCircle, X, Plus, ImagePlay, AtSign, Users, Languages, Loader2, FileText } from "lucide-react";
+import { Send, Smile, StopCircle, X, Plus, ImagePlay, AtSign, Users, UserCheck, Languages, Loader2, FileText } from "lucide-react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -195,12 +195,14 @@ export function ConversationInput({
   const { applyToUserInput } = useApplyRegex();
   const enterToSend = useUIStore((s) => s.enterToSendConvo);
   const guideGenerations = useUIStore((s) => s.guideGenerations);
+  const impersonateShowQuickButton = useUIStore((s) => s.impersonateShowQuickButton);
   const speechToTextEnabled = useUIStore((s) => s.speechToTextEnabled);
   const createMessage = useCreateMessage(activeChatId);
   const updateMessageExtra = useUpdateMessageExtra(activeChatId);
   const qc = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isReadingAttachments = pendingAttachmentReads > 0;
+  const hasPendingAttachments = isReadingAttachments || attachments.length > 0;
 
   const syncInputState = useCallback(
     (value: string) => {
@@ -538,6 +540,42 @@ export function ConversationInput({
     syncInputState,
     onPeekPrompt,
   ]);
+
+  const handleImpersonateQuickButton = useCallback(async () => {
+    if (!activeChatId || isStreaming) return;
+    if (hasPendingAttachments) {
+      toast.info("Clear or send attachments before using quick impersonate.");
+      return;
+    }
+    const text = textareaRef.current?.value?.trim() ?? "";
+    if (!text) return;
+    const { impersonatePresetId, impersonateConnectionId, impersonateBlockAgents, impersonatePromptTemplate } =
+      useUIStore.getState();
+    const trimmedPromptTemplate = impersonatePromptTemplate.trim();
+    try {
+      const generated = await generate({
+        chatId: activeChatId,
+        connectionId: null,
+        impersonate: true,
+        userMessage: text,
+        ...(impersonatePresetId ? { impersonatePresetId } : {}),
+        ...(impersonateConnectionId ? { impersonateConnectionId } : {}),
+        ...(impersonateBlockAgents ? { impersonateBlockAgents: true } : {}),
+        ...(trimmedPromptTemplate ? { impersonatePromptTemplate: trimmedPromptTemplate } : {}),
+      });
+      if (generated) {
+        if (textareaRef.current) {
+          textareaRef.current.value = "";
+          textareaRef.current.style.height = "auto";
+        }
+        syncInputState("");
+        clearInputDraft(activeChatId);
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Impersonate failed";
+      toast.error(msg);
+    }
+  }, [activeChatId, isStreaming, hasPendingAttachments, generate, syncInputState, clearInputDraft]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1058,6 +1096,22 @@ export function ConversationInput({
               }
             >
               <Users size="1rem" />
+            </button>
+          )}
+
+          {impersonateShowQuickButton && (
+            <button
+              onClick={handleImpersonateQuickButton}
+              disabled={!hasInput || isStreaming || !activeChatId || hasPendingAttachments}
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+                hasInput && activeChatId && !isStreaming && !hasPendingAttachments
+                  ? "text-[var(--primary)] hover:bg-[var(--primary)]/15"
+                  : "text-foreground/20",
+              )}
+              title="Generate as {{user}} using this text as direction"
+            >
+              <UserCheck size="1rem" />
             </button>
           )}
 

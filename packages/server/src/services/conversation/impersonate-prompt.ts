@@ -1,3 +1,5 @@
+import { DEFAULT_IMPERSONATE_PROMPT } from "@marinara-engine/shared";
+
 interface BuildImpersonateInstructionArgs {
   customPrompt?: unknown;
   direction?: string | null;
@@ -31,6 +33,35 @@ function buildCustomImpersonateInstruction(customPrompt: string, direction: stri
   return `${customPrompt} ${punctuateDirection(direction)}`;
 }
 
+function renderImpersonateTemplate(
+  template: string,
+  {
+    direction,
+    personaName,
+    personaDescription,
+  }: {
+    direction: string;
+    personaName: string;
+    personaDescription: string;
+  },
+): string {
+  return template
+    .split(/\r?\n/)
+    .filter((line) => {
+      if (!personaDescription && line.includes("{{persona_description}}")) return false;
+      if (!direction && line.includes("{{impersonate_direction}}")) return false;
+      return true;
+    })
+    .map((line) =>
+      line
+        .replaceAll("{{user}}", personaName)
+        .replaceAll("{{persona_description}}", personaDescription)
+        .replaceAll("{{impersonate_direction}}", direction),
+    )
+    .join("\n")
+    .trim();
+}
+
 export function buildImpersonateInstruction({
   customPrompt,
   direction,
@@ -40,23 +71,22 @@ export function buildImpersonateInstruction({
   const normalizedCustomPrompt = normalizeText(customPrompt);
   const impersonationDirection = normalizeDirection(direction);
   const personaLabel = normalizeText(personaName) || "{{user}}";
-
-  if (normalizedCustomPrompt) {
-    const resolvedCustomPrompt = normalizedCustomPrompt.replaceAll("{{user}}", personaLabel);
-    return buildCustomImpersonateInstruction(resolvedCustomPrompt, impersonationDirection);
-  }
-
   const description = normalizeText(personaDescription);
 
-  return [
-    `<instruction>`,
-    `You are now writing as ${personaLabel}, the user's character.`,
-    `Study ${personaLabel}'s previous messages in the conversation and replicate their voice, mannerisms, speech patterns, and style as closely as possible.`,
-    description ? `Character description: ${description}` : "",
-    impersonationDirection ? `Additional direction for this reply: ${impersonationDirection}` : "",
-    `Write a single in-character response from ${personaLabel}'s perspective. Do NOT break character or add meta-commentary. Respond exactly as ${personaLabel} would.`,
-    `</instruction>`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  if (normalizedCustomPrompt) {
+    const resolvedCustomPrompt = renderImpersonateTemplate(normalizedCustomPrompt, {
+      direction: impersonationDirection,
+      personaName: personaLabel,
+      personaDescription: description,
+    });
+    return normalizedCustomPrompt.includes("{{impersonate_direction}}")
+      ? resolvedCustomPrompt
+      : buildCustomImpersonateInstruction(resolvedCustomPrompt, impersonationDirection);
+  }
+
+  return renderImpersonateTemplate(DEFAULT_IMPERSONATE_PROMPT, {
+    direction: impersonationDirection,
+    personaName: personaLabel,
+    personaDescription: description,
+  });
 }

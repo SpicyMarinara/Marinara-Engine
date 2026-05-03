@@ -166,6 +166,20 @@ export function resolveBaseUrl(connection: { baseUrl: string | null; provider: s
   return providerDef?.defaultBaseUrl ?? "";
 }
 
+export function shouldEnableAgentsForGeneration({
+  chatEnableAgents,
+  chatMode,
+  impersonate,
+  impersonateBlockAgents,
+}: {
+  chatEnableAgents: boolean;
+  chatMode: string;
+  impersonate: boolean;
+  impersonateBlockAgents: boolean;
+}): boolean {
+  return chatEnableAgents && chatMode !== "conversation" && !(impersonate && impersonateBlockAgents);
+}
+
 /** Parse connection/chat stored generation parameters without injecting schema defaults. */
 export function parseStoredGenerationParameters(raw: unknown): StoredGenerationParameters | null {
   let parsed = raw;

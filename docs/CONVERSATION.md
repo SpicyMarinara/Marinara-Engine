@@ -56,6 +56,20 @@ A single toggle in the chat settings drawer.
 
 A toggle in the chat settings drawer (visible only when you have multiple characters) that lets characters chat with **each other** rather than only with you. With this on, the response orchestrator can decide a character should address another character. With it off, all responses are directed at you.
 
+## Impersonating your persona
+
+Use `/impersonate [direction]` when you want Marinara to draft a message as **you** instead of as a character. The model reads your selected persona, recent chat context, and the optional direction text, then writes a user-side reply you can keep, edit, or swipe like other generated text.
+
+The chat settings drawer has an **Impersonate** section with global defaults for this workflow:
+
+- **Prompt Template** — overrides the built-in impersonation instruction. Leave it empty to use the chat-specific prompt, or the built-in default if the chat has none.
+- **Preset** — optionally route roleplay-style impersonation through a specific prompt preset. Conversation Mode falls back to the chat default because it does not use prompt presets.
+- **Connection** — optionally send impersonation calls to a different model, such as a cheaper or faster connection.
+- **Quick button** — shows a one-click impersonate button in the input bar.
+- **Skip agents** — when enabled, skips agents during impersonation so drafting stays fast and does not mutate trackers or world state.
+
+For per-chat prompt tuning, use `/impersonate_prompt "your prompt"` or `/impersonate_prompt reset`.
+
 ## Conversation-specific features
 
 These are features Conversation Mode has that other modes don't.

@@ -2,7 +2,7 @@
 // Chat: Input — mode-aware styling
 // ──────────────────────────────────────────────
 import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react";
-import { Send, Paperclip, StopCircle, X, Smile, Users, Languages, Loader2, FileText } from "lucide-react";
+import { Send, Paperclip, StopCircle, X, Smile, Users, UserCheck, Languages, Loader2, FileText } from "lucide-react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
@@ -143,6 +143,7 @@ export const ChatInput = memo(function ChatInput({
   const { applyToUserInput } = useApplyRegex();
   const enterToSend = useUIStore((s) => s.enterToSendRP);
   const guideGenerations = useUIStore((s) => s.guideGenerations);
+  const impersonateShowQuickButton = useUIStore((s) => s.impersonateShowQuickButton);
   const speechToTextEnabled = useUIStore((s) => s.speechToTextEnabled);
   const createMessage = useCreateMessage(activeChatId);
   const updateMessageExtra = useUpdateMessageExtra(activeChatId);
@@ -231,6 +232,7 @@ export const ChatInput = memo(function ChatInput({
   const canRetry = !isStreaming && lastMessageRole === "user";
   const canContinue = !isStreaming && mode === "roleplay" && lastMessageRole === "assistant";
   const isReadingAttachments = pendingAttachmentReads > 0;
+  const hasPendingAttachments = isReadingAttachments || attachments.length > 0;
 
   const removeAttachment = (idx: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== idx));
@@ -511,6 +513,51 @@ export const ChatInput = memo(function ChatInput({
     syncInputState,
     onPeekPrompt,
   ]);
+
+  const handleImpersonateQuickButton = useCallback(async () => {
+    if (!activeChatId || isStreaming) return;
+    if (hasPendingAttachments) {
+      toast.info("Clear or send attachments before using quick impersonate.");
+      return;
+    }
+    const submittingChatId = activeChatId;
+    const submittingInput = textareaRef.current?.value ?? "";
+    const text = submittingInput.trim();
+    if (!text) return;
+    const { impersonatePresetId, impersonateConnectionId, impersonateBlockAgents, impersonatePromptTemplate } =
+      useUIStore.getState();
+    const trimmedPromptTemplate = impersonatePromptTemplate.trim();
+    try {
+      const generated = await generate({
+        chatId: submittingChatId,
+        connectionId: null,
+        impersonate: true,
+        userMessage: text,
+        ...(impersonatePresetId ? { impersonatePresetId } : {}),
+        ...(impersonateConnectionId ? { impersonateConnectionId } : {}),
+        ...(impersonateBlockAgents ? { impersonateBlockAgents: true } : {}),
+        ...(trimmedPromptTemplate ? { impersonatePromptTemplate: trimmedPromptTemplate } : {}),
+      });
+      if (generated) {
+        const isSameDraft =
+          useChatStore.getState().activeChatId === submittingChatId && textareaRef.current?.value === submittingInput;
+        if (!isSameDraft) return;
+        if (draftTimerRef.current) {
+          clearTimeout(draftTimerRef.current);
+          draftTimerRef.current = null;
+        }
+        if (textareaRef.current) {
+          textareaRef.current.value = "";
+          textareaRef.current.style.height = "auto";
+        }
+        syncInputState("");
+        clearInputDraft(submittingChatId);
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Impersonate failed";
+      toast.error(msg);
+    }
+  }, [activeChatId, isStreaming, hasPendingAttachments, generate, syncInputState, clearInputDraft]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Autocomplete navigation
@@ -911,6 +958,23 @@ export const ChatInput = memo(function ChatInput({
             title={guideGenerations && hasInput ? "Trigger character response (guided)" : "Trigger character response"}
           >
             <Users size="1rem" />
+          </button>
+        )}
+
+        {/* Impersonate quick button */}
+        {impersonateShowQuickButton && (
+          <button
+            onClick={handleImpersonateQuickButton}
+            disabled={!hasInput || isStreaming || !activeChatId || hasPendingAttachments}
+            className={cn(
+              "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+              hasInput && activeChatId && !isStreaming && !hasPendingAttachments
+                ? "text-[var(--primary)] hover:bg-[var(--primary)]/15"
+                : "text-foreground/20",
+            )}
+            title="Generate as {{user}} using this text as direction"
+          >
+            <UserCheck size="1rem" />
           </button>
         )}
 

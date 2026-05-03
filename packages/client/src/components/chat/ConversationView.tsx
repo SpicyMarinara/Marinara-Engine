@@ -102,6 +102,15 @@ function hasNamePrefixFormat(msg: Message, characterMap: CharacterMap, chatChara
   return false;
 }
 
+function isHiddenFromUser(message: Message) {
+  try {
+    const extra = typeof message.extra === "string" ? JSON.parse(message.extra) : (message.extra ?? {});
+    return extra.hiddenFromUser === true;
+  } catch {
+    return false;
+  }
+}
+
 // Module-level set that remembers which message keys have been "seen" across
 // component remounts. This prevents stagger animations and notification sounds
 // from replaying when the user navigates away from a chat and comes back.
@@ -287,6 +296,7 @@ export function ConversationView({
     let lastDay = "";
     for (let i = 0; i < messages.length; i++) {
       const msg = messages[i]!;
+      if (isHiddenFromUser(msg)) continue;
       const day = getDayKey(msg.createdAt);
       if (day !== lastDay) {
         items.push({ type: "separator", key: `sep-${day}`, label: formatDaySeparator(msg.createdAt) });

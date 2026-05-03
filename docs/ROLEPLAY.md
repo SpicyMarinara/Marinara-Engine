@@ -60,6 +60,20 @@ Each widget has a popover panel for inline editing. You can manually re-run a si
 
 The widgets are **populated by the World-State agent** (a default for Roleplay), which reads each turn's narrative and extracts structured fields. The agent isn't a separate prompt to the user — it runs automatically alongside the main response.
 
+## Impersonating your persona
+
+Use `/impersonate [direction]` when you want Marinara to draft the next message as **your persona**. This is useful when you know what your character is trying to do, but want the model to help phrase it in the current scene voice.
+
+Open the chat settings drawer's **Impersonate** section to configure the workflow:
+
+- **Prompt Template** — global instructions for how impersonation should write. Empty means the chat-specific prompt or built-in default is used.
+- **Preset** — optionally use a specific prompt preset for impersonation instead of the chat's preset.
+- **Connection** — optionally route impersonation to a different model/provider.
+- **Quick button** — adds a one-click impersonate button to the input bar.
+- **Agent pipeline** — skip agents during impersonation when you want a fast draft that does not update trackers, lorebook routers, or world state.
+
+You can also set a per-chat prompt with `/impersonate_prompt "your prompt"` and reset it with `/impersonate_prompt reset`.
+
 ## Sprite expressions
 
 Each character can have a **sprite library** with expressions for different emotions. The default expression set includes:

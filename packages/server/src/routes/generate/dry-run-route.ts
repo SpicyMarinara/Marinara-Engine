@@ -543,14 +543,17 @@ export async function registerDryRunRoute(app: FastifyInstance) {
 
     // Extensions sometimes send presetId as a number or `{id}`; accept these to avoid
     // silently falling back to the chat's default preset.
-    const presetIdOverride = asNonEmptyString(body.presetId);
+    const presetIdOverride =
+      (impersonate ? asNonEmptyString(body.impersonatePresetId) : null) || asNonEmptyString(body.presetId);
     const skipPreset = body.skipPreset === true;
     const presetText = typeof body.presetText === "string" ? body.presetText : "";
 
     // Resolve connection (allow override; otherwise use chat connection)
     // Extensions may send connectionId like presetId (number or `{id}`); accept it.
-    let connId = asNonEmptyString(body.connectionId);
-    if (!connId) connId = (chat.connectionId as string | null) ?? null;
+    const impersonateConnectionOverride =
+      impersonate ? asNonEmptyString(body.impersonateConnectionId) : null;
+    const fallbackConnectionId = asNonEmptyString(body.connectionId) || ((chat.connectionId as string | null) ?? null);
+    let connId = impersonateConnectionOverride || fallbackConnectionId;
 
     if (connId === "random") {
       const pool = await connections.listRandomPool();
@@ -560,7 +563,21 @@ export async function registerDryRunRoute(app: FastifyInstance) {
     }
 
     if (!connId) return reply.status(400).send({ error: "No API connection configured for this chat" });
-    const conn = await connections.getWithKey(connId);
+    let conn = await connections.getWithKey(connId);
+    if (!conn && impersonateConnectionOverride && connId === impersonateConnectionOverride && fallbackConnectionId) {
+      logger.warn(
+        "[dryRun] Impersonate connection override %s was not found; falling back to chat/request connection",
+        impersonateConnectionOverride,
+      );
+      connId = fallbackConnectionId;
+      if (connId === "random") {
+        const pool = await connections.listRandomPool();
+        if (!pool.length) return reply.status(400).send({ error: "No connections are marked for the random pool" });
+        const picked = pool[Math.floor(Math.random() * pool.length)];
+        connId = picked.id;
+      }
+      conn = connId ? await connections.getWithKey(connId) : null;
+    }
     if (!conn) return reply.status(400).send({ error: "API connection not found" });
 
     const baseUrl = resolveBaseUrl(conn);
@@ -1306,7 +1323,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
     // ── Impersonate: same instruction block as POST /api/generate (no DB writes) ──
     if (impersonate) {
       const impersonateInstruction = buildImpersonateInstruction({
-        customPrompt: chatMeta.impersonatePrompt,
+        customPrompt: body.impersonatePromptTemplate ?? chatMeta.impersonatePrompt,
         direction: userMessage,
         personaName,
         personaDescription,

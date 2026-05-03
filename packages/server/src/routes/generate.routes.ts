@@ -119,6 +119,7 @@ import {
   parseStoredGenerationParameters,
   parseGameStateRow,
   resolveBaseUrl,
+  shouldEnableAgentsForGeneration,
   wrapFields,
   type PromptAttachment,
   type SimpleMessage,
@@ -661,7 +662,10 @@ export async function generateRoutes(app: FastifyInstance) {
     }
 
     // Resolve connection
-    let connId = input.connectionId ?? chat.connectionId;
+    const impersonateConnectionOverride =
+      input.impersonate && input.impersonateConnectionId ? input.impersonateConnectionId : null;
+    const fallbackConnectionId = input.connectionId || chat.connectionId;
+    let connId = impersonateConnectionOverride || fallbackConnectionId;
 
     // ── Random connection: pick one from the random pool ──
     if (connId === "random") {
@@ -676,7 +680,23 @@ export async function generateRoutes(app: FastifyInstance) {
     if (!connId) {
       return reply.status(400).send({ error: "No API connection configured for this chat" });
     }
-    const conn = await connections.getWithKey(connId);
+    let conn = await connections.getWithKey(connId);
+    if (!conn && impersonateConnectionOverride && connId === impersonateConnectionOverride && fallbackConnectionId) {
+      logger.warn(
+        "[generate] Impersonate connection override %s was not found; falling back to chat/request connection",
+        impersonateConnectionOverride,
+      );
+      connId = fallbackConnectionId;
+      if (connId === "random") {
+        const pool = await connections.listRandomPool();
+        if (!pool.length) {
+          return reply.status(400).send({ error: "No connections are marked for the random pool" });
+        }
+        const picked = pool[Math.floor(Math.random() * pool.length)];
+        connId = picked.id;
+      }
+      conn = connId ? await connections.getWithKey(connId) : null;
+    }
     if (!conn) {
       return reply.status(400).send({ error: "API connection not found" });
     }
@@ -922,8 +942,35 @@ export async function generateRoutes(app: FastifyInstance) {
       }
 
       // ── Assembler path: use preset if the chat has one ──
-      const presetId = chatMode === "conversation" ? undefined : ((chat.promptPresetId as string | null) ?? undefined);
-      const chatChoices = (chatMeta.presetChoices ?? {}) as Record<string, string | string[]>;
+      let presetId = chatMode === "conversation"
+        ? undefined
+        : (input.impersonate && input.impersonatePresetId
+            ? input.impersonatePresetId
+            : (chat.promptPresetId as string | null) ?? undefined);
+      let resolvedPreset = presetId ? await presets.getById(presetId) : null;
+      const usingImpersonatePreset = !!(input.impersonate && input.impersonatePresetId);
+      if (usingImpersonatePreset && !resolvedPreset) {
+        presetId = (chat.promptPresetId as string | null) ?? undefined;
+        resolvedPreset = presetId ? await presets.getById(presetId) : null;
+      }
+      const usingResolvedImpersonatePreset =
+        usingImpersonatePreset && !!resolvedPreset && presetId === input.impersonatePresetId;
+      const impersonatePresetDiffers = usingResolvedImpersonatePreset && input.impersonatePresetId !== chat.promptPresetId;
+      const impersonateDefaultChoices = impersonatePresetDiffers
+        ? (() => {
+            try {
+              const raw = resolvedPreset?.defaultChoices as string | undefined;
+              if (!raw) return {};
+              const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+              if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+              return parsed as Record<string, string | string[]>;
+            } catch {
+              return {};
+            }
+          })()
+        : null;
+      const chatChoices: Record<string, string | string[]> = impersonateDefaultChoices
+        ?? (chatMeta.presetChoices ?? {}) as Record<string, string | string[]>;
 
       let finalMessages: Array<{
         role: "system" | "user" | "assistant";
@@ -951,7 +998,12 @@ export async function generateRoutes(app: FastifyInstance) {
       // Determine whether agents are enabled for this chat (needed by assembler + agent pipeline)
       // Conversation mode chats never run roleplay agents — force agents off.
       logger.info("[generate] chatId=%s, chatMode=%s", input.chatId, chatMode);
-      const chatEnableAgents = chatMeta.enableAgents === true && chatMode !== "conversation";
+      const chatEnableAgents = shouldEnableAgentsForGeneration({
+        chatEnableAgents: chatMeta.enableAgents === true,
+        chatMode,
+        impersonate: input.impersonate,
+        impersonateBlockAgents: input.impersonateBlockAgents,
+      });
       const chatActiveAgentIds: string[] = Array.isArray(chatMeta.activeAgentIds)
         ? (chatMeta.activeAgentIds as string[])
         : [];
@@ -1042,9 +1094,8 @@ export async function generateRoutes(app: FastifyInstance) {
 
       sendProgress("assembling");
       const _tAssemble = Date.now();
-      if (presetId) {
-        const preset = await presets.getById(presetId);
-        if (preset) {
+      if (presetId && resolvedPreset) {
+        const preset = resolvedPreset;
           wrapFormat = (preset.wrapFormat as "xml" | "markdown" | "none") || "xml";
           const [sections, groups, choiceBlocks] = await Promise.all([
             presets.listSections(presetId),
@@ -1119,7 +1170,6 @@ export async function generateRoutes(app: FastifyInstance) {
               entryStateOverrides: assembled.updatedEntryStateOverrides,
             });
           }
-        }
       }
 
       // ── Conversation mode: inject built-in DM-style system prompt when no preset ──
@@ -5078,7 +5128,7 @@ export async function generateRoutes(app: FastifyInstance) {
       // ── Impersonate: inject instruction to respond as the user's character ──
       if (input.impersonate) {
         const impersonateInstruction = buildImpersonateInstruction({
-          customPrompt: chatMeta.impersonatePrompt,
+          customPrompt: input.impersonatePromptTemplate || chatMeta.impersonatePrompt,
           direction: input.userMessage,
           personaName,
           personaDescription,
@@ -5896,17 +5946,31 @@ export async function generateRoutes(app: FastifyInstance) {
           // Exception: if the model emitted character commands (e.g. [fetch:...]) with
           // no surrounding prose, treat the commands as the useful output. Skip saving
           // a blank assistant bubble but still return the commands so they execute.
-          if (!fullResponse.trim() && !input.impersonate) {
-            if (parsedCommands.length > 0) {
+          if (!fullResponse.trim()) {
+            if (!input.impersonate && parsedCommands.length > 0) {
               logger.info(
-                "[generate] Model emitted %d command(s) with no visible prose for chat %s; executing commands without saving a message",
+                "[generate] Model emitted %d command(s) with no visible prose for chat %s; saving hidden command anchor",
                 parsedCommands.length,
                 input.chatId,
               );
-              if (markGenerationCommitted) {
+              const savedMsg = await chats.createMessage({
+                chatId: input.chatId,
+                role: "assistant",
+                characterId: targetCharId,
+                content: "",
+              });
+              const anchoredMsg = savedMsg?.id
+                ? await chats.updateMessageExtra(savedMsg.id, {
+                    hiddenFromUser: true,
+                    hiddenFromAI: true,
+                    commandOnly: true,
+                    isGenerated: true,
+                  })
+                : savedMsg;
+              if (markGenerationCommitted && anchoredMsg?.id) {
                 generationComplete = true;
               }
-              return { savedMsg: null, response: "", commands: parsedCommands, oocMessages, characterId: targetCharId };
+              return { savedMsg: anchoredMsg, response: "", commands: parsedCommands, oocMessages, characterId: targetCharId };
             }
             logger.warn(`[generate] Empty response from model for chat ${input.chatId} (char: ${targetCharId})`);
             reply.raw.write(
