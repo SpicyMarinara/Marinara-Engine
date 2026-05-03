@@ -42,6 +42,42 @@ export interface Lorebook {
   updatedAt: string;
 }
 
+/**
+ * A collapsible container that groups lorebook entries to reduce visual
+ * clutter in the editor. Folders are flat in v1 — `parentFolderId` is reserved
+ * for future nested-folder support and must currently be null.
+ *
+ * Folder enable/disable acts as a gate: when `enabled` is false, every entry
+ * inside the folder is treated as inactive at activation time, regardless of
+ * the entry's own `enabled` flag. The entry's own flag is preserved (the
+ * folder toggle does NOT mutate it), so re-enabling the folder restores the
+ * entries' previous individual settings.
+ *
+ * Folders sit above root-level entries in the editor display. Folder display
+ * order among siblings is controlled by `order`. Entry `order` continues to
+ * control prompt-injection priority and per-container display sort.
+ */
+export interface LorebookFolder {
+  id: string;
+  lorebookId: string;
+  /** Display name shown on the folder header row. */
+  name: string;
+  /**
+   * When false, every entry whose `folderId` matches this folder is skipped
+   * during activation, regardless of the entry's own `enabled` flag.
+   */
+  enabled: boolean;
+  /**
+   * Reserved for future nested-folder support. Always null in v1; the server
+   * rejects non-null values.
+   */
+  parentFolderId: string | null;
+  /** Display order among sibling folders (lower = higher in the list). */
+  order: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** A single lorebook entry. */
 export interface LorebookEntry {
   id: string;
@@ -92,6 +128,14 @@ export interface LorebookEntry {
   // ── Grouping ──
   group: string;
   groupWeight: number | null;
+  /**
+   * ID of the folder this entry belongs to, or null if it lives at the
+   * lorebook root level. Display sort by `order` is per-container — entries
+   * inside a folder sort independently from root entries and from entries in
+   * other folders. When a folder is disabled, every entry whose `folderId`
+   * matches is excluded from activation regardless of `enabled`.
+   */
+  folderId: string | null;
 
   // ── Engine extensions (beyond ST) ──
   /** When true, the Lorebook Keeper agent cannot modify or overwrite this entry */
