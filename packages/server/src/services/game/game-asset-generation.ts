@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { logger } from "../../lib/logger.js";
 import { join } from "path";
 import { DATA_DIR } from "../../utils/data-dir.js";
-import { generateImage, type ImageGenRequest } from "../image/image-generation.js";
+import { generateImage, type ImageGenResult } from "../image/image-generation.js";
 import { buildAssetManifest, GAME_ASSETS_DIR } from "./asset-manifest.service.js";
 import type { PromptOverridesStorage } from "../storage/prompt-overrides.storage.js";
 import { loadPrompt, GAME_NPC_PORTRAIT, GAME_BACKGROUND, GAME_SCENE_ILLUSTRATION } from "../prompt-overrides/index.js";
@@ -19,6 +19,8 @@ import { loadPrompt, GAME_NPC_PORTRAIT, GAME_BACKGROUND, GAME_SCENE_ILLUSTRATION
 const NPC_AVATAR_DIR = join(DATA_DIR, "avatars", "npc");
 const GAME_BACKGROUND_WIDTH = 1024;
 const GAME_BACKGROUND_HEIGHT = 576;
+const GAME_BACKGROUND_EXTS = ["png", "jpg", "jpeg", "webp", "avif", "gif"] as const;
+const GAME_BACKGROUND_EXT_SET = new Set<string>(GAME_BACKGROUND_EXTS);
 
 // sharp is optional in the server package. Generated game backgrounds should be
 // stored at the VN canvas ratio when possible, but generation must still work on
@@ -43,19 +45,75 @@ async function getSharp(): Promise<SharpFn | null> {
   }
 }
 
-async function gameBackgroundBuffer(base64: string): Promise<Buffer> {
-  const input = Buffer.from(base64, "base64");
+type GameBackgroundImage = {
+  buffer: Buffer;
+  ext: string;
+};
+
+function detectImageExt(buffer: Buffer): string | null {
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return "png";
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "jpg";
+  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) return "gif";
+  if (
+    buffer[0] === 0x52 &&
+    buffer[1] === 0x49 &&
+    buffer[2] === 0x46 &&
+    buffer[3] === 0x46 &&
+    buffer[8] === 0x57 &&
+    buffer[9] === 0x45 &&
+    buffer[10] === 0x42 &&
+    buffer[11] === 0x50
+  ) {
+    return "webp";
+  }
+  if (buffer[4] === 0x66 && buffer[5] === 0x74 && buffer[6] === 0x79 && buffer[7] === 0x70) {
+    const brand = buffer.subarray(8, 12).toString("ascii").toLowerCase();
+    if (brand.startsWith("avif") || brand.startsWith("avis")) return "avif";
+  }
+  return null;
+}
+
+function normalizeGeneratedImageExt(result: Pick<ImageGenResult, "mimeType" | "ext">, buffer: Buffer): string {
+  const detectedExt = detectImageExt(buffer);
+  if (detectedExt) return detectedExt;
+
+  const ext = result.ext.trim().toLowerCase().replace(/^\./, "");
+  if (GAME_BACKGROUND_EXT_SET.has(ext)) return ext === "jpeg" ? "jpg" : ext;
+
+  const mime = result.mimeType.toLowerCase();
+  if (mime.includes("jpeg") || mime.includes("jpg")) return "jpg";
+  if (mime.includes("webp")) return "webp";
+  if (mime.includes("avif")) return "avif";
+  if (mime.includes("gif")) return "gif";
+  return "png";
+}
+
+async function gameBackgroundImage(result: ImageGenResult): Promise<GameBackgroundImage> {
+  const input = Buffer.from(result.base64, "base64");
   const sharp = await getSharp();
-  if (!sharp) return input;
+  if (!sharp) return { buffer: input, ext: normalizeGeneratedImageExt(result, input) };
   try {
-    return await sharp(input)
+    const buffer = await sharp(input)
       .resize(GAME_BACKGROUND_WIDTH, GAME_BACKGROUND_HEIGHT, { fit: "cover", position: "centre" })
       .png()
       .toBuffer();
+    return { buffer, ext: "png" };
   } catch (err) {
     logger.warn(err, "[game-asset-gen] Failed to resize generated game background; saving original image");
-    return input;
+    return { buffer: input, ext: normalizeGeneratedImageExt(result, input) };
   }
+}
+
+function generatedBackgroundPath(targetDir: string, slug: string, ext: string): string {
+  return join(targetDir, `${slug}.${ext}`);
+}
+
+function existingGeneratedBackgroundPath(targetDir: string, slug: string): string | null {
+  for (const ext of GAME_BACKGROUND_EXTS) {
+    const candidate = generatedBackgroundPath(targetDir, slug, ext);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
 }
 
 export function readAvatarBase64(avatarPath: string | null | undefined): string | undefined {
@@ -262,15 +320,13 @@ export async function generateBackground(req: BackgroundGenRequest): Promise<str
   if (!slug) return null;
 
   const subcategory = genreToFolder(req.genre);
-  const filename = `${slug}.png`;
   const targetDir = join(GAME_ASSETS_DIR, "backgrounds", subcategory);
-  const targetPath = join(targetDir, filename);
 
   // Build asset tag: backgrounds:<category>:<slug>
   const tag = `backgrounds:${subcategory}:${slug}`;
 
   // Skip if already generated
-  if (existsSync(targetPath)) {
+  if (existingGeneratedBackgroundPath(targetDir, slug)) {
     return tag;
   }
 
@@ -309,8 +365,9 @@ export async function generateBackground(req: BackgroundGenRequest): Promise<str
     );
 
     if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
-    const imageBuffer = await gameBackgroundBuffer(result.base64);
-    writeFileSync(targetPath, imageBuffer);
+    const image = await gameBackgroundImage(result);
+    const targetPath = generatedBackgroundPath(targetDir, slug, image.ext);
+    writeFileSync(targetPath, image.buffer);
 
     // Rebuild manifest so the new tag is available immediately
     buildAssetManifest();
@@ -319,7 +376,7 @@ export async function generateBackground(req: BackgroundGenRequest): Promise<str
     req.debugLog?.(
       "[debug/game/image-generation] background result slug=%s bytes=%d tag=%s",
       slug,
-      imageBuffer.byteLength,
+      image.buffer.byteLength,
       tag,
     );
     return tag;
@@ -332,9 +389,7 @@ export async function generateBackground(req: BackgroundGenRequest): Promise<str
 export async function generateSceneIllustration(req: SceneIllustrationGenRequest): Promise<string | null> {
   const baseSlug = safeName(req.slug || req.reason || req.prompt.slice(0, 80)) || "scene-illustration";
   const slug = `${baseSlug}-${Date.now().toString(36)}`;
-  const filename = `${slug}.png`;
   const targetDir = join(GAME_ASSETS_DIR, "backgrounds", "illustrations");
-  const targetPath = join(targetDir, filename);
   const tag = `backgrounds:illustrations:${slug}`;
 
   const styleHint = [req.artStyle, req.genre, req.setting].filter(Boolean).join(", ");
@@ -382,15 +437,16 @@ export async function generateSceneIllustration(req: SceneIllustrationGenRequest
     );
 
     if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
-    const imageBuffer = await gameBackgroundBuffer(result.base64);
-    writeFileSync(targetPath, imageBuffer);
+    const image = await gameBackgroundImage(result);
+    const targetPath = generatedBackgroundPath(targetDir, slug, image.ext);
+    writeFileSync(targetPath, image.buffer);
     buildAssetManifest();
 
     logger.info('[game-asset-gen] Generated scene illustration "%s" -> tag: %s', slug, tag);
     req.debugLog?.(
       "[debug/game/image-generation] scene illustration result slug=%s bytes=%d tag=%s",
       slug,
-      imageBuffer.byteLength,
+      image.buffer.byteLength,
       tag,
     );
     return tag;

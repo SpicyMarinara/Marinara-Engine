@@ -4,7 +4,7 @@
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "crypto";
 import { existsSync, readFileSync } from "fs";
-import { join } from "path";
+import { extname, join } from "path";
 import { z } from "zod";
 import { logger } from "../lib/logger.js";
 import { createChatsStorage } from "../services/storage/chats.storage.js";
@@ -138,6 +138,7 @@ function findCharAvatarFuzzy(npcName: string, charAvatarByName: Map<string, stri
 }
 
 const ILLUSTRATION_COOLDOWN_TURNS = 2;
+const GENERATED_ILLUSTRATION_EXTS = ["png", "jpg", "jpeg", "webp", "avif", "gif"] as const;
 
 function currentGameSessionNumber(meta: Record<string, unknown>): number | null {
   return typeof meta.gameSessionNumber === "number" && Number.isFinite(meta.gameSessionNumber)
@@ -290,11 +291,14 @@ async function addGeneratedIllustrationToGallery(opts: {
   const slug = opts.tag.slice(prefix.length);
   if (!/^[a-z0-9-]+$/.test(slug)) return;
 
-  const assetPath = join(GAME_ASSETS_DIR, "backgrounds", "illustrations", `${slug}.png`);
-  if (!existsSync(assetPath)) return;
+  const assetPath = GENERATED_ILLUSTRATION_EXTS.map((ext) =>
+    join(GAME_ASSETS_DIR, "backgrounds", "illustrations", `${slug}.${ext}`),
+  ).find((candidate) => existsSync(candidate));
+  if (!assetPath) return;
 
   try {
-    const filePath = saveImageToDisk(opts.chatId, readFileSync(assetPath).toString("base64"), "png");
+    const ext = extname(assetPath).toLowerCase().replace(/^\./, "") || "png";
+    const filePath = saveImageToDisk(opts.chatId, readFileSync(assetPath).toString("base64"), ext);
     const gallery = createGalleryStorage(opts.app.db);
     const prompt = [opts.illustration.reason, opts.illustration.prompt].filter(Boolean).join("\n\n");
     await gallery.create({
