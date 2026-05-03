@@ -183,6 +183,13 @@ async function importLorebook(data: unknown, db: DB) {
       return {
         name: String(e.name ?? ""),
         content: String(e.content ?? ""),
+        // CodeRabbit-flagged: description, ephemeral, locked, and preventRecursion
+        // were absent from the previous map, so an exported lorebook would lose
+        // these fields on re-import. Knowledge-router matching uses description,
+        // ephemeral controls auto-disable countdown, locked protects entries
+        // from the Lorebook Keeper agent, and preventRecursion gates recursive
+        // scanning — all behaviors that should round-trip.
+        description: String(e.description ?? ""),
         keys: Array.isArray(e.keys) ? e.keys.map(String) : [],
         secondaryKeys: Array.isArray(e.secondaryKeys) ? e.secondaryKeys.map(String) : [],
         enabled: e.enabled !== false,
@@ -201,9 +208,12 @@ async function importLorebook(data: unknown, db: DB) {
         sticky: e.sticky != null ? Number(e.sticky) : null,
         cooldown: e.cooldown != null ? Number(e.cooldown) : null,
         delay: e.delay != null ? Number(e.delay) : null,
+        ephemeral: e.ephemeral != null ? Number(e.ephemeral) : null,
         group: String(e.group ?? ""),
         groupWeight: e.groupWeight != null ? Number(e.groupWeight) : null,
         folderId: newFolderId,
+        locked: Boolean(e.locked),
+        preventRecursion: Boolean(e.preventRecursion),
         tag: String(e.tag ?? ""),
         relationships: (e.relationships as any) ?? {},
         dynamicState: (e.dynamicState as any) ?? {},
