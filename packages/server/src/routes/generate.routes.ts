@@ -153,7 +153,12 @@ import { sidecarModelService } from "../services/sidecar/sidecar-model.service.j
 
 function isEncryptedToken(value: string): boolean {
   const parts = value.split(":");
-  return parts.length === 3 && parts.every((part) => /^[0-9a-f]+$/i.test(part)) && parts[0]?.length === 24 && parts[2]?.length === 32;
+  return (
+    parts.length === 3 &&
+    parts.every((part) => /^[0-9a-f]+$/i.test(part)) &&
+    parts[0]?.length === 24 &&
+    parts[2]?.length === 32
+  );
 }
 
 function decryptStoredToken(value: unknown): string | null {
@@ -454,6 +459,10 @@ export async function generateRoutes(app: FastifyInstance) {
     const input = generateRequestSchema.parse(req.body);
     const requestDebug = input.debugMode === true;
     const debugLog = (message: string, ...args: any[]) => {
+      if (requestDebug && !isDebug) {
+        logger.info(message, ...args);
+        return;
+      }
       logger.debug(message, ...args);
     };
 

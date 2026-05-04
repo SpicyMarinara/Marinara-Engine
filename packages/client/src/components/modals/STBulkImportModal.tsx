@@ -78,6 +78,30 @@ type Phase = "input" | "scanning" | "preview" | "importing" | "done";
 type CategoryKey = "characters" | "chats" | "groupChats" | "presets" | "lorebooks" | "backgrounds" | "personas";
 type SelectionState = Record<CategoryKey, string[]>;
 
+type ApiErrorPayload = {
+  error?: unknown;
+  message?: unknown;
+};
+
+async function readJsonResponse<T>(res: Response): Promise<{ data: T | null; raw: string }> {
+  const raw = await res.text().catch(() => "");
+  if (!raw.trim()) return { data: null, raw };
+
+  try {
+    return { data: JSON.parse(raw) as T, raw };
+  } catch {
+    return { data: null, raw };
+  }
+}
+
+function describeResponseError(res: Response, data: ApiErrorPayload | null, raw: string, fallback: string): string {
+  const status = [res.status, res.statusText].filter(Boolean).join(" ");
+  const detail =
+    typeof data?.error === "string" ? data.error : typeof data?.message === "string" ? data.message : raw.trim();
+
+  return `${fallback}${status ? ` (${status})` : ""}${detail ? `: ${detail.slice(0, 500)}` : ""}`;
+}
+
 function buildInitialSelection(scan: ScanResult): SelectionState {
   return {
     characters: scan.characters.map((item) => item.id),
@@ -157,17 +181,17 @@ export function STBulkImportModal({ open, onClose }: Props) {
         },
         body: JSON.stringify({ folderPath: folderPath.trim(), folderToken }),
       });
-      const data = (await res.json()) as ScanResult;
-      if (data.success) {
+      const { data, raw } = await readJsonResponse<ScanResult>(res);
+      if (res.ok && data?.success) {
         setScanResult(data);
         setSelection(buildInitialSelection(data));
         setPhase("preview");
       } else {
-        setError(data.error ?? "Scan failed");
+        setError(describeResponseError(res, data, raw, "Scan failed"));
         setPhase("input");
       }
-    } catch {
-      setError("Failed to connect to server");
+    } catch (err) {
+      setError(err instanceof Error ? `Failed to connect to server: ${err.message}` : "Failed to connect to server");
       setPhase("input");
     }
   }, [folderPath, folderToken]);
@@ -189,21 +213,25 @@ export function STBulkImportModal({ open, onClose }: Props) {
         },
         body: JSON.stringify({ path: dirPath || "" }),
       });
-      const data = (await res.json().catch(() => ({ success: false, error: res.statusText }))) as {
+      const { data, raw } = await readJsonResponse<{
         success: boolean;
         path?: string;
         folderToken?: string;
         folders?: string[];
         error?: string;
-      };
-      if (!res.ok || !data.success || !data.path) {
-        setError(data.error ?? res.statusText ?? "Unable to list directories");
+      }>(res);
+      if (!res.ok || !data?.success || !data.path) {
+        setBrowserFolders([]);
+        setFolderToken(null);
+        setError(describeResponseError(res, data, raw, "Unable to list directories"));
         return;
       }
       setBrowserPath(data.path);
       setFolderToken(data.folderToken ?? null);
       setBrowserFolders(data.folders ?? []);
     } catch (err) {
+      setBrowserFolders([]);
+      setFolderToken(null);
       setError(err instanceof Error ? err.message : "Unable to list directories");
     } finally {
       setBrowserLoading(false);
@@ -218,18 +246,18 @@ export function STBulkImportModal({ open, onClose }: Props) {
         method: "POST",
         headers: getAdminSecretHeader(),
       });
-      const data = (await res.json().catch(() => ({ success: false, error: res.statusText }))) as {
+      const { data, raw } = await readJsonResponse<{
         success: boolean;
         path?: string;
         folderToken?: string;
         error?: string;
-      };
+      }>(res);
       if (!res.ok) {
-        setError(data.error ?? res.statusText ?? "Unable to open folder picker");
+        setError(describeResponseError(res, data, raw, "Unable to open folder picker"));
         setPicking(false);
         return;
       }
-      if (data.success && data.path) {
+      if (data?.success && data.path) {
         setFolderPath(data.path);
         setFolderToken(data.folderToken ?? null);
         setPicking(false);
@@ -272,8 +300,15 @@ export function STBulkImportModal({ open, onClose }: Props) {
         body: JSON.stringify({ folderPath: folderPath.trim(), folderToken, options: selection }),
       });
 
-      if (!res.ok || !res.body) {
-        setError("Import failed — server error");
+      if (!res.ok) {
+        const { data, raw } = await readJsonResponse<ApiErrorPayload>(res);
+        setError(describeResponseError(res, data, raw, "Import failed"));
+        setPhase("preview");
+        return;
+      }
+
+      if (!res.body) {
+        setError("Import failed: server returned no response stream");
         setPhase("preview");
         return;
       }
@@ -313,8 +348,8 @@ export function STBulkImportModal({ open, onClose }: Props) {
           }
         }
       }
-    } catch {
-      setError("Import failed — server error");
+    } catch (err) {
+      setError(err instanceof Error ? `Import failed: ${err.message}` : "Import failed — server error");
       setPhase("preview");
     }
   }, [folderPath, folderToken, qc, selection]);
