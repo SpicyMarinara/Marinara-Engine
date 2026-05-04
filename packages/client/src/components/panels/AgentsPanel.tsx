@@ -32,9 +32,6 @@ import { BUILT_IN_AGENTS, type AgentCategory } from "@marinara-engine/shared";
 import { showConfirmDialog } from "../../lib/app-dialogs";
 import { cn } from "../../lib/utils";
 
-const HIDDEN_BUILT_IN_AGENT_IDS = new Set(["game-master", "party-player"]);
-const VISIBLE_BUILT_IN_AGENTS = BUILT_IN_AGENTS.filter((agent) => !HIDDEN_BUILT_IN_AGENT_IDS.has(agent.id));
-
 export function AgentsPanel() {
   const { data: agentConfigs, isLoading } = useAgentConfigs();
   const { data: customTools } = useCustomTools();
@@ -128,7 +125,7 @@ export function AgentsPanel() {
   const configByType = new Map(((agentConfigs ?? []) as AgentConfigRow[]).map((config) => [config.type, config]));
 
   const statusAgents = [
-    ...VISIBLE_BUILT_IN_AGENTS.map((agent) => ({
+    ...BUILT_IN_AGENTS.map((agent) => ({
       id: agent.id,
       type: agent.id,
       name: agent.name,
@@ -391,7 +388,7 @@ export function AgentsPanel() {
               desc: "Utilities, combat, illustrations, and other helpers.",
             },
           ].map(({ category, title, icon, desc }) => {
-            const agents = VISIBLE_BUILT_IN_AGENTS.filter((a) => a.category === category);
+            const agents = BUILT_IN_AGENTS.filter((a) => a.category === category);
             return (
               <PanelSection key={category} title={title} icon={icon}>
                 <div className="mb-1.5 text-[0.625rem] text-[var(--muted-foreground)]">{desc}</div>
