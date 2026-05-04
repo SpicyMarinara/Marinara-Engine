@@ -223,7 +223,9 @@ export function ToolEditor() {
       {/* ── Header ── */}
       <div className="flex items-center gap-3 border-b border-[var(--border)] bg-[var(--card)] px-4 py-3">
         <button
+          type="button"
           onClick={handleClose}
+          aria-label="Back to tools"
           className="rounded-xl p-2 transition-all hover:bg-[var(--accent)] active:scale-95"
         >
           <ArrowLeft size="1.125rem" />

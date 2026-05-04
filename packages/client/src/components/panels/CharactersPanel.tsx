@@ -852,7 +852,7 @@ export function CharactersPanel() {
 
                   {/* Expanded: show members */}
                   {isExpanded && (
-                    <div className="ml-5 flex flex-col gap-0.5 border-l-2 border-[var(--border)]/40 pl-3 pb-2">
+                    <div className="ml-5 flex flex-col gap-0.5 border-l border-[var(--border)]/40 pl-3 pb-2">
                       {group.memberIds.length === 0 && (
                         <div className="py-2 text-[0.625rem] text-[var(--muted-foreground)] italic">
                           No members — click <Users size="0.625rem" className="inline" /> to add characters

@@ -1067,8 +1067,11 @@ export function ChatArea() {
                 )}
               >
                 <img
-                  src={showEmptyStateEffects ? "/logo-splash.gif" : "/logo.png"}
+                  src="/icon-192.png"
                   alt="Marinara Engine"
+                  width={80}
+                  height={80}
+                  decoding="async"
                   className="h-full w-full object-cover"
                 />
               </div>

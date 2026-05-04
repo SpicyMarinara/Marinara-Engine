@@ -98,7 +98,9 @@ export function ChatFilesDrawer({ chat, open, onClose }: ChatFilesDrawerProps) {
           <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
             <h3 className="text-sm font-bold">Manage Chat Files</h3>
             <button
+              type="button"
               onClick={onClose}
+              aria-label="Close chat files drawer"
               className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-all hover:bg-[var(--accent)]"
             >
               <X size="1rem" />
@@ -150,7 +152,9 @@ export function ChatFilesDrawer({ chat, open, onClose }: ChatFilesDrawerProps) {
         <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
           <h3 className="text-sm font-bold">Manage Chat Files</h3>
           <button
+            type="button"
             onClick={onClose}
+            aria-label="Close chat files drawer"
             className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-all hover:bg-[var(--accent)]"
           >
             <X size="1rem" />

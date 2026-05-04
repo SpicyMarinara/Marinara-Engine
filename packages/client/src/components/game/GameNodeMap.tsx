@@ -103,7 +103,7 @@ export function GameNodeMap({
       >
         <svg
           viewBox={`${visibleMinX} ${visibleMinY} ${visibleViewWidth} ${visibleViewHeight}`}
-          className="block rounded border border-[var(--border)] bg-gray-900/30 transition-[width] duration-150 ease-out"
+          className="block rounded border border-[var(--border)] bg-gray-900/30"
           style={{ width: mapContentWidth }}
         >
           {/* Edges */}

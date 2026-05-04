@@ -31,10 +31,10 @@ export interface GameSetupLearnedOptions {
   goals: string[];
 }
 
-const SIDEBAR_WIDTH_MIN = 240;
-const SIDEBAR_WIDTH_MAX = 480;
-const RIGHT_PANEL_WIDTH_MIN = 280;
-const RIGHT_PANEL_WIDTH_MAX = 520;
+export const SIDEBAR_WIDTH_MIN = 240;
+export const SIDEBAR_WIDTH_MAX = 480;
+export const RIGHT_PANEL_WIDTH_MIN = 280;
+export const RIGHT_PANEL_WIDTH_MAX = 520;
 const IMAGE_DIMENSION_MIN = 64;
 const IMAGE_DIMENSION_MAX = 4096;
 const GAME_SETUP_LEARNED_LIMIT = 60;

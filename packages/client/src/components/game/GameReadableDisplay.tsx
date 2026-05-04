@@ -57,7 +57,7 @@ const NOTE_STYLES = [
     name: "official",
     wrapper: "bg-[#fefefe] text-[#1a1a2e] shadow-[0_8px_32px_rgba(0,0,0,0.4)]",
     inner: "font-sans leading-relaxed text-sm",
-    border: "border-l-4 border-[#1a1a2e]/80",
+    border: "border border-[#1a1a2e]/30 ring-1 ring-[#1a1a2e]/10",
     accent: "bg-[#1a1a2e]/5",
     heading: "text-[#1a1a2e] font-sans font-bold uppercase tracking-wide",
     closeBtn: "text-[#1a1a2e]/40 hover:text-[#1a1a2e]",

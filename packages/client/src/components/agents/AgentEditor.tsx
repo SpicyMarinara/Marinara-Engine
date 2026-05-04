@@ -543,7 +543,9 @@ export function AgentEditor() {
       {/* ── Header ── */}
       <div className="flex flex-wrap items-center gap-3 border-b border-[var(--border)] bg-[var(--card)] px-4 py-3 max-md:gap-2 max-md:px-3">
         <button
+          type="button"
           onClick={handleClose}
+          aria-label="Back to agents"
           className="rounded-xl p-2 transition-all hover:bg-[var(--accent)] active:scale-95"
         >
           <ArrowLeft size="1.125rem" />

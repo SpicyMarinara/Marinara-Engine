@@ -99,7 +99,7 @@ export function GameGridMap({
           }}
         >
           <div
-            className="grid gap-0.5 transition-[width] duration-150 ease-out"
+            className="grid gap-0.5"
             style={{
               gridTemplateColumns: `repeat(${width}, minmax(0, 1fr))`,
               width: `${zoom * 100}%`,

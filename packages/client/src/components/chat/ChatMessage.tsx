@@ -99,14 +99,18 @@ const EditTextarea = memo(function EditTextarea({
       />
       <div className="flex items-center gap-1.5 justify-end">
         <button
+          type="button"
           onClick={onCancel}
+          aria-label="Cancel edit"
           className="rounded-md p-1 text-white/40 hover:bg-white/10 hover:text-white/70"
           title="Cancel (Esc)"
         >
           <X size="0.8125rem" />
         </button>
         <button
+          type="button"
           onClick={handleSave}
+          aria-label="Save edit"
           className="rounded-md p-1 text-emerald-400/70 hover:bg-emerald-400/10 hover:text-emerald-400"
           title="Save (Cmd+Enter)"
         >
@@ -359,7 +363,9 @@ const CHAT_HTML_ALLOWED_ATTR = [
   "color",
   "colspan",
   "data-spk",
+  "decoding",
   "href",
+  "loading",
   "rel",
   "rowspan",
   "src",
@@ -445,7 +451,7 @@ function renderContent(
   // to avoid the dialogue-bolding regex mangling attribute quotes.
   const withImages = withBreaks.replace(
     /!\[([^\]]*)\]\((https?:\/\/[^)]+)\)/g,
-    (_m, alt: string, url: string) => `<img src="${url}" alt="${alt || "image"}">`,
+    (_m, alt: string, url: string) => `<img src="${url}" alt="${alt || "image"}" loading="lazy" decoding="async">`,
   );
 
   const clean = sanitizeChatHtml(withImages);
@@ -1046,6 +1052,8 @@ export const ChatMessage = memo(function ChatMessage({
             src={avatar.url}
             alt=""
             aria-hidden="true"
+            loading="lazy"
+            decoding="async"
             className="rpg-avatar-panel-tail-image absolute inset-0 h-full w-full object-cover object-top transition-opacity duration-700"
             style={{ opacity: i === 0 ? 1 : 0, ...getAvatarCropStyle(avatar.crop) }}
           />
@@ -1057,6 +1065,8 @@ export const ChatMessage = memo(function ChatMessage({
           src={avatarUrl}
           alt=""
           aria-hidden="true"
+          loading="lazy"
+          decoding="async"
           className="rpg-avatar-panel-tail-image absolute inset-0 h-full w-full object-cover object-top"
           style={avatarCropStyle}
         />
@@ -1116,10 +1126,12 @@ export const ChatMessage = memo(function ChatMessage({
         <div className="relative">
           {!multiSelectMode && onDelete && (
             <button
+              type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 onDelete(message.id);
               }}
+              aria-label="Delete message"
               className={cn(
                 "absolute -right-1 -top-1 rounded-md p-1 text-white/20 opacity-0 transition-all hover:bg-red-500/20 hover:text-red-400 group-hover:opacity-100",
                 showActions && "opacity-100",
@@ -1175,7 +1187,9 @@ export const ChatMessage = memo(function ChatMessage({
               {/* Delete button */}
               {!multiSelectMode && onDelete && (
                 <button
+                  type="button"
                   onClick={() => onDelete(message.id)}
+                  aria-label="Delete message"
                   className={cn(
                     "absolute right-2 top-2 rounded-md p-1 text-white/20 opacity-0 transition-all hover:bg-red-500/20 hover:text-red-400 group-hover:opacity-100",
                     showActions && "opacity-100",
@@ -1235,7 +1249,8 @@ export const ChatMessage = memo(function ChatMessage({
           {!isGrouped && !showRoleplayAvatarPanel && (
             <div className="mari-message-avatar flex flex-col items-center flex-shrink-0 pt-1">
               {isMergedGroup && mergedAvatars.length > 0 ? (
-                <div
+                <button
+                  type="button"
                   className={cn(
                     "rpg-avatar-glow relative cursor-pointer overflow-hidden ring-2 ring-white/10",
                     compactAvatarFrameClass,
@@ -1244,6 +1259,7 @@ export const ChatMessage = memo(function ChatMessage({
                     const visible = mergedAvatars[cycleIndexRef.current];
                     if (visible) setAvatarLightbox(visible.url);
                   }}
+                  aria-label={`Open ${displayName} avatar`}
                 >
                   {mergedAvatars.map((avatar, i) => (
                     <img
@@ -1253,24 +1269,30 @@ export const ChatMessage = memo(function ChatMessage({
                       }}
                       src={avatar.url}
                       alt="Group"
+                      loading="lazy"
+                      decoding="async"
                       className="absolute inset-0 h-full w-full object-cover transition-opacity duration-700"
                       style={{ opacity: i === 0 ? 1 : 0, ...getAvatarCropStyle(avatar.crop) }}
                     />
                   ))}
-                </div>
+                </button>
               ) : avatarUrl ? (
                 <div className={cn(!isUser && "rpg-avatar-glow")}>
-                  <div
+                  <button
+                    type="button"
                     className={cn("cursor-pointer overflow-hidden ring-2 ring-white/10", compactAvatarFrameClass)}
                     onClick={() => setAvatarLightbox(avatarUrl)}
+                    aria-label={`Open ${displayName} avatar`}
                   >
                     <img
                       src={avatarUrl}
                       alt={displayName}
+                      loading="lazy"
+                      decoding="async"
                       className="h-full w-full object-cover"
                       style={avatarCropStyle}
                     />
-                  </div>
+                  </button>
                 </div>
               ) : (
                 <div
@@ -1388,6 +1410,8 @@ export const ChatMessage = memo(function ChatMessage({
                               }}
                               src={avatar.url}
                               alt="Group"
+                              loading="lazy"
+                              decoding="async"
                               className="absolute inset-0 h-full w-full object-cover object-top transition-opacity duration-700"
                               style={{ opacity: i === 0 ? 1 : 0, ...getAvatarCropStyle(avatar.crop) }}
                             />
@@ -1406,6 +1430,8 @@ export const ChatMessage = memo(function ChatMessage({
                           <img
                             src={avatarUrl}
                             alt={displayName}
+                            loading="lazy"
+                            decoding="async"
                             className="h-full w-full object-cover object-top"
                             style={avatarCropStyle}
                           />
@@ -1464,16 +1490,20 @@ export const ChatMessage = memo(function ChatMessage({
                         onClick={() => setAvatarLightbox(att.url || att.data)}
                         className="block"
                         title="Open image"
+                        aria-label={`Open ${att.filename || att.name || "image"}`}
                       >
                         <img
                           src={att.url || att.data}
                           alt={att.filename || att.name || "image"}
                           className="max-h-80 max-w-full rounded-lg"
                           loading="lazy"
+                          decoding="async"
                         />
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleRemoveAttachment(i)}
+                        aria-label="Remove image from message"
                         title="Remove from message"
                         className="absolute top-1.5 right-1.5 rounded-full bg-black/60 p-1 text-white/80 transition-opacity hover:bg-black/80 hover:text-white sm:opacity-0 sm:group-hover/att:opacity-100"
                       >
@@ -1489,9 +1519,11 @@ export const ChatMessage = memo(function ChatMessage({
             {hasSwipes && (
               <div className="mari-message-swipes flex items-center gap-1.5 px-1 text-[0.75rem] text-white/40">
                 <button
+                  type="button"
                   className="rounded-md p-[0.25em] transition-colors hover:bg-white/10 disabled:opacity-30"
                   onClick={handleSwipePrev}
                   disabled={message.activeSwipeIndex <= 0}
+                  aria-label="Previous swipe"
                 >
                   <ChevronLeft size={MESSAGE_SWIPE_ICON_SIZE} />
                 </button>
@@ -1499,9 +1531,11 @@ export const ChatMessage = memo(function ChatMessage({
                   {message.activeSwipeIndex + 1}/{swipeCount}
                 </span>
                 <button
+                  type="button"
                   className="rounded-md p-[0.25em] transition-colors hover:bg-white/10 disabled:opacity-30"
                   onClick={handleSwipeNext}
                   disabled={message.activeSwipeIndex >= swipeCount - 1}
+                  aria-label="Next swipe"
                 >
                   <ChevronRight size={MESSAGE_SWIPE_ICON_SIZE} />
                 </button>
@@ -1637,10 +1671,13 @@ export const ChatMessage = memo(function ChatMessage({
             <img
               src={avatarLightbox}
               alt={displayName}
+              decoding="async"
               className="max-h-[85vh] max-w-[90vw] rounded-lg object-contain shadow-2xl"
             />
             <button
+              type="button"
               onClick={() => setAvatarLightbox(null)}
+              aria-label="Close image"
               className="absolute right-3 top-3 rounded-lg bg-black/60 p-2 text-white transition-colors hover:bg-black/80"
             >
               <X size="1rem" />
@@ -1679,12 +1716,14 @@ export const ChatMessage = memo(function ChatMessage({
             )}
           >
             {isMergedGroup && mergedAvatars.length > 0 ? (
-              <div
+              <button
+                type="button"
                 className="relative h-8 w-8 cursor-pointer overflow-hidden rounded-full"
                 onClick={() => {
                   const visible = mergedAvatars[cycleIndexRef.current];
                   if (visible) setAvatarLightbox(visible.url);
                 }}
+                aria-label={`Open ${displayName} avatar`}
               >
                 {mergedAvatars.map((avatar, i) => (
                   <img
@@ -1694,24 +1733,29 @@ export const ChatMessage = memo(function ChatMessage({
                     }}
                     src={avatar.url}
                     alt="Group"
+                    loading="lazy"
+                    decoding="async"
                     className="absolute inset-0 h-8 w-8 object-cover transition-opacity duration-700"
                     style={{ opacity: i === 0 ? 1 : 0, ...getAvatarCropStyle(avatar.crop) }}
                   />
                 ))}
-              </div>
+              </button>
             ) : avatarUrl ? (
-              <div
+              <button
+                type="button"
                 className="h-8 w-8 cursor-pointer overflow-hidden rounded-full"
                 onClick={() => setAvatarLightbox(avatarUrl)}
+                aria-label={`Open ${displayName} avatar`}
               >
                 <img
                   src={avatarUrl}
                   alt={displayName}
                   loading="lazy"
+                  decoding="async"
                   className="h-full w-full object-cover"
                   style={avatarCropStyle}
                 />
-              </div>
+              </button>
             ) : (
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--accent)] text-[0.6875rem] font-bold text-[var(--muted-foreground)]">
                 {displayName[0]}
@@ -1823,16 +1867,20 @@ export const ChatMessage = memo(function ChatMessage({
                       onClick={() => setAvatarLightbox(att.url || att.data)}
                       className="block"
                       title="Open image"
+                      aria-label={`Open ${att.filename || att.name || "image"}`}
                     >
                       <img
                         src={att.url || att.data}
                         alt={att.filename || att.name || "image"}
                         className="max-h-80 max-w-full rounded-lg"
                         loading="lazy"
+                        decoding="async"
                       />
                     </button>
                     <button
+                      type="button"
                       onClick={() => handleRemoveAttachment(i)}
+                      aria-label="Remove image from message"
                       title="Remove from message"
                       className="absolute top-1.5 right-1.5 rounded-full bg-black/60 p-1 text-white/80 transition-opacity hover:bg-black/80 hover:text-white sm:opacity-0 sm:group-hover/att:opacity-100"
                     >
@@ -1865,9 +1913,11 @@ export const ChatMessage = memo(function ChatMessage({
           {hasSwipes && (
             <div className="mari-message-swipes flex items-center gap-1.5 px-2 text-[0.75rem] text-[var(--muted-foreground)]">
               <button
+                type="button"
                 className="rounded p-[0.25em] transition-colors hover:bg-[var(--accent)] disabled:opacity-30"
                 onClick={handleSwipePrev}
                 disabled={message.activeSwipeIndex <= 0}
+                aria-label="Previous swipe"
               >
                 <ChevronLeft size={MESSAGE_SWIPE_ICON_SIZE} />
               </button>
@@ -1875,9 +1925,11 @@ export const ChatMessage = memo(function ChatMessage({
                 {message.activeSwipeIndex + 1}/{swipeCount}
               </span>
               <button
+                type="button"
                 className="rounded p-[0.25em] transition-colors hover:bg-[var(--accent)] disabled:opacity-30"
                 onClick={handleSwipeNext}
                 disabled={message.activeSwipeIndex >= swipeCount - 1}
+                aria-label="Next swipe"
               >
                 <ChevronRight size={MESSAGE_SWIPE_ICON_SIZE} />
               </button>
@@ -1992,10 +2044,13 @@ export const ChatMessage = memo(function ChatMessage({
           <img
             src={avatarLightbox}
             alt={displayName}
+            decoding="async"
             className="max-h-[85vh] max-w-[90vw] rounded-lg object-contain shadow-2xl"
           />
           <button
+            type="button"
             onClick={() => setAvatarLightbox(null)}
+            aria-label="Close image"
             className="absolute right-3 top-3 rounded-lg bg-black/60 p-2 text-white transition-colors hover:bg-black/80"
           >
             <X size="1rem" />
@@ -2023,7 +2078,9 @@ function ThinkingModal({ thinking, onClose }: { thinking: string; onClose: () =>
             Model Thoughts
           </div>
           <button
+            type="button"
             onClick={onClose}
+            aria-label="Close thoughts"
             className="rounded-md p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
           >
             <X size="0.875rem" />
@@ -2058,8 +2115,10 @@ function ActionBtn({
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       title={title}
+      aria-label={title}
       disabled={disabled}
       className={cn(
         "rounded-md p-[0.35em] text-[0.8125rem] transition-all active:scale-90 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-30",

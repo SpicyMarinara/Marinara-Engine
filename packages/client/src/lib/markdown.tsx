@@ -69,6 +69,7 @@ export function applyInlineMarkdown(text: string, keyPrefix: string, _depth = 0)
             alt={match[3] || ""}
             className="my-1 inline-block max-w-full rounded-lg align-bottom sm:max-w-md"
             loading="lazy"
+            decoding="async"
           />,
         );
       } else {
@@ -488,6 +489,7 @@ export function renderMarkdownBlocks(
           alt={imgMatch[1] || ""}
           className="my-1 max-w-full rounded-lg sm:max-w-md"
           loading="lazy"
+          decoding="async"
         />,
       );
       continue;
