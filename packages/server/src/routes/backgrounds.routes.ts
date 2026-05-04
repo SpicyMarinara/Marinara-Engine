@@ -4,10 +4,9 @@
 import type { FastifyInstance } from "fastify";
 import { existsSync, mkdirSync, readdirSync, unlinkSync, readFileSync, writeFileSync, renameSync } from "fs";
 import { join, extname, basename, parse as parsePath } from "path";
-import { pipeline } from "stream/promises";
-import { createWriteStream } from "fs";
 import { DATA_DIR } from "../utils/data-dir.js";
 import { buildAssetManifest } from "../services/game/asset-manifest.service.js";
+import { assertInsideDir, isAllowedImageBuffer } from "../utils/security.js";
 
 const BG_DIR = join(DATA_DIR, "backgrounds");
 const META_PATH = join(BG_DIR, "meta.json");
@@ -99,9 +98,12 @@ export async function backgroundsRoutes(app: FastifyInstance) {
     // Use the original filename (sanitised) instead of a UUID
     const sanitized = sanitizeFilename(basename(data.filename));
     const safeName = sanitized ? uniqueFilename(sanitized) : uniqueFilename(`background${ext}`);
-    const filePath = join(BG_DIR, safeName);
-
-    await pipeline(data.file, createWriteStream(filePath));
+    const filePath = assertInsideDir(BG_DIR, join(BG_DIR, safeName));
+    const buffer = await data.toBuffer();
+    if (!isAllowedImageBuffer(buffer, ext)) {
+      return reply.status(400).send({ error: "Unsupported or invalid image file" });
+    }
+    writeFileSync(filePath, buffer);
 
     // Store metadata
     const meta = readMeta();
@@ -127,7 +129,7 @@ export async function backgroundsRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "Invalid filename" });
     }
 
-    const filePath = join(BG_DIR, filename);
+    const filePath = assertInsideDir(BG_DIR, join(BG_DIR, filename));
     if (!existsSync(filePath)) {
       return reply.status(404).send({ error: "Not found" });
     }
@@ -166,7 +168,7 @@ export async function backgroundsRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "Invalid filename" });
     }
 
-    const filePath = join(BG_DIR, filename);
+    const filePath = assertInsideDir(BG_DIR, join(BG_DIR, filename));
     if (!existsSync(filePath)) {
       return reply.status(404).send({ error: "Not found" });
     }
@@ -189,7 +191,7 @@ export async function backgroundsRoutes(app: FastifyInstance) {
     }
 
     const newFilename = uniqueFilename(desired);
-    const newPath = join(BG_DIR, newFilename);
+    const newPath = assertInsideDir(BG_DIR, join(BG_DIR, newFilename));
 
     renameSync(filePath, newPath);
 
@@ -222,7 +224,7 @@ export async function backgroundsRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "Invalid filename" });
     }
 
-    const filePath = join(BG_DIR, filename);
+    const filePath = assertInsideDir(BG_DIR, join(BG_DIR, filename));
     if (!existsSync(filePath)) {
       return reply.status(404).send({ error: "Not found" });
     }
@@ -254,7 +256,7 @@ export async function backgroundsRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "Invalid filename" });
     }
 
-    const filePath = join(BG_DIR, filename);
+    const filePath = assertInsideDir(BG_DIR, join(BG_DIR, filename));
     if (!existsSync(filePath)) {
       return reply.status(404).send({ error: "Not found" });
     }

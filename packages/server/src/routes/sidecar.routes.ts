@@ -32,6 +32,8 @@ import {
   type SidecarDownloadProgress,
   type SidecarQuantization,
 } from "@marinara-engine/shared";
+import { isSidecarRuntimeInstallEnabled } from "../config/runtime-config.js";
+import { requirePrivilegedAccess } from "../middleware/privileged-gate.js";
 
 const quantizationSchema = z.enum(["q8_0", "q4_k_m"]);
 const hfRepoSchema = z
@@ -80,6 +82,13 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post("/runtime/install", async (req, reply) => {
+    if (!requirePrivilegedAccess(req, reply, { feature: "Sidecar runtime install" })) return;
+    if (!isSidecarRuntimeInstallEnabled()) {
+      return reply.status(403).send({
+        error: "Sidecar runtime install is disabled",
+        message: "Set SIDECAR_RUNTIME_INSTALL_ENABLED=true to allow runtime installation from the API.",
+      });
+    }
     const body = z.object({ reinstall: z.boolean().optional() }).parse(req.body ?? {});
 
     await handleDownloadSse(reply, async () => {
@@ -91,7 +100,8 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
     });
   });
 
-  app.post("/restart", async () => {
+  app.post("/restart", async (req, reply) => {
+    if (!requirePrivilegedAccess(req, reply, { feature: "Sidecar restart" })) return;
     await sidecarProcessService.restart();
     return { ok: true };
   });
@@ -122,7 +132,11 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
-  app.post("/reinstall", async () => {
+  app.post("/reinstall", async (req, reply) => {
+    if (!requirePrivilegedAccess(req, reply, { feature: "Sidecar runtime reinstall" })) return;
+    if (!isSidecarRuntimeInstallEnabled()) {
+      return reply.status(403).send({ error: "Sidecar runtime install is disabled" });
+    }
     await sidecarProcessService.reinstallRuntime();
     return { ok: true };
   });
@@ -179,6 +193,7 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
   app.post<{
     Body: { quantization: SidecarQuantization };
   }>("/download", async (req, reply) => {
+    if (!requirePrivilegedAccess(req, reply, { feature: "Sidecar model download" })) return;
     const { quantization } = z.object({ quantization: quantizationSchema }).parse(req.body);
     await handleDownloadSse(reply, async () => {
       await sidecarProcessService.stop();
@@ -190,6 +205,7 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
   app.post<{
     Body: { repo: string; modelPath?: string };
   }>("/download/custom", async (req, reply) => {
+    if (!requirePrivilegedAccess(req, reply, { feature: "Sidecar custom model download" })) return;
     const body = z
       .object({
         repo: hfRepoSchema,
@@ -204,7 +220,8 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
     });
   });
 
-  app.post("/download/cancel", async () => {
+  app.post("/download/cancel", async (req, reply) => {
+    if (!requirePrivilegedAccess(req, reply, { feature: "Sidecar download cancel" })) return;
     sidecarModelService.cancelDownload();
     mlxRuntimeService.cancelInstall();
     sidecarRuntimeService.cancelInstall();
@@ -212,6 +229,7 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.delete("/model", async (_req, reply) => {
+    if (!requirePrivilegedAccess(_req, reply, { feature: "Sidecar model deletion" })) return;
     if (isInferenceBusy()) {
       return reply.status(409).send({ error: "Cannot delete the sidecar model while inference is in progress" });
     }
@@ -254,11 +272,7 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
     const requestDebug = body.debugMode === true;
     const debugLogsEnabled = requestDebug || logger.isLevelEnabled("debug");
     const debugLog = (message: string, ...args: any[]) => {
-      if (requestDebug) {
-        console.log(message, ...args);
-      } else {
-        logger.debug(message, ...args);
-      }
+      logger.debug(message, ...args);
     };
     const available = await isInferenceAvailable();
     if (!available) {

@@ -7,13 +7,14 @@ services:
     image: ghcr.io/pasta-devs/marinara-engine:latest
     init: true
     ports:
-      - "${PORT:-7860}:7860"
+      - "127.0.0.1:${PORT:-7860}:7860"
     volumes:
       - marinara-data:/app/data
     environment:
       - NODE_ENV=production
       - DATA_DIR=/app/data
       - AUTO_CREATE_DEFAULT_CONNECTION=${AUTO_CREATE_DEFAULT_CONNECTION:-true}
+      # Set BASIC_AUTH_USER/BASIC_AUTH_PASS and ADMIN_SECRET before exposing beyond localhost.
       # - TZ=America/New_York          # IANA timezone for time-based features (e.g. character schedules)
       # - ENCRYPTION_KEY=              # AES key for API key encryption (generate: openssl rand -hex 32)
       # - LOG_LEVEL=debug              # Set to "debug" to log full prompts & responses

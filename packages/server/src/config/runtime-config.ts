@@ -53,6 +53,17 @@ function isDisabledFlag(value: string | undefined | null) {
   return ["0", "false", "no", "off"].includes((value ?? "").trim().toLowerCase());
 }
 
+function isEnabledFlag(value: string | undefined | null) {
+  return ["1", "true", "yes", "on"].includes((value ?? "").trim().toLowerCase());
+}
+
+function parseCsv(value: string | undefined | null): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
 export function getMonorepoRoot() {
   return MONOREPO_ROOT;
 }
@@ -167,8 +178,15 @@ export function getBasicAuthConfig() {
  * Default false — protects users who accidentally expose the port.
  */
 export function isUnauthenticatedRemoteAllowed() {
-  const value = (process.env.ALLOW_UNAUTHENTICATED_REMOTE ?? "").trim().toLowerCase();
-  return ["1", "true", "yes", "on"].includes(value);
+  return isEnabledFlag(process.env.ALLOW_UNAUTHENTICATED_REMOTE);
+}
+
+/**
+ * Explicit compatibility switch for old LAN/Tailscale/Docker convenience.
+ * Default false: loopback stays passwordless; every other client needs auth.
+ */
+export function isUnauthenticatedPrivateNetworkAllowed() {
+  return isEnabledFlag(process.env.ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK);
 }
 
 /**
@@ -191,6 +209,54 @@ export function getGifApiKey() {
 
 export function getAdminSecret() {
   return normalizeEnvValue(process.env.ADMIN_SECRET);
+}
+
+export function getCsrfTrustedOrigins() {
+  return parseCsv(process.env.CSRF_TRUSTED_ORIGINS);
+}
+
+export function isUpdatesApplyEnabled() {
+  return isEnabledFlag(process.env.UPDATES_APPLY_ENABLED);
+}
+
+export function isUpdatesRemoteApplyAllowed() {
+  return isEnabledFlag(process.env.UPDATES_ALLOW_REMOTE_APPLY);
+}
+
+export function isProviderLocalUrlsEnabled() {
+  return isEnabledFlag(process.env.PROVIDER_LOCAL_URLS_ENABLED);
+}
+
+export function isImageLocalUrlsEnabled() {
+  return isEnabledFlag(process.env.IMAGE_LOCAL_URLS_ENABLED);
+}
+
+export function isTtsLocalUrlsEnabled() {
+  return isEnabledFlag(process.env.TTS_LOCAL_URLS_ENABLED);
+}
+
+export function isDeeplxLocalUrlsEnabled() {
+  return isEnabledFlag(process.env.DEEPLX_LOCAL_URLS_ENABLED);
+}
+
+export function isWebhookLocalUrlsEnabled() {
+  return isEnabledFlag(process.env.WEBHOOK_LOCAL_URLS_ENABLED);
+}
+
+export function isCustomToolScriptEnabled() {
+  return isEnabledFlag(process.env.CUSTOM_TOOL_SCRIPT_ENABLED);
+}
+
+export function isSidecarRuntimeInstallEnabled() {
+  return isEnabledFlag(process.env.SIDECAR_RUNTIME_INSTALL_ENABLED);
+}
+
+export function isHapticsRemoteAllowed() {
+  return isEnabledFlag(process.env.HAPTICS_ALLOW_REMOTE);
+}
+
+export function getImportAllowedRoots() {
+  return parseCsv(process.env.IMPORT_ALLOWED_ROOTS).map(resolveFromRepoRoot);
 }
 
 export function getEncryptionKeyOverride() {

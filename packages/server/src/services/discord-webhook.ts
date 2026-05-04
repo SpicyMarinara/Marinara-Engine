@@ -2,6 +2,7 @@
 // Discord Webhook Mirror — one-way message relay
 // ──────────────────────────────────────────────
 import { logger } from "../lib/logger.js";
+import { safeFetch } from "../utils/security.js";
 // Posts messages to a Discord channel webhook with per-character identity.
 // Webhook API: https://discord.com/developers/docs/resources/webhook#execute-webhook
 
@@ -79,10 +80,11 @@ export function postToDiscordWebhook(
     if (opts.avatarUrl) body.avatar_url = opts.avatarUrl;
 
     try {
-      const res = await fetch(webhookUrl, {
+      const res = await safeFetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        maxResponseBytes: 128 * 1024,
       });
 
       // Respect Discord rate limit (429)

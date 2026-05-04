@@ -3,6 +3,7 @@
 // ──────────────────────────────────────────────
 import type { FastifyInstance } from "fastify";
 import { logger } from "../lib/logger.js";
+import { safeFetch } from "../utils/security.js";
 
 const PYGMALION_API_BASE = "https://server.pygmalion.chat/galatea.v1.PublicCharacterService";
 const PYGMALION_ORIGIN = "https://pygmalion.chat";
@@ -250,7 +251,12 @@ export async function botBrowserPygmalionRoutes(app: FastifyInstance) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15_000);
     try {
-      const res = await fetch(url, { signal: controller.signal });
+      const res = await safeFetch(url, {
+        signal: controller.signal,
+        policy: { allowedProtocols: ["https:"] },
+        allowedContentTypes: ["image/"],
+        maxResponseBytes: 10 * 1024 * 1024,
+      });
       if (!res.ok) return reply.status(404).send({ error: "Avatar not found" });
       const buf = Buffer.from(await res.arrayBuffer());
       const ct = res.headers.get("content-type") || "image/webp";

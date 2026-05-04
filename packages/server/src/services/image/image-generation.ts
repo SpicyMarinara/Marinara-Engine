@@ -19,6 +19,8 @@ import {
   type ComfyUiDefaults,
   type ImageGenerationDefaultsProfile,
 } from "@marinara-engine/shared";
+import { isImageLocalUrlsEnabled } from "../../config/runtime-config.js";
+import { safeFetch } from "../../utils/security.js";
 
 const GALLERY_DIR = join(DATA_DIR, "gallery");
 
@@ -145,6 +147,15 @@ export function saveImageToDisk(chatId: string, base64: string, ext: string): st
 
 /** Default 5-minute timeout for image generation API calls (overridable via env). */
 const IMAGE_GEN_TIMEOUT = Number(process.env.IMAGE_GEN_TIMEOUT_MS ?? 300_000);
+const MAX_IMAGE_RESPONSE_BYTES = 30 * 1024 * 1024;
+
+function imageFetch(url: string | URL, init?: RequestInit) {
+  return safeFetch(url, {
+    ...(init ?? {}),
+    policy: { allowLocal: isImageLocalUrlsEnabled(), allowedProtocols: ["https:", "http:"] },
+    maxResponseBytes: MAX_IMAGE_RESPONSE_BYTES,
+  });
+}
 
 function isOpenAIGptImageModel(model?: string): boolean {
   return !!model && /^gpt-image-(?:1|1\.5|2)(?:$|-)/i.test(model.trim());
@@ -227,7 +238,7 @@ function nanoGPTImagesUrl(baseUrl: string): string {
 }
 
 async function downloadImageUrl(imageUrl: string): Promise<ImageGenResult> {
-  const imgResp = await fetch(imageUrl, { signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT) });
+  const imgResp = await imageFetch(imageUrl, { signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT) });
   if (!imgResp.ok) {
     throw new Error(`Failed to download generated image (${imgResp.status})`);
   }
@@ -266,7 +277,7 @@ async function generateOpenAI(baseUrl: string, apiKey: string, request: ImageGen
     body.response_format = "b64_json";
   }
 
-  const resp = await fetch(url, {
+  const resp = await imageFetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -313,7 +324,7 @@ async function generateNanoGPT(baseUrl: string, apiKey: string, request: ImageGe
     body.imageDataUrls = references.map(imageDataUrlFromReference);
   }
 
-  const resp = await fetch(url, {
+  const resp = await imageFetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -346,7 +357,7 @@ async function generatePollinations(request: ImageGenRequest): Promise<ImageGenR
   if (request.negativePrompt) params.set("negative", request.negativePrompt);
 
   const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(request.prompt)}?${params}`;
-  const resp = await fetch(url, { signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT) });
+  const resp = await imageFetch(url, { signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT) });
 
   if (!resp.ok) {
     throw new Error(`Pollinations image generation failed (${resp.status})`);
@@ -382,7 +393,7 @@ async function generateStability(baseUrl: string, apiKey: string, request: Image
   }
   formData.append("output_format", "png");
 
-  const resp = await fetch(url, {
+  const resp = await imageFetch(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -415,7 +426,7 @@ async function generateTogetherAI(baseUrl: string, apiKey: string, request: Imag
   };
   if (request.negativePrompt) body.negative_prompt = request.negativePrompt;
 
-  const resp = await fetch(url, {
+  const resp = await imageFetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -496,7 +507,7 @@ async function generateNovelAI(baseUrl: string, apiKey: string, request: ImageGe
     parameters,
   };
 
-  const resp = await fetch(url, {
+  const resp = await imageFetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -632,7 +643,7 @@ async function generateViaChatCompletions(
     messageContent = request.prompt;
   }
 
-  const resp = await fetch(url, {
+  const resp = await imageFetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -803,7 +814,7 @@ async function generateComfyUI(baseUrl: string, request: ImageGenRequest): Promi
   const resolvedWorkflow = JSON.parse(wfStr);
 
   // Queue the workflow
-  const queueResp = await fetch(`${base}/prompt`, {
+  const queueResp = await imageFetch(`${base}/prompt`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt: resolvedWorkflow }),
@@ -821,7 +832,7 @@ async function generateComfyUI(baseUrl: string, request: ImageGenRequest): Promi
   for (let i = 0; i < COMFYUI_GEN_TIMEOUT; i++) {
     await new Promise((r) => setTimeout(r, 1000));
 
-    const historyResp = await fetch(`${base}/history/${prompt_id}`);
+    const historyResp = await imageFetch(`${base}/history/${prompt_id}`);
     if (!historyResp.ok) continue;
 
     const history = (await historyResp.json()) as Record<
@@ -845,7 +856,7 @@ async function generateComfyUI(baseUrl: string, request: ImageGenRequest): Promi
           type: img.type || "output",
         });
 
-        const imgResp = await fetch(`${base}/view?${params}`);
+        const imgResp = await imageFetch(`${base}/view?${params}`);
         if (!imgResp.ok) {
           throw new Error(`ComfyUI image fetch failed (${imgResp.status})`);
         }
@@ -902,7 +913,7 @@ async function generateAutomatic1111(baseUrl: string, request: ImageGenRequest):
 
   const endpoint = useImg2Img ? `${base}/sdapi/v1/img2img` : `${base}/sdapi/v1/txt2img`;
 
-  const resp = await fetch(endpoint, {
+  const resp = await imageFetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

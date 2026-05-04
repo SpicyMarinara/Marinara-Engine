@@ -16,6 +16,8 @@ import { getDataDir } from "../utils/data-dir.js";
 import { getDatabaseFilePath, getFileStorageDir } from "../config/runtime-config.js";
 import { normalizeTimestampOverrides } from "../services/import/import-timestamps.js";
 import { flushDB } from "../db/connection.js";
+import { requirePrivilegedAccess } from "../middleware/privileged-gate.js";
+import { assertInsideDir } from "../utils/security.js";
 
 /** Directories inside DATA_DIR that should be included in every backup. */
 const BACKUP_DIRS = ["storage", "avatars", "sprites", "backgrounds", "gallery", "fonts", "knowledge-sources"];
@@ -29,7 +31,35 @@ function resolveAvatarWritePath(dataDir: string, avatarPath: unknown) {
   if (typeof avatarPath !== "string" || !avatarPath.trim()) return null;
   const filename = avatarPath.split("?")[0]?.split("/").filter(Boolean).pop();
   if (!filename) return null;
-  return join(dataDir, "avatars", filename);
+  return assertInsideDir(join(dataDir, "avatars"), join(dataDir, "avatars", filename));
+}
+
+function redactAgentSecrets(agent: any) {
+  const redactSettings = (settings: unknown): unknown => {
+    if (!settings || typeof settings !== "object" || Array.isArray(settings)) return settings;
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(settings)) {
+      const lower = key.toLowerCase();
+      if (lower.includes("token") || lower.includes("secret") || lower.includes("password") || lower.includes("apikey")) {
+        out[key] = null;
+      } else if (value && typeof value === "object" && !Array.isArray(value)) {
+        out[key] = redactSettings(value);
+      } else {
+        out[key] = value;
+      }
+    }
+    return out;
+  };
+
+  if (typeof agent.settings === "string") {
+    try {
+      return { ...agent, settings: redactSettings(JSON.parse(agent.settings)) };
+    } catch {
+      return agent;
+    }
+  }
+
+  return { ...agent, settings: redactSettings(agent.settings) };
 }
 
 async function buildProfileExportEnvelope(app: FastifyInstance): Promise<ExportEnvelope> {
@@ -83,7 +113,7 @@ async function buildProfileExportEnvelope(app: FastifyInstance): Promise<ExportE
     }),
   );
 
-  const allAgents = await agents.list();
+  const allAgents = (await agents.list()).map(redactAgentSecrets);
   const allThemes = await themes.list();
 
   return {
@@ -118,7 +148,8 @@ function buildBackupRestoreNotes() {
 
 export async function backupRoutes(app: FastifyInstance) {
   // Create a full backup folder
-  app.post("/", async (_req, reply) => {
+  app.post("/", async (req, reply) => {
+    if (!requirePrivilegedAccess(req, reply, { feature: "Backup creation" })) return;
     await flushDB();
     const dataDir = getDataDir();
     const dbPath = getDatabaseFilePath();
@@ -162,7 +193,8 @@ export async function backupRoutes(app: FastifyInstance) {
   // Download a full backup as a single zip — client-side saves to a
   // user-chosen location via the browser's Save dialog / File System Access
   // API. Preferred on Android where the on-disk data folder isn't reachable.
-  app.post("/download", async (_req, reply) => {
+  app.post("/download", async (req, reply) => {
+    if (!requirePrivilegedAccess(req, reply, { feature: "Backup download" })) return;
     await flushDB();
     const dataDir = getDataDir();
     const dbPath = getDatabaseFilePath();
@@ -234,6 +266,7 @@ export async function backupRoutes(app: FastifyInstance) {
 
   // Delete a backup
   app.delete<{ Params: { name: string } }>("/:name", async (req, reply) => {
+    if (!requirePrivilegedAccess(req, reply, { feature: "Backup deletion" })) return;
     const { name } = req.params;
     // Sanitize: only allow backup folder names
     if (!/^marinara-backup-[\w-]+$/.test(name)) {
@@ -256,7 +289,8 @@ export async function backupRoutes(app: FastifyInstance) {
   // ── Profile Export ──
   // Returns a portable JSON envelope with characters, personas, lorebooks,
   // presets (+ groups/sections/choices), agent configs, and synced custom themes.
-  app.get("/export-profile", async (_req, reply) => {
+  app.get("/export-profile", async (req, reply) => {
+    if (!requirePrivilegedAccess(req, reply, { feature: "Profile export" })) return;
     const envelope = await buildProfileExportEnvelope(app);
 
     return reply
@@ -268,6 +302,7 @@ export async function backupRoutes(app: FastifyInstance) {
   // ── Profile Import ──
   // Accepts a profile JSON envelope and creates all entities.
   app.post("/import-profile", { bodyLimit: PROFILE_IMPORT_BODY_LIMIT_BYTES }, async (req, reply) => {
+    if (!requirePrivilegedAccess(req, reply, { feature: "Profile import" })) return;
     const envelope = req.body as ExportEnvelope;
     if (!envelope || envelope.type !== "marinara_profile" || envelope.version !== 1) {
       return reply.status(400).send({ error: "Invalid profile export" });

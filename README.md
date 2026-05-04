@@ -129,6 +129,8 @@ More detailed public [roadmap](https://github.com/orgs/Pasta-Devs/projects/1).
 
 Each guide covers installation, updating, and LAN access for that platform. See [Configuration Reference](docs/CONFIGURATION.md) for environment variables setup. Having trouble? See [FAQ](docs/FAQ.md) and [Troubleshooting](docs/TROUBLESHOOTING.md).
 
+Security defaults are intentionally local-first: loopback access works out of the box, while LAN, Docker bridge, Tailscale, and public clients require Basic Auth unless you explicitly opt back into unauthenticated private-network access. Powerful actions such as backups, bulk import, update apply, sidecar install/download/delete, haptics, and custom tool mutation also require `ADMIN_SECRET`; see [Access Control](docs/CONFIGURATION.md#access-control).
+
 ---
 
 ## Features

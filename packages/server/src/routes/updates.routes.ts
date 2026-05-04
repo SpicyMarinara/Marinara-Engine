@@ -8,8 +8,9 @@ import { execFile } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { promisify } from "util";
-import { getMonorepoRoot } from "../config/runtime-config.js";
+import { getMonorepoRoot, isUpdatesApplyEnabled, isUpdatesRemoteApplyAllowed } from "../config/runtime-config.js";
 import { getBuildCommit, getBuildLabel } from "../config/build-info.js";
+import { requirePrivilegedAccess } from "../middleware/privileged-gate.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -196,20 +197,7 @@ async function resolvePinnedPnpmRunner(root: string): Promise<PnpmRunner> {
     // Fall through to npx.
   }
 
-  try {
-    const { stdout } = await execFileAsync("npx", ["--yes", `pnpm@${pnpmVersion}`, "--version"], {
-      cwd: root,
-      timeout: 60_000,
-      shell,
-    });
-    if (stdout.trim() === pnpmVersion) {
-      return { command: "npx", prefixArgs: ["--yes", `pnpm@${pnpmVersion}`] };
-    }
-  } catch {
-    // Fall through to the final error below.
-  }
-
-  throw new Error(`Could not start pnpm ${pnpmVersion} via Corepack or npx.`);
+  throw new Error(`Could not start pnpm ${pnpmVersion} via Corepack. Enable Corepack or run the update manually.`);
 }
 
 async function runPinnedPnpm(root: string, args: string[], timeout: number) {
@@ -275,6 +263,15 @@ async function resolveLatestReleaseFromGitHub(signal: AbortSignal) {
   };
 }
 
+type ApplyUpdateBody = {
+  confirm?: boolean;
+  currentVersion?: string;
+  currentBuild?: string | null;
+  currentCommit?: string | null;
+  targetRef?: string;
+  targetCommit?: string;
+};
+
 export async function updatesRoutes(app: FastifyInstance) {
   // ── Check for updates ──
   // GET /api/updates/check
@@ -311,6 +308,8 @@ export async function updatesRoutes(app: FastifyInstance) {
         versionUpdate,
         commitsBehind: commitsBehind ?? 0,
         installType: gitInstall ? "git" : "standalone",
+        targetRef: UPDATE_REF,
+        targetCommit: gitInstall ? await resolveGitRef(getMonorepoRoot(), UPDATE_REF) : null,
       };
     }
 
@@ -334,6 +333,8 @@ export async function updatesRoutes(app: FastifyInstance) {
         versionUpdate,
         commitsBehind: commitsBehind ?? 0,
         installType: gitInstall ? "git" : "standalone",
+        targetRef: UPDATE_REF,
+        targetCommit: gitInstall ? await resolveGitRef(getMonorepoRoot(), UPDATE_REF) : null,
       };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -351,7 +352,23 @@ export async function updatesRoutes(app: FastifyInstance) {
   // ── Apply update (git installs only) ──
   // POST /api/updates/apply
   // Fast-forwards to origin/main, installs, rebuilds, then signals the process to restart.
-  app.post("/apply", async (_req, reply) => {
+  app.post<{ Body: ApplyUpdateBody }>("/apply", async (req, reply) => {
+    if (!isUpdatesApplyEnabled()) {
+      return reply.status(403).send({
+        error: "Auto-update apply is disabled",
+        message: "Set UPDATES_APPLY_ENABLED=true to enable server-side update application.",
+      });
+    }
+
+    if (
+      !requirePrivilegedAccess(req, reply, {
+        feature: "Update apply",
+        loopbackOnly: !isUpdatesRemoteApplyAllowed(),
+      })
+    ) {
+      return;
+    }
+
     if (!isGitInstall()) {
       return reply.status(400).send({
         error:
@@ -363,6 +380,21 @@ export async function updatesRoutes(app: FastifyInstance) {
     const root = getMonorepoRoot();
 
     try {
+      const body = req.body ?? {};
+      if (body.confirm !== true) {
+        return reply.status(400).send({ error: "Must send { confirm: true } to apply an update" });
+      }
+      if (body.currentVersion !== APP_VERSION) {
+        return reply.status(409).send({ error: "Current version confirmation does not match the running server" });
+      }
+      const buildCommit = getBuildCommit();
+      if (buildCommit && body.currentCommit && body.currentCommit !== buildCommit) {
+        return reply.status(409).send({ error: "Current commit confirmation does not match the running server" });
+      }
+      if (body.targetRef && body.targetRef !== UPDATE_REF) {
+        return reply.status(400).send({ error: `Update target ref must be ${UPDATE_REF}` });
+      }
+
       const currentBranch = await getCurrentBranch(root);
       const oldHead = await resolveGitRef(root, "HEAD");
       if (!oldHead) {
@@ -373,6 +405,12 @@ export async function updatesRoutes(app: FastifyInstance) {
       const targetHead = await resolveGitRef(root, UPDATE_REF);
       if (!targetHead) {
         throw new Error(`Could not resolve ${UPDATE_REF}.`);
+      }
+      if (!body.targetCommit || body.targetCommit !== targetHead) {
+        return reply.status(409).send({
+          error: "Update target commit confirmation does not match the latest checked target",
+          expectedTargetCommit: targetHead,
+        });
       }
 
       // Step 0: stash local tracked changes so the fast-forward does not fail.
@@ -466,7 +504,7 @@ export async function updatesRoutes(app: FastifyInstance) {
       const pnpmVersion = getPinnedPnpmVersion(root);
       return reply.status(500).send({
         error: `Update failed: ${message}`,
-        hint: `You can try running the update manually: git fetch ${UPDATE_REMOTE} ${UPDATE_BRANCH} && git merge --ff-only ${UPDATE_REF} && npx --yes pnpm@${pnpmVersion} install --frozen-lockfile && npx --yes pnpm@${pnpmVersion} --filter @marinara-engine/shared build && npx --yes pnpm@${pnpmVersion} --filter @marinara-engine/server --filter @marinara-engine/client --parallel run build`,
+        hint: `You can try running the update manually: git fetch ${UPDATE_REMOTE} ${UPDATE_BRANCH} && git merge --ff-only ${UPDATE_REF} && corepack pnpm@${pnpmVersion} install --frozen-lockfile && corepack pnpm@${pnpmVersion} --filter @marinara-engine/shared build && corepack pnpm@${pnpmVersion} --filter @marinara-engine/server --filter @marinara-engine/client --parallel run build`,
       });
     }
   });

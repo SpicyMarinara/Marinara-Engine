@@ -6,6 +6,8 @@ import { createConnectionSchema, inferImageSource } from "@marinara-engine/share
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
 import { createLLMProvider } from "../services/llm/provider-registry.js";
 import { resolveConnectionImageDefaults } from "../services/image/image-generation-defaults.js";
+import { isProviderLocalUrlsEnabled } from "../config/runtime-config.js";
+import { safeFetch } from "../utils/security.js";
 
 function resolveImageGenerationSource(conn: Record<string, unknown>, baseUrl: string): string {
   const explicitSource = typeof conn.imageGenerationSource === "string" ? conn.imageGenerationSource : "";
@@ -128,7 +130,11 @@ export async function connectionsRoutes(app: FastifyInstance) {
         testUrl = `${baseUrl}${provider?.modelsEndpoint || "/models"}`;
       }
 
-      const res = await fetch(testUrl, { headers });
+      const res = await safeFetch(testUrl, {
+        headers,
+        policy: { allowLocal: isProviderLocalUrlsEnabled(), allowedProtocols: ["https:", "http:"] },
+        maxResponseBytes: 2 * 1024 * 1024,
+      });
       const latencyMs = Date.now() - start;
 
       if (res.ok) {
@@ -200,7 +206,10 @@ export async function connectionsRoutes(app: FastifyInstance) {
 
       // ComfyUI: fetch checkpoints from object_info
       if (conn.provider === "image_generation" && imageSource === "comfyui") {
-        const res = await fetch(`${baseUrl}/object_info/CheckpointLoaderSimple`);
+        const res = await safeFetch(`${baseUrl}/object_info/CheckpointLoaderSimple`, {
+          policy: { allowLocal: isProviderLocalUrlsEnabled(), allowedProtocols: ["https:", "http:"] },
+          maxResponseBytes: 5 * 1024 * 1024,
+        });
         if (!res.ok) {
           return reply.status(502).send({ error: `ComfyUI returned ${res.status}` });
         }
@@ -213,7 +222,10 @@ export async function connectionsRoutes(app: FastifyInstance) {
 
       // AUTOMATIC1111 / SD Web UI: fetch models from /sdapi/v1/sd-models
       if (conn.provider === "image_generation" && imageSource === "automatic1111") {
-        const res = await fetch(`${baseUrl}/sdapi/v1/sd-models`);
+        const res = await safeFetch(`${baseUrl}/sdapi/v1/sd-models`, {
+          policy: { allowLocal: isProviderLocalUrlsEnabled(), allowedProtocols: ["https:", "http:"] },
+          maxResponseBytes: 5 * 1024 * 1024,
+        });
         if (!res.ok) {
           return reply.status(502).send({ error: `SD Web UI returned ${res.status}` });
         }
@@ -226,7 +238,11 @@ export async function connectionsRoutes(app: FastifyInstance) {
       }
 
       if (conn.provider === "image_generation" && lowerBase.includes("nano-gpt.com")) {
-        const res = await fetch(`${baseUrl}/image-models`, { headers });
+        const res = await safeFetch(`${baseUrl}/image-models`, {
+          headers,
+          policy: { allowLocal: isProviderLocalUrlsEnabled(), allowedProtocols: ["https:", "http:"] },
+          maxResponseBytes: 5 * 1024 * 1024,
+        });
         if (!res.ok) {
           const body = await res.text();
           return reply.status(502).send({ error: `Provider returned ${res.status}: ${sanitizeProviderBody(body)}` });
@@ -251,7 +267,11 @@ export async function connectionsRoutes(app: FastifyInstance) {
         modelsUrl += `?key=${conn.apiKey}`;
       }
 
-      const res = await fetch(modelsUrl, { headers });
+      const res = await safeFetch(modelsUrl, {
+        headers,
+        policy: { allowLocal: isProviderLocalUrlsEnabled(), allowedProtocols: ["https:", "http:"] },
+        maxResponseBytes: 5 * 1024 * 1024,
+      });
       if (!res.ok) {
         const body = await res.text();
         return reply.status(502).send({

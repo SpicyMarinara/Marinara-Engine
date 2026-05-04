@@ -3,6 +3,9 @@
 // ──────────────────────────────────────────────
 import type { LLMToolCall } from "../llm/base-provider.js";
 import vm from "node:vm";
+import { isCustomToolScriptEnabled, isWebhookLocalUrlsEnabled } from "../../config/runtime-config.js";
+import { safeFetch } from "../../utils/security.js";
+import { logger } from "../../lib/logger.js";
 
 export interface ToolExecutionResult {
   toolCallId: string;
@@ -144,6 +147,7 @@ async function executeSingleTool(
 // ── Custom Tool Execution ──
 
 async function executeCustomTool(tool: CustomToolDef, args: Record<string, unknown>): Promise<unknown> {
+  logger.info("[custom-tools] Executing %s custom tool %s", tool.executionType, tool.name);
   switch (tool.executionType) {
     case "static":
       return { result: tool.staticResult ?? "OK", tool: tool.name, args };
@@ -151,11 +155,16 @@ async function executeCustomTool(tool: CustomToolDef, args: Record<string, unkno
     case "webhook": {
       if (!tool.webhookUrl) return { error: "No webhook URL configured" };
       try {
-        const res = await fetch(tool.webhookUrl, {
+        const res = await safeFetch(tool.webhookUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ tool: tool.name, arguments: args }),
           signal: AbortSignal.timeout(10_000),
+          policy: {
+            allowLocal: isWebhookLocalUrlsEnabled(),
+            allowedProtocols: ["https:", "http:"],
+          },
+          maxResponseBytes: 512 * 1024,
         });
         const text = await res.text();
         try {
@@ -169,6 +178,9 @@ async function executeCustomTool(tool: CustomToolDef, args: Record<string, unkno
     }
 
     case "script": {
+      if (!isCustomToolScriptEnabled()) {
+        return { error: "Script custom tools are disabled. Set CUSTOM_TOOL_SCRIPT_ENABLED=true to allow local code execution." };
+      }
       if (!tool.scriptBody) return { error: "No script body configured" };
       try {
         // Sandboxed execution using vm.runInNewContext

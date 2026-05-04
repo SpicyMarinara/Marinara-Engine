@@ -5,25 +5,27 @@
 // on every request from non-loopback, non-allowlisted IPs.
 //
 // When credentials are NOT configured, this middleware refuses connections
-// from PUBLIC internet IPs (returns 403). Loopback, private networks
-// (RFC 1918 LANs, Docker bridges, Kubernetes pod ranges, Tailscale CGNAT,
-// IPv6 ULA / link-local), and explicit IP_ALLOWLIST entries continue to
-// work without a password. This protects accidentally-exposed ports while
-// keeping LAN / phone / container access "just works" by default.
+// from every non-loopback IP (returns 401/403) unless the operator explicitly
+// opts into unauthenticated private/public access. This protects LAN, Docker,
+// Tailscale, and internet-exposed installs by default.
 //
 // Note: the private-network exemption applies ONLY when no Basic Auth is
 // configured. If you set BASIC_AUTH_USER/PASS, the password is required
 // from every IP except loopback and explicit IP_ALLOWLIST matches —
 // because if you went out of your way to set a password, you mean it.
 //
-// To opt back into the legacy "anyone can connect" behaviour from public
-// IPs too, set ALLOW_UNAUTHENTICATED_REMOTE=true.
+// To opt back into the legacy "LAN/private networks can connect without auth"
+// behaviour, set ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK=true. To allow
+// unauthenticated public IPs too, set ALLOW_UNAUTHENTICATED_REMOTE=true.
 //
 // Optional:
 //   BASIC_AUTH_REALM            — string shown in the browser password prompt
 //                                 (default: "Marinara Engine")
-//   ALLOW_UNAUTHENTICATED_REMOTE — set to "true" to disable the default lockdown
-//                                  (NOT recommended on internet-facing servers)
+//   ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK — set to "true" to allow LAN/Docker/
+//                                           Tailscale clients without auth
+//                                           (NOT recommended on shared networks)
+//   ALLOW_UNAUTHENTICATED_REMOTE          — set to "true" to allow public IPs
+//                                           without auth (NOT recommended)
 //
 // Notes:
 //   • The `/api/health` endpoint is exempt so external uptime checks /
@@ -38,7 +40,11 @@
 
 import type { FastifyRequest, FastifyReply } from "fastify";
 import { timingSafeEqual } from "node:crypto";
-import { getBasicAuthConfig, isUnauthenticatedRemoteAllowed } from "../config/runtime-config.js";
+import {
+  getBasicAuthConfig,
+  isUnauthenticatedPrivateNetworkAllowed,
+  isUnauthenticatedRemoteAllowed,
+} from "../config/runtime-config.js";
 import { logger } from "../lib/logger.js";
 import { isInIpAllowlist, isLoopbackIp, isPrivateNetworkIp } from "./ip-allowlist.js";
 
@@ -105,11 +111,32 @@ function sendLockdown(reply: FastifyReply) {
   reply.status(403).send({
     error: "Forbidden",
     message:
-      "Public-internet access is disabled because no authentication is configured. " +
+      "Non-loopback access requires authentication because no Basic Auth credentials are configured. " +
       "Set BASIC_AUTH_USER and BASIC_AUTH_PASS, add this IP to IP_ALLOWLIST, " +
-      "or set ALLOW_UNAUTHENTICATED_REMOTE=true to allow unauthenticated public access. " +
-      "(Loopback, LAN, Docker, Kubernetes, and Tailscale traffic is allowed automatically.)",
+      "or explicitly opt in with ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK=true for LAN/private clients. " +
+      "Set ALLOW_UNAUTHENTICATED_REMOTE=true only if unauthenticated public access is intentional.",
   });
+}
+
+export function hasBasicAuthConfigured(): boolean {
+  return loadConfig() !== null;
+}
+
+export function isBasicAuthSatisfied(request: FastifyRequest): boolean {
+  if (request.url === "/api/health" || request.url.startsWith("/api/health?")) return true;
+
+  const ip = request.ip;
+  if (isLoopbackIp(ip) || isInIpAllowlist(ip)) return true;
+
+  const config = loadConfig();
+  if (!config) {
+    if (isPrivateNetworkIp(ip) && isUnauthenticatedPrivateNetworkAllowed()) return true;
+    return isUnauthenticatedRemoteAllowed();
+  }
+
+  const header = request.headers.authorization;
+  if (!header || typeof header !== "string") return false;
+  return safeEqual(Buffer.from(header, "utf8"), config.expectedHeader);
 }
 
 // ── Fastify onRequest hook ──
@@ -127,17 +154,14 @@ export function basicAuthHook(request: FastifyRequest, reply: FastifyReply, done
 
   const config = loadConfig();
 
-  // No credentials configured → safe-by-default lockdown for PUBLIC IPs only.
-  // Private networks (LAN, Docker bridge, Kubernetes pod, Tailscale CGNAT) pass
-  // through so the common "phone on Wi-Fi" / "container-to-container" cases
-  // keep working. Opt out via ALLOW_UNAUTHENTICATED_REMOTE=true to allow
-  // unauthenticated PUBLIC IPs too (legacy open-access behaviour).
+  // No credentials configured → fail closed for every non-loopback IP unless
+  // the operator has explicitly opted back into private/public unauthenticated access.
   if (!config) {
-    if (isPrivateNetworkIp(ip)) return done();
+    if (isPrivateNetworkIp(ip) && isUnauthenticatedPrivateNetworkAllowed()) return done();
     if (isUnauthenticatedRemoteAllowed()) return done();
     if (!lockdownAnnounced) {
       logger.warn(
-        `[basic-auth] Refused public-internet connection from ${ip}. No auth configured; set BASIC_AUTH_USER/BASIC_AUTH_PASS, add the IP to IP_ALLOWLIST, or set ALLOW_UNAUTHENTICATED_REMOTE=true.`,
+        `[basic-auth] Refused non-loopback connection from ${ip}. No auth configured; set BASIC_AUTH_USER/BASIC_AUTH_PASS, add the IP to IP_ALLOWLIST, or explicitly opt in with ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK/ALLOW_UNAUTHENTICATED_REMOTE.`,
       );
       lockdownAnnounced = true;
     }

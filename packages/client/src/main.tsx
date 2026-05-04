@@ -4,10 +4,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { registerSW } from "virtual:pwa-register";
 import { App } from "./App";
 import { startKeepAlive } from "./lib/keep-alive";
+import { installCsrfFetchShim } from "./lib/csrf-fetch";
 import "./styles/globals.css";
 
 // Prevent Chrome/Edge from sleeping this tab
 startKeepAlive();
+installCsrfFetchShim();
 
 const queryClient = new QueryClient({
   defaultOptions: {

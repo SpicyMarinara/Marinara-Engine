@@ -285,6 +285,103 @@ function highlightDialogue(text: string, dialogueColor?: string, boldDialogue = 
 const HTML_TAG_RE =
   /<(?:div|span|style|table|p|br|img|a|ul|ol|li|h[1-6]|em|strong|b|i|pre|code|section|article|header|footer|nav|button|input|form|label|select|option|textarea|canvas|svg|video|audio|source|iframe|hr|blockquote|details|summary|figure|figcaption|main|aside|mark|small|sub|sup|del|ins|abbr|time|progress|meter|output|dialog|template|slot|ruby|rt|rp|bdi|bdo|wbr|area|map|track|embed|object|param|picture|portal|datalist|fieldset|legend|optgroup|caption|col|colgroup|thead|tbody|tfoot|th|td|dl|dt|dd|kbd|samp|var|cite|dfn|q|s|u|font|center)\b[^>]*>/i;
 
+const CHAT_HTML_ALLOWED_TAGS = [
+  "a",
+  "abbr",
+  "aside",
+  "b",
+  "bdi",
+  "bdo",
+  "blockquote",
+  "br",
+  "caption",
+  "center",
+  "cite",
+  "code",
+  "col",
+  "colgroup",
+  "dd",
+  "del",
+  "details",
+  "dfn",
+  "div",
+  "dl",
+  "dt",
+  "em",
+  "figcaption",
+  "figure",
+  "font",
+  "footer",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "header",
+  "hr",
+  "i",
+  "img",
+  "ins",
+  "kbd",
+  "li",
+  "main",
+  "mark",
+  "nav",
+  "ol",
+  "p",
+  "pre",
+  "q",
+  "s",
+  "samp",
+  "section",
+  "small",
+  "span",
+  "strong",
+  "sub",
+  "summary",
+  "sup",
+  "table",
+  "tbody",
+  "td",
+  "tfoot",
+  "th",
+  "thead",
+  "time",
+  "tr",
+  "u",
+  "ul",
+  "var",
+] as const;
+
+const CHAT_HTML_ALLOWED_ATTR = [
+  "alt",
+  "class",
+  "colspan",
+  "data-spk",
+  "href",
+  "rel",
+  "rowspan",
+  "src",
+  "style",
+  "target",
+  "title",
+] as const;
+
+function sanitizeChatHtml(html: string, options: { allowStyle?: boolean } = {}) {
+  const allowedAttr = options.allowStyle
+    ? [...CHAT_HTML_ALLOWED_ATTR]
+    : CHAT_HTML_ALLOWED_ATTR.filter((attr) => attr !== "style");
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: [...CHAT_HTML_ALLOWED_TAGS],
+    ALLOWED_ATTR: allowedAttr,
+    ALLOW_DATA_ATTR: false,
+    ALLOW_UNKNOWN_PROTOCOLS: false,
+    FORBID_TAGS: ["animate", "embed", "foreignObject", "iframe", "math", "object", "script", "svg", "style"],
+    FORBID_ATTR: ["onerror", "onload", "onclick", "srcdoc"],
+  });
+}
+
 /**
  * Render message content, handling both plain text with dialogue highlighting
  * and HTML blocks that should be rendered as actual HTML.
@@ -351,14 +448,7 @@ function renderContent(
     (_m, alt: string, url: string) => `<img src="${url}" alt="${alt || "image"}">`,
   );
 
-  // Content has HTML — sanitize and render it
-  // DOMPurify disallows <animate> by default (conservative SVG list).
-  // It's safe — only animates presentation attributes, no script execution.
-  const clean = DOMPurify.sanitize(withImages, {
-    ADD_TAGS: ["animate"],
-    ADD_ATTR: ["style", "class"],
-    ALLOW_DATA_ATTR: true,
-  });
+  const clean = sanitizeChatHtml(withImages);
 
   // Apply dialogue bolding inside sanitised HTML with per-speaker color support.
   const withDialogue = (() => {
@@ -408,8 +498,9 @@ function renderContent(
 
   // Apply markdown-style bold/italic in HTML path
   const withMarkdown = applyInlineMarkdownHTML(withHr);
+  const finalHtml = sanitizeChatHtml(withMarkdown, { allowStyle: true });
 
-  return <div className="overflow-hidden" dangerouslySetInnerHTML={{ __html: withMarkdown }} />;
+  return <div className="overflow-hidden" dangerouslySetInnerHTML={{ __html: finalHtml }} />;
 }
 
 /** Build style object for name color (supports gradients). */

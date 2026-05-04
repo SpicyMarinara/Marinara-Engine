@@ -3169,7 +3169,7 @@ export async function gameRoutes(app: FastifyInstance) {
   // ── POST /game/session/regenerate-conclusion ──
   app.post("/session/regenerate-conclusion", async (req, reply) => {
     const { chatId, connectionId, sessionNumber, streaming } = regenerateSessionConclusionSchema.parse(req.body);
-    console.log("[game/session/regenerate-conclusion] Regenerating session %s for chat %s", sessionNumber, chatId);
+    logger.info("[game/session/regenerate-conclusion] Regenerating session %s for chat %s", sessionNumber, chatId);
     const chats = createChatsStorage(app.db);
     const connections = createConnectionsStorage(app.db);
 
@@ -3245,7 +3245,7 @@ export async function gameRoutes(app: FastifyInstance) {
       maxTokens: conclusionOptions.maxTokens,
     });
     if (transcriptTruncated) {
-      console.log(
+      logger.info(
         "[game/session/regenerate-conclusion] Transcript exceeded context for chat %s; trimmed only the middle of the transcript to fit.",
         chatId,
       );
@@ -3266,12 +3266,14 @@ export async function gameRoutes(app: FastifyInstance) {
         currentCards,
       });
       if (appliedConclusion.updatedCardCount > 0) {
-        console.log(
-          `[session/regenerate-conclusion] Updated ${appliedConclusion.updatedCardCount} character cards for session ${sessionNumber}`,
+        logger.info(
+          "[session/regenerate-conclusion] Updated %d character cards for session %d",
+          appliedConclusion.updatedCardCount,
+          sessionNumber,
         );
       }
     } catch (err) {
-      console.warn("[session/regenerate-conclusion] Session conclusion parsing failed:", err);
+      logger.warn(err, "[session/regenerate-conclusion] Session conclusion parsing failed");
       sendJsonRepairError(
         reply,
         "The regenerated conclusion was not valid JSON.",
@@ -3391,7 +3393,7 @@ export async function gameRoutes(app: FastifyInstance) {
   // ── POST /game/session/update-campaign-progression ──
   app.post("/session/update-campaign-progression", async (req, reply) => {
     const { chatId, connectionId, sessionNumber, streaming } = updateCampaignProgressionSchema.parse(req.body);
-    console.log(
+    logger.info(
       "[game/session/update-campaign-progression] Updating campaign progression from session %s for chat %s",
       sessionNumber,
       chatId,
@@ -3504,7 +3506,7 @@ export async function gameRoutes(app: FastifyInstance) {
       maxTokens: progressionOptions.maxTokens,
     });
     if (fit.trimmed) {
-      console.log(
+      logger.info(
         "[game/session/update-campaign-progression] Context trimmed while updating session %s for chat %s",
         sessionNumber,
         chatId,
@@ -3514,7 +3516,7 @@ export async function gameRoutes(app: FastifyInstance) {
     const result = await provider.chatComplete(fit.trimmed ? fit.messages : progressionMessages, progressionOptions);
     const rawProgressionContent = result.content ?? "";
     const extraction = extractLeadingThinkingBlocks(rawProgressionContent);
-    console.log(
+    logger.info(
       "[game/session/update-campaign-progression] Response length=%d chars, extracted=%d chars, maxTokens=%d",
       rawProgressionContent.length,
       extraction.content.length,
@@ -3525,8 +3527,8 @@ export async function gameRoutes(app: FastifyInstance) {
       const parsedProgression = parseJSON(extraction.content) as Record<string, unknown>;
       updatedProgression = applyCampaignProgressionPayload(parsedProgression, currentProgression);
     } catch (err) {
-      console.warn("[game/session/update-campaign-progression] Campaign progression parsing failed:", err);
-      console.warn("[game/session/update-campaign-progression] Invalid JSON tail: %s", extraction.content.slice(-800));
+      logger.warn(err, "[game/session/update-campaign-progression] Campaign progression parsing failed");
+      logger.warn("[game/session/update-campaign-progression] Invalid JSON tail: %s", extraction.content.slice(-800));
       sendJsonRepairError(
         reply,
         "The campaign progression update was not valid JSON.",
@@ -4976,11 +4978,7 @@ export async function gameRoutes(app: FastifyInstance) {
     const requestDebug = input.debugMode === true;
     const debugLogsEnabled = requestDebug || isDebugAgentsEnabled() || logger.isLevelEnabled("debug");
     const debugLog = (message: string, ...args: any[]) => {
-      if (requestDebug) {
-        console.log(message, ...args);
-      } else {
-        logger.debug(message, ...args);
-      }
+      logger.debug(message, ...args);
     };
     const chats = createChatsStorage(app.db);
     const connections = createConnectionsStorage(app.db);
@@ -5709,16 +5707,12 @@ export async function gameRoutes(app: FastifyInstance) {
     const requestDebug = input.debugMode === true;
     const debugLogsEnabled = requestDebug || isDebugAgentsEnabled() || logger.isLevelEnabled("debug");
     const debugLog = (message: string, ...args: any[]) => {
-      if (requestDebug) {
-        console.log(message, ...args);
-      } else {
-        logger.debug(message, ...args);
-      }
+      logger.debug(message, ...args);
     };
     const chats = createChatsStorage(app.db);
     const connections = createConnectionsStorage(app.db);
 
-    console.log(
+    logger.info(
       "[game/generate-assets] request: chatId=%s bg=%s npcs=%s",
       input.chatId,
       input.backgroundTag ?? "none",
@@ -5748,7 +5742,7 @@ export async function gameRoutes(app: FastifyInstance) {
     const imgConnId = (meta.gameImageConnectionId as string) || null;
 
     if (!enableGen || !imgConnId) {
-      console.log(
+      logger.info(
         "[game/generate-assets] skipped: enableSpriteGeneration=%s imageConnectionConfigured=%s",
         enableGen,
         !!imgConnId,
@@ -5758,7 +5752,7 @@ export async function gameRoutes(app: FastifyInstance) {
 
     const imgConn = await connections.getWithKey(imgConnId);
     if (!imgConn) {
-      console.log("[game/generate-assets] skipped: image connection %s not found", imgConnId);
+      logger.info("[game/generate-assets] skipped: image connection %s not found", imgConnId);
       return { generatedBackground: null, generatedIllustration: null, generatedNpcAvatars: [] };
     }
 
@@ -5816,7 +5810,7 @@ export async function gameRoutes(app: FastifyInstance) {
       const approxTurnNumber = Math.max(1, allMsgs.filter((message) => message.role === "user").length + 1);
       const sessionNumber = currentGameSessionNumber(meta);
       if (!isIllustrationAllowed(meta, approxTurnNumber, sessionNumber)) {
-        console.log("[game/generate-assets] illustration skipped: cooldown active");
+        logger.info("[game/generate-assets] illustration skipped: cooldown active");
       } else {
         const charStore = createCharactersStorage(app.db);
         const allChars = await charStore.list();
@@ -5937,7 +5931,7 @@ export async function gameRoutes(app: FastifyInstance) {
       for (const npc of input.npcsNeedingAvatars) {
         const existingAvatarUrl = existingNpcAvatarByName.get(normalizeJournalMatch(npc.name));
         if (existingAvatarUrl) {
-          console.log('[game/generate-assets] NPC avatar exists, skipping generation: "%s"', npc.name);
+          logger.info('[game/generate-assets] NPC avatar exists, skipping generation: "%s"', npc.name);
           generatedNpcAvatars.push({ name: npc.name, avatarUrl: existingAvatarUrl });
           continue;
         }
@@ -5987,7 +5981,7 @@ export async function gameRoutes(app: FastifyInstance) {
       }
     }
 
-    console.log(
+    logger.info(
       "[game/generate-assets] result: bg=%s illustration=%s npcs=%s",
       generatedBackground ?? "none",
       generatedIllustration?.tag ?? "none",

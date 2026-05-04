@@ -44,6 +44,7 @@ export * from "./constants/chat-modes.js";
 export * from "./constants/model-lists.js"; // also exports IMAGE_GENERATION_SOURCES
 export * from "./constants/agent-prompts.js";
 export * from "./constants/image-generation-defaults.js";
+export * from "./constants/security.js";
 
 // Utils
 export * from "./utils/macro-engine.js";

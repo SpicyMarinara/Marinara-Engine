@@ -40,7 +40,7 @@ export function createCustomToolsStorage(db: DB) {
         webhookUrl: input.webhookUrl ?? null,
         staticResult: input.staticResult ?? null,
         scriptBody: input.scriptBody ?? null,
-        enabled: String(input.enabled ?? true),
+        enabled: String(input.executionType === "script" ? false : (input.enabled ?? true)),
         createdAt: timestamp,
         updatedAt: timestamp,
       });
@@ -52,11 +52,14 @@ export function createCustomToolsStorage(db: DB) {
       if (data.name !== undefined) updateFields.name = data.name;
       if (data.description !== undefined) updateFields.description = data.description;
       if (data.parametersSchema !== undefined) updateFields.parametersSchema = JSON.stringify(data.parametersSchema);
-      if (data.executionType !== undefined) updateFields.executionType = data.executionType;
+      if (data.executionType !== undefined) {
+        updateFields.executionType = data.executionType;
+        if (data.executionType === "script" && data.enabled === undefined) updateFields.enabled = "false";
+      }
       if (data.webhookUrl !== undefined) updateFields.webhookUrl = data.webhookUrl;
       if (data.staticResult !== undefined) updateFields.staticResult = data.staticResult;
       if (data.scriptBody !== undefined) updateFields.scriptBody = data.scriptBody;
-      if (data.enabled !== undefined) updateFields.enabled = String(data.enabled);
+      if (data.enabled !== undefined) updateFields.enabled = String(data.executionType === "script" ? false : data.enabled);
       await db.update(customTools).set(updateFields).where(eq(customTools.id, id));
       return this.getById(id);
     },

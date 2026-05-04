@@ -3,6 +3,8 @@
 // ──────────────────────────────────────────────
 import { Agent } from "undici";
 import { logger } from "../../lib/logger.js";
+import { isProviderLocalUrlsEnabled } from "../../config/runtime-config.js";
+import { safeFetch } from "../../utils/security.js";
 
 /**
  * Shared undici Agent with a 5-minute headers timeout (time to first byte)
@@ -17,7 +19,12 @@ const llmDispatcher = new Agent({ bodyTimeout: 0, headersTimeout: LLM_HEADERS_TI
  * with no body/headers timeout. Use this for all outgoing LLM requests.
  */
 export function llmFetch(url: string | URL, init?: RequestInit): Promise<Response> {
-  return fetch(url, { ...init, dispatcher: llmDispatcher } as unknown as RequestInit);
+  return safeFetch(url, {
+    ...(init ?? {}),
+    dispatcher: llmDispatcher,
+    policy: { allowLocal: isProviderLocalUrlsEnabled(), allowedProtocols: ["https:", "http:"] },
+    maxResponseBytes: 50 * 1024 * 1024,
+  });
 }
 
 export interface ChatMessage {
@@ -563,7 +570,7 @@ export abstract class BaseLLMProvider {
       headers["HTTP-Referer"] = "https://github.com/Pasta-Devs/Marinara-Engine";
       headers["X-Title"] = "Marinara Engine";
     }
-    const res = await fetch(`${this.baseUrl}/embeddings`, {
+    const res = await llmFetch(`${this.baseUrl}/embeddings`, {
       method: "POST",
       headers,
       body: JSON.stringify({ input: texts, model }),

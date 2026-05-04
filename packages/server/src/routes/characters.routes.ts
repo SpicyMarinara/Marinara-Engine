@@ -19,6 +19,7 @@ import { join } from "path";
 import { DATA_DIR } from "../utils/data-dir.js";
 import { createWriteStream, existsSync, rmSync, unlinkSync } from "fs";
 import { normalizeTimestampOverrides } from "../services/import/import-timestamps.js";
+import { assertInsideDir, extensionFromImageMime, isAllowedImageBuffer } from "../utils/security.js";
 import { importSTLorebook } from "../services/import/st-lorebook.importer.js";
 import AdmZip from "adm-zip";
 import { extname } from "path";
@@ -409,12 +410,16 @@ export async function charactersRoutes(app: FastifyInstance) {
         base64 = base64.slice(base64.indexOf(",") + 1);
       }
     }
+    const imageBuffer = Buffer.from(base64, "base64");
+    const imageInfo = isAllowedImageBuffer(imageBuffer, `.${ext}`);
+    if (!imageInfo) return reply.status(400).send({ error: "Unsupported or invalid avatar image" });
+    ext = extensionFromImageMime(imageInfo.mimeType);
 
     const avatarsDir = join(DATA_DIR, "avatars");
     await mkdir(avatarsDir, { recursive: true });
     const filename = `character-${id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-    const filepath = join(avatarsDir, filename);
-    await writeFile(filepath, Buffer.from(base64, "base64"));
+    const filepath = assertInsideDir(avatarsDir, join(avatarsDir, filename));
+    await writeFile(filepath, imageBuffer);
 
     const avatarPath = `/api/avatars/file/${filename}`;
     return storage.updateAvatar(id, avatarPath);
@@ -464,12 +469,20 @@ export async function charactersRoutes(app: FastifyInstance) {
     const body = req.body as { avatar?: string; filename?: string };
     if (!body.avatar) return reply.status(400).send({ error: "No avatar data" });
     let base64 = body.avatar;
+    let hintedExt = ".png";
+    if (base64.startsWith("data:")) {
+      const match = base64.match(/^data:image\/([\w+]+);base64,/);
+      if (match?.[1]) hintedExt = `.${match[1].replace("+xml", "")}`;
+    }
     if (base64.includes(",")) base64 = base64.split(",")[1]!;
-    const filename = body.filename ?? `persona-${req.params.id}-${Date.now()}.png`;
+    const imageBuffer = Buffer.from(base64, "base64");
+    const imageInfo = isAllowedImageBuffer(imageBuffer, hintedExt);
+    if (!imageInfo) return reply.status(400).send({ error: "Unsupported or invalid avatar image" });
+    const filename = `persona-${req.params.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${imageInfo.ext}`;
     const avatarsDir = join(DATA_DIR, "avatars");
     await mkdir(avatarsDir, { recursive: true });
-    const filepath = join(avatarsDir, filename);
-    await writeFile(filepath, Buffer.from(base64, "base64"));
+    const filepath = assertInsideDir(avatarsDir, join(avatarsDir, filename));
+    await writeFile(filepath, imageBuffer);
     const avatarPath = `/api/avatars/file/${filename}`;
     return storage.updatePersona(req.params.id, { avatarPath });
   });

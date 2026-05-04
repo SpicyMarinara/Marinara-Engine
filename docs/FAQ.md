@@ -14,7 +14,13 @@ If Marinara Engine is running on one device (your PC, a server, etc.) and you wa
 
 The shell launchers (`start.sh`, `start.bat`, `start-termux.sh`) already bind to `0.0.0.0` by default. If you started manually with `pnpm start`, set `HOST=0.0.0.0` in your `.env` file first. See the [Configuration Reference](CONFIGURATION.md) for details.
 
-## 2. Find your host device's local IP address
+## 2. Configure access control
+
+Loopback (`127.0.0.1`) works without a password, but other devices on your LAN now require authentication by default. Set `BASIC_AUTH_USER` and `BASIC_AUTH_PASS` in `.env`, then restart Marinara. For privileged actions from that browser, also set `ADMIN_SECRET` and save it in **Settings -> Advanced -> Admin Access**.
+
+You can restore the old unauthenticated LAN behavior with `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK=true`, but only do this on a network you fully trust.
+
+## 3. Find your host device's local IP address
 
 | Platform | Command                                                                 |
 | -------- | ----------------------------------------------------------------------- |
@@ -23,7 +29,7 @@ The shell launchers (`start.sh`, `start.bat`, `start-termux.sh`) already bind to
 | Linux    | `hostname -I` or `ip addr`                                              |
 | Android  | Settings → Wi-Fi → tap your network to see the IP                       |
 
-### 3. Open a browser on the other device
+### 4. Open a browser on the other device
 
 Navigate to:
 
@@ -33,7 +39,7 @@ http://<host-ip>:7860
 
 For example: `http://192.168.1.42:7860`
 
-## 4. (Optional) Install the PWA
+## 5. (Optional) Install the PWA
 
 Most mobile browsers will offer an **"Add to Home Screen"** or **"Install App"** prompt, giving you a more native app experience without browser chrome.
 
@@ -44,6 +50,7 @@ Tools like [Tailscale](https://tailscale.com/) give each device a stable IP addr
 ### Still not connecting?
 
 - Verify both devices are on the same Wi-Fi network.
+- Confirm `HOST=0.0.0.0` and Basic Auth credentials are set on the server.
 - Check that no firewall is blocking the configured port (default `7860`).
 - See the [Troubleshooting](TROUBLESHOOTING.md#app-not-loading-on-mobile--another-device) page for more help.
 

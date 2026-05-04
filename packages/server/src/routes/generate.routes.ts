@@ -38,6 +38,7 @@ import { injectAtDepth } from "../services/lorebook/prompt-injector.js";
 import { createLLMProvider } from "../services/llm/provider-registry.js";
 import { resolveConnectionImageDefaults } from "../services/image/image-generation-defaults.js";
 import { loadImageGenerationUserSettings } from "../services/image/image-generation-settings.js";
+import { decryptApiKey, encryptApiKey } from "../utils/crypto.js";
 import { extractLeadingThinkingBlocks } from "../services/llm/inline-thinking.js";
 import {
   assemblePrompt,
@@ -442,11 +443,7 @@ export async function generateRoutes(app: FastifyInstance) {
     const input = generateRequestSchema.parse(req.body);
     const requestDebug = input.debugMode === true;
     const debugLog = (message: string, ...args: any[]) => {
-      if (requestDebug) {
-        console.log(message, ...args);
-      } else {
-        app.log.debug(message, ...args);
-      }
+      logger.debug(message, ...args);
     };
 
     // Resolve the chat
@@ -4101,8 +4098,10 @@ export async function generateRoutes(app: FastifyInstance) {
       if (spotifyAgent) {
         const sSettings =
           typeof spotifyAgent.settings === "string" ? JSON.parse(spotifyAgent.settings) : spotifyAgent.settings || {};
-        spotifyAccessToken = (sSettings.spotifyAccessToken as string) || null;
-        const spotifyRefreshToken = (sSettings.spotifyRefreshToken as string) || null;
+        const rawSpotifyAccessToken = (sSettings.spotifyAccessToken as string) || "";
+        spotifyAccessToken = rawSpotifyAccessToken ? decryptApiKey(rawSpotifyAccessToken) || rawSpotifyAccessToken : null;
+        const rawSpotifyRefreshToken = (sSettings.spotifyRefreshToken as string) || "";
+        const spotifyRefreshToken = rawSpotifyRefreshToken ? decryptApiKey(rawSpotifyRefreshToken) || rawSpotifyRefreshToken : null;
         const spotifyClientId = (sSettings.spotifyClientId as string) || null;
         spotifyExpiresAt = (sSettings.spotifyExpiresAt as number) ?? 0;
 
@@ -4136,8 +4135,8 @@ export async function generateRoutes(app: FastifyInstance) {
                 .update(spotifyAgent.id, {
                   settings: {
                     ...sSettings,
-                    spotifyAccessToken: tokens.access_token,
-                    spotifyRefreshToken: tokens.refresh_token ?? spotifyRefreshToken,
+                    spotifyAccessToken: encryptApiKey(tokens.access_token),
+                    spotifyRefreshToken: tokens.refresh_token ? encryptApiKey(tokens.refresh_token) : sSettings.spotifyRefreshToken,
                     spotifyExpiresAt: refreshedExpiresAt,
                   },
                 })
@@ -5513,14 +5512,14 @@ export async function generateRoutes(app: FastifyInstance) {
           const durationMs = Date.now() - genStartTime;
 
           if (input.debugMode && chatMode === "game") {
-            console.log(
+            logger.debug(
               "[generate/game/raw] chatId=%s characterId=%s chars=%d BEGIN",
               input.chatId,
               targetCharId ?? "gm",
               fullResponse.length,
             );
-            console.log(fullResponse);
-            console.log("[generate/game/raw] chatId=%s characterId=%s END", input.chatId, targetCharId ?? "gm");
+            logger.debug("%s", fullResponse);
+            logger.debug("[generate/game/raw] chatId=%s characterId=%s END", input.chatId, targetCharId ?? "gm");
           }
 
           // Some models inline reasoning blocks instead of using provider-native
@@ -5766,7 +5765,7 @@ export async function generateRoutes(app: FastifyInstance) {
                       sendSseEvent(reply, { type: "game_state_patch", data: { location: latestLocation } });
                     }
 
-                    console.log(
+                    logger.info(
                       "[generate/game/map_update] chatId=%s applied=%d location=%s",
                       input.chatId,
                       mapUpdates.length,
@@ -5774,7 +5773,7 @@ export async function generateRoutes(app: FastifyInstance) {
                     );
                   }
                 } catch (err) {
-                  console.warn("[generate/game/map_update] Failed to apply map_update:", err);
+                  logger.warn(err, "[generate/game/map_update] Failed to apply map_update");
                 }
               }
             }

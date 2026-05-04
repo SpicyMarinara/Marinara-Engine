@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "../../lib/utils";
+import { getAdminSecretHeader } from "../../lib/api-client";
 
 interface Props {
   open: boolean;
@@ -102,6 +103,7 @@ function formatModifiedAt(value: string | null) {
 
 export function STBulkImportModal({ open, onClose }: Props) {
   const [folderPath, setFolderPath] = useState("");
+  const [folderToken, setFolderToken] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("input");
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [selection, setSelection] = useState<SelectionState>({
@@ -121,6 +123,7 @@ export function STBulkImportModal({ open, onClose }: Props) {
   const reset = useCallback(() => {
     setPhase("input");
     setScanResult(null);
+    setFolderToken(null);
     setSelection({
       characters: [],
       chats: [],
@@ -148,8 +151,11 @@ export function STBulkImportModal({ open, onClose }: Props) {
     try {
       const res = await fetch("/api/import/st-bulk/scan", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ folderPath: folderPath.trim() }),
+        headers: {
+          "Content-Type": "application/json",
+          ...getAdminSecretHeader(),
+        },
+        body: JSON.stringify({ folderPath: folderPath.trim(), folderToken }),
       });
       const data = (await res.json()) as ScanResult;
       if (data.success) {
@@ -164,7 +170,7 @@ export function STBulkImportModal({ open, onClose }: Props) {
       setError("Failed to connect to server");
       setPhase("input");
     }
-  }, [folderPath]);
+  }, [folderPath, folderToken]);
 
   const [picking, setPicking] = useState(false);
   const [showFolderBrowser, setShowFolderBrowser] = useState(false);
@@ -177,12 +183,16 @@ export function STBulkImportModal({ open, onClose }: Props) {
     try {
       const res = await fetch("/api/import/list-directory", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...getAdminSecretHeader(),
+        },
         body: JSON.stringify({ path: dirPath || "" }),
       });
-      const data = (await res.json()) as { success: boolean; path?: string; folders?: string[] };
+      const data = (await res.json()) as { success: boolean; path?: string; folderToken?: string; folders?: string[] };
       if (data.success && data.path) {
         setBrowserPath(data.path);
+        setFolderToken(data.folderToken ?? null);
         setBrowserFolders(data.folders ?? []);
       }
     } catch {
@@ -195,10 +205,14 @@ export function STBulkImportModal({ open, onClose }: Props) {
     setPicking(true);
     setError("");
     try {
-      const res = await fetch("/api/import/pick-folder", { method: "POST" });
-      const data = (await res.json()) as { success: boolean; path?: string; error?: string };
+      const res = await fetch("/api/import/pick-folder", {
+        method: "POST",
+        headers: getAdminSecretHeader(),
+      });
+      const data = (await res.json()) as { success: boolean; path?: string; folderToken?: string; error?: string };
       if (data.success && data.path) {
         setFolderPath(data.path);
+        setFolderToken(data.folderToken ?? null);
         setPicking(false);
         return;
       }
@@ -232,8 +246,11 @@ export function STBulkImportModal({ open, onClose }: Props) {
     try {
       const res = await fetch("/api/import/st-bulk/run", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ folderPath: folderPath.trim(), options: selection }),
+        headers: {
+          "Content-Type": "application/json",
+          ...getAdminSecretHeader(),
+        },
+        body: JSON.stringify({ folderPath: folderPath.trim(), folderToken, options: selection }),
       });
 
       if (!res.ok || !res.body) {
@@ -281,7 +298,7 @@ export function STBulkImportModal({ open, onClose }: Props) {
       setError("Import failed — server error");
       setPhase("preview");
     }
-  }, [folderPath, qc, selection]);
+  }, [folderPath, folderToken, qc, selection]);
 
   const hasAnySelected = Object.values(selection).some((ids) => ids.length > 0);
   const builtinPresetCount = scanResult?.presets.filter((item) => item.isBuiltin).length ?? 0;
@@ -302,7 +319,10 @@ export function STBulkImportModal({ open, onClose }: Props) {
                 <input
                   type="text"
                   value={folderPath}
-                  onChange={(e) => setFolderPath(e.target.value)}
+                  onChange={(e) => {
+                    setFolderPath(e.target.value);
+                    setFolderToken(null);
+                  }}
                   placeholder="/path/to/SillyTavern"
                   disabled={phase === "scanning"}
                   className="flex-1 rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs outline-none ring-1 ring-transparent placeholder:text-[var(--muted-foreground)]/50 focus:ring-[var(--primary)]"

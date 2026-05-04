@@ -1,14 +1,14 @@
 // ──────────────────────────────────────────────
 // Routes: Admin (clear data, maintenance)
 // ──────────────────────────────────────────────
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { ne } from "drizzle-orm";
 import { existsSync, readdirSync, rmSync } from "fs";
 import { join } from "path";
 import { PROFESSOR_MARI_ID } from "@marinara-engine/shared";
 import { DATA_DIR } from "../utils/data-dir.js";
 import * as schema from "../db/schema/index.js";
-import { getAdminSecret } from "../config/runtime-config.js";
+import { requirePrivilegedAccess } from "../middleware/privileged-gate.js";
 
 type ExpungeScope =
   | "chats"
@@ -49,15 +49,6 @@ function clearDirectory(dirPath: string) {
 
 function isValidScope(scope: unknown): scope is ExpungeScope {
   return typeof scope === "string" && ALL_EXPUNGE_SCOPES.includes(scope as ExpungeScope);
-}
-
-function requireAdminSecret(req: FastifyRequest, reply: FastifyReply) {
-  const adminSecret = getAdminSecret();
-  if (!adminSecret) return true;
-  const provided = (req.headers["x-admin-secret"] as string) ?? "";
-  if (provided === adminSecret) return true;
-  reply.status(403).send({ error: "Invalid or missing X-Admin-Secret header" });
-  return false;
 }
 
 export async function adminRoutes(app: FastifyInstance) {
@@ -158,7 +149,7 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!confirm) {
       return reply.status(400).send({ error: "Must send { confirm: true } to proceed" });
     }
-    if (!requireAdminSecret(req, reply)) return;
+    if (!requirePrivilegedAccess(req, reply, { feature: "Admin data expunge" })) return;
 
     const requestedScopes = Array.isArray(scopes) ? scopes.filter(isValidScope) : [];
     return runExpunge(requestedScopes, reply);
@@ -166,7 +157,7 @@ export async function adminRoutes(app: FastifyInstance) {
 
   // Clear all data — compatibility wrapper around scoped expunge.
   app.post<{ Body: { confirm: boolean } }>("/clear-all", async (req, reply) => {
-    if (!requireAdminSecret(req, reply)) return;
+    if (!requirePrivilegedAccess(req, reply, { feature: "Admin data clearing" })) return;
     const { confirm } = req.body as { confirm?: boolean };
     if (!confirm) {
       return reply.status(400).send({ error: "Must send { confirm: true } to proceed" });

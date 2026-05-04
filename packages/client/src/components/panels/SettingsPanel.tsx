@@ -11,7 +11,7 @@ import {
 } from "../../stores/ui.store";
 import { cn, generateClientId } from "../../lib/utils";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../../lib/api-client";
+import { ADMIN_SECRET_STORAGE_KEY, api, getAdminSecretHeader } from "../../lib/api-client";
 import { forceRefreshSpa } from "@/lib/browser-runtime";
 import React, { useRef, useState, useCallback, useEffect } from "react";
 import { toast } from "sonner";
@@ -2180,7 +2180,10 @@ function ImportSettings() {
       }
       const res = await fetch("/api/backup/import-profile", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...getAdminSecretHeader(),
+        },
         body: text,
       });
       const data = await res.json();
@@ -2359,11 +2362,14 @@ function AdvancedSettings() {
   const [confirmAction, setConfirmAction] = useState<"selected" | "all" | null>(null);
   const [exportingProfile, setExportingProfile] = useState(false);
   const [refreshingSpa, setRefreshingSpa] = useState(false);
+  const [adminSecret, setAdminSecret] = useState(() => localStorage.getItem(ADMIN_SECRET_STORAGE_KEY) ?? "");
 
   const handleExportProfile = async () => {
     setExportingProfile(true);
     try {
-      const res = await fetch("/api/backup/export-profile");
+      const res = await fetch("/api/backup/export-profile", {
+        headers: getAdminSecretHeader(),
+      });
       if (!res.ok) throw new Error("Export failed");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -2411,7 +2417,10 @@ function AdvancedSettings() {
   const handleCreateBackup = async () => {
     setCreatingBackup(true);
     try {
-      const res = await fetch("/api/backup/download", { method: "POST" });
+      const res = await fetch("/api/backup/download", {
+        method: "POST",
+        headers: getAdminSecretHeader(),
+      });
       if (!res.ok) throw new Error("Backup failed");
 
       // Pull the filename from Content-Disposition if provided
@@ -2498,10 +2507,23 @@ function AdvancedSettings() {
     },
   });
 
+  const saveAdminSecret = useCallback(() => {
+    const trimmed = adminSecret.trim();
+    if (trimmed) {
+      localStorage.setItem(ADMIN_SECRET_STORAGE_KEY, trimmed);
+      toast.success("Admin secret saved for this browser");
+    } else {
+      localStorage.removeItem(ADMIN_SECRET_STORAGE_KEY);
+      toast.info("Admin secret cleared");
+    }
+  }, [adminSecret]);
+
   const updateCheck = useQuery<{
     currentVersion: string;
     currentCommit: string | null;
     currentBuild: string;
+    targetRef: string;
+    targetCommit: string | null;
     latestVersion: string;
     updateAvailable: boolean;
     versionUpdate?: boolean;
@@ -2518,7 +2540,15 @@ function AdvancedSettings() {
   });
 
   const applyUpdate = useMutation({
-    mutationFn: () => api.post<{ status: string; message: string }>("/updates/apply"),
+    mutationFn: () =>
+      api.post<{ status: string; message: string }>("/updates/apply", {
+        confirm: true,
+        currentVersion: updateCheck.data?.currentVersion ?? health.data?.version ?? APP_VERSION,
+        currentCommit: updateCheck.data?.currentCommit ?? health.data?.commit ?? null,
+        currentBuild: updateCheck.data?.currentBuild ?? health.data?.build ?? null,
+        targetRef: updateCheck.data?.targetRef,
+        targetCommit: updateCheck.data?.targetCommit,
+      }),
     onSuccess: (data) => {
       if (data.status === "already_up_to_date") {
         toast.info(data.message);
@@ -2564,6 +2594,29 @@ function AdvancedSettings() {
   return (
     <div className="flex flex-col gap-3">
       <div className="text-xs text-[var(--muted-foreground)]">Advanced settings for power users.</div>
+
+      <div className="flex flex-col gap-2 rounded-lg bg-[var(--secondary)]/40 p-2.5 ring-1 ring-[var(--border)]">
+        <div className="flex items-center gap-1.5">
+          <Power size="0.75rem" className="text-[var(--muted-foreground)]" />
+          <span className="text-xs font-medium">Admin Access</span>
+        </div>
+        <div className="flex gap-2 max-sm:flex-col">
+          <input
+            type="password"
+            value={adminSecret}
+            onChange={(e) => setAdminSecret(e.target.value)}
+            placeholder="ADMIN_SECRET"
+            className="flex-1 rounded-lg bg-[var(--background)] px-3 py-2 text-xs outline-none ring-1 ring-[var(--border)] placeholder:text-[var(--muted-foreground)]/50 focus:ring-[var(--primary)]"
+          />
+          <button
+            onClick={saveAdminSecret}
+            className="flex items-center justify-center gap-1.5 rounded-lg bg-[var(--primary)] px-3 py-2 text-xs font-medium text-white transition-all hover:opacity-90 active:scale-95"
+          >
+            <Save size="0.75rem" />
+            Save
+          </button>
+        </div>
+      </div>
 
       {/* ── Updates ── */}
       <div className="flex flex-col gap-2">

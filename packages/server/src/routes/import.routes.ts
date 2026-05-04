@@ -5,7 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { execFile } from "child_process";
 import { platform, homedir } from "os";
 import { readdir, stat } from "fs/promises";
-import { resolve as pathResolve } from "path";
+import { relative, resolve as pathResolve, sep } from "path";
 import { importSTChat } from "../services/import/st-chat.importer.js";
 import { importSTCharacter, importCharX } from "../services/import/st-character.importer.js";
 import { importSTPreset } from "../services/import/st-prompt.importer.js";
@@ -14,8 +14,71 @@ import { importMarinara } from "../services/import/marinara.importer.js";
 import { scanSTFolder, runSTBulkImport, type STBulkImportOptions } from "../services/import/st-bulk.importer.js";
 import { characters as charactersTable } from "../db/schema/index.js";
 import { normalizeTimestampOverrides } from "../services/import/import-timestamps.js";
+import { getImportAllowedRoots } from "../config/runtime-config.js";
+import { requirePrivilegedAccess } from "../middleware/privileged-gate.js";
+import { assertInsideDir, safeCompareString, tokenForPath } from "../utils/security.js";
 
 const PICK_FOLDER_TIMEOUT_MS = 60_000; // 60s — prevents infinite hang on headless servers
+const FOLDER_TOKEN_TTL_MS = 15 * 60_000;
+
+const folderTokens = new Map<string, { path: string; expiresAt: number }>();
+
+function cleanupFolderTokens() {
+  const now = Date.now();
+  for (const [token, entry] of folderTokens) {
+    if (entry.expiresAt < now) folderTokens.delete(token);
+  }
+}
+
+function issueFolderToken(pathValue: string) {
+  cleanupFolderTokens();
+  const resolved = pathResolve(pathValue);
+  const token = tokenForPath(`${resolved}:${Date.now()}:${Math.random()}`);
+  folderTokens.set(token, { path: resolved, expiresAt: Date.now() + FOLDER_TOKEN_TTL_MS });
+  return token;
+}
+
+function isUnderRoot(pathValue: string, root: string): boolean {
+  const resolvedRoot = pathResolve(root);
+  const resolvedPath = pathResolve(pathValue);
+  const rel = relative(resolvedRoot, resolvedPath);
+  return rel === "" || (!rel.startsWith("..") && !rel.includes(`..${sep}`));
+}
+
+function isAllowedImportRoot(pathValue: string) {
+  return getImportAllowedRoots().some((root) => isUnderRoot(pathValue, root));
+}
+
+function isHomeContained(pathValue: string) {
+  try {
+    assertInsideDir(homedir(), pathResolve(pathValue));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveImportFolder(body: { folderPath?: unknown; folderToken?: unknown }): { ok: true; path: string } | { ok: false; error: string } {
+  const rawPath = typeof body.folderPath === "string" ? body.folderPath.trim() : "";
+  const token = typeof body.folderToken === "string" ? body.folderToken.trim() : "";
+  cleanupFolderTokens();
+
+  if (token) {
+    const entry = folderTokens.get(token);
+    if (!entry) return { ok: false, error: "Folder token is missing or expired" };
+    if (rawPath && !safeCompareString(pathResolve(rawPath), entry.path)) {
+      return { ok: false, error: "Folder token does not match folderPath" };
+    }
+    return { ok: true, path: entry.path };
+  }
+
+  if (!rawPath) return { ok: false, error: "folderPath or folderToken is required" };
+  const resolved = pathResolve(rawPath);
+  if (!isAllowedImportRoot(resolved)) {
+    return { ok: false, error: "folderPath is not allowed. Use the folder picker/browser or set IMPORT_ALLOWED_ROOTS." };
+  }
+  return { ok: true, path: resolved };
+}
 
 /**
  * Opens a native OS folder picker and returns the selected path.
@@ -411,23 +474,23 @@ export async function importRoutes(app: FastifyInstance) {
   // ═══════════════════════════════════════════════
 
   /** Scan a SillyTavern installation folder, return counts of importable data. */
-  app.post("/st-bulk/scan", async (req) => {
-    const { folderPath } = req.body as { folderPath: string };
-    if (!folderPath || typeof folderPath !== "string") {
-      return { success: false, error: "folderPath is required" };
-    }
-    return scanSTFolder(folderPath.trim());
+  app.post("/st-bulk/scan", async (req, reply) => {
+    if (!requirePrivilegedAccess(req, reply, { feature: "SillyTavern bulk import scan" })) return;
+    const resolved = resolveImportFolder(req.body as { folderPath?: unknown; folderToken?: unknown });
+    if (!resolved.ok) return { success: false, error: resolved.error };
+    return scanSTFolder(resolved.path);
   });
 
   /** Run a bulk import from a SillyTavern installation folder (SSE stream with progress). */
   app.post("/st-bulk/run", async (req, reply) => {
-    const { folderPath, options } = req.body as {
-      folderPath: string;
+    if (!requirePrivilegedAccess(req, reply, { feature: "SillyTavern bulk import" })) return;
+    const { options } = req.body as {
+      folderPath?: string;
+      folderToken?: string;
       options: STBulkImportOptions;
     };
-    if (!folderPath || typeof folderPath !== "string") {
-      return reply.send({ success: false, error: "folderPath is required" });
-    }
+    const resolved = resolveImportFolder(req.body as { folderPath?: unknown; folderToken?: unknown });
+    if (!resolved.ok) return reply.send({ success: false, error: resolved.error });
 
     // Set up SSE headers
     reply.raw.writeHead(200, {
@@ -441,7 +504,7 @@ export async function importRoutes(app: FastifyInstance) {
     };
 
     try {
-      const result = await runSTBulkImport(folderPath.trim(), options, app.db, (progress) => {
+      const result = await runSTBulkImport(resolved.path, options, app.db, (progress) => {
         sendEvent("progress", progress);
       });
       sendEvent("done", result);
@@ -452,23 +515,25 @@ export async function importRoutes(app: FastifyInstance) {
   });
 
   /** Open a native OS folder picker dialog and return the selected path. */
-  app.post("/pick-folder", async () => {
+  app.post("/pick-folder", async (req, reply) => {
+    if (!requirePrivilegedAccess(req, reply, { feature: "Folder picker" })) return;
     const selected = await pickFolder();
     if (!selected) return { success: false, error: "No folder selected" };
-    return { success: true, path: selected };
+    return { success: true, path: selected, folderToken: issueFolderToken(selected) };
   });
 
   /** List directories at a given path (for remote/headless folder browsing).
    *  Restricted to subdirectories of the user's home directory to prevent
    *  arbitrary filesystem enumeration. */
-  app.post<{ Body: { path?: string } }>("/list-directory", async (req) => {
+  app.post<{ Body: { path?: string } }>("/list-directory", async (req, reply) => {
+    if (!requirePrivilegedAccess(req, reply, { feature: "Folder browser" })) return;
     const home = homedir();
     const requestedPath = (req.body?.path || "").trim();
     const dirPath = requestedPath || home;
     const resolved = pathResolve(dirPath);
 
     // Restrict browsing to the home directory tree
-    if (!resolved.startsWith(home)) {
+    if (!isHomeContained(resolved)) {
       return { success: false, error: "Access denied: path outside home directory" };
     }
 
@@ -482,7 +547,7 @@ export async function importRoutes(app: FastifyInstance) {
         .map((e) => e.name)
         .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 
-      return { success: true, path: resolved, folders };
+      return { success: true, path: resolved, folderToken: issueFolderToken(resolved), folders };
     } catch {
       return { success: false, error: "Cannot read directory" };
     }

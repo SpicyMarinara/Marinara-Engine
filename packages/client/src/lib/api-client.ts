@@ -3,6 +3,13 @@
 // ──────────────────────────────────────────────
 
 const BASE = "/api";
+export const ADMIN_SECRET_STORAGE_KEY = "marinara_admin_secret";
+
+export function getAdminSecretHeader(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  const secret = window.localStorage.getItem(ADMIN_SECRET_STORAGE_KEY)?.trim();
+  return secret ? { "X-Admin-Secret": secret } : {};
+}
 
 export class ApiError extends Error {
   constructor(
@@ -61,7 +68,7 @@ export function isJsonRepairApiError(error: unknown): boolean {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers: Record<string, string> = { ...(init?.headers as Record<string, string>) };
+  const headers: Record<string, string> = { ...getAdminSecretHeader(), ...(init?.headers as Record<string, string>) };
   // Only set Content-Type for requests that have a body
   if (init?.body !== undefined) {
     headers["Content-Type"] = "application/json";
@@ -108,7 +115,7 @@ export const api = {
 
   /** Download a JSON endpoint as a file (triggers browser save-as). */
   download: async (path: string, fallbackFilename = "export.json") => {
-    const res = await fetch(`${BASE}${path}`);
+    const res = await fetch(`${BASE}${path}`, { headers: getAdminSecretHeader(), cache: "no-store" });
     if (!res.ok) throw new ApiError(res.status, "Download failed");
     const disposition = res.headers.get("Content-Disposition");
     let filename = fallbackFilename;
@@ -131,8 +138,9 @@ export const api = {
   downloadPost: async (path: string, body: unknown, fallbackFilename = "export.bin") => {
     const res = await fetch(`${BASE}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...getAdminSecretHeader(), "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      cache: "no-store",
     });
     if (!res.ok) {
       const payload = await res.json().catch(() => ({ error: res.statusText }));
@@ -161,7 +169,7 @@ export const api = {
   stream: async function* (path: string, body?: unknown): AsyncGenerator<string> {
     const res = await fetch(`${BASE}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...getAdminSecretHeader(), "Content-Type": "application/json" },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       cache: "no-store",
     });
@@ -219,7 +227,7 @@ export const api = {
   ): AsyncGenerator<{ type: string; data: unknown }> {
     const res = await fetch(`${BASE}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...getAdminSecretHeader(), "Content-Type": "application/json" },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       cache: "no-store",
       signal,
@@ -270,6 +278,7 @@ export const api = {
   upload: async <T>(path: string, formData: FormData): Promise<T> => {
     const res = await fetch(`${BASE}${path}`, {
       method: "POST",
+      headers: getAdminSecretHeader(),
       body: formData,
     });
 

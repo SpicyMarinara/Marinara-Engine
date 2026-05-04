@@ -6,6 +6,7 @@ import type { ChatOptions } from "../src/services/llm/base-provider.js";
 async function captureRequestBody(overrides: Partial<ChatOptions> = {}) {
   const requests: Array<Record<string, unknown>> = [];
   const originalFetch = globalThis.fetch;
+  const originalLocalUrls = process.env.PROVIDER_LOCAL_URLS_ENABLED;
 
   globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
     requests.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
@@ -22,6 +23,7 @@ async function captureRequestBody(overrides: Partial<ChatOptions> = {}) {
   };
 
   try {
+    process.env.PROVIDER_LOCAL_URLS_ENABLED = "true";
     const provider = new AnthropicProvider("https://api.anthropic.com/v1", "test-key");
     const options: ChatOptions = {
       model: "claude-opus-4-7",
@@ -39,6 +41,11 @@ async function captureRequestBody(overrides: Partial<ChatOptions> = {}) {
     }
   } finally {
     globalThis.fetch = originalFetch;
+    if (originalLocalUrls === undefined) {
+      delete process.env.PROVIDER_LOCAL_URLS_ENABLED;
+    } else {
+      process.env.PROVIDER_LOCAL_URLS_ENABLED = originalLocalUrls;
+    }
   }
 
   assert.equal(requests.length, 1);

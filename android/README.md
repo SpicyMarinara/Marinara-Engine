@@ -20,6 +20,7 @@ The Android app is a thin WebView wrapper around Marinara Engine running locally
 - File upload support for character cards, images, and similar assets
 - Back button navigation inside the WebView
 - External links open in your default browser
+- Android backup is disabled for the wrapper app, and the WebView disallows file URL access and mixed-content loading.
 
 ## Building the APK
 

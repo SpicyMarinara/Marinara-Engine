@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
 import { createClient } from "@libsql/client";
 import { and, eq } from "drizzle-orm";
@@ -58,6 +59,24 @@ function withEnv<T>(name: string, value: string, fn: () => Promise<T>) {
   });
 }
 
+async function removeTempDir(path: string) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      rmSync(path, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (!["EBUSY", "ENOTEMPTY", "EPERM"].includes(code ?? "")) {
+        throw err;
+      }
+      if (attempt === 7) {
+        return;
+      }
+      await delay(50 * (attempt + 1));
+    }
+  }
+}
+
 test("file-native import merges chats from every known legacy database source", async () => {
   const root = mkdtempSync(join(tmpdir(), "marinara-file-import-"));
   try {
@@ -81,7 +100,7 @@ test("file-native import merges chats from every known legacy database source", 
       }
     });
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeTempDir(root);
   }
 });
 
@@ -109,7 +128,7 @@ test("file-native import falls back to node:sqlite when libSQL is unavailable", 
       }),
     );
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeTempDir(root);
   }
 });
 
@@ -154,7 +173,7 @@ test("file-native storage repairs existing snapshots that missed legacy chats", 
     const manifest = JSON.parse(readFileSync(join(storageDir, "manifest.json"), "utf8"));
     assert.equal(manifest.legacyRepair.tables.chats, 1);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeTempDir(root);
   }
 });
 
@@ -204,7 +223,7 @@ test("file-native storage retries old empty repair markers from unavailable read
     const manifest = JSON.parse(readFileSync(join(storageDir, "manifest.json"), "utf8"));
     assert.equal(manifest.legacyRepair.tables.chats, 1);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeTempDir(root);
   }
 });
 
@@ -262,7 +281,7 @@ test("file-native storage supports lorebook folders", async () => {
     const folderRows = JSON.parse(readFileSync(join(storageDir, "tables", "lorebook_folders.json"), "utf8"));
     assert.deepEqual(folderRows, []);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeTempDir(root);
   }
 });
 
@@ -313,6 +332,6 @@ test("file-native storage deletes only the requested character card version", as
       }
     });
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeTempDir(root);
   }
 });

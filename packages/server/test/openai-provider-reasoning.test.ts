@@ -11,6 +11,7 @@ async function captureChatRequestBody(
 ) {
   const requests: Array<Record<string, unknown>> = [];
   const originalFetch = globalThis.fetch;
+  const originalLocalUrls = process.env.PROVIDER_LOCAL_URLS_ENABLED;
 
   globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
     requests.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
@@ -27,6 +28,7 @@ async function captureChatRequestBody(
   };
 
   try {
+    process.env.PROVIDER_LOCAL_URLS_ENABLED = "true";
     const provider = new OpenAIProvider(baseUrl, "test-key");
     const options: ChatOptions = {
       model,
@@ -41,6 +43,11 @@ async function captureChatRequestBody(
     }
   } finally {
     globalThis.fetch = originalFetch;
+    if (originalLocalUrls === undefined) {
+      delete process.env.PROVIDER_LOCAL_URLS_ENABLED;
+    } else {
+      process.env.PROVIDER_LOCAL_URLS_ENABLED = originalLocalUrls;
+    }
   }
 
   assert.equal(requests.length, 1);
@@ -54,6 +61,7 @@ async function captureChatCompleteRequestBody(
 ) {
   const requests: Array<Record<string, unknown>> = [];
   const originalFetch = globalThis.fetch;
+  const originalLocalUrls = process.env.PROVIDER_LOCAL_URLS_ENABLED;
 
   globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
     requests.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
@@ -72,6 +80,7 @@ async function captureChatCompleteRequestBody(
   };
 
   try {
+    process.env.PROVIDER_LOCAL_URLS_ENABLED = "true";
     const provider = new OpenAIProvider(baseUrl, "test-key");
     const options: ChatOptions = {
       model,
@@ -84,6 +93,11 @@ async function captureChatCompleteRequestBody(
     await provider.chatComplete([{ role: "user", content: "Hello" }], options);
   } finally {
     globalThis.fetch = originalFetch;
+    if (originalLocalUrls === undefined) {
+      delete process.env.PROVIDER_LOCAL_URLS_ENABLED;
+    } else {
+      process.env.PROVIDER_LOCAL_URLS_ENABLED = originalLocalUrls;
+    }
   }
 
   assert.equal(requests.length, 1);
@@ -141,6 +155,7 @@ test("gpt-5.5 chatComplete forces streaming and keeps generation parameters", as
 test("assistant reasoning_content metadata is replayed on Chat Completions messages", async () => {
   const requests: Array<Record<string, unknown>> = [];
   const originalFetch = globalThis.fetch;
+  const originalLocalUrls = process.env.PROVIDER_LOCAL_URLS_ENABLED;
 
   globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
     requests.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
@@ -157,6 +172,7 @@ test("assistant reasoning_content metadata is replayed on Chat Completions messa
   };
 
   try {
+    process.env.PROVIDER_LOCAL_URLS_ENABLED = "true";
     const provider = new OpenAIProvider("https://openrouter.ai/api/v1", "test-key");
     for await (const _ of provider.chat(
       [
@@ -175,6 +191,11 @@ test("assistant reasoning_content metadata is replayed on Chat Completions messa
     }
   } finally {
     globalThis.fetch = originalFetch;
+    if (originalLocalUrls === undefined) {
+      delete process.env.PROVIDER_LOCAL_URLS_ENABLED;
+    } else {
+      process.env.PROVIDER_LOCAL_URLS_ENABLED = originalLocalUrls;
+    }
   }
 
   const messages = requests[0]?.messages as Array<Record<string, unknown>>;
@@ -183,6 +204,7 @@ test("assistant reasoning_content metadata is replayed on Chat Completions messa
 
 test("chatComplete returns streamed reasoning_content metadata with tool calls", async () => {
   const originalFetch = globalThis.fetch;
+  const originalLocalUrls = process.env.PROVIDER_LOCAL_URLS_ENABLED;
 
   globalThis.fetch = async () =>
     new Response(
@@ -199,6 +221,7 @@ test("chatComplete returns streamed reasoning_content metadata with tool calls",
     );
 
   try {
+    process.env.PROVIDER_LOCAL_URLS_ENABLED = "true";
     const provider = new OpenAIProvider("https://openrouter.ai/api/v1", "test-key");
     const result = await provider.chatComplete([{ role: "user", content: "Need a lookup." }], {
       model: "deepseek/deepseek-v4-pro",
@@ -212,6 +235,11 @@ test("chatComplete returns streamed reasoning_content metadata with tool calls",
     assert.equal(result.providerMetadata?.reasoning_content, "I should call the tool.");
   } finally {
     globalThis.fetch = originalFetch;
+    if (originalLocalUrls === undefined) {
+      delete process.env.PROVIDER_LOCAL_URLS_ENABLED;
+    } else {
+      process.env.PROVIDER_LOCAL_URLS_ENABLED = originalLocalUrls;
+    }
   }
 });
 

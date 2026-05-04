@@ -6,6 +6,8 @@ import { z } from "zod";
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
 import { createLLMProvider } from "../services/llm/provider-registry.js";
 import { PROVIDERS } from "@marinara-engine/shared";
+import { isDeeplxLocalUrlsEnabled } from "../config/runtime-config.js";
+import { safeFetch, validateOutboundUrl } from "../utils/security.js";
 
 const GOOGLE_MAX_LENGTH = 5000;
 
@@ -113,16 +115,16 @@ async function translateWithDeepLX(input: z.infer<typeof translateSchema>) {
     throw Object.assign(new Error("Invalid DeepLX URL"), { statusCode: 400 });
   }
 
-  // Block requests to cloud metadata endpoints (SSRF protection).
-  // localhost/private IPs are allowed since DeepLX is typically self-hosted.
-  const hostname = url.hostname.toLowerCase();
-  if (hostname === "169.254.169.254" || hostname.startsWith("169.254.") || hostname.endsWith(".internal")) {
-    throw Object.assign(new Error("DeepLX URL must not point to a cloud metadata or internal service address"), {
+  await validateOutboundUrl(url, {
+    allowLocal: isDeeplxLocalUrlsEnabled(),
+    allowedProtocols: ["https:", "http:"],
+  }).catch((err) => {
+    throw Object.assign(new Error(err instanceof Error ? err.message : "DeepLX URL is not allowed"), {
       statusCode: 400,
     });
-  }
+  });
 
-  const response = await fetch(url.toString(), {
+  const response = await safeFetch(url.toString(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -131,6 +133,8 @@ async function translateWithDeepLX(input: z.infer<typeof translateSchema>) {
       target_lang: input.targetLanguage.toUpperCase(),
     }),
     signal: AbortSignal.timeout(15_000),
+    policy: { allowLocal: isDeeplxLocalUrlsEnabled(), allowedProtocols: ["https:", "http:"] },
+    maxResponseBytes: 1024 * 1024,
   }).catch((err) => {
     if (err.name === "TimeoutError") throw Object.assign(new Error("DeepLX request timed out"), { statusCode: 502 });
     throw err;
@@ -154,7 +158,7 @@ async function translateWithDeepL(input: z.infer<typeof translateSchema>) {
   const isFree = input.deeplApiKey.endsWith(":fx");
   const apiUrl = isFree ? "https://api-free.deepl.com/v2/translate" : "https://api.deepl.com/v2/translate";
 
-  const response = await fetch(apiUrl, {
+  const response = await safeFetch(apiUrl, {
     method: "POST",
     headers: {
       Authorization: `DeepL-Auth-Key ${input.deeplApiKey}`,
@@ -165,6 +169,7 @@ async function translateWithDeepL(input: z.infer<typeof translateSchema>) {
       target_lang: input.targetLanguage.toUpperCase(),
     }),
     signal: AbortSignal.timeout(15_000),
+    maxResponseBytes: 1024 * 1024,
   }).catch((err) => {
     if (err.name === "TimeoutError") throw Object.assign(new Error("DeepL request timed out"), { statusCode: 502 });
     throw err;
@@ -196,7 +201,10 @@ async function translateWithGoogle(input: z.infer<typeof translateSchema>) {
   url.searchParams.set("dt", "t");
   url.searchParams.set("q", input.text);
 
-  const response = await fetch(url.toString(), { signal: AbortSignal.timeout(15_000) }).catch((err) => {
+  const response = await safeFetch(url.toString(), {
+    signal: AbortSignal.timeout(15_000),
+    maxResponseBytes: 1024 * 1024,
+  }).catch((err) => {
     if (err.name === "TimeoutError")
       throw Object.assign(new Error("Google Translate request timed out"), { statusCode: 502 });
     throw err;

@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join, extname } from "path";
 import { DATA_DIR } from "../utils/data-dir.js";
+import { assertInsideDir, isAllowedImageBuffer } from "../utils/security.js";
 
 const AVATAR_DIR = join(DATA_DIR, "avatars");
 const NPC_AVATAR_DIR = join(AVATAR_DIR, "npc");
@@ -38,7 +39,7 @@ export async function avatarsRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "Invalid filename" });
     }
 
-    const filePath = join(AVATAR_DIR, filename);
+    const filePath = assertInsideDir(AVATAR_DIR, join(AVATAR_DIR, filename));
     if (!existsSync(filePath)) {
       return reply.status(404).send({ error: "Not found" });
     }
@@ -60,7 +61,7 @@ export async function avatarsRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "Invalid path" });
     }
 
-    const filePath = join(NPC_AVATAR_DIR, chatId, filename);
+    const filePath = assertInsideDir(NPC_AVATAR_DIR, join(NPC_AVATAR_DIR, chatId, filename));
     if (!existsSync(filePath)) {
       return reply.status(404).send({ error: "Not found" });
     }
@@ -103,8 +104,12 @@ export async function avatarsRoutes(app: FastifyInstance) {
     const npcDir = join(NPC_AVATAR_DIR, chatId);
     if (!existsSync(npcDir)) mkdirSync(npcDir, { recursive: true });
 
-    const filePath = join(npcDir, `${safeName}.png`);
-    writeFileSync(filePath, Buffer.from(match[1]!, "base64"));
+    const imageBuffer = Buffer.from(match[1]!, "base64");
+    if (!isAllowedImageBuffer(imageBuffer, ".png")) {
+      return reply.status(400).send({ error: "Unsupported or invalid avatar image" });
+    }
+    const filePath = assertInsideDir(npcDir, join(npcDir, `${safeName}.png`));
+    writeFileSync(filePath, imageBuffer);
 
     return reply.send({ avatarPath: `/api/avatars/npc/${chatId}/${safeName}.png?v=${Date.now()}` });
   });

@@ -13,6 +13,8 @@ import {
 } from "@marinara-engine/shared";
 import { createAppSettingsStorage } from "../services/storage/app-settings.storage.js";
 import { encryptApiKey, decryptApiKey } from "../utils/crypto.js";
+import { isTtsLocalUrlsEnabled } from "../config/runtime-config.js";
+import { safeFetch } from "../utils/security.js";
 
 // OpenAI built-in voices used as fallback when the provider has no /audio/voices endpoint
 const OPENAI_FALLBACK_VOICES = ["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"];
@@ -34,6 +36,7 @@ const ELEVENLABS_TTS_MODEL_ALIASES: Record<string, string> = {
   elevenlabs_v3: "eleven_v3",
   elevenlabs_tts_v3: "eleven_v3",
 };
+const MAX_TTS_AUDIO_BYTES = 20 * 1024 * 1024;
 
 const speakSchema = z.object({
   text: z.string().min(1).max(4096),
@@ -281,9 +284,11 @@ async function fetchElevenLabsVoiceOptions(
       url.searchParams.set("next_page_token", nextPageToken);
     }
 
-    const res = await fetch(url, {
+    const res = await safeFetch(url, {
       headers: elevenLabsHeaders(apiKey),
       signal: AbortSignal.timeout(10_000),
+      policy: { allowLocal: isTtsLocalUrlsEnabled(), allowedProtocols: ["https:", "http:"] },
+      maxResponseBytes: 2 * 1024 * 1024,
     });
 
     if (!res.ok) throw new Error(`ElevenLabs voices request failed (${res.status})`);
@@ -316,9 +321,11 @@ async function fetchProviderVoices(cfg: TTSConfig): Promise<TTSVoicesResponse> {
     return voices.length > 0 ? responseFromVoiceOptions(cfg.source, voices, true) : fallbackVoices(cfg.source);
   }
 
-  const res = await fetch(`${base}/audio/voices`, {
+  const res = await safeFetch(`${base}/audio/voices`, {
     headers: openAiHeaders(cfg.apiKey),
     signal: AbortSignal.timeout(10_000),
+    policy: { allowLocal: isTtsLocalUrlsEnabled(), allowedProtocols: ["https:", "http:"] },
+    maxResponseBytes: 2 * 1024 * 1024,
   });
 
   if (!res.ok) return fallbackVoices(cfg.source);
@@ -425,7 +432,7 @@ export async function ttsRoutes(app: FastifyInstance) {
 
     let providerRes: Response;
     try {
-      providerRes = await fetch(url, {
+      providerRes = await safeFetch(url, {
         method: "POST",
         headers: cfg.source === "elevenlabs" ? elevenLabsHeaders(cfg.apiKey) : openAiHeaders(cfg.apiKey),
         body:
@@ -448,6 +455,9 @@ export async function ttsRoutes(app: FastifyInstance) {
                 ...(speechInstructions ? { instructions: speechInstructions } : {}),
               }),
         signal: AbortSignal.timeout(60_000),
+        policy: { allowLocal: isTtsLocalUrlsEnabled(), allowedProtocols: ["https:", "http:"] },
+        maxResponseBytes: MAX_TTS_AUDIO_BYTES,
+        allowedContentTypes: ["audio/", "application/octet-stream"],
       });
     } catch (err: unknown) {
       const msg =

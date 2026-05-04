@@ -2,6 +2,7 @@
 // Routes: Browser — Wyvern provider
 // ──────────────────────────────────────────────
 import type { FastifyInstance } from "fastify";
+import { safeFetch } from "../utils/security.js";
 
 const WYVERN_API_BASE = "https://api.wyvern.chat";
 const WYVERN_IMAGE_BASE = "https://imagedelivery.net";
@@ -112,7 +113,12 @@ export async function botBrowserWyvernRoutes(app: FastifyInstance) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15_000);
     try {
-      const res = await fetch(url, { signal: controller.signal });
+      const res = await safeFetch(url, {
+        signal: controller.signal,
+        policy: { allowedProtocols: ["https:"] },
+        allowedContentTypes: ["image/"],
+        maxResponseBytes: 10 * 1024 * 1024,
+      });
       if (!res.ok) return reply.status(404).send({ error: "Avatar not found" });
       const buf = Buffer.from(await res.arrayBuffer());
       const ct = res.headers.get("content-type") || "image/webp";

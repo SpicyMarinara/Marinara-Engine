@@ -16,7 +16,7 @@ import type {
   SidecarQuantization,
 } from "@marinara-engine/shared";
 import { SIDECAR_DEFAULT_CONFIG } from "@marinara-engine/shared";
-import { api } from "../lib/api-client.js";
+import { ADMIN_SECRET_STORAGE_KEY, api } from "../lib/api-client.js";
 
 interface SidecarTestMessageResult {
   success: boolean;
@@ -131,9 +131,10 @@ async function consumeDownloadStream(
   set: (partial: Partial<SidecarState>) => void,
   get: () => SidecarState,
 ): Promise<void> {
+  const adminSecret = localStorage.getItem(ADMIN_SECRET_STORAGE_KEY)?.trim();
   const response = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(adminSecret ? { "X-Admin-Secret": adminSecret } : {}) },
     body: JSON.stringify(body),
     cache: "no-store",
   });

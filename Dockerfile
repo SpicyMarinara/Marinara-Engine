@@ -71,7 +71,8 @@ COPY --from=builder /app/packages/server/dist packages/server/dist
 COPY --from=builder /app/packages/client/dist packages/client/dist
 
 # Ensure /app/data exists for runtime use (file storage, uploads, generated assets)
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data && \
+    chown -R node:node /app
 
 # Point the server at /app/data regardless of working directory
 ENV DATA_DIR=/app/data
@@ -85,6 +86,8 @@ ENV PORT=7860
 ENV HOST=0.0.0.0
 ENV NODE_ENV=production
 EXPOSE 7860
+
+USER node
 
 # Run the server (serves both API and client SPA)
 CMD ["node", "packages/server/dist/index.js"]
