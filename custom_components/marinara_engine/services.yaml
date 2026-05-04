@@ -1,0 +1,65 @@
+send_message:
+  name: Send Message
+  description: >
+    Send a message to a Marinara Engine chat. If no chat_id is provided, the
+    primary chat configured in the integration options is used.
+  fields:
+    chat_id:
+      name: Chat ID
+      description: >
+        ID of the target chat. Leave blank to use the primary chat set in
+        the integration options.
+      required: false
+      selector:
+        text:
+    message:
+      name: Message
+      description: The message content to send.
+      required: true
+      selector:
+        text:
+          multiline: true
+    role:
+      name: Role
+      description: Message role. Defaults to "user".
+      required: false
+      default: user
+      selector:
+        select:
+          options:
+            - user
+            - assistant
+            - system
+            - narrator
+    trigger_generation:
+      name: Trigger Generation
+      description: >
+        After sending the message, immediately trigger AI generation so the
+        character responds.
+      required: false
+      default: false
+      selector:
+        boolean:
+
+trigger_generation:
+  name: Trigger Generation
+  description: >
+    Start an AI generation turn in a Marinara Engine chat. If no chat_id is
+    provided, the primary chat configured in the integration options is used.
+  fields:
+    chat_id:
+      name: Chat ID
+      description: >
+        ID of the target chat. Leave blank to use the primary chat set in
+        the integration options.
+      required: false
+      selector:
+        text:
+    user_message:
+      name: User Message
+      description: >
+        Optional message to send from the user as part of this generation turn.
+      required: false
+      selector:
+        text:
+          multiline: true

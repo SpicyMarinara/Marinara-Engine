@@ -45,6 +45,7 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 - PocketTTS is now available as a local TTS provider.
 - Optional speech-to-text microphone buttons can be enabled for Conversation, Roleplay, and Game input fields.
 - Character imports now ask before extracting embedded character-card lorebooks into standalone Marinara lorebooks.
+- Home Assistant HACS integration that syncs Marinara custom tools and a Home Assistant agent for smart-home control.
 
 ### Security
 

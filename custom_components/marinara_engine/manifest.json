@@ -1,0 +1,12 @@
+{
+  "domain": "marinara_engine",
+  "name": "Marinara Engine",
+  "version": "1.0.0",
+  "config_flow": true,
+  "documentation": "https://github.com/Pasta-Devs/Marinara-Engine/blob/main/docs/integrations/home-assistant.md",
+  "issue_tracker": "https://github.com/Pasta-Devs/Marinara-Engine/issues",
+  "requirements": [],
+  "dependencies": ["webhook"],
+  "iot_class": "local_polling",
+  "codeowners": []
+}
