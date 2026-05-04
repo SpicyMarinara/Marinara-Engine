@@ -58,7 +58,7 @@ jobs:
       - name: Build release APK
         working-directory: android
         env:
-          ANDROID_SIGNING_KEYSTORE: app/marinara-release.jks
+          ANDROID_SIGNING_KEYSTORE: marinara-release.jks
           ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
           ANDROID_SIGNING_STORE_TYPE: ${{ secrets.ANDROID_SIGNING_STORE_TYPE }}
           ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
