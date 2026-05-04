@@ -177,8 +177,6 @@ export const BUILT_IN_AGENT_IDS = {
   HAPTIC: "haptic",
   CYOA: "cyoa",
   SECRET_PLOT_DRIVER: "secret-plot-driver",
-  GAME_MASTER: "game-master",
-  PARTY_PLAYER: "party-player",
 } as const;
 
 export type AgentCategory = "writer" | "tracker" | "misc";
@@ -520,8 +518,6 @@ export const DEFAULT_AGENT_TOOLS: Record<string, string[]> = {
   haptic: [],
   cyoa: [],
   "secret-plot-driver": [],
-  "game-master": ["roll_dice", "update_game_state"],
-  "party-player": [],
 };
 
 /** Data shape for a lorebook_update agent result. */

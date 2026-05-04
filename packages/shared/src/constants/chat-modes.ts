@@ -39,6 +39,6 @@ export const CHAT_MODES: Record<ChatMode, ChatModeDefinition> = {
     name: "Game",
     description: "AI-managed singleplayer RPG with a Game Master, party members, sessions, and dice.",
     icon: "🎲",
-    defaultAgents: ["game-master", "party-player", "world-state", "quest", "expression", "combat"],
+    defaultAgents: ["world-state", "quest", "expression", "combat"],
   },
 };
