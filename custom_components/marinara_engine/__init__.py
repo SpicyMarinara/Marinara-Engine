@@ -84,7 +84,11 @@ async def _async_sync_tools(
     try:
         base_url = get_url(hass, allow_internal=True, prefer_external=False)
     except NoURLAvailableError:
-        base_url = f"http://{hass.config.api.local_ip}:{hass.config.api.port}"
+        api = getattr(hass.config, "api", None)
+        if api is None or not api.local_ip or not api.port:
+            _LOGGER.warning("Cannot determine Home Assistant URL for tool sync")
+            return
+        base_url = f"http://{api.local_ip}:{api.port}"
 
     webhook_url = f"{base_url}/api/webhook/{webhook_id}"
     try:

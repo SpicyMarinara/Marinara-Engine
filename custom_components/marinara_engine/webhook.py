@@ -18,6 +18,16 @@ from homeassistant.helpers import entity_registry as er_helper
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+_SENSITIVE_ARG_KEYS = {
+    "access_token",
+    "api_key",
+    "code",
+    "password",
+    "pin",
+    "refresh_token",
+    "secret",
+    "token",
+}
 
 
 def async_register_webhook(hass: HomeAssistant, webhook_id: str) -> None:
@@ -47,7 +57,7 @@ async def _handle_webhook(
     tool: str = body.get("tool", "")
     args: dict[str, Any] = body.get("arguments", {})
 
-    _LOGGER.debug("Marinara webhook: tool=%s args=%s", tool, args)
+    _LOGGER.debug("Marinara webhook: tool=%s args=%s", tool, _redact_args(args))
 
     handler = _DISPATCH.get(tool)
     if handler is None:
@@ -75,6 +85,18 @@ def _get_area(hass: HomeAssistant, area_name: str):
             f"Area '{area_name}' not found. Call ha_list_areas to see available areas."
         )
     return area
+
+
+def _redact_args(value: Any) -> Any:
+    """Redact sensitive fields, including lock codes accepted by _unlock."""
+    if isinstance(value, dict):
+        return {
+            key: "<REDACTED>" if str(key).lower() in _SENSITIVE_ARG_KEYS else _redact_args(val)
+            for key, val in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_args(item) for item in value]
+    return value
 
 
 def _resolve_entity_and_target(

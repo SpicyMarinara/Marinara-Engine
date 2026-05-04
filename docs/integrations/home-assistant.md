@@ -84,7 +84,8 @@ You can choose which categories to expose in the integration's **Configure** men
 | Locks                    | `ha_lock`, `ha_unlock`                                                                             |
 | Media Players            | `ha_media_play`, `ha_media_pause`, `ha_set_volume`                                                 |
 | Scenes & Scripts         | `ha_activate_scene`, `ha_run_script`                                                               |
-| Query & Generic          | `ha_get_state`, `ha_list_entities`, `ha_call_service`, `ha_notify`                                 |
+| Query                    | `ha_get_state`, `ha_list_areas`, `ha_list_entities`, `ha_notify`                                   |
+| Generic Service Calls    | `ha_call_service`                                                                                  |
 
 ## The Home Assistant agent
 

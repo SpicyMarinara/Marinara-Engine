@@ -19,7 +19,8 @@ TOOL_CATEGORIES: dict[str, str] = {
     "locks": "Locks",
     "media": "Media Players",
     "scenes_scripts": "Scenes & Scripts",
-    "query": "Query & Generic",
+    "query": "Query",
+    "generic_service": "Generic Service Calls (Advanced)",
 }
 
 # Locks excluded by default — users can opt in via Options
@@ -398,7 +399,7 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "ha_call_service",
-        "category": "query",
+        "category": "generic_service",
         "description": "Call any Home Assistant service with full control over domain, service, and data",
         "parametersSchema": {
             "type": "object",

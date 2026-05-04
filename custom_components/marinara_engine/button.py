@@ -78,18 +78,24 @@ class MarinaraSyncToolsButton(CoordinatorEntity[MarinaraCoordinator], ButtonEnti
         try:
             base_url = get_url(self.hass, allow_internal=True, prefer_external=False)
         except NoURLAvailableError:
-            base_url = (
-                f"http://{self.hass.config.api.local_ip}"
-                f":{self.hass.config.api.port}"
-            )
+            api = getattr(self.hass.config, "api", None)
+            if api is None or not api.local_ip or not api.port:
+                _LOGGER.error("Cannot determine Home Assistant URL for tool sync")
+                return
+            base_url = f"http://{api.local_ip}:{api.port}"
         webhook_url = f"{base_url}/api/webhook/{webhook_id}"
         enabled_categories = self._entry.options.get(
             CONF_ENABLED_CATEGORIES, DEFAULT_ENABLED_CATEGORIES
         )
-        created, updated = await self.coordinator.sync_tools(webhook_url, enabled_categories)
-        _LOGGER.info(
-            "Marinara tool sync: %d created, %d updated", created, updated
-        )
-        agent_status = await self.coordinator.sync_agent(enabled_categories)
-        if agent_status != "unchanged":
-            _LOGGER.info("Marinara tool sync: Home Assistant agent %s", agent_status)
+        try:
+            created, updated = await self.coordinator.sync_tools(
+                webhook_url, enabled_categories
+            )
+            _LOGGER.info(
+                "Marinara tool sync: %d created, %d updated", created, updated
+            )
+            agent_status = await self.coordinator.sync_agent(enabled_categories)
+            if agent_status != "unchanged":
+                _LOGGER.info("Marinara tool sync: Home Assistant agent %s", agent_status)
+        except Exception:
+            _LOGGER.exception("Marinara tool sync failed")

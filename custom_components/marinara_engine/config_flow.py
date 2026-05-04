@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 
 import aiohttp
 import voluptuous as vol
@@ -40,6 +41,26 @@ _STEP_USER_SCHEMA = vol.Schema(
         vol.Required(CONF_PORT, default=DEFAULT_PORT): vol.Coerce(int),
     }
 )
+
+
+def _chat_options_from_payload(chats: list[object]) -> dict[str, str]:
+    """Build safe chat selector options from Marinara's /api/chats payload."""
+    options: dict[str, str] = {}
+    for chat in chats:
+        if not isinstance(chat, Mapping):
+            _LOGGER.debug("Skipping malformed Marinara chat entry: %s", chat)
+            continue
+        chat_id = chat.get("id")
+        name = chat.get("name")
+        if chat_id is None or not name:
+            _LOGGER.debug("Skipping incomplete Marinara chat entry: %s", chat)
+            continue
+        key = str(chat_id)
+        if key in options:
+            _LOGGER.debug("Skipping duplicate Marinara chat id: %s", key)
+            continue
+        options[key] = str(name)
+    return options
 
 
 async def _test_connection(host: str, port: int) -> str | None:
@@ -106,7 +127,7 @@ class MarinaraOptionsFlow(OptionsFlow):
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         self._config_entry = config_entry
-        self._chats: list[dict] = []
+        self._chats: list[object] = []
 
     async def async_step_init(
         self, user_input: dict | None = None
@@ -126,7 +147,7 @@ class MarinaraOptionsFlow(OptionsFlow):
         except Exception:
             self._chats = []
 
-        chat_options = {c["id"]: c["name"] for c in self._chats}
+        chat_options = _chat_options_from_payload(self._chats)
         current_chat = self._config_entry.options.get(CONF_PRIMARY_CHAT_ID, "")
         current_cats = self._config_entry.options.get(
             CONF_ENABLED_CATEGORIES, DEFAULT_ENABLED_CATEGORIES
