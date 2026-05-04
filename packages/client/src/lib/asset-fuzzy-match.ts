@@ -38,15 +38,20 @@ function tagScore(prose: string, tag: string, category: string): number {
 }
 
 /**
- * Find the best-matching tag for a prose description. Requires at least two
- * specific-word overlaps so a brand-new location with only the (already
- * stripped) category prefix in common does not get pinned to whichever
- * library tag happens to come first in iteration order.
+ * Find the best-matching tag for a prose description. For backgrounds we
+ * require at least two specific-word overlaps so a brand-new location with
+ * only the (already stripped) category prefix in common does not get pinned
+ * to whichever library tag happens to come first in iteration order. Audio
+ * categories keep the original ≥1 threshold — single-word matches like
+ * "tense" or "combat" are meaningful in the deeper audio hierarchy and the
+ * "no fuzzy match" fall-through for those categories is silent (returns the
+ * original tag, no playback) rather than visually disruptive.
  */
 function bestMatch(prose: string, tags: string[], category: string): string | null {
   if (!tags.length) return null;
+  const minOverlap = category === "backgrounds" ? 2 : 1;
   let best: string | null = null;
-  let bestScore = 1;
+  let bestScore = minOverlap - 1;
   for (const tag of tags) {
     const s = tagScore(prose, tag, category);
     if (s > bestScore) {
