@@ -60,6 +60,11 @@ function stRole(value: unknown): number {
   return value === "user" ? 1 : value === "assistant" ? 2 : 0;
 }
 
+function resolveScanGenerationTriggers(mode: unknown): string[] {
+  const modeTrigger = mode === "game" ? "game" : typeof mode === "string" && mode.trim() ? mode.trim() : "roleplay";
+  return Array.from(new Set(["test_scan", modeTrigger, "chat"]));
+}
+
 function buildCompatibleLorebookExport(lb: Record<string, unknown>, entries: Array<Record<string, unknown>>) {
   const exportedEntries: Record<string, Record<string, unknown>> = {};
   entries.forEach((entry, index) => {
@@ -418,6 +423,7 @@ export async function lorebooksRoutes(app: FastifyInstance) {
       characterIds,
       personaId,
       activeLorebookIds,
+      generationTriggers: resolveScanGenerationTriggers(chat?.mode),
     });
 
     // Fetch full entry data for the activated IDs

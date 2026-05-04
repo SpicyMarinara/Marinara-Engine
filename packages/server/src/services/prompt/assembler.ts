@@ -109,6 +109,8 @@ export interface AssemblerInput {
   chatEmbedding?: number[] | null;
   /** Per-chat ephemeral state overrides for lorebook entries (from chat metadata). */
   entryStateOverrides?: Record<string, { ephemeral?: number | null; enabled?: boolean }>;
+  /** Generation trigger labels used by per-entry lorebook include/exclude filters. */
+  generationTriggers?: string[];
   /** When set, replaces individual character scenario fields with this group scenario. */
   groupScenarioOverrideText?: string | null;
 }
@@ -217,6 +219,7 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
     activeLorebookIds: input.activeLorebookIds ?? [],
     chatEmbedding: input.chatEmbedding ?? null,
     entryStateOverrides: input.entryStateOverrides,
+    generationTriggers: input.generationTriggers ?? ["chat"],
     groupScenarioOverrideText: input.groupScenarioOverrideText ?? null,
   };
 

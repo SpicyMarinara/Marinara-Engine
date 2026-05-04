@@ -137,16 +137,21 @@ export function LorebookEditor() {
   const entries = useMemo(() => (rawEntries ?? []) as LorebookEntry[], [rawEntries]);
   const folders = useMemo(() => (rawFolders ?? []) as LorebookFolder[], [rawFolders]);
   const characters = useMemo(() => {
-    if (!rawCharacters) return [] as Array<{ id: string; name: string }>;
+    if (!rawCharacters) return [] as Array<{ id: string; name: string; tags: string[] }>;
     return (rawCharacters as Array<{ id: string; data: string | Record<string, unknown> }>).map((c) => {
       try {
         const parsed = typeof c.data === "string" ? JSON.parse(c.data) : c.data;
-        return { id: c.id, name: parsed?.name ?? "Unknown" };
+        const tags = Array.isArray(parsed?.tags) ? parsed.tags.map(String).filter(Boolean) : [];
+        return { id: c.id, name: parsed?.name ?? "Unknown", tags };
       } catch {
-        return { id: c.id, name: "Unknown" };
+        return { id: c.id, name: "Unknown", tags: [] };
       }
     });
   }, [rawCharacters]);
+  const characterTags = useMemo(
+    () => Array.from(new Set(characters.flatMap((character) => character.tags))).sort((a, b) => a.localeCompare(b)),
+    [characters],
+  );
   const personas = useMemo(() => {
     if (!rawPersonas) return [] as Array<{ id: string; name: string; comment?: string | null }>;
     return (rawPersonas as Array<{ id: string; name: string; comment?: string | null }>).map((p) => ({
@@ -1229,6 +1234,8 @@ export function LorebookEditor() {
                                           lorebookId={lorebookId}
                                           isExpanded={expandedEntryId === entry.id}
                                           onToggleExpand={() => toggleEntryExpanded(entry.id)}
+                                          characters={characters}
+                                          characterTags={characterTags}
                                           folders={folders}
                                           draggable={canReorderEntries}
                                           isDragging={sameContainer && draggingEntryIdx === eIdx}
@@ -1326,6 +1333,8 @@ export function LorebookEditor() {
                               lorebookId={lorebookId}
                               isExpanded={expandedEntryId === entry.id}
                               onToggleExpand={() => toggleEntryExpanded(entry.id)}
+                              characters={characters}
+                              characterTags={characterTags}
                               folders={folders}
                               draggable={canReorderEntries}
                               isDragging={sameContainer && draggingEntryIdx === idx}
@@ -1366,6 +1375,8 @@ export function LorebookEditor() {
                         lorebookId={lorebookId}
                         isExpanded={expandedEntryId === entry.id}
                         onToggleExpand={() => toggleEntryExpanded(entry.id)}
+                        characters={characters}
+                        characterTags={characterTags}
                         folders={folders}
                         draggable={false}
                         isDragging={false}

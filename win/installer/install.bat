@@ -12,7 +12,8 @@ set "NODE_SHA256=feffb8e5cb5ac47f793666636d496ef3e975be82c84c4da5d20e6aa8fa4eb80
 set "GIT_DOWNLOAD_URL=https://github.com/git-for-windows/git/releases/download/v2.54.0.windows.1/Git-2.54.0-64-bit.exe"
 set "GIT_SHA256=2b96e7854f0520f0f6b709c21041d9801b1be44d5e1a0d9fa621b2fbc40f1983"
 set "RELEASE_TAG=v1.5.7"
-set "RELEASE_COMMIT=8325c7592b35743884f6852b68937446363697fb"
+if not defined MARINARA_RELEASE_COMMIT set "MARINARA_RELEASE_COMMIT="
+set "RELEASE_COMMIT=%MARINARA_RELEASE_COMMIT%"
 
 echo.
 echo  +==========================================+
@@ -174,7 +175,11 @@ if errorlevel 1 (
 cd /d "%INSTALL_DIR%"
 set "NEW_HEAD="
 for /f "tokens=*" %%i in ('git rev-parse HEAD 2^>nul') do set "NEW_HEAD=%%i"
-if /I not "!NEW_HEAD!"=="%RELEASE_COMMIT%" (
+if not defined NEW_HEAD (
+    set "INSTALL_ERROR=Downloaded release %RELEASE_TAG% could not be verified."
+    goto :fatal
+)
+if defined RELEASE_COMMIT if /I not "!NEW_HEAD!"=="%RELEASE_COMMIT%" (
     set "INSTALL_ERROR=Downloaded release %RELEASE_TAG% did not match the expected commit."
     goto :fatal
 )
@@ -197,7 +202,7 @@ if not defined TARGET_HEAD (
     set "INSTALL_ERROR=Could not resolve release %RELEASE_TAG% after fetch."
     goto :fatal
 )
-if /I not "!TARGET_HEAD!"=="%RELEASE_COMMIT%" (
+if defined RELEASE_COMMIT if /I not "!TARGET_HEAD!"=="%RELEASE_COMMIT%" (
     set "INSTALL_ERROR=Release %RELEASE_TAG% resolved to an unexpected commit."
     goto :fatal
 )
@@ -218,14 +223,14 @@ if "!DIRTY!"=="1" (
     if "!STASHED!"=="1" for /f "tokens=*" %%i in ('git stash list -1 --format^=%%gd 2^>nul') do set "STASH_REF=%%i"
 )
 
-git checkout --detach "%RELEASE_COMMIT%"
+git checkout --detach "!TARGET_HEAD!"
 if errorlevel 1 (
     if "!STASHED!"=="1" call :restore_stashed_changes
     set "INSTALL_ERROR=Failed to check out release %RELEASE_TAG%."
     goto :fatal
 )
 for /f "tokens=*" %%i in ('git rev-parse HEAD 2^>nul') do set "NEW_HEAD=%%i"
-if /I not "!NEW_HEAD!"=="%RELEASE_COMMIT%" (
+if /I not "!NEW_HEAD!"=="!TARGET_HEAD!" (
     if "!STASHED!"=="1" call :restore_stashed_changes
     set "INSTALL_ERROR=Repository update did not land on the expected %RELEASE_TAG% commit."
     goto :fatal

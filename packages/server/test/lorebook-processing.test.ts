@@ -49,6 +49,13 @@ function makeEntry(overrides: Partial<LorebookEntry> = {}): LorebookEntry {
     matchWholeWords: false,
     caseSensitive: false,
     useRegex: false,
+    characterFilterMode: "any",
+    characterFilterIds: [],
+    characterTagFilterMode: "any",
+    characterTagFilters: [],
+    generationTriggerFilterMode: "any",
+    generationTriggerFilters: [],
+    additionalMatchingSources: [],
     position: 0,
     depth: 4,
     order: 100,
@@ -92,6 +99,44 @@ test("entries inherit their lorebook scan depth when no per-entry override is se
 
   assert.equal(activated.length, 0);
   assert.equal(entries[0]?.scanDepth, 2);
+});
+
+test("entry character filters include and exclude active characters", () => {
+  const includeEntry = makeEntry({ id: "include", characterFilterMode: "include", characterFilterIds: ["char-a"] });
+  const excludeEntry = makeEntry({ id: "exclude", characterFilterMode: "exclude", characterFilterIds: ["char-b"] });
+
+  const activated = scanForActivatedEntries([{ role: "user", content: "keyword" }], [includeEntry, excludeEntry], {
+    activeCharacterIds: ["char-a"],
+  });
+
+  assert.deepEqual(
+    activated.map((entry) => entry.entry.id),
+    ["include", "exclude"],
+  );
+
+  const blocked = scanForActivatedEntries([{ role: "user", content: "keyword" }], [includeEntry, excludeEntry], {
+    activeCharacterIds: ["char-b"],
+  });
+
+  assert.deepEqual(
+    blocked.map((entry) => entry.entry.id),
+    [],
+  );
+});
+
+test("additional matching sources can activate entries without chat keyword matches", () => {
+  const entry = makeEntry({ additionalMatchingSources: ["character_description"], keys: ["sorcerer"] });
+
+  const activated = scanForActivatedEntries([{ role: "user", content: "What can they do?" }], [entry], {
+    additionalMatchingSourceText: {
+      character_description: "A traveling Sorcerer from the northern academy.",
+    },
+  });
+
+  assert.deepEqual(
+    activated.map((result) => result.entry.id),
+    ["entry-1"],
+  );
 });
 
 test("persona-linked lorebooks activate only for the active persona", () => {

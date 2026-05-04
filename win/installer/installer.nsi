@@ -28,7 +28,9 @@
 !define GIT_SHA256 "2b96e7854f0520f0f6b709c21041d9801b1be44d5e1a0d9fa621b2fbc40f1983"
 !define NODE_SHA256 "feffb8e5cb5ac47f793666636d496ef3e975be82c84c4da5d20e6aa8fa4eb806"
 !define RELEASE_TAG "v1.5.7"
-!define RELEASE_COMMIT "8325c7592b35743884f6852b68937446363697fb"
+!ifndef RELEASE_COMMIT
+!define RELEASE_COMMIT ""
+!endif
 
 Name "${APP_NAME}"
 OutFile "Marinara-Engine-Installer-${APP_VERSION}.exe"
@@ -312,7 +314,26 @@ Please restart your computer and run this installer again."
     nsExec::ExecToStack 'git rev-parse ${RELEASE_TAG}^{commit}'
     Pop $0
     Pop $3
-    ${If} $3 != "${RELEASE_COMMIT}"
+    ${If} $0 != 0
+      ${If} $5 == "1"
+        nsExec::ExecToLog 'git stash apply -q'
+        Pop $1
+      ${EndIf}
+      MessageBox MB_OK|MB_ICONSTOP "Could not resolve release ${RELEASE_TAG} after fetching it.$\r$\n$\r$\nInstallation was stopped before updating files."
+      Abort
+    ${EndIf}
+
+    ${If} $3 == ""
+      ${If} $5 == "1"
+        nsExec::ExecToLog 'git stash apply -q'
+        Pop $1
+      ${EndIf}
+      MessageBox MB_OK|MB_ICONSTOP "Release ${RELEASE_TAG} resolved to an empty commit.$\r$\n$\r$\nInstallation was stopped before updating files."
+      Abort
+    ${EndIf}
+
+    ${If} "${RELEASE_COMMIT}" != ""
+    ${AndIf} $3 != "${RELEASE_COMMIT}"
       ${If} $5 == "1"
         nsExec::ExecToLog 'git stash apply -q'
         Pop $1
@@ -321,7 +342,7 @@ Please restart your computer and run this installer again."
       Abort
     ${EndIf}
 
-    nsExec::ExecToLog 'git checkout --detach ${RELEASE_COMMIT}'
+    nsExec::ExecToLog 'git checkout --detach $3'
     Pop $0
     ${If} $0 != 0
       ${If} $5 == "1"
@@ -339,7 +360,7 @@ Please restart your computer and run this installer again."
     nsExec::ExecToStack 'git rev-parse HEAD'
     Pop $0
     Pop $2
-    ${If} $2 != "${RELEASE_COMMIT}"
+    ${If} $2 != "$3"
       ${If} $5 == "1"
         nsExec::ExecToLog 'git stash apply -q'
         Pop $1
@@ -451,7 +472,28 @@ ${APP_URL}"
     nsExec::ExecToStack 'cmd /c cd /d "$CLONE_DIR" && git rev-parse HEAD'
     Pop $0
     Pop $2
-    ${If} $2 != "${RELEASE_COMMIT}"
+    ${If} $0 != 0
+      ${If} $CLONE_DIR_CREATED == "1"
+        RMDir /r "$CLONE_DIR"
+      ${EndIf}
+      ${If} $STAGE_DIR_CREATED == "1"
+        RMDir /r "$STAGE_DIR"
+      ${EndIf}
+      MessageBox MB_OK|MB_ICONSTOP "Downloaded release ${RELEASE_TAG} could not be verified.$\r$\n$\r$\nInstallation was stopped before publishing files."
+      Abort
+    ${EndIf}
+    ${If} $2 == ""
+      ${If} $CLONE_DIR_CREATED == "1"
+        RMDir /r "$CLONE_DIR"
+      ${EndIf}
+      ${If} $STAGE_DIR_CREATED == "1"
+        RMDir /r "$STAGE_DIR"
+      ${EndIf}
+      MessageBox MB_OK|MB_ICONSTOP "Downloaded release ${RELEASE_TAG} resolved to an empty commit.$\r$\n$\r$\nInstallation was stopped before publishing files."
+      Abort
+    ${EndIf}
+    ${If} "${RELEASE_COMMIT}" != ""
+    ${AndIf} $2 != "${RELEASE_COMMIT}"
       ${If} $CLONE_DIR_CREATED == "1"
         RMDir /r "$CLONE_DIR"
       ${EndIf}

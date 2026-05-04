@@ -4,7 +4,14 @@
 // and returns activated entries respecting all
 // matching rules (regex, whole-word, case, selective).
 // ──────────────────────────────────────────────
-import type { LorebookEntry, SelectiveLogic, ActivationCondition, LorebookSchedule } from "@marinara-engine/shared";
+import type {
+  ActivationCondition,
+  LorebookEntry,
+  LorebookFilterMode,
+  LorebookMatchingSource,
+  LorebookSchedule,
+  SelectiveLogic,
+} from "@marinara-engine/shared";
 
 /** Compute cosine similarity between two vectors. Returns 0 for empty/mismatched vectors. */
 function cosineSimilarity(a: number[], b: number[]): number {
@@ -47,6 +54,12 @@ export interface EntryTimingState {
   /** Delay messages remaining before first activation */
   delayRemaining: number;
 }
+
+type LorebookFilterValueContext = {
+  activeCharacterIds: Set<string>;
+  activeCharacterTags: Set<string>;
+  generationTriggers: Set<string>;
+};
 
 /** Game state fields used for condition evaluation. */
 export interface GameStateForScanning {
@@ -227,6 +240,53 @@ function checkTiming(
   return true;
 }
 
+function normalizeFilterValue(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function makeValueSet(values: string[] | undefined) {
+  return new Set((values ?? []).map(normalizeFilterValue).filter(Boolean));
+}
+
+function passesValueFilter(
+  mode: LorebookFilterMode | undefined,
+  filters: string[] | undefined,
+  activeValues: Set<string>,
+) {
+  const normalizedMode = mode ?? "any";
+  const filterValues = makeValueSet(filters);
+  if (normalizedMode === "any" || filterValues.size === 0) return true;
+  const hasMatch = Array.from(filterValues).some((value) => activeValues.has(value));
+  return normalizedMode === "include" ? hasMatch : !hasMatch;
+}
+
+function passesEntryFilters(entry: LorebookEntry, context: LorebookFilterValueContext) {
+  return (
+    passesValueFilter(entry.characterFilterMode, entry.characterFilterIds, context.activeCharacterIds) &&
+    passesValueFilter(entry.characterTagFilterMode, entry.characterTagFilters, context.activeCharacterTags) &&
+    passesValueFilter(entry.generationTriggerFilterMode, entry.generationTriggerFilters, context.generationTriggers)
+  );
+}
+
+export function lorebookEntryPassesContextFilters(
+  entry: LorebookEntry,
+  options: { activeCharacterIds?: string[]; activeCharacterTags?: string[]; generationTriggers?: string[] },
+) {
+  return passesEntryFilters(entry, {
+    activeCharacterIds: makeValueSet(options.activeCharacterIds),
+    activeCharacterTags: makeValueSet(options.activeCharacterTags),
+    generationTriggers: makeValueSet(options.generationTriggers?.length ? options.generationTriggers : ["chat"]),
+  });
+}
+
+function getAdditionalMatchingText(entry: LorebookEntry, sourceText: Partial<Record<LorebookMatchingSource, string>>) {
+  if (!entry.additionalMatchingSources?.length) return "";
+  return entry.additionalMatchingSources
+    .map((source) => sourceText[source]?.trim() ?? "")
+    .filter(Boolean)
+    .join("\n");
+}
+
 /**
  * Group-based selection: within a group, only activate entries up to weight limits.
  */
@@ -278,6 +338,14 @@ export interface ScanOptions {
   chatEmbedding?: number[] | null;
   /** Cosine similarity threshold for semantic matching (0-1, default 0.3). */
   semanticThreshold?: number;
+  /** Active character IDs for per-entry include/exclude gates. */
+  activeCharacterIds?: string[];
+  /** Tags from active character cards for per-entry include/exclude gates. */
+  activeCharacterTags?: string[];
+  /** Generation trigger names for per-entry include/exclude gates. */
+  generationTriggers?: string[];
+  /** Extra source text entries may opt into scanning. */
+  additionalMatchingSourceText?: Partial<Record<LorebookMatchingSource, string>>;
 }
 
 /**
@@ -296,7 +364,16 @@ export function scanForActivatedEntries(
     currentMessageIndex = messages.length,
     chatEmbedding = null,
     semanticThreshold = 0.3,
+    activeCharacterIds = [],
+    activeCharacterTags = [],
+    generationTriggers = ["chat"],
+    additionalMatchingSourceText = {},
   } = options;
+  const filterContext: LorebookFilterValueContext = {
+    activeCharacterIds: makeValueSet(activeCharacterIds),
+    activeCharacterTags: makeValueSet(activeCharacterTags),
+    generationTriggers: makeValueSet(generationTriggers.length > 0 ? generationTriggers : ["chat"]),
+  };
 
   // Build the text to scan from recent messages
   const messagesToScan = scanDepth > 0 ? messages.slice(-scanDepth) : messages;
@@ -308,6 +385,7 @@ export function scanForActivatedEntries(
   for (const entry of entries) {
     // Skip disabled entries
     if (!entry.enabled) continue;
+    if (!passesEntryFilters(entry, filterContext)) continue;
 
     // Constant entries are always activated
     if (entry.constant) {
@@ -341,13 +419,15 @@ export function scanForActivatedEntries(
     }
 
     // Per-entry scan depth override
-    const entryScanText =
+    const baseEntryScanText =
       entry.scanDepth !== null && entry.scanDepth > 0
         ? messages
             .slice(-entry.scanDepth)
             .map((m) => m.content)
             .join("\n")
         : combinedText;
+    const extraMatchingText = getAdditionalMatchingText(entry, additionalMatchingSourceText);
+    const entryScanText = extraMatchingText ? `${baseEntryScanText}\n${extraMatchingText}` : baseEntryScanText;
 
     const matchOptions = {
       useRegex: entry.useRegex,
@@ -378,6 +458,7 @@ export function scanForActivatedEntries(
   if (chatEmbedding && chatEmbedding.length > 0) {
     for (const entry of entries) {
       if (!entry.enabled || entry.constant || activatedIds.has(entry.id)) continue;
+      if (!passesEntryFilters(entry, filterContext)) continue;
       if (!entry.embedding || entry.embedding.length === 0) continue;
 
       const similarity = cosineSimilarity(chatEmbedding, entry.embedding);

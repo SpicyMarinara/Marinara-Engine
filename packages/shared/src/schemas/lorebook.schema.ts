@@ -7,6 +7,18 @@ export const lorebookCategorySchema = z.enum(["world", "character", "npc", "spel
 
 export const selectiveLogicSchema = z.enum(["and", "or", "not"]);
 
+export const lorebookFilterModeSchema = z.enum(["any", "include", "exclude"]);
+
+export const lorebookMatchingSourceSchema = z.enum([
+  "character_name",
+  "character_description",
+  "character_personality",
+  "character_scenario",
+  "character_tags",
+  "persona_description",
+  "persona_tags",
+]);
+
 export const activationConditionSchema = z.object({
   field: z.string(),
   operator: z.enum(["equals", "not_equals", "contains", "not_contains", "gt", "lt"]),
@@ -89,6 +101,13 @@ export const createLorebookEntrySchema = z.object({
   matchWholeWords: z.boolean().default(false),
   caseSensitive: z.boolean().default(false),
   useRegex: z.boolean().default(false),
+  characterFilterMode: lorebookFilterModeSchema.default("any"),
+  characterFilterIds: z.array(z.string()).default([]),
+  characterTagFilterMode: lorebookFilterModeSchema.default("any"),
+  characterTagFilters: z.array(z.string()).default([]),
+  generationTriggerFilterMode: lorebookFilterModeSchema.default("any"),
+  generationTriggerFilters: z.array(z.string()).default([]),
+  additionalMatchingSources: z.array(lorebookMatchingSourceSchema).default([]),
   position: z.number().int().min(0).max(2).default(0),
   depth: z.number().int().min(0).default(4),
   order: z.number().int().default(100),
@@ -125,6 +144,13 @@ export const updateLorebookEntrySchema = z.object({
   matchWholeWords: z.boolean().optional(),
   caseSensitive: z.boolean().optional(),
   useRegex: z.boolean().optional(),
+  characterFilterMode: lorebookFilterModeSchema.optional(),
+  characterFilterIds: z.array(z.string()).optional(),
+  characterTagFilterMode: lorebookFilterModeSchema.optional(),
+  characterTagFilters: z.array(z.string()).optional(),
+  generationTriggerFilterMode: lorebookFilterModeSchema.optional(),
+  generationTriggerFilters: z.array(z.string()).optional(),
+  additionalMatchingSources: z.array(lorebookMatchingSourceSchema).optional(),
   position: z.number().int().min(0).max(2).optional(),
   depth: z.number().int().min(0).optional(),
   order: z.number().int().optional(),

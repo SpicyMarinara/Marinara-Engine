@@ -47,6 +47,7 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 - Character imports now ask before extracting embedded character-card lorebooks into standalone Marinara lorebooks.
 - Home Assistant HACS integration that syncs Marinara custom tools and a Home Assistant agent for smart-home control.
 - Updated the supported toolchain to Node.js 24 LTS and pnpm 10.33.2 across launchers, installers, Docker images, docs, and CI, plus refreshed dependencies within their compatible ranges.
+- Lorebook entries can now be scoped by active characters, character tags, and generation triggers, and can scan selected character/persona fields as extra keyword-matching sources.
 
 ### Security
 
@@ -97,6 +98,7 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 - Loopback LLM provider URLs are allowed by default again, so local model servers on `127.0.0.1`, `::1`, or `localhost` do not require the broad private-network URL opt-in.
 - Restored the animated Marinara logo on the home screen while keeping the static logo as the inactive-page fallback.
 - Tightened the home screen spacing so the logo, FAQ, credits, and special thanks fit more comfortably on desktop and mobile.
+- Windows installer updates now force-refresh the release tag and verify the resolved tag commit instead of aborting on legitimate v1.5.7 hotfix retags.
 - Various minor UI bugs.
 
 ## [1.5.6]

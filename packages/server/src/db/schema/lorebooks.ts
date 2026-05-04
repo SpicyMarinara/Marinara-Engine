@@ -80,6 +80,23 @@ export const lorebookEntries = sqliteTable("lorebook_entries", {
   matchWholeWords: text("match_whole_words").notNull().default("false"),
   caseSensitive: text("case_sensitive").notNull().default("false"),
   useRegex: text("use_regex").notNull().default("false"),
+  characterFilterMode: text("character_filter_mode", { enum: ["any", "include", "exclude"] })
+    .notNull()
+    .default("any"),
+  /** JSON array of character IDs used by characterFilterMode */
+  characterFilterIds: text("character_filter_ids").notNull().default("[]"),
+  characterTagFilterMode: text("character_tag_filter_mode", { enum: ["any", "include", "exclude"] })
+    .notNull()
+    .default("any"),
+  /** JSON array of character-card tags used by characterTagFilterMode */
+  characterTagFilters: text("character_tag_filters").notNull().default("[]"),
+  generationTriggerFilterMode: text("generation_trigger_filter_mode", { enum: ["any", "include", "exclude"] })
+    .notNull()
+    .default("any"),
+  /** JSON array of generation trigger names */
+  generationTriggerFilters: text("generation_trigger_filters").notNull().default("[]"),
+  /** JSON array of non-chat matching sources */
+  additionalMatchingSources: text("additional_matching_sources").notNull().default("[]"),
 
   position: integer("position").notNull().default(0),
   depth: integer("depth").notNull().default(4),

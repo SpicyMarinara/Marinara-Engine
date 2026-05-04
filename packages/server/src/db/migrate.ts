@@ -143,6 +143,13 @@ const CREATE_TABLES: string[] = [
     match_whole_words TEXT NOT NULL DEFAULT 'false',
     case_sensitive TEXT NOT NULL DEFAULT 'false',
     use_regex TEXT NOT NULL DEFAULT 'false',
+    character_filter_mode TEXT NOT NULL DEFAULT 'any',
+    character_filter_ids TEXT NOT NULL DEFAULT '[]',
+    character_tag_filter_mode TEXT NOT NULL DEFAULT 'any',
+    character_tag_filters TEXT NOT NULL DEFAULT '[]',
+    generation_trigger_filter_mode TEXT NOT NULL DEFAULT 'any',
+    generation_trigger_filters TEXT NOT NULL DEFAULT '[]',
+    additional_matching_sources TEXT NOT NULL DEFAULT '[]',
     position INTEGER NOT NULL DEFAULT 0,
     depth INTEGER NOT NULL DEFAULT 4,
     "order" INTEGER NOT NULL DEFAULT 100,
@@ -585,6 +592,41 @@ const COLUMN_MIGRATIONS: ColumnMigration[] = [
     table: "lorebook_entries",
     column: "folder_id",
     definition: "TEXT",
+  },
+  {
+    table: "lorebook_entries",
+    column: "character_filter_mode",
+    definition: "TEXT NOT NULL DEFAULT 'any'",
+  },
+  {
+    table: "lorebook_entries",
+    column: "character_filter_ids",
+    definition: "TEXT NOT NULL DEFAULT '[]'",
+  },
+  {
+    table: "lorebook_entries",
+    column: "character_tag_filter_mode",
+    definition: "TEXT NOT NULL DEFAULT 'any'",
+  },
+  {
+    table: "lorebook_entries",
+    column: "character_tag_filters",
+    definition: "TEXT NOT NULL DEFAULT '[]'",
+  },
+  {
+    table: "lorebook_entries",
+    column: "generation_trigger_filter_mode",
+    definition: "TEXT NOT NULL DEFAULT 'any'",
+  },
+  {
+    table: "lorebook_entries",
+    column: "generation_trigger_filters",
+    definition: "TEXT NOT NULL DEFAULT '[]'",
+  },
+  {
+    table: "lorebook_entries",
+    column: "additional_matching_sources",
+    definition: "TEXT NOT NULL DEFAULT '[]'",
   },
 ];
 

@@ -34,6 +34,7 @@ import { createRegexScriptsStorage } from "../services/storage/regex-scripts.sto
 import { createPromptOverridesStorage } from "../services/storage/prompt-overrides.storage.js";
 import { loadPrompt, CONVERSATION_SELFIE } from "../services/prompt-overrides/index.js";
 import { processLorebooks } from "../services/lorebook/index.js";
+import { lorebookEntryPassesContextFilters } from "../services/lorebook/keyword-scanner.js";
 import { injectAtDepth } from "../services/lorebook/prompt-injector.js";
 import { createLLMProvider } from "../services/llm/provider-registry.js";
 import { resolveConnectionImageDefaults } from "../services/image/image-generation-defaults.js";
@@ -254,6 +255,28 @@ function prefixConversationUserTurn(content: string, personaName: string): strin
 
 function formatConversationPromptTurn(content: string, role: string, personaName: string): string {
   return role === "user" ? prefixConversationUserTurn(content, personaName) : content.trim();
+}
+
+function resolveLorebookGenerationTriggers(
+  input: { impersonate?: boolean; regenerateMessageId?: string | null; userMessage?: string | null },
+  chatMode: string,
+): string[] {
+  const triggers = new Set<string>();
+  triggers.add(chatMode === "game" ? "game" : chatMode);
+
+  if (input.impersonate) {
+    triggers.add("impersonate");
+  } else if (input.regenerateMessageId) {
+    triggers.add("swipe");
+    triggers.add("regenerate");
+  } else if (!input.userMessage?.trim()) {
+    triggers.add("continue");
+    triggers.add("autonomous");
+  } else {
+    triggers.add("chat");
+  }
+
+  return Array.from(triggers);
 }
 
 function normalizePartyLookupName(value: string): string {
@@ -625,6 +648,7 @@ export async function generateRoutes(app: FastifyInstance) {
       const allChatMessages = await chats.listMessages(input.chatId);
       const chatMeta = parseExtra(chat.metadata) as Record<string, unknown>;
       const chatMode = requestChatMode;
+      const lorebookGenerationTriggers = resolveLorebookGenerationTriggers(input, chatMode);
       const supportsHiddenFromAI = chatMode === "roleplay" || chatMode === "visual_novel";
 
       // ── Conversation-start filter: find the latest "isConversationStart" marker ──
@@ -981,6 +1005,7 @@ export async function generateRoutes(app: FastifyInstance) {
             entryStateOverrides:
               (chatMeta.entryStateOverrides as Record<string, { ephemeral?: number | null; enabled?: boolean }>) ??
               undefined,
+            generationTriggers: lorebookGenerationTriggers,
             groupScenarioOverrideText:
               typeof chatMeta.groupScenarioText === "string" && (chatMeta.groupScenarioText as string).trim()
                 ? (chatMeta.groupScenarioText as string).trim()
@@ -2044,6 +2069,7 @@ export async function generateRoutes(app: FastifyInstance) {
             entryStateOverrides:
               (chatMeta.entryStateOverrides as Record<string, { ephemeral?: number | null; enabled?: boolean }>) ??
               undefined,
+            generationTriggers: lorebookGenerationTriggers,
           });
 
           // Persist updated per-chat entry state overrides (ephemeral countdown)
@@ -2097,6 +2123,7 @@ export async function generateRoutes(app: FastifyInstance) {
           entryStateOverrides:
             (chatMeta.entryStateOverrides as Record<string, { ephemeral?: number | null; enabled?: boolean }>) ??
             undefined,
+          generationTriggers: lorebookGenerationTriggers,
         });
 
         if (lorebookResult.updatedEntryStateOverrides) {
@@ -2532,6 +2559,7 @@ export async function generateRoutes(app: FastifyInstance) {
         mesExample: string;
         firstMes: string;
         postHistoryInstructions: string;
+        tags: string[];
         talkativeness: number;
         avatarPath: string | null;
       }> = [];
@@ -2557,6 +2585,7 @@ export async function generateRoutes(app: FastifyInstance) {
             mesExample: charData.mes_example ?? "",
             firstMes: charData.first_mes ?? "",
             postHistoryInstructions: charData.post_history_instructions ?? "",
+            tags: Array.isArray(charData.tags) ? charData.tags.map(String).filter(Boolean) : [],
             talkativeness: Math.max(0, Math.min(1, Number(charData.extensions?.talkativeness ?? 0.5))),
             avatarPath: (charRow.avatarPath as string) ?? null,
           });
@@ -3102,6 +3131,7 @@ export async function generateRoutes(app: FastifyInstance) {
             entryStateOverrides:
               (chatMeta.entryStateOverrides as Record<string, { ephemeral?: number | null; enabled?: boolean }>) ??
               undefined,
+            generationTriggers: lorebookGenerationTriggers,
           });
 
           if (lorebookResult.updatedEntryStateOverrides) {
@@ -3721,6 +3751,8 @@ export async function generateRoutes(app: FastifyInstance) {
             //   - Constant entries (already injected unconditionally by the standard
             //     activation pipeline — routing them would duplicate work).
             //   - Exhausted ephemeral entries (countdown reached 0 in this chat).
+            //   - Entries excluded by character/tag/generation-trigger filters.
+            const activeCharacterTags = Array.from(new Set(charInfo.flatMap((character) => character.tags)));
             knowledgeRouterEntries = entries
               .filter((e: LorebookEntry) => {
                 const ov = entryStateOverrides[e.id];
@@ -3730,6 +3762,15 @@ export async function generateRoutes(app: FastifyInstance) {
                 // the per-chat remaining count, not the stale global default.
                 const effectiveEphemeral = ov?.ephemeral !== undefined ? ov.ephemeral : e.ephemeral;
                 if (effectiveEphemeral === 0) return false;
+                if (
+                  !lorebookEntryPassesContextFilters(e, {
+                    activeCharacterIds: promptCharacterIds,
+                    activeCharacterTags,
+                    generationTriggers: lorebookGenerationTriggers,
+                  })
+                ) {
+                  return false;
+                }
                 return true;
               })
               .map((e: LorebookEntry) => {

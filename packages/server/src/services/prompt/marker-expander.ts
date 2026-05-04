@@ -41,6 +41,8 @@ export interface MarkerContext {
   chatEmbedding?: number[] | null;
   /** Per-chat ephemeral state overrides for lorebook entries (from chat metadata). */
   entryStateOverrides?: Record<string, { ephemeral?: number | null; enabled?: boolean }>;
+  /** Generation trigger labels used by per-entry lorebook include/exclude filters. */
+  generationTriggers?: string[];
   /** Collector for lorebook depth entries — populated during expansion, consumed by the assembler. */
   lorebookDepthEntries?: Array<{ content: string; role: "system" | "user" | "assistant"; depth: number }>;
   /** Collector for updated entry state overrides after ephemeral processing — saved to chat metadata by caller. */
@@ -229,6 +231,7 @@ async function expandLorebook(config: MarkerConfig, ctx: MarkerContext): Promise
     activeLorebookIds: ctx.activeLorebookIds,
     chatEmbedding: ctx.chatEmbedding ?? null,
     entryStateOverrides: ctx.entryStateOverrides,
+    generationTriggers: ctx.generationTriggers ?? ["chat"],
   });
 
   // Collect updated per-chat entry state overrides for the caller to persist

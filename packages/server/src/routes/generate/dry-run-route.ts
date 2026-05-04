@@ -36,6 +36,32 @@ import { logger } from "../../lib/logger.js";
 
 type WrapFormat = "xml" | "markdown" | "none";
 
+function resolveDryRunLorebookGenerationTriggers(
+  input: {
+    impersonate?: boolean;
+    regenerateMessageId?: unknown;
+    userMessage?: string | null;
+  },
+  chatMode: string,
+): string[] {
+  const triggers = new Set<string>(["prompt_preview"]);
+  triggers.add(chatMode === "game" ? "game" : chatMode);
+
+  if (input.impersonate) {
+    triggers.add("impersonate");
+  } else if (typeof input.regenerateMessageId === "string" && input.regenerateMessageId.trim()) {
+    triggers.add("swipe");
+    triggers.add("regenerate");
+  } else if (!input.userMessage?.trim()) {
+    triggers.add("continue");
+    triggers.add("autonomous");
+  } else {
+    triggers.add("chat");
+  }
+
+  return Array.from(triggers);
+}
+
 async function loadLatestGameSnapshot(app: FastifyInstance, chatId: string): Promise<any | null> {
   const committedRows = await app.db
     .select()
@@ -598,6 +624,14 @@ export async function registerDryRunRoute(app: FastifyInstance) {
     // Ephemeral user line (normal dry run only): mirrors an unsaved "what if I said this" turn.
     // Impersonate mode does NOT add userMessage to history — same as POST /generate; direction is injected later.
     const userMessage = typeof body.userMessage === "string" ? body.userMessage : "";
+    const lorebookGenerationTriggers = resolveDryRunLorebookGenerationTriggers(
+      {
+        impersonate,
+        regenerateMessageId: body.regenerateMessageId,
+        userMessage,
+      },
+      chatMode,
+    );
     if (!impersonate && userMessage.trim()) {
       chatMessages = [
         ...chatMessages,
@@ -963,6 +997,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
               activeLorebookIds,
               chatEmbedding: null,
               entryStateOverrides: undefined,
+              generationTriggers: lorebookGenerationTriggers,
             });
             const loreContent = [lorebookResult.worldInfoBefore, lorebookResult.worldInfoAfter]
               .filter((content): content is string => typeof content === "string" && content.length > 0)
@@ -1222,6 +1257,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
         activeLorebookIds,
         chatEmbedding: null,
         entryStateOverrides: undefined,
+        generationTriggers: lorebookGenerationTriggers,
       });
       const loreContent = [lorebookResult.worldInfoBefore, lorebookResult.worldInfoAfter]
         .filter((content): content is string => typeof content === "string" && content.length > 0)

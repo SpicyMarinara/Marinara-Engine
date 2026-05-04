@@ -11,6 +11,19 @@ export type SelectiveLogic = "and" | "or" | "not";
 /** Role for injected lorebook content. */
 export type LorebookRole = "system" | "user" | "assistant";
 
+/** Include/exclude behavior for contextual lorebook filters. */
+export type LorebookFilterMode = "any" | "include" | "exclude";
+
+/** Extra places an entry can scan for keyword matches beyond recent chat text. */
+export type LorebookMatchingSource =
+  | "character_name"
+  | "character_description"
+  | "character_personality"
+  | "character_scenario"
+  | "character_tags"
+  | "persona_description"
+  | "persona_tags";
+
 /** A complete lorebook (collection of entries). */
 export interface Lorebook {
   id: string;
@@ -105,6 +118,20 @@ export interface LorebookEntry {
   caseSensitive: boolean;
   /** Use regex matching for keys */
   useRegex: boolean;
+  /**
+   * Character gates for activation. These are independent from lorebook tags,
+   * which are only organizational.
+   */
+  characterFilterMode: LorebookFilterMode;
+  characterFilterIds: string[];
+  /** Character-card tag gates for activation. */
+  characterTagFilterMode: LorebookFilterMode;
+  characterTagFilters: string[];
+  /** Generation trigger gates (chat, game, swipe, lorebook_assistant, etc.). */
+  generationTriggerFilterMode: LorebookFilterMode;
+  generationTriggerFilters: string[];
+  /** Additional non-chat sources to include when matching entry keywords. */
+  additionalMatchingSources: LorebookMatchingSource[];
 
   // ── Injection settings ──
   /** 0 = before character, 1 = after character, 2 = inject at message depth */

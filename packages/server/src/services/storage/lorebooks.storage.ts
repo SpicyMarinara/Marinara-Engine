@@ -40,6 +40,17 @@ function parseLorebookRow(row: Record<string, unknown>) {
   };
 }
 
+function parseStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String).filter(Boolean);
+  if (typeof value !== "string" || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
 function parseEntryRow(row: Record<string, unknown>) {
   return {
     ...row,
@@ -52,8 +63,15 @@ function parseEntryRow(row: Record<string, unknown>) {
     locked: row.locked === "true",
     preventRecursion: row.preventRecursion === "true",
     folderId: (row.folderId as string | null | undefined) ?? null,
-    keys: JSON.parse((row.keys as string) || "[]"),
-    secondaryKeys: JSON.parse((row.secondaryKeys as string) || "[]"),
+    keys: parseStringArray(row.keys),
+    secondaryKeys: parseStringArray(row.secondaryKeys),
+    characterFilterMode: row.characterFilterMode || "any",
+    characterFilterIds: parseStringArray(row.characterFilterIds),
+    characterTagFilterMode: row.characterTagFilterMode || "any",
+    characterTagFilters: parseStringArray(row.characterTagFilters),
+    generationTriggerFilterMode: row.generationTriggerFilterMode || "any",
+    generationTriggerFilters: parseStringArray(row.generationTriggerFilters),
+    additionalMatchingSources: parseStringArray(row.additionalMatchingSources),
     relationships: JSON.parse((row.relationships as string) || "{}"),
     dynamicState: JSON.parse((row.dynamicState as string) || "{}"),
     activationConditions: JSON.parse((row.activationConditions as string) || "[]"),
@@ -295,6 +313,13 @@ export function createLorebooksStorage(db: DB) {
         matchWholeWords: String(input.matchWholeWords ?? false),
         caseSensitive: String(input.caseSensitive ?? false),
         useRegex: String(input.useRegex ?? false),
+        characterFilterMode: input.characterFilterMode ?? "any",
+        characterFilterIds: JSON.stringify(input.characterFilterIds ?? []),
+        characterTagFilterMode: input.characterTagFilterMode ?? "any",
+        characterTagFilters: JSON.stringify(input.characterTagFilters ?? []),
+        generationTriggerFilterMode: input.generationTriggerFilterMode ?? "any",
+        generationTriggerFilters: JSON.stringify(input.generationTriggerFilters ?? []),
+        additionalMatchingSources: JSON.stringify(input.additionalMatchingSources ?? []),
         position: input.position ?? 0,
         depth: input.depth ?? 0,
         order: input.order ?? 100,
@@ -363,6 +388,17 @@ export function createLorebooksStorage(db: DB) {
       if (input.matchWholeWords !== undefined) updates.matchWholeWords = String(input.matchWholeWords);
       if (input.caseSensitive !== undefined) updates.caseSensitive = String(input.caseSensitive);
       if (input.useRegex !== undefined) updates.useRegex = String(input.useRegex);
+      if (input.characterFilterMode !== undefined) updates.characterFilterMode = input.characterFilterMode;
+      if (input.characterFilterIds !== undefined) updates.characterFilterIds = JSON.stringify(input.characterFilterIds);
+      if (input.characterTagFilterMode !== undefined) updates.characterTagFilterMode = input.characterTagFilterMode;
+      if (input.characterTagFilters !== undefined)
+        updates.characterTagFilters = JSON.stringify(input.characterTagFilters);
+      if (input.generationTriggerFilterMode !== undefined)
+        updates.generationTriggerFilterMode = input.generationTriggerFilterMode;
+      if (input.generationTriggerFilters !== undefined)
+        updates.generationTriggerFilters = JSON.stringify(input.generationTriggerFilters);
+      if (input.additionalMatchingSources !== undefined)
+        updates.additionalMatchingSources = JSON.stringify(input.additionalMatchingSources);
       if (input.position !== undefined) updates.position = input.position;
       if (input.depth !== undefined) updates.depth = input.depth;
       if (input.order !== undefined) updates.order = input.order;

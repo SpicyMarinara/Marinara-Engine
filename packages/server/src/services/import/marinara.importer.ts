@@ -2,7 +2,8 @@
 // Import: Marinara Engine native format (.marinara.json)
 // ──────────────────────────────────────────────
 import type { DB } from "../../db/connection.js";
-import type { ExportEnvelope, ExportType } from "@marinara-engine/shared";
+import { lorebookFilterModeSchema } from "@marinara-engine/shared";
+import type { ExportEnvelope, ExportType, LorebookFilterMode, LorebookMatchingSource } from "@marinara-engine/shared";
 import { createCharactersStorage } from "../storage/characters.storage.js";
 import { createLorebooksStorage } from "../storage/lorebooks.storage.js";
 import { createPromptsStorage } from "../storage/prompts.storage.js";
@@ -24,6 +25,28 @@ function readTimestampOverrides(value: unknown): TimestampOverrides | undefined 
     createdAt: timestamps?.createdAt ?? metadata?.createdAt ?? record.createdAt,
     updatedAt: timestamps?.updatedAt ?? metadata?.updatedAt ?? record.updatedAt,
   });
+}
+
+const VALID_MATCHING_SOURCES = new Set<LorebookMatchingSource>([
+  "character_name",
+  "character_description",
+  "character_personality",
+  "character_scenario",
+  "character_tags",
+  "persona_description",
+  "persona_tags",
+]);
+
+function readMatchingSources(value: unknown): LorebookMatchingSource[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((source): source is LorebookMatchingSource =>
+    VALID_MATCHING_SOURCES.has(source as LorebookMatchingSource),
+  );
+}
+
+function readFilterMode(value: unknown): LorebookFilterMode {
+  const parsed = lorebookFilterModeSchema.safeParse(value);
+  return parsed.success ? parsed.data : "any";
 }
 
 /**
@@ -201,6 +224,15 @@ async function importLorebook(data: unknown, db: DB) {
         matchWholeWords: Boolean(e.matchWholeWords),
         caseSensitive: Boolean(e.caseSensitive),
         useRegex: Boolean(e.useRegex),
+        characterFilterMode: readFilterMode(e.characterFilterMode),
+        characterFilterIds: Array.isArray(e.characterFilterIds) ? e.characterFilterIds.map(String) : [],
+        characterTagFilterMode: readFilterMode(e.characterTagFilterMode),
+        characterTagFilters: Array.isArray(e.characterTagFilters) ? e.characterTagFilters.map(String) : [],
+        generationTriggerFilterMode: readFilterMode(e.generationTriggerFilterMode),
+        generationTriggerFilters: Array.isArray(e.generationTriggerFilters)
+          ? e.generationTriggerFilters.map(String)
+          : [],
+        additionalMatchingSources: readMatchingSources(e.additionalMatchingSources),
         position: Number(e.position ?? 0),
         depth: Number(e.depth ?? 4),
         order: Number(e.order ?? 100),

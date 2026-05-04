@@ -2429,6 +2429,7 @@ export async function gameRoutes(app: FastifyInstance) {
         characterIds: setupConfig.partyCharacterIds,
         personaId: setupConfig.personaId ?? null,
         activeLorebookIds: setupConfig.activeLorebookIds,
+        generationTriggers: ["game_setup", "game"],
       });
       const combinedLore = [
         lorebookResult.worldInfoBefore,

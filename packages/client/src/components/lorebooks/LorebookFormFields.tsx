@@ -22,7 +22,7 @@ export function FieldGroup({
 }) {
   return (
     <div>
-      <div className="mb-2 flex items-center gap-1.5 text-xs font-medium">
+      <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium">
         <Icon size="0.8125rem" className="text-amber-400" />
         {label}
         {help && <HelpTooltip text={help} />}
@@ -96,7 +96,7 @@ export function ToggleButton({
       onClick={() => onChange(!value)}
       title={tooltip}
       className={cn(
-        "flex items-center justify-between rounded-xl px-3 py-2.5 text-xs font-medium ring-1 transition-all",
+        "flex items-center justify-between rounded-lg px-2.5 py-2 text-xs font-medium ring-1 transition-all",
         value
           ? "bg-amber-400/15 text-amber-400 ring-amber-400/30"
           : "bg-[var(--secondary)] text-[var(--muted-foreground)] ring-[var(--border)]",
@@ -185,7 +185,7 @@ export function ExpandableTextarea({
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => handleTextareaTabKeyDown(e, value, onChange)}
           rows={rows ?? 6}
-          className="w-full resize-y rounded-xl bg-[var(--secondary)] p-3 pr-9 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+          className="w-full resize-y rounded-lg bg-[var(--secondary)] p-2.5 pr-9 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
           placeholder={placeholder}
         />
         <button

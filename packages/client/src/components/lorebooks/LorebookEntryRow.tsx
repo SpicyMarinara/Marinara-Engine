@@ -31,7 +31,12 @@ import {
 import { cn } from "../../lib/utils";
 import { showConfirmDialog } from "../../lib/app-dialogs";
 import { useUpdateLorebookEntry, useDeleteLorebookEntry } from "../../hooks/use-lorebooks";
-import type { LorebookEntry, LorebookFolder } from "@marinara-engine/shared";
+import type {
+  LorebookEntry,
+  LorebookFilterMode,
+  LorebookFolder,
+  LorebookMatchingSource,
+} from "@marinara-engine/shared";
 import {
   ExpandableTextarea,
   FieldGroup,
@@ -46,6 +51,8 @@ interface Props {
   lorebookId: string;
   isExpanded: boolean;
   onToggleExpand: () => void;
+  characters: Array<{ id: string; name: string; tags: string[] }>;
+  characterTags: string[];
   /**
    * All folders in the parent lorebook. Used to populate the folder selector
    * on the row. May be empty — when empty, the selector is hidden because
@@ -106,6 +113,38 @@ const STATUS_DOT_COLOR: Record<EntryStatus, string> = {
 
 const ENTRY_STATUS_ORDER: EntryStatus[] = ["normal", "constant", "selective"];
 
+const FILTER_MODE_LABEL: Record<LorebookFilterMode, string> = {
+  any: "Any",
+  include: "Only",
+  exclude: "Exclude",
+};
+
+const MATCHING_SOURCE_OPTIONS: Array<{ value: LorebookMatchingSource; label: string }> = [
+  { value: "character_name", label: "Character name" },
+  { value: "character_description", label: "Character description" },
+  { value: "character_personality", label: "Personality" },
+  { value: "character_scenario", label: "Scenario" },
+  { value: "character_tags", label: "Character tags" },
+  { value: "persona_description", label: "Persona description" },
+  { value: "persona_tags", label: "Persona tags" },
+];
+
+const GENERATION_TRIGGER_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "conversation", label: "Conversation" },
+  { value: "roleplay", label: "Roleplay" },
+  { value: "visual_novel", label: "VN" },
+  { value: "game", label: "Game" },
+  { value: "chat", label: "Chat reply" },
+  { value: "continue", label: "Continue" },
+  { value: "autonomous", label: "Autonomous" },
+  { value: "swipe", label: "Swipe" },
+  { value: "impersonate", label: "Impersonate" },
+  { value: "prompt_preview", label: "Prompt preview" },
+  { value: "test_scan", label: "Test scan" },
+  { value: "game_setup", label: "Game setup" },
+  { value: "lorebook_assistant", label: "Lorebook Assistant" },
+];
+
 function getNextStatus(status: EntryStatus): EntryStatus {
   const index = ENTRY_STATUS_ORDER.indexOf(status);
   return ENTRY_STATUS_ORDER[(index + 1) % ENTRY_STATUS_ORDER.length] ?? "normal";
@@ -119,6 +158,8 @@ export function LorebookEntryRow({
   lorebookId,
   isExpanded,
   onToggleExpand,
+  characters,
+  characterTags,
   folders,
   draggable,
   isDragging,
@@ -452,7 +493,9 @@ export function LorebookEntryRow({
       </div>
 
       {/* ── Expanded drawer ── */}
-      {isExpanded && <ExpandedDrawer entry={entry} lorebookId={lorebookId} />}
+      {isExpanded && (
+        <ExpandedDrawer entry={entry} lorebookId={lorebookId} characters={characters} characterTags={characterTags} />
+      )}
     </div>
   );
 }
@@ -557,13 +600,89 @@ function CompactNumber({
   );
 }
 
+function toggleStringValue(values: string[] | undefined, value: string) {
+  const current = values ?? [];
+  return current.includes(value) ? current.filter((item) => item !== value) : [...current, value];
+}
+
+function FilterModeSelect({
+  value,
+  onChange,
+}: {
+  value: LorebookFilterMode;
+  onChange: (value: LorebookFilterMode) => void;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as LorebookFilterMode)}
+      className="h-7 rounded-lg bg-[var(--secondary)] px-2 text-[0.6875rem] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+    >
+      {(["any", "include", "exclude"] as LorebookFilterMode[]).map((mode) => (
+        <option key={mode} value={mode}>
+          {FILTER_MODE_LABEL[mode]}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function FilterPills({
+  values,
+  selected,
+  onChange,
+  emptyLabel,
+}: {
+  values: Array<{ value: string; label: string }>;
+  selected: string[];
+  onChange: (next: string[]) => void;
+  emptyLabel: string;
+}) {
+  if (values.length === 0) {
+    return <p className="text-[0.625rem] text-[var(--muted-foreground)]">{emptyLabel}</p>;
+  }
+
+  return (
+    <div className="flex max-h-20 flex-wrap gap-1 overflow-y-auto pr-1">
+      {values.map((item) => {
+        const active = selected.includes(item.value);
+        return (
+          <button
+            key={item.value}
+            type="button"
+            onClick={() => onChange(toggleStringValue(selected, item.value))}
+            className={cn(
+              "rounded-full px-2 py-0.5 text-[0.625rem] ring-1 transition-colors",
+              active
+                ? "bg-amber-400/15 text-amber-300 ring-amber-400/30"
+                : "bg-[var(--secondary)] text-[var(--muted-foreground)] ring-[var(--border)] hover:text-[var(--foreground)]",
+            )}
+          >
+            {item.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────
 // Expanded drawer — keys, content, advanced toggles, timing, group/tag.
 // Manages its own dirty state and Save button so users see explicit commit
 // for the heavier fields (especially the content textarea).
 // ─────────────────────────────────────────────────────
 
-function ExpandedDrawer({ entry, lorebookId }: { entry: LorebookEntry; lorebookId: string }) {
+function ExpandedDrawer({
+  entry,
+  lorebookId,
+  characters,
+  characterTags,
+}: {
+  entry: LorebookEntry;
+  lorebookId: string;
+  characters: Array<{ id: string; name: string; tags: string[] }>;
+  characterTags: string[];
+}) {
   const updateEntry = useUpdateLorebookEntry();
   const [form, setForm] = useState<Partial<LorebookEntry>>(() => ({ ...entry }));
   const [dirty, setDirty] = useState(false);
@@ -602,6 +721,13 @@ function ExpandedDrawer({ entry, lorebookId }: { entry: LorebookEntry; lorebookI
         matchWholeWords: form.matchWholeWords,
         caseSensitive: form.caseSensitive,
         useRegex: form.useRegex,
+        characterFilterMode: form.characterFilterMode,
+        characterFilterIds: form.characterFilterIds,
+        characterTagFilterMode: form.characterTagFilterMode,
+        characterTagFilters: form.characterTagFilters,
+        generationTriggerFilterMode: form.generationTriggerFilterMode,
+        generationTriggerFilters: form.generationTriggerFilters,
+        additionalMatchingSources: form.additionalMatchingSources,
         role: form.role,
         sticky: form.sticky,
         cooldown: form.cooldown,
@@ -619,8 +745,8 @@ function ExpandedDrawer({ entry, lorebookId }: { entry: LorebookEntry; lorebookI
   }, [form, entry.id, lorebookId, updateEntry]);
 
   return (
-    <div className="space-y-5 border-t border-[var(--border)] px-4 py-4">
-      <div className="flex items-start gap-2 rounded-xl border border-[var(--border)] bg-[var(--secondary)]/55 px-3 py-2 text-xs leading-relaxed text-[var(--muted-foreground)]">
+    <div className="space-y-4 border-t border-[var(--border)] px-3 py-3 sm:px-4">
+      <div className="flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--secondary)]/55 px-3 py-2 text-xs leading-relaxed text-[var(--muted-foreground)]">
         <span className={cn("mt-1 h-2.5 w-2.5 shrink-0 rounded-full", STATUS_DOT_COLOR[drawerStatus])} />
         <p>{STATUS_DESCRIPTION[drawerStatus]}</p>
       </div>
@@ -635,7 +761,7 @@ function ExpandedDrawer({ entry, lorebookId }: { entry: LorebookEntry; lorebookI
           value={form.description ?? ""}
           onChange={(e) => update({ description: e.target.value })}
           rows={2}
-          className="w-full resize-y rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+          className="w-full resize-y rounded-lg bg-[var(--secondary)] px-2.5 py-2 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
           placeholder="Brief summary of what this entry is about (used by Knowledge Router agent)."
         />
       </FieldGroup>
@@ -675,6 +801,78 @@ function ExpandedDrawer({ entry, lorebookId }: { entry: LorebookEntry; lorebookI
         </div>
       </FieldGroup>
 
+      <details className="rounded-lg border border-[var(--border)] bg-[var(--card)]/40 px-3 py-2">
+        <summary className="cursor-pointer text-xs font-medium text-[var(--foreground)]">
+          Context filters & matching sources
+        </summary>
+        <div className="mt-3 space-y-3">
+          <div className="grid gap-3 lg:grid-cols-3">
+            <div className="space-y-2 rounded-lg bg-[var(--secondary)]/45 p-2 ring-1 ring-[var(--border)]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[0.6875rem] font-medium">Characters</span>
+                <FilterModeSelect
+                  value={form.characterFilterMode ?? "any"}
+                  onChange={(value) => update({ characterFilterMode: value })}
+                />
+              </div>
+              <FilterPills
+                values={characters.map((character) => ({ value: character.id, label: character.name }))}
+                selected={form.characterFilterIds ?? []}
+                onChange={(next) => update({ characterFilterIds: next })}
+                emptyLabel="No characters available."
+              />
+            </div>
+
+            <div className="space-y-2 rounded-lg bg-[var(--secondary)]/45 p-2 ring-1 ring-[var(--border)]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[0.6875rem] font-medium">Character tags</span>
+                <FilterModeSelect
+                  value={form.characterTagFilterMode ?? "any"}
+                  onChange={(value) => update({ characterTagFilterMode: value })}
+                />
+              </div>
+              <FilterPills
+                values={characterTags.map((tag) => ({ value: tag, label: tag }))}
+                selected={form.characterTagFilters ?? []}
+                onChange={(next) => update({ characterTagFilters: next })}
+                emptyLabel="No character tags available."
+              />
+            </div>
+
+            <div className="space-y-2 rounded-lg bg-[var(--secondary)]/45 p-2 ring-1 ring-[var(--border)]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[0.6875rem] font-medium">Generation</span>
+                <FilterModeSelect
+                  value={form.generationTriggerFilterMode ?? "any"}
+                  onChange={(value) => update({ generationTriggerFilterMode: value })}
+                />
+              </div>
+              <FilterPills
+                values={GENERATION_TRIGGER_OPTIONS}
+                selected={form.generationTriggerFilters ?? []}
+                onChange={(next) => update({ generationTriggerFilters: next })}
+                emptyLabel="No trigger filters available."
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2 rounded-lg bg-[var(--secondary)]/45 p-2 ring-1 ring-[var(--border)]">
+            <div>
+              <p className="text-[0.6875rem] font-medium">Additional matching sources</p>
+              <p className="text-[0.625rem] text-[var(--muted-foreground)]">
+                Optional card fields to scan for this entry&apos;s keywords in addition to recent chat.
+              </p>
+            </div>
+            <FilterPills
+              values={MATCHING_SOURCE_OPTIONS}
+              selected={form.additionalMatchingSources ?? []}
+              onChange={(next) => update({ additionalMatchingSources: next as LorebookMatchingSource[] })}
+              emptyLabel="No sources available."
+            />
+          </div>
+        </div>
+      </details>
+
       {/* Content */}
       <FieldGroup
         label="Content"
@@ -684,7 +882,7 @@ function ExpandedDrawer({ entry, lorebookId }: { entry: LorebookEntry; lorebookI
         <ExpandableTextarea
           value={form.content ?? ""}
           onChange={(v) => update({ content: v })}
-          rows={6}
+          rows={5}
           placeholder="The content that will be injected into the prompt when this entry activates…"
           title="Edit Content"
         />
@@ -695,7 +893,7 @@ function ExpandedDrawer({ entry, lorebookId }: { entry: LorebookEntry; lorebookI
 
       {/* Toggles row — note: enable / regex / trigger mode are now on the row header,
           so they are intentionally omitted from this block to avoid duplication. */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <ToggleButton
           label="Whole Words"
           value={form.matchWholeWords ?? false}
@@ -743,7 +941,7 @@ function ExpandedDrawer({ entry, lorebookId }: { entry: LorebookEntry; lorebookI
         icon={Settings2}
         help="Sticky = stays active for N messages after triggering. Cooldown = waits N messages before it can trigger again. Delay = waits N messages before first activation. Ephemeral = auto-disables after N activations (0 = unlimited)."
       >
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <NumberField
             label="Sticky"
             value={form.sticky ?? 0}
@@ -772,7 +970,7 @@ function ExpandedDrawer({ entry, lorebookId }: { entry: LorebookEntry; lorebookI
         icon={Settings2}
         help="Group entries together so only one from the group activates at a time. Tags are for your own organization."
       >
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">Group</label>
             <input
