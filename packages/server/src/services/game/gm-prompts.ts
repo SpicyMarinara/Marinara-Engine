@@ -564,10 +564,20 @@ export function buildGmFormatReminder(
   const customSpriteLines = characterSprites
     .map((character) => ({
       name: normalizePromptText(character.name),
+      expressions: normalizePromptTextList(character.expressions),
       fullBody: normalizePromptTextList(character.fullBody),
     }))
-    .filter((character) => character.name && character.fullBody.length > 0)
-    .map((character) => `  ${character.name}: ${character.fullBody.join(", ")}`);
+    .filter((character) => character.name && (character.expressions.length > 0 || character.fullBody.length > 0))
+    .flatMap((character) => {
+      const lines: string[] = [];
+      if (character.expressions.length > 0) {
+        lines.push(`  ${character.name} (expressions): ${character.expressions.join(", ")}`);
+      }
+      if (character.fullBody.length > 0) {
+        lines.push(`  ${character.name} (full-body): ${character.fullBody.join(", ")}`);
+      }
+      return lines;
+    });
   const hudWidgets = Array.isArray(ctx.hudWidgets) ? ctx.hudWidgets : [];
   const playerInventory = Array.isArray(ctx.playerInventory)
     ? ctx.playerInventory.flatMap((item) => {
@@ -608,7 +618,11 @@ export function buildGmFormatReminder(
     `- Commands: [tag: params].`,
     `- Default expressions: neutral, happy, sad, angry, surprised, scared, disgusted, thinking, laughing, crying, blushing, smirk, embarrassed, determined, confused, sleepy.`,
     ...(customSpriteLines.length
-      ? [``, `- Sprite expressions:`, ...customSpriteLines, `Prefer listed expressions when available.`]
+      ? [
+          ``,
+          `- Available sprites per character (use these EXACT names when the character has any listed expression; only fall back to the defaults if the character has no listed sprites):`,
+          ...customSpriteLines,
+        ]
       : []),
     ``,
     `DIALOGUE TYPE USAGE:`,

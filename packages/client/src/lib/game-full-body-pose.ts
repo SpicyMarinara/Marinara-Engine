@@ -51,7 +51,7 @@ export function resolveDialogueFullBodyPose(
     return pickFirstAvailable(availablePoses, "cheer", "idle");
   }
 
-  return pickFirstAvailable(availablePoses, "idle");
+  return pickFirstAvailable(availablePoses, normalizedExpression, "idle");
 }
 
 export function resolveCombatFullBodyPose(
