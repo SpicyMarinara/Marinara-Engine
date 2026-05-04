@@ -26,6 +26,7 @@ import { QuickConnectionSwitcher } from "./QuickConnectionSwitcher";
 import { QuickPersonaSwitcher } from "./QuickPersonaSwitcher";
 import { QuickSwitcherMobile } from "./QuickSwitcherMobile";
 import { MariThinkingIndicator } from "./MariThinkingIndicator";
+import { MariCapabilityNotice } from "./MariCapabilityNotice";
 import { SlashCommandFeedback } from "./SlashCommandFeedback";
 
 interface Attachment {
@@ -658,7 +659,8 @@ export const ChatInput = memo(function ChatInput({
         </div>
       )}
 
-      {/* Mari command-execution indicator */}
+      {/* Mari capability + thinking indicators */}
+      <MariCapabilityNotice />
       <MariThinkingIndicator />
 
       {/* Main input container */}

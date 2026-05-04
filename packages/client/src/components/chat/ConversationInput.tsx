@@ -26,6 +26,7 @@ import { QuickSwitcherMobile } from "./QuickSwitcherMobile";
 import { EmojiPicker } from "../ui/EmojiPicker";
 import { GifPicker } from "../ui/GifPicker";
 import { MariThinkingIndicator } from "./MariThinkingIndicator";
+import { MariCapabilityNotice } from "./MariCapabilityNotice";
 import { SlashCommandFeedback } from "./SlashCommandFeedback";
 
 interface Attachment {
@@ -757,7 +758,8 @@ export function ConversationInput({
         </div>
       )}
 
-      {/* Mari command-execution indicator */}
+      {/* Mari capability + thinking indicators */}
+      <MariCapabilityNotice />
       <MariThinkingIndicator />
 
       {/* Input bar */}

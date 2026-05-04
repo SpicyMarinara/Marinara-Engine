@@ -65,7 +65,7 @@ const STEPS: TourStep[] = [
   {
     target: null,
     title: "Meet Professor Mari!",
-    body: "That's me! I'm your built-in assistant. I come pre-installed and I'm always here to help. You can message me anytime to ask questions about the app, and I can even **do things for you:** like create characters, personas, start new chats, and navigate the app.\n\nI've set up a chat with me in the Chats sidebar already. Feel free to ask me anything after the tour!",
+    body: "That's me! I'm your built-in assistant. I come pre-installed and I'm always here to help. You can message me anytime to ask questions about the app, and I can even **do things for you:** like create characters, personas, start new chats, and navigate the app.\n\n**Heads up:** when you ask me to update or edit a character or persona, I write directly to your library. Character edits keep a recoverable version snapshot you can roll back to from that character's history, but **persona edits overwrite without a snapshot — back up the persona first** if you want to keep the old version.\n\nI've set up a chat with me in the Chats sidebar already. Feel free to ask me anything after the tour!",
     sprite: { src: "/sprites/mari/Mari_greet.png" },
   },
   {
