@@ -41,6 +41,7 @@ async function buildHookApp() {
   });
   app.get("/api/headers", async () => ({ ok: true }));
   app.post("/api/haptic/command", async () => ({ ok: true }));
+  app.get("/", async () => "ok");
   await app.ready();
   return app;
 }
@@ -63,6 +64,63 @@ test("non-loopback requests fail closed when Basic Auth is not configured", asyn
           remoteAddress: "192.168.1.50",
         });
         assert.equal(res.statusCode, 403);
+      } finally {
+        await app.close();
+      }
+    },
+  ));
+
+test("browser navigation hitting the lockdown gets the friendly HTML page", async () =>
+  withEnv(
+    {
+      BASIC_AUTH_USER: undefined,
+      BASIC_AUTH_PASS: undefined,
+      ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK: undefined,
+      ALLOW_UNAUTHENTICATED_REMOTE: undefined,
+      IP_ALLOWLIST: undefined,
+    },
+    async () => {
+      const app = await buildHookApp();
+      try {
+        const res = await app.inject({
+          method: "GET",
+          url: "/",
+          remoteAddress: "192.168.1.50",
+          headers: { accept: "text/html,application/xhtml+xml" },
+        });
+        assert.equal(res.statusCode, 403);
+        assert.match(res.headers["content-type"] ?? "", /text\/html/);
+        assert.match(res.body, /<!doctype html>/i);
+        assert.match(res.body, /BASIC_AUTH_USER/);
+        assert.match(res.body, /IP_ALLOWLIST=192\.168\.1\.50/);
+      } finally {
+        await app.close();
+      }
+    },
+  ));
+
+test("non-browser clients still get JSON 403 from the lockdown", async () =>
+  withEnv(
+    {
+      BASIC_AUTH_USER: undefined,
+      BASIC_AUTH_PASS: undefined,
+      ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK: undefined,
+      ALLOW_UNAUTHENTICATED_REMOTE: undefined,
+      IP_ALLOWLIST: undefined,
+    },
+    async () => {
+      const app = await buildHookApp();
+      try {
+        const res = await app.inject({
+          method: "GET",
+          url: "/api/headers",
+          remoteAddress: "192.168.1.50",
+          headers: { accept: "application/json" },
+        });
+        assert.equal(res.statusCode, 403);
+        assert.match(res.headers["content-type"] ?? "", /application\/json/);
+        const body = JSON.parse(res.body) as { error: string };
+        assert.equal(body.error, "Forbidden");
       } finally {
         await app.close();
       }
