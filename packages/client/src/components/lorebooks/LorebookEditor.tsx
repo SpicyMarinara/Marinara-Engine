@@ -865,7 +865,7 @@ export function LorebookEditor() {
                 <div>
                   <label className="mb-1.5 flex items-center gap-1 text-xs font-medium">
                     Linked Character{" "}
-                    <HelpTooltip text="When linked to a character, this lorebook will only activate in chats that include that character." />
+                    <HelpTooltip text="When linked to a character, this lorebook auto-activates in any chat that includes that character. For multi-character or chat-specific scope, leave this empty and attach the lorebook per-chat via the chat settings drawer's Lorebooks section instead." />
                   </label>
                   <div className="flex items-center gap-2">
                     <select
@@ -904,7 +904,7 @@ export function LorebookEditor() {
                 <div>
                   <label className="mb-1.5 flex items-center gap-1 text-xs font-medium">
                     Linked Persona{" "}
-                    <HelpTooltip text="When linked to a persona, this lorebook will only activate in chats that use that persona." />
+                    <HelpTooltip text="When linked to a persona, this lorebook auto-activates in any chat that uses that persona. For chat-specific scope, leave this empty and attach the lorebook per-chat via the chat settings drawer's Lorebooks section instead." />
                   </label>
                   <div className="flex items-center gap-2">
                     <select

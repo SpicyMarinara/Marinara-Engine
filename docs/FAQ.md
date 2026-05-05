@@ -95,3 +95,29 @@ Connected chats (the link between a conversation and a roleplay or game) are int
 This is by design — pulling raw DM messages into every roleplay turn would inflate the prompt and dilute the story. If you want something from the DM to stick in the roleplay, ask the conversation character to wrap it in a `<note>`.
 
 </details>
+
+---
+
+<a id="how-do-i-use-one-lorebook-with-multiple-characters"></a>
+
+<details>
+<summary><strong>How do I use one lorebook with multiple characters, or scope it to a specific chat?</strong></summary>
+<br>
+
+Marinara has three different ways to scope a lorebook, each at a different level. Pick whichever matches your use case:
+
+**1. Bind a lorebook to one character or persona** (lorebook editor → `Linked Character` / `Linked Persona`).
+
+The lorebook auto-activates in any chat that includes that character or uses that persona. Best when the lore is specifically *about* that character (e.g., their backstory, their world). The two link types are mutually exclusive — pick one or the other, not both. Each link is single-value, so this is the right tool for one lorebook ↔ one character.
+
+**2. Attach lorebooks per-chat via the chat settings drawer** (gear icon → **Lorebooks** section → **+ Add Lorebook**).
+
+Multi-select. Use this when you want one lorebook active across multiple characters, or scoped to just one specific chat, or when you want several lorebooks layered together for a single chat. The lorebook's `Linked Character` / `Linked Persona` fields can be empty for this — chat attachment is independent of those links.
+
+**3. Filter individual entries by character** (lorebook entry editor → `Character Filters`).
+
+Inside a single shared lorebook, you can mark each entry as only firing when specific characters (or character tags) are present in the chat. Best for a "world bible" lorebook shared across many chats where some entries are character-specific.
+
+**Common scenario — "I want this lorebook for Character A *and* Character B":** leave the lorebook's character link empty, and attach the lorebook via the chat settings drawer in any chat that includes either character. The same lorebook can be attached to as many chats as you want.
+
+</details>
