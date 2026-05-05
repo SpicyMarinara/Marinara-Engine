@@ -128,6 +128,10 @@ export interface ChatMetadata {
   groupScenarioOverride?: boolean;
   /** The shared scenario text used when groupScenarioOverride is enabled */
   groupScenarioText?: string;
+  /** When true, show the Secret Plot tab in the roleplay Agents menu (edits apply to agent memory, same as generation). */
+  showSecretPlotPanel?: boolean;
+  /** When true, show the Injections tab in the roleplay Agents menu for cached prompt injections. */
+  showInjectionsPanel?: boolean;
   /** When true, tracker agents only run when the user manually triggers them (not after every generation) */
   manualTrackers?: boolean;
   /** Whether to recall memories from this chat during generation. Default: true for conversation/scenes, false for roleplay. */
@@ -286,6 +290,11 @@ export interface MessageExtra {
   hiddenFromUser?: boolean;
   /** When true, the visible message is excluded from future AI prompt context */
   hiddenFromAI?: boolean;
+  /**
+   * Cached pipeline injections (prose-guardian, director, knowledge-retrieval, etc.)
+   * saved with this assistant message — reused when regenerating that swipe unless refreshed.
+   */
+  contextInjections?: Array<{ agentType: string; text: string }> | null;
 }
 
 /** Metadata about how a message was generated. */

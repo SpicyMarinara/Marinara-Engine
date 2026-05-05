@@ -26,7 +26,8 @@ import { cn } from "../../lib/utils";
 import { api } from "../../lib/api-client";
 import { useGameStateStore } from "../../stores/game-state.store";
 import { useAgentStore } from "../../stores/agent.store";
-import { useAgentConfigs, useCustomAgentRuns } from "../../hooks/use-agents";
+import { useAgentConfigs, useCustomAgentRuns, type AgentConfigRow } from "../../hooks/use-agents";
+import { useChat } from "../../hooks/use-chats";
 import { useUIStore } from "../../stores/ui.store";
 import type {
   GameState,
@@ -35,8 +36,11 @@ import type {
   InventoryItem,
   QuestProgress,
   CustomTrackerField,
+  Message,
 } from "@marinara-engine/shared";
 import type { HudPosition } from "../../stores/ui.store";
+
+const ACTIONS_DROPDOWN_WIDTH_PX = 288;
 
 interface RoleplayHUDProps {
   chatId: string;
@@ -44,12 +48,15 @@ interface RoleplayHUDProps {
   layout?: HudPosition;
   isStreaming: boolean;
   onRetriggerTrackers?: () => void;
+  /** Re-run one tracker agent only (same pipeline as full tracker run). */
   onRerunSingleTracker?: (agentType: string) => void;
   onRetryFailedAgents?: () => void;
   /** When true, tracker agents are manual — show a trigger button in the widget strip */
   manualTrackers?: boolean;
   /** When provided, overrides the globally-computed set so that only per-chat agents show widgets. */
   enabledAgentTypes?: Set<string>;
+  /** Chat messages (chronological) — used to resolve cached prompt injections on the latest assistant reply */
+  injectionSourceMessages?: Message[];
 }
 
 const RoleplayHUDActionsMenu = lazy(async () =>
@@ -86,6 +93,7 @@ export function RoleplayHUD({
   manualTrackers,
   mobileCompact,
   enabledAgentTypes: enabledAgentTypesProp,
+  injectionSourceMessages,
 }: RoleplayHUDProps & { mobileCompact?: boolean }) {
   const [agentsOpen, setAgentsOpen] = useState(false);
   const gameState = useGameStateStore((s) => s.current);
@@ -103,6 +111,25 @@ export function RoleplayHUD({
     return set;
   }, [agentConfigs]);
   const enabledAgentTypes = enabledAgentTypesProp ?? globalEnabledAgentTypes;
+
+  const { data: chatForAgentsMenu } = useChat(chatId);
+  const agentsMenuMetadata = useMemo(() => {
+    const raw = chatForAgentsMenu?.metadata;
+    let m: Record<string, unknown> = {};
+    if (typeof raw === "string") {
+      try {
+        m = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        m = {};
+      }
+    } else if (raw && typeof raw === "object") {
+      m = raw as Record<string, unknown>;
+    }
+    return m;
+  }, [chatForAgentsMenu?.metadata]);
+  const showInjectionsTab = agentsMenuMetadata.showInjectionsPanel === true;
+  const showSecretPlotTab =
+    agentsMenuMetadata.showSecretPlotPanel === true && enabledAgentTypes.has("secret-plot-driver");
 
   const thoughtBubbles = useAgentStore((s) => s.thoughtBubbles);
   const isAgentProcessing = useAgentStore((s) => s.isProcessing);
@@ -294,10 +321,13 @@ export function RoleplayHUD({
       {/* Actions (Agents + Clear) */}
       <ActionsGroup
         chatId={chatId}
+        injectionSourceMessages={injectionSourceMessages}
+        agentConfigs={agentConfigs}
         isVertical={isVertical}
         agentsOpen={agentsOpen}
         setAgentsOpen={setAgentsOpen}
         isAgentProcessing={isAgentProcessing}
+        isGenerationBusy={isTrackerBusy}
         thoughtBubbles={thoughtBubbles}
         clearThoughtBubbles={clearThoughtBubbles}
         dismissThoughtBubble={dismissThoughtBubble}
@@ -306,6 +336,8 @@ export function RoleplayHUD({
         onRetriggerTrackers={onRetriggerTrackers}
         onRetryFailedAgents={onRetryFailedAgents}
         failedAgentTypes={failedAgentTypes}
+        showInjectionsTab={showInjectionsTab}
+        showSecretPlotTab={showSecretPlotTab}
       />
 
       {/* ── Mobile: combined widgets, centered ── */}
@@ -496,10 +528,13 @@ function DeferredActionsFallback({ isAgentProcessing }: { isAgentProcessing: boo
 
 interface ActionsGroupProps {
   chatId: string;
+  injectionSourceMessages?: Message[];
+  agentConfigs?: AgentConfigRow[];
   isVertical: boolean;
   agentsOpen: boolean;
   setAgentsOpen: (v: boolean) => void;
   isAgentProcessing: boolean;
+  isGenerationBusy: boolean;
   thoughtBubbles: Array<{ agentId: string; agentName: string; content: string; timestamp: number }>;
   clearThoughtBubbles: () => void;
   dismissThoughtBubble: (i: number) => void;
@@ -508,14 +543,19 @@ interface ActionsGroupProps {
   onRetriggerTrackers?: () => void;
   onRetryFailedAgents?: () => void;
   failedAgentTypes: string[];
+  showInjectionsTab?: boolean;
+  showSecretPlotTab?: boolean;
 }
 
 function ActionsGroup({
   chatId,
+  injectionSourceMessages,
+  agentConfigs,
   isVertical: _isVertical,
   agentsOpen,
   setAgentsOpen,
   isAgentProcessing,
+  isGenerationBusy,
   thoughtBubbles,
   clearThoughtBubbles,
   dismissThoughtBubble,
@@ -524,6 +564,8 @@ function ActionsGroup({
   onRetriggerTrackers,
   onRetryFailedAgents,
   failedAgentTypes,
+  showInjectionsTab,
+  showSecretPlotTab,
 }: ActionsGroupProps) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -540,7 +582,7 @@ function ActionsGroup({
     const rect = btnRef.current.getBoundingClientRect();
     const maxH = 320;
     const top = rect.bottom + 4 + maxH > window.innerHeight ? rect.top - maxH - 4 : rect.bottom + 4;
-    const left = Math.min(rect.left, window.innerWidth - 288 - 8);
+    const left = Math.min(rect.left, window.innerWidth - ACTIONS_DROPDOWN_WIDTH_PX - 8);
     setPos({ top, left });
   }, [agentsOpen]);
 
@@ -578,12 +620,17 @@ function ActionsGroup({
       >
         <Suspense fallback={<DeferredActionsFallback isAgentProcessing={isAgentProcessing} />}>
           <RoleplayHUDActionsMenu
+            chatId={chatId}
+            injectionSourceMessages={injectionSourceMessages}
             isAgentProcessing={isAgentProcessing}
+            isGenerationBusy={isGenerationBusy}
             thoughtBubbles={thoughtBubbles}
             clearThoughtBubbles={clearThoughtBubbles}
             dismissThoughtBubble={dismissThoughtBubble}
             customAgentRuns={customAgentRuns}
             customAgentRunsLoading={customAgentRunsLoading}
+            agentConfigs={agentConfigs}
+            enabledAgentTypes={enabledAgentTypes}
             showEcho={showEcho}
             echoChamberOpen={echoChamberOpen}
             toggleEchoChamber={toggleEchoChamber}
@@ -593,6 +640,8 @@ function ActionsGroup({
             onRetryFailedAgents={onRetryFailedAgents}
             failedAgentTypes={failedAgentTypes}
             onClose={() => setAgentsOpen(false)}
+            showInjectionsTab={showInjectionsTab}
+            showSecretPlotTab={showSecretPlotTab}
           />
         </Suspense>
       </div>,

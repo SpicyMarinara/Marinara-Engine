@@ -484,17 +484,17 @@ The server (`packages/server`) exposes the following REST API at `/api`:
 | `/api/chats`         | GET, POST, PATCH, DELETE      | Chat CRUD, messages, metadata, connect/disconnect    |
 | `/api/prompts`       | GET, POST, PATCH, DELETE      | Preset CRUD, sections, groups, choice blocks, export |
 | `/api/connections`   | GET, POST, PATCH, DELETE      | API connection CRUD, duplicate, test                 |
-| `/api/agents`        | GET, POST, PATCH, DELETE, PUT | Agent CRUD, toggle, echo messages                    |
+| `/api/agents`        | GET, POST, PATCH, DELETE, PUT | Agent CRUD, toggle, echo messages, runs, memory      |
 | `/api/lorebooks`     | GET, POST, PATCH, DELETE      | Lorebook CRUD, entries, export                       |
 | `/api/custom-tools`  | GET, POST, PATCH, DELETE      | Custom tool CRUD                                     |
 | `/api/regex-scripts` | GET, POST, PATCH, DELETE      | Regex script CRUD                                    |
 
 ### Generation
 
-| Endpoint                                        | Method | Description                             |
-| ----------------------------------------------- | ------ | --------------------------------------- |
-| `/api/generate`                                 | POST   | Main SSE generation with agent pipeline |
-| `/api/generate/retry-agents/:chatId/:messageId` | POST   | Retry agent phases                      |
+| Endpoint                     | Method | Description                                                                 |
+| ---------------------------- | ------ | --------------------------------------------------------------------------- |
+| `/api/generate`              | POST   | Main SSE generation with agent pipeline                                     |
+| `/api/generate/retry-agents` | POST   | SSE retry for the agent types supplied by the caller                        |
 
 ### Chat Features
 
@@ -575,6 +575,8 @@ The agent system processes AI responses through configurable pipelines. Agents r
 1. **Pre-generation**: Before the main LLM call (e.g., context injection, knowledge retrieval)
 2. **Parallel**: Alongside the main generation (e.g., world-state tracking, expression detection)
 3. **Post-processing**: After the main response (e.g., prose rewriting, lorebook updates)
+
+Retry requests go through `/api/generate/retry-agents` with an explicit `agentTypes` list. Broad UI actions such as **Re-run Trackers** pass all active tracker types; individual widget controls pass only the target tracker. Agent memory tools, such as the Secret Plot tab, use `/api/agents/memory/:agentType/:chatId`.
 
 ### Built-in Agents (24)
 

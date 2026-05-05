@@ -513,6 +513,39 @@ function formatAgentInjections(injections: AgentInjection[], wrapFormat: string)
   return parts.join("\n\n");
 }
 
+function normalizeContextInjections(raw: unknown): AgentInjection[] {
+  if (!Array.isArray(raw)) return [];
+  const normalized: AgentInjection[] = [];
+  for (const entry of raw) {
+    if (typeof entry === "string") {
+      normalized.push({ agentType: "prose-guardian", text: entry });
+      continue;
+    }
+    if (!entry || typeof entry !== "object") continue;
+    const candidate = entry as { agentType?: unknown; text?: unknown };
+    if (typeof candidate.agentType !== "string" || typeof candidate.text !== "string") continue;
+    normalized.push({ agentType: candidate.agentType, text: candidate.text });
+  }
+  return normalized;
+}
+
+type SecretPlotDirection = { direction: string; fulfilled?: boolean };
+
+function normalizeSecretPlotSceneDirections(raw: unknown): SecretPlotDirection[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const candidate = entry as { direction?: unknown; fulfilled?: unknown };
+    if (typeof candidate.direction !== "string") return [];
+    return [{ direction: candidate.direction, fulfilled: candidate.fulfilled === true }];
+  });
+}
+
+function normalizeStringArray(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((entry): entry is string => typeof entry === "string");
+}
+
 function normalizeChatTopP(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   if (value <= 0) return 1;
@@ -3802,9 +3835,11 @@ export async function generateRoutes(app: FastifyInstance) {
           const mem = await agentsStore.getMemory(secretPlotAgent.id, input.chatId);
           const state: Record<string, unknown> = {};
           if (mem.overarchingArc) state.overarchingArc = mem.overarchingArc;
-          if (mem.sceneDirections) state.sceneDirections = mem.sceneDirections;
+          const sceneDirections = normalizeSecretPlotSceneDirections(mem.sceneDirections);
+          if (sceneDirections.length > 0) state.sceneDirections = sceneDirections;
           if (mem.pacing) state.pacing = mem.pacing;
-          if (mem.recentlyFulfilled) state.recentlyFulfilled = mem.recentlyFulfilled;
+          const recentlyFulfilled = normalizeStringArray(mem.recentlyFulfilled);
+          if (recentlyFulfilled.length > 0) state.recentlyFulfilled = recentlyFulfilled;
           if (mem.staleDetected != null) state.staleDetected = mem.staleDetected;
           if (Object.keys(state).length > 0) {
             agentContext.memory._secretPlotState = state;
@@ -4700,7 +4735,7 @@ export async function generateRoutes(app: FastifyInstance) {
               await agentsStore.setMemory(agentConfigId, input.chatId, "overarchingArc", plotData.overarchingArc);
             }
             if (plotData.sceneDirections) {
-              const allDirections = plotData.sceneDirections as Array<{ direction: string; fulfilled: boolean }>;
+              const allDirections = normalizeSecretPlotSceneDirections(plotData.sceneDirections);
               const active = allDirections.filter((d) => !d.fulfilled);
               const justFulfilled = allDirections.filter((d) => d.fulfilled).map((d) => d.direction);
               await agentsStore.setMemory(agentConfigId, input.chatId, "sceneDirections", active);
@@ -4708,7 +4743,7 @@ export async function generateRoutes(app: FastifyInstance) {
               // Keep a rolling window of recently fulfilled directions so the agent doesn't repeat them
               if (justFulfilled.length > 0) {
                 const mem = await agentsStore.getMemory(agentConfigId, input.chatId);
-                const prev = (mem.recentlyFulfilled as string[] | undefined) ?? [];
+                const prev = normalizeStringArray(mem.recentlyFulfilled);
                 const merged = [...prev, ...justFulfilled].slice(-10); // keep last 10
                 await agentsStore.setMemory(agentConfigId, input.chatId, "recentlyFulfilled", merged);
               }
@@ -4763,18 +4798,15 @@ export async function generateRoutes(app: FastifyInstance) {
         // knowledge-router) — which `hasPreGenAgents` excludes. Without this, a chat whose
         // only pre-gen agent is KR or Router would silently drop the lore on every regen.
         const regenExtra = parseExtra(regenMsg?.extra);
-        const rawCached = regenExtra.contextInjections as AgentInjection[] | string[] | undefined;
+        // Backwards compat: old caches stored plain string[], and some edited
+        // caches may contain a mix of legacy strings and object-shaped entries.
+        const cached = normalizeContextInjections(regenExtra.contextInjections);
+        // Secret plot is applied from agent memory, not from message cache (legacy entries ignored)
+        const cachedSansSecret = cached.filter((i) => i.agentType !== "secret-plot-driver");
 
-        // Backwards compat: old caches stored plain string[], upgrade to AgentInjection[]
-        const cached: AgentInjection[] | undefined = rawCached?.length
-          ? typeof rawCached[0] === "string"
-            ? (rawCached as string[]).map((text) => ({ agentType: "prose-guardian", text }))
-            : (rawCached as AgentInjection[])
-          : undefined;
-
-        if (cached && cached.length > 0) {
-          contextInjections = cached;
-          for (const inj of cached) {
+        if (cachedSansSecret && cachedSansSecret.length > 0) {
+          contextInjections = cachedSansSecret;
+          for (const inj of cachedSansSecret) {
             reply.raw.write(
               `data: ${JSON.stringify({
                 type: "agent_result",
@@ -4858,9 +4890,7 @@ export async function generateRoutes(app: FastifyInstance) {
         try {
           const plotMem = await agentsStore.getMemory(secretPlotAgent.id, input.chatId);
           const arcRaw = plotMem.overarchingArc as Record<string, unknown> | string | undefined;
-          const sceneDirections = plotMem.sceneDirections as
-            | Array<{ direction: string; fulfilled?: boolean }>
-            | undefined;
+          const sceneDirections = normalizeSecretPlotSceneDirections(plotMem.sceneDirections);
 
           // Inject overarching arc into the prompt
           if (arcRaw) {
@@ -4945,8 +4975,8 @@ export async function generateRoutes(app: FastifyInstance) {
           }
 
           // Inject scene directions into the tracker block
-          const activeDirections = sceneDirections?.filter((d) => !d.fulfilled);
-          if (activeDirections && activeDirections.length > 0) {
+          const activeDirections = sceneDirections.filter((d) => !d.fulfilled);
+          if (activeDirections.length > 0) {
             const dirLines = activeDirections.map((d) => `- ${d.direction}`).join("\n");
             const dirBlock = wrapContent(dirLines, "scene_directions", wrapFormat);
 
@@ -5964,8 +5994,9 @@ export async function generateRoutes(app: FastifyInstance) {
             const cachedReasoning = encryptedReasoningCache.get(input.chatId);
             if (cachedReasoning?.length) extraUpdate.encryptedReasoning = cachedReasoning;
             else extraUpdate.encryptedReasoning = null;
-            // Cache context injections (prose-guardian etc.) on the message so regens can reuse them
-            if (!input.regenerateMessageId && contextInjections.length > 0) {
+            // Cache the exact prompt injections used for this swipe so future
+            // regenerations and swipe switches replay the same guidance.
+            if (contextInjections.length > 0) {
               extraUpdate.contextInjections = contextInjections;
             }
             // Cache the final prompt (what was actually sent to the model) for Peek Prompt
@@ -6076,6 +6107,7 @@ export async function generateRoutes(app: FastifyInstance) {
       }
 
       // ── Run generation ──
+      let firstSavedMsg: any = null;
       let lastSavedMsg: any = null;
       const collectedCommands: Array<{ command: CharacterCommand; characterId: string | null; messageId: string }> = [];
       const collectedOocMessages: string[] = [];
@@ -6134,6 +6166,7 @@ export async function generateRoutes(app: FastifyInstance) {
 
           const genResult = await generateForCharacter(charId, messagesWithInstruction);
           if (!genResult) break; // aborted
+          firstSavedMsg ??= genResult.savedMsg;
           lastSavedMsg = genResult.savedMsg;
           allResponses.push(genResult.response);
           for (const cmd of genResult.commands) {
@@ -6189,6 +6222,7 @@ export async function generateRoutes(app: FastifyInstance) {
 
         const genResult = await generateForCharacter(targetCharId, sentMessages);
         if (genResult) {
+          firstSavedMsg ??= genResult.savedMsg;
           lastSavedMsg = genResult.savedMsg;
           for (const cmd of genResult.commands) {
             collectedCommands.push({
@@ -6218,9 +6252,11 @@ export async function generateRoutes(app: FastifyInstance) {
       // Persist successful Narrative Director runs.
       // Interval gating uses getLastSuccessfulRunByType("director", …); those rows were
       // never inserted because only post_generation results were saved below. Pre-gen runs
-      // before the assistant message exists — anchor each run to this turn's saved message id.
-      const preGenAnchorMessageId = (lastSavedMsg as any)?.id ?? "";
-      if (preGenAnchorMessageId && !abortController.signal.aborted) {
+      // before the assistant message exists — anchor each run to the first saved
+      // assistant message from this turn so group-chat cadence counts from the
+      // earliest generated response.
+      const preGenAnchorMessageId = (firstSavedMsg as any)?.id ?? "";
+      if (preGenAnchorMessageId && !input.regenerateMessageId && !abortController.signal.aborted) {
         const preGenSuccessful = pipeline.results.filter((r) => {
           if (!r.success || r.agentType !== "director") return false;
           const cfg = pipelineAgents.find((a) => a.type === r.agentType);

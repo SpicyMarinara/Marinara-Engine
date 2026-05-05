@@ -124,6 +124,22 @@ Inside a single shared lorebook, you can mark each entry as only firing when spe
 
 ---
 
+<details>
+<summary><strong>Does retrying agents rerun every agent or just one?</strong></summary>
+<br>
+
+It depends which retry button you use.
+
+**Re-run Trackers** in the Roleplay HUD's Agents menu keeps the original broad behavior: it reruns all active tracker agents for that chat. Use this when the overall HUD state feels stale.
+
+Individual tracker controls are narrower. If you open a specific HUD widget and rerun it from there, Marinara sends only that tracker through the retry pipeline.
+
+Other retry controls are also scoped to what they say on the button: **Retry Failed Agents** retries the failed agents from the last generation, while Injections-tab re-runs only refresh the selected cached prompt injection for the current assistant message.
+
+</details>
+
+---
+
 <a id="what-happens-if-i-enable-an-agent-and-also-have-similar-instructions-in-my-preset"></a>
 
 <details>
@@ -135,6 +151,7 @@ Both contribute to the prompt, but in different ways: a preset section is static
 Common overlaps to watch for:
 
 - Writing-style or anti-repetition directives in the preset and the **Prose Guardian** agent.
+- Plot-steering, twist, pacing, or "what should happen next" directives in the preset and the **Narrative Director** or **Secret Plot Driver** agents.
 - "Track time / weather / location" instructions and the **World State** agent.
 - "Track character mood / outfit / stats" instructions and the **Character Tracker** agent.
 - Quest-tracking, combat-mechanics, or persona-stat instructions and their respective agents.
@@ -142,6 +159,8 @@ Common overlaps to watch for:
 - "Summarize past events" instructions and the **Automated Chat Summary** agent.
 
 **The general rule:** pick one place to express each behavior. If you've enabled an agent that covers a behavior, you can usually remove the matching preset directive. If you'd rather keep your preset version (e.g., it's tuned for a particular character), disable the corresponding agent.
+
+For story direction, choose the tool by how persistent you want the guidance to be. Use **Narrative Director** for occasional next-beat steering. Use **Secret Plot Driver** when you want hidden long-term arc memory and scene directions across turns. Use a preset only when the instruction should be static every turn.
 
 **One important exception:** the `agent_data` marker section, and the `{{agent::TYPE}}` macro, are the _intended_ way to thread an agent's output into a specific spot in the preset. That's wiring, not overlap — several agents (World State, Quest Tracker, Character Tracker, and others) set this up for you by default. The pattern to avoid is hand-writing preset sections that duplicate an agent's _behavior_, not using the marker section that carries the agent's _output_.
 

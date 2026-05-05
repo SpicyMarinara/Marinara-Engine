@@ -38,6 +38,7 @@ Roleplay's interface is significantly richer than Conversation's. Visible elemen
 - **Sprite slots** — up to three character sprites rendered in fixed positions (left, center, right) or free-placement mode. Sprites change expression based on the message content.
 - **Roleplay HUD** — heads-up display widgets along the top or side showing current world state.
 - **Weather overlay** — particle effects (rain, snow, fog, etc.) when the world-state agent infers weather from narrative.
+- **Agents menu** — the sparkle / agent activity menu for agent thoughts, retries, troubleshooting tabs, and optional hidden story guidance.
 - **Echo chamber panel** — simulated chat reactions from a fictional audience, like a Twitch-style chat (optional, agent-driven).
 - **Durable info panels** — toolbar buttons opening Summary, World Info (active lorebook entries), and Author's Notes panels.
 
@@ -59,6 +60,38 @@ The HUD displays compact widgets, one per enabled tracker agent. The widgets the
 Each widget has a popover panel for inline editing. You can manually re-run a single tracker if a value drifts wrong. Per-chat agent config can override the global defaults — for example, you can disable inventory tracking in a specific roleplay if you don't want it.
 
 The widgets are **populated by the World-State agent** (a default for Roleplay), which reads each turn's narrative and extracts structured fields. The agent isn't a separate prompt to the user — it runs automatically alongside the main response.
+
+### The Agents menu
+
+The Agents menu is the small activity menu in the Roleplay HUD. By default it shows **Activity**: agent thought bubbles, custom agent outputs, failed-agent retry actions, tracker re-run actions, and Echo Chamber controls when those features are active.
+
+Some troubleshooting tools are opt-in so they don't clutter the normal roleplay view:
+
+- **Injections tab** — enable it from chat settings -> Agents -> Writer Agents -> Injections tab.
+- **Secret Plot tab** — enable Secret Plot Driver for the chat, then turn on its Secret Plot tab from that agent's active card in chat settings.
+
+The **Injections tab** shows cached prompt injections saved on the latest assistant message. These are snippets that writer-style agents added before the reply was generated, such as Prose Guardian, Narrative Director, knowledge retrieval, knowledge router, or custom prompt-section agents. You can inspect, edit, save, or re-run eligible cached injections.
+
+The important part: edits in the Injections tab don't change the already-visible message by themselves, nor do they carry over to the next assistant message. They're used when you regenerate that same assistant message. Re-running a cached injection also targets that same assistant message, using the transcript slice and tracker snapshot from the original generation rather than the newest chat turn. This keeps regeneration reproducible: you're changing the guidance that fed that reply, not asking the current chat state to invent a new unrelated direction.
+
+Knowledge Retrieval and Knowledge Router cached injections can be viewed but not re-run from this tab because they depend on their own retrieval/routing paths. Custom agents with **Add as Prompt Section** enabled appear below the cached injections so you can inspect and edit their latest saved prompt-section output too.
+
+### Secret Plot Driver
+
+Secret Plot Driver is an optional hidden-story agent. It maintains private plot memory for one roleplay chat: a long-term **arc memory** plus short-term **scene directions** that can be injected before replies. This is different from visible summaries or lorebook entries. It's meant to steer pacing, reveals, and long-term tension without printing the plan directly in the chat.
+
+When Secret Plot Driver is active and the Secret Plot tab is shown, you can edit:
+
+- **Scene direction** — short-term guidance for the next turn or near-term scene motion.
+- **Needs momentum shift** — a hint that the current scene has gone stale and should move.
+- **Arc memory** — hidden long-term plot structure, including the overall arc, protagonist arc, and whether the arc is complete.
+
+There are two re-run buttons with different blast radius:
+
+- **Re-run scene direction** keeps the current arc memory and only refreshes the turn-level guidance.
+- **Re-run full secret plot state** can replace the hidden arc and scene directions. Marinara asks for confirmation first because this rewrites the chat's hidden plot plan.
+
+Saving edits writes directly to the agent memory used during generation. Hiding the Secret Plot tab only hides the editor; it doesn't disable the agent or delete memory. Removing Secret Plot Driver from the chat DOES delete that chat's hidden plot memory for the agent, including the current arc and scene directions.
 
 ## Sprite expressions
 
@@ -209,6 +242,18 @@ Long contexts compress when they hit the model's window. Things to try:
 - Bump to a model with a larger context window.
 - Use the **Summary** panel (toolbar button) to write down major events explicitly — the summary is injected into prompts and survives compression.
 - Author key facts into a lorebook as **constant** entries — they'll always be in scope regardless of where they were established in chat.
+
+### Regenerating a reply keeps using the wrong guidance
+
+If Prose Guardian, Narrative Director, knowledge retrieval, or a custom prompt-section agent pushed the reply in a bad direction or decided to continue the RP inside its guidance, turn on the **Injections tab** in chat settings -> Agents -> Writer Agents. Open the Roleplay HUD's Agents menu, inspect the cached prompt injections, then edit or re-run the specific injection and regenerate the same assistant message.
+
+This works because Marinara stores the prompt injections used for each assistant message. On regeneration, it reuses that message's cached guidance instead of blindly using whatever the newest chat state would produce.
+
+### Secret Plot Driver keeps steering toward the wrong arc
+
+Open chat settings -> Agents, make sure Secret Plot Driver is active, and show its **Secret Plot tab**. In the Roleplay HUD's Agents menu, use the Secret Plot tab to edit or re-run the hidden state.
+
+Use **Re-run scene direction** when the current turn needs a fresher nudge but the long-term arc is still good. Use **Re-run full secret plot state** when the hidden arc itself is wrong. Removing Secret Plot Driver from the chat wipes its hidden plot memory for that chat, so only do that if you want a clean slate.
 
 ---
 

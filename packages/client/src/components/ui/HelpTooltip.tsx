@@ -15,9 +15,17 @@ interface HelpTooltipProps {
   side?: "top" | "bottom" | "left" | "right";
   /** Extra class on the icon wrapper */
   className?: string;
+  /** Use a wider tooltip panel (long explanations) */
+  wide?: boolean;
 }
 
-export function HelpTooltip({ text, size = "0.75rem", side = "top", className }: HelpTooltipProps) {
+export function HelpTooltip({
+  text,
+  size = "0.75rem",
+  side = "top",
+  className,
+  wide,
+}: HelpTooltipProps) {
   const [show, setShow] = useState(false);
   const wrapRef = useRef<HTMLSpanElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
@@ -102,7 +110,12 @@ export function HelpTooltip({ text, size = "0.75rem", side = "top", className }:
         createPortal(
           <div
             ref={tipRef}
-            className="pointer-events-none fixed z-[9999] w-56 rounded-lg bg-[var(--popover)] px-3 py-2 text-[0.6875rem] leading-relaxed text-[var(--popover-foreground)] shadow-xl ring-1 ring-[var(--border)]"
+            className={cn(
+              "pointer-events-none fixed z-[9999] rounded-lg bg-[var(--popover)] px-3 py-2 text-[0.6875rem] leading-relaxed text-[var(--popover-foreground)] shadow-xl ring-1 ring-[var(--border)]",
+              wide
+                ? "w-[min(22rem,calc(100vw-1.5rem))] max-w-[22rem]"
+                : "w-56",
+            )}
             style={{ top: pos.top, left: pos.left, visibility: pos.ready ? "visible" : "hidden" }}
           >
             {text}

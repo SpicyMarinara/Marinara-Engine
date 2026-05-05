@@ -712,10 +712,64 @@ export function ChatSettingsDrawer({
     updateMeta.mutate({ id: chat.id, activeLorebookIds: current });
   };
 
-  const toggleAgent = (agentId: string) => {
+  const hasSecretPlotMemory = (memory: Record<string, unknown> | null | undefined) => {
+    if (!memory) return false;
+    const arc = memory.overarchingArc;
+    if (typeof arc === "string" && arc.trim()) return true;
+    if (arc && typeof arc === "object") {
+      const arcRecord = arc as Record<string, unknown>;
+      if (
+        String(arcRecord.description ?? "").trim() ||
+        String(arcRecord.protagonistArc ?? "").trim() ||
+        arcRecord.completed === true
+      ) {
+        return true;
+      }
+    }
+
+    const sceneDirections = memory.sceneDirections;
+    if (
+      Array.isArray(sceneDirections) &&
+      sceneDirections.some(
+        (entry) =>
+          typeof entry === "string"
+            ? entry.trim()
+            : !!(entry && typeof entry === "object" && String((entry as Record<string, unknown>).direction ?? "").trim()),
+      )
+    ) {
+      return true;
+    }
+
+    const pacing = memory.pacing;
+    if (typeof pacing === "string" ? pacing.trim() : pacing != null) return true;
+    const recentlyFulfilled = memory.recentlyFulfilled;
+    return Array.isArray(recentlyFulfilled) && recentlyFulfilled.some((entry) => String(entry ?? "").trim());
+  };
+
+  const toggleAgent = async (agentId: string) => {
     const current = [...activeAgentIds];
     const idx = current.indexOf(agentId);
     const isRemoving = idx >= 0;
+    if (isRemoving && agentId === "secret-plot-driver") {
+      let shouldWarn = true;
+      try {
+        const res = await api.get<{ memory: Record<string, unknown> }>(`/agents/memory/${agentId}/${chat.id}`);
+        shouldWarn = hasSecretPlotMemory(res.memory);
+      } catch {
+        shouldWarn = true;
+      }
+      if (shouldWarn) {
+        const ok = await showConfirmDialog({
+          title: "Remove Secret Plot Driver",
+          message:
+            "Remove Secret Plot Driver from this chat? This will wipe its hidden plot memory for this chat, including the current arc and scene directions. This cannot be undone.",
+          confirmLabel: "Remove Agent",
+          tone: "destructive",
+        });
+        if (!ok) return;
+      }
+    }
+
     if (isRemoving) current.splice(idx, 1);
     else current.push(agentId);
     updateMeta.mutate({ id: chat.id, activeAgentIds: current });
@@ -921,6 +975,11 @@ export function ChatSettingsDrawer({
       await updateMeta.mutateAsync({
         id: chat.id,
         activeAgentIds: Array.from(new Set([...activeAgentIds, agent.id])),
+        ...(agent.id === "secret-plot-driver"
+          ? {
+              showSecretPlotPanel: true,
+            }
+          : {}),
       });
       setAgentAddPreview(null);
     } catch (error) {
@@ -3518,38 +3577,121 @@ export function ChatSettingsDrawer({
                               description={cat.description}
                               count={activeInCat.length}
                             >
+                              {cat.key === "writer" && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    updateMeta.mutate({
+                                      id: chat.id,
+                                      showInjectionsPanel: metadata.showInjectionsPanel !== true,
+                                    })
+                                  }
+                                  aria-pressed={metadata.showInjectionsPanel === true}
+                                  className="ml-auto flex w-fit max-w-full items-center gap-2 rounded-md bg-[var(--background)]/20 px-1.5 py-1 text-left text-[0.5625rem] text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]/35 hover:text-[var(--foreground)]"
+                                  title={
+                                    metadata.showInjectionsPanel === true
+                                      ? "Hide the Injections tab in the roleplay Agents menu. This is mainly for troubleshooting Prose Guardian, Narrative Director, or custom injected text before regenerating the current reply."
+                                      : "Show the Injections tab in the roleplay Agents menu. This is mainly for troubleshooting Prose Guardian, Narrative Director, or custom injected text before regenerating the current reply."
+                                  }
+                                >
+                                  <span className="flex min-w-0 items-center gap-1.5">
+                                    <FilePlus2 size="0.625rem" className="shrink-0 text-[var(--primary)]" />
+                                    <span className="truncate font-medium">Injections tab</span>
+                                  </span>
+                                  <span
+                                    className={cn(
+                                      "h-3.5 w-6 shrink-0 rounded-full p-0.5 transition-colors",
+                                      metadata.showInjectionsPanel === true
+                                        ? "bg-[var(--primary)]"
+                                        : "bg-[var(--muted-foreground)]/50",
+                                    )}
+                                  >
+                                    <span
+                                      className={cn(
+                                        "block h-2.5 w-2.5 rounded-full bg-white shadow-sm transition-transform",
+                                        metadata.showInjectionsPanel === true && "translate-x-2.5",
+                                      )}
+                                    />
+                                  </span>
+                                </button>
+                              )}
                               {/* Active agents in this category */}
                               {activeInCat.length > 0 && (
                                 <div className="flex flex-col gap-1 mb-1.5">
                                   {activeInCat.map((agent) => {
                                     const tokenEst = agentLoadCost.tokensByType.get(agent.id);
+                                    const isSecretPlotDriver = agent.id === "secret-plot-driver";
                                     return (
                                       <div
                                         key={agent.id}
-                                        className="flex items-center gap-2.5 rounded-lg bg-[var(--primary)]/10 px-3 py-2 ring-1 ring-[var(--primary)]/30"
+                                        className="rounded-lg bg-[var(--primary)]/10 px-3 py-2 ring-1 ring-[var(--primary)]/30"
                                       >
-                                        <Sparkles size="0.875rem" className="text-[var(--primary)]" />
-                                        <div className="flex-1 min-w-0">
-                                          <span className="block truncate text-xs">{agent.name}</span>
-                                          <span className="mt-0.5 block text-[0.625rem] leading-tight text-[var(--muted-foreground)] line-clamp-2">
-                                            {agent.description}
-                                          </span>
-                                        </div>
-                                        {tokenEst != null ? (
-                                          <span
-                                            className="shrink-0 tabular-nums text-[0.625rem] text-[var(--muted-foreground)]"
-                                            title={`~${tokenEst.toLocaleString()} tokens of agent instructions (estimated)`}
+                                        <div className="flex items-start gap-2.5">
+                                          <Sparkles size="0.875rem" className="mt-0.5 shrink-0 text-[var(--primary)]" />
+                                          <div className="min-w-0 flex-1">
+                                            <div className="flex min-w-0 items-center gap-1.5">
+                                              <span className="block min-w-0 truncate text-xs">{agent.name}</span>
+                                              {tokenEst != null ? (
+                                                <span
+                                                  className="shrink-0 tabular-nums text-[0.625rem] text-[var(--muted-foreground)]"
+                                                  title={`~${tokenEst.toLocaleString()} tokens of agent instructions (estimated)`}
+                                                >
+                                                  ~{tokenEst.toLocaleString()}
+                                                </span>
+                                              ) : null}
+                                            </div>
+                                            <span className="mt-0.5 block text-[0.625rem] leading-tight text-[var(--muted-foreground)] line-clamp-2">
+                                              {agent.description}
+                                            </span>
+                                          </div>
+                                          <button
+                                            onClick={() => {
+                                              void toggleAgent(agent.id);
+                                            }}
+                                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)]"
+                                            title="Remove from chat"
                                           >
-                                            ~{tokenEst.toLocaleString()}
-                                          </span>
-                                        ) : null}
-                                        <button
-                                          onClick={() => toggleAgent(agent.id)}
-                                          className="flex h-5 w-5 items-center justify-center rounded-md text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)]"
-                                          title="Remove from chat"
-                                        >
-                                          <Trash2 size="0.6875rem" />
-                                        </button>
+                                            <Trash2 size="0.6875rem" />
+                                          </button>
+                                        </div>
+                                        {isSecretPlotDriver && (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              updateMeta.mutate({
+                                                id: chat.id,
+                                                showSecretPlotPanel: metadata.showSecretPlotPanel !== true,
+                                              })
+                                            }
+                                            aria-pressed={metadata.showSecretPlotPanel === true}
+                                            className="ml-auto mt-1.5 flex w-fit max-w-full items-center gap-2 rounded-md bg-[var(--background)]/20 px-1.5 py-1 text-left text-[0.5625rem] text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]/35 hover:text-[var(--foreground)]"
+                                            title={
+                                              metadata.showSecretPlotPanel === true
+                                                ? "Hide the Secret Plot tab in the roleplay Agents menu. That tab lets you inspect and edit the Secret Plot Driver's hidden arc memory and scene directions for this chat."
+                                                : "Show the Secret Plot tab in the roleplay Agents menu. Use it to inspect and edit the Secret Plot Driver's hidden arc memory and scene directions for this chat."
+                                            }
+                                          >
+                                            <span className="flex min-w-0 items-center gap-1.5">
+                                              <Brain size="0.625rem" className="shrink-0 text-[var(--primary)]" />
+                                              <span className="truncate font-medium">Secret Plot tab</span>
+                                            </span>
+                                            <span
+                                              className={cn(
+                                                "h-3.5 w-6 shrink-0 rounded-full p-0.5 transition-colors",
+                                                metadata.showSecretPlotPanel === true
+                                                  ? "bg-[var(--primary)]"
+                                                  : "bg-[var(--muted-foreground)]/50",
+                                              )}
+                                            >
+                                              <span
+                                                className={cn(
+                                                  "block h-2.5 w-2.5 rounded-full bg-white shadow-sm transition-transform",
+                                                  metadata.showSecretPlotPanel === true && "translate-x-2.5",
+                                                )}
+                                              />
+                                            </span>
+                                          </button>
+                                        )}
                                       </div>
                                     );
                                   })}
@@ -3618,7 +3760,9 @@ export function ChatSettingsDrawer({
                                           </span>
                                         ) : null}
                                         <button
-                                          onClick={() => toggleAgent(agent.id)}
+                                          onClick={() => {
+                                            void toggleAgent(agent.id);
+                                          }}
                                           className="flex h-5 w-5 items-center justify-center rounded-md text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)]"
                                           title="Remove from chat"
                                         >

@@ -808,6 +808,7 @@ export function ChatRoleplaySurface({
                         onRerunSingleTracker={onRerunSingleTracker}
                         enabledAgentTypes={enabledAgentTypes}
                         manualTrackers={!!chatMeta.manualTrackers}
+                        injectionSourceMessages={messages}
                       />
                     </Suspense>
                   </div>
@@ -887,6 +888,7 @@ export function ChatRoleplaySurface({
                         enabledAgentTypes={enabledAgentTypes}
                         manualTrackers={!!chatMeta.manualTrackers}
                         mobileCompact
+                        injectionSourceMessages={messages}
                       />
                     </Suspense>
                     <div className="flex items-center gap-1.5">

@@ -1516,7 +1516,15 @@ export function useGenerate() {
   );
 
   const retryAgents = useCallback(
-    async (chatId: string, agentTypes: string[], options?: { lorebookKeeperBackfill?: boolean }) => {
+    async (
+      chatId: string,
+      agentTypes: string[],
+      options?: {
+        lorebookKeeperBackfill?: boolean;
+        forMessageId?: string;
+        secretPlotRerollMode?: "full" | "turn_only";
+      },
+    ) => {
       const isActiveChat = () => useChatStore.getState().activeChatId === chatId;
       const abortController = new AbortController();
       useChatStore.getState().setAbortController(chatId, abortController);
@@ -1533,6 +1541,8 @@ export function useGenerate() {
             agentTypes,
             streaming: useUIStore.getState().enableStreaming,
             lorebookKeeperBackfill: options?.lorebookKeeperBackfill === true,
+            ...(options?.forMessageId ? { forMessageId: options.forMessageId } : {}),
+            ...(options?.secretPlotRerollMode ? { secretPlotRerollMode: options.secretPlotRerollMode } : {}),
           },
           abortController.signal,
         )) {
