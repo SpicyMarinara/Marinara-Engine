@@ -145,6 +145,16 @@ const HIDDEN_ROLEPLAY_AGENTS = new Set([
   "autonomous-messenger",
 ]);
 
+const MODE_INTROS: Record<ChatMode, string> = {
+  conversation:
+    "Plain chat — no roleplay or game systems built in; autonomous messaging and other tools are optional below.",
+  roleplay:
+    "Plain roleplay surface — no built-in dice, combat, or GM pipeline; sprites, world-state tracking, and other helpers are available as optional agents below.",
+  visual_novel:
+    "Sprite- and background-driven roleplay — expressions, world state, and CYOA choices are available as optional agents below.",
+  game: "Full Game Master with built-in dice, combat, encounters, world state, and session/map tracking — the Scene Analysis toggle below adds optional cinematic visuals (backgrounds, music, weather).",
+};
+
 type AvailableAgent = {
   id: string;
   name: string;
@@ -1191,6 +1201,16 @@ export function ChatSettingsDrawer({
         )}
 
         <div className="flex-1 overflow-y-auto">
+          {/* Hardcoded — CHAT_MODES.defaultAgents looks like the source of truth but is currently
+              unused, and wouldn't cover non-agent built-ins (GM pipeline, autonomous messaging, etc.) anyway. */}
+          {MODE_INTROS[chatMode as ChatMode] && (
+            <div className="border-b border-[var(--border)] px-4 py-2.5">
+              <p className="text-[0.625rem] leading-relaxed text-[var(--muted-foreground)]">
+                {MODE_INTROS[chatMode as ChatMode]}
+              </p>
+            </div>
+          )}
+
           {/* Chat Name */}
           <Section
             label="Chat Name"
