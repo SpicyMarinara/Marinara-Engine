@@ -86,6 +86,8 @@ LOG_LEVEL=debug pnpm start
 
 Marinara Engine ships with layered access-control mechanisms designed for users who expose the server beyond their local machine.
 
+> Looking for a step-by-step walkthrough rather than a reference? See [Remote Access — Setting Up Basic Auth or an IP Allowlist](REMOTE_ACCESS.md).
+
 ### Safe-by-default lockdown
 
 By default, when no Basic Auth credentials are configured, the server **refuses connections from every non-loopback IP**. Local browser access continues to work without any configuration:

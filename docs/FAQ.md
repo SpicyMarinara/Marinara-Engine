@@ -18,7 +18,7 @@ The shell launchers (`start.sh`, `start.bat`, `start-termux.sh`) already bind to
 
 Loopback (`127.0.0.1`) works without a password, but other devices on your LAN now require authentication by default. Set `BASIC_AUTH_USER` and `BASIC_AUTH_PASS` in `.env`, then restart Marinara. For privileged actions from that browser, also set `ADMIN_SECRET` and save it in **Settings -> Advanced -> Admin Access**.
 
-You can restore the old unauthenticated LAN behavior with `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK=true`, but only do this on a network you fully trust.
+You can restore the old unauthenticated LAN behavior with `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK=true`, but only do this on a network you fully trust. For a step-by-step walkthrough covering Basic Auth, IP Allowlist, and the private-network bypass, see [Remote Access — Setting Up Basic Auth or an IP Allowlist](REMOTE_ACCESS.md).
 
 ## 3. Find your host device's local IP address
 

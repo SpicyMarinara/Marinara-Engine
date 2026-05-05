@@ -199,6 +199,7 @@ function renderLockdownPage(clientIp: string): string {
     font-weight: 600;
   }
   .panel .hint { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
+  .panel .detail { display: inline-block; margin-top: 12px; font-size: 13px; }
   ol { margin: 0; padding-left: 20px; }
   ol li { margin: 6px 0; }
   code, pre {
@@ -268,6 +269,7 @@ BASIC_AUTH_PASS=a-long-random-password</pre>
         </li>
         <li>Restart Marinara Engine. Refresh this page and enter the credentials.</li>
       </ol>
+      <a class="detail" href="https://github.com/Pasta-Devs/Marinara-Engine/blob/main/docs/REMOTE_ACCESS.md#option-1-basic-auth-recommended" target="_blank" rel="noopener noreferrer">Detailed walkthrough →</a>
     </section>
 
     <section class="panel">
@@ -280,14 +282,15 @@ BASIC_AUTH_PASS=a-long-random-password</pre>
         </li>
         <li>Restart Marinara Engine and refresh this page.</li>
       </ol>
+      <a class="detail" href="https://github.com/Pasta-Devs/Marinara-Engine/blob/main/docs/REMOTE_ACCESS.md#option-2-ip-allowlist" target="_blank" rel="noopener noreferrer">Detailed walkthrough →</a>
     </section>
 
     <footer>
-      <strong>On a fully trusted private network?</strong> You can restore the legacy passwordless LAN behavior with <code>ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK=true</code> in your <code>.env</code>. Only do this when you trust every device that can reach this server — anyone on the network will have full access without a password.
+      <strong>On a fully trusted private network?</strong> You can restore the legacy passwordless LAN behavior with <code>ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK=true</code> in your <code>.env</code>. Only do this when you trust every device that can reach this server — anyone on the network will have full access without a password. <a href="https://github.com/Pasta-Devs/Marinara-Engine/blob/main/docs/REMOTE_ACCESS.md#option-3-private-network-bypass-no-password" target="_blank" rel="noopener noreferrer">Read the caveats first →</a>
       <div class="links">
+        <a href="https://github.com/Pasta-Devs/Marinara-Engine/blob/main/docs/REMOTE_ACCESS.md" target="_blank" rel="noopener noreferrer">Full Remote Access walkthrough</a>
         <a href="https://github.com/Pasta-Devs/Marinara-Engine/blob/main/docs/FAQ.md#how-do-i-access-marinara-engine-from-my-phone-or-another-device" target="_blank" rel="noopener noreferrer">FAQ: Access from another device</a>
         <a href="https://github.com/Pasta-Devs/Marinara-Engine/blob/main/docs/TROUBLESHOOTING.md#app-not-loading-on-mobile--another-device" target="_blank" rel="noopener noreferrer">Troubleshooting</a>
-        <a href="https://github.com/Pasta-Devs/Marinara-Engine/blob/main/docs/CONFIGURATION.md" target="_blank" rel="noopener noreferrer">Full configuration reference</a>
       </div>
     </footer>
   </main>
