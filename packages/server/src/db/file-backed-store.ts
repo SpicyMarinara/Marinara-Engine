@@ -181,6 +181,7 @@ export const FILE_BACKED_TABLES = [
   "app_settings",
   "chat_presets",
   "prompt_overrides",
+  "installed_extensions",
 ] as const;
 
 type FileBackedTable = (typeof FILE_BACKED_TABLES)[number];
