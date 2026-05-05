@@ -714,6 +714,7 @@ Section "Uninstall"
   DetailPrint "Removing application files..."
   ; Only remove known app directories — preserve user data if they stored it elsewhere
   RMDir /r "$INSTDIR\node_modules"
+  RMDir /r "$INSTDIR\.pnpm-store"
   RMDir /r "$INSTDIR\packages"
   RMDir /r "$INSTDIR\android"
   RMDir /r "$INSTDIR\docs"
