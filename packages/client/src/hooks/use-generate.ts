@@ -66,9 +66,9 @@ type CachedCharacterRow = {
 function resolveCachedCharacterIdentity(
   qc: QueryClient,
   characterId: string | null | undefined,
-  fallbackName = "Character",
+  fallbackName: string | null | undefined = "Character",
 ): {
-  name: string;
+  name: string | null;
   avatarUrl: string | null;
   avatarCrop?: { zoom: number; offsetX: number; offsetY: number } | null;
 } {
@@ -81,7 +81,8 @@ function resolveCachedCharacterIdentity(
   const name =
     (parsed && typeof parsed.name === "string" && parsed.name.trim()) ||
     (typeof row?.name === "string" && row.name.trim()) ||
-    fallbackName;
+    fallbackName ||
+    "Character";
   const avatarCrop =
     parsed &&
     typeof parsed.extensions === "object" &&
@@ -949,11 +950,12 @@ export function useGenerate() {
                   const identity = resolveCachedCharacterIdentity(
                     qc,
                     previousGroupMessage?.characterId ?? null,
-                    turn.characterName,
+                    (previousGroupMessage as (Message & { characterName?: string | null }) | null)?.characterName ??
+                      null,
                   );
                   useChatStore
                     .getState()
-                    .addNotification(params.chatId, identity.name, identity.avatarUrl, identity.avatarCrop);
+                    .addNotification(params.chatId, identity.name ?? "Character", identity.avatarUrl, identity.avatarCrop);
                   const chatList = qc.getQueryData<Chat[]>(chatKeys.list());
                   const thisChat = chatList?.find((c) => c.id === params.chatId);
                   const isRpMode = thisChat?.mode === "roleplay" || thisChat?.mode === "visual_novel";
@@ -1377,7 +1379,7 @@ export function useGenerate() {
             const identity = resolveCachedCharacterIdentity(qc, notifiedCharacterId);
             useChatStore
               .getState()
-              .addNotification(params.chatId, identity.name, identity.avatarUrl, identity.avatarCrop);
+              .addNotification(params.chatId, identity.name ?? "Character", identity.avatarUrl, identity.avatarCrop);
           }
           const isRp = chat?.mode === "roleplay" || chat?.mode === "visual_novel";
           const soundEnabled = isRp

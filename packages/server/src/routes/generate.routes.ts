@@ -7135,29 +7135,13 @@ export async function generateRoutes(app: FastifyInstance) {
 
                       // Always persist to the swipe row so the attachment survives
                       // swipe switches even if the user has already navigated away.
-                      const swipeRow = (await chats.getSwipes(messageId)).find(
-                        (s: any) => s.index === targetSwipeIndex,
-                      );
-                      if (swipeRow) {
-                        const swipeExtra =
-                          typeof swipeRow.extra === "string" ? JSON.parse(swipeRow.extra) : (swipeRow.extra ?? {});
-                        const swipeAtts = (swipeExtra.attachments as any[]) ?? [];
-                        swipeAtts.push(attachment);
-                        await chats.updateSwipeExtra(messageId, targetSwipeIndex, { attachments: swipeAtts });
-                      }
+                      await chats.appendSwipeAttachment(messageId, targetSwipeIndex, attachment);
 
                       // Also update the live message row if this swipe is still active,
                       // so the SSE illustration event is immediately visible.
                       const msgRow = await chats.getMessage(messageId);
                       if (msgRow && (msgRow.activeSwipeIndex ?? 0) === targetSwipeIndex) {
-                        const msgExtra = msgRow.extra
-                          ? typeof msgRow.extra === "string"
-                            ? JSON.parse(msgRow.extra)
-                            : msgRow.extra
-                          : {};
-                        const existingAttachments = (msgExtra.attachments as any[]) ?? [];
-                        existingAttachments.push(attachment);
-                        await chats.updateMessageExtra(messageId, { attachments: existingAttachments });
+                        await chats.appendMessageAttachment(messageId, attachment);
                       }
                     }
 
@@ -7555,28 +7539,8 @@ export async function generateRoutes(app: FastifyInstance) {
                           url: imageUrl,
                           filename: `selfie_${charName.toLowerCase().replace(/\s+/g, "_")}.${imageResult.ext}`,
                         };
-                        const swipeRow = (await chats.getSwipes(messageId)).find(
-                          (swipe: any) => swipe.index === activeSwipeIndex,
-                        );
-                        if (swipeRow) {
-                          const swipeExtra = swipeRow.extra
-                            ? typeof swipeRow.extra === "string"
-                              ? JSON.parse(swipeRow.extra)
-                              : swipeRow.extra
-                            : {};
-                          const swipeAttachments = (swipeExtra.attachments as any[]) ?? [];
-                          swipeAttachments.push(attachment);
-                          await chats.updateSwipeExtra(messageId, activeSwipeIndex, { attachments: swipeAttachments });
-                        }
-
-                        const msgExtra = msgRow?.extra
-                          ? typeof msgRow.extra === "string"
-                            ? JSON.parse(msgRow.extra)
-                            : msgRow.extra
-                          : {};
-                        const existingAttachments = (msgExtra.attachments as any[]) ?? [];
-                        existingAttachments.push(attachment);
-                        await chats.updateMessageExtra(messageId, { attachments: existingAttachments });
+                        await chats.appendSwipeAttachment(messageId, activeSwipeIndex, attachment);
+                        await chats.appendMessageAttachment(messageId, attachment);
                       }
 
                       // Send selfie event to client
