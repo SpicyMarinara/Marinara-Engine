@@ -20,13 +20,19 @@ const PERMISSIONS_POLICY = [
   "xr-spatial-tracking=()",
 ].join(", ");
 
+// 'unsafe-eval' is required by the JS extension system: user-installed
+// extensions are executed via `new Function(...)` in CustomThemeInjector
+// so they can access the marinara extension API. Without it, every JS
+// extension fails with an EvalError. All other directives stay strict —
+// in particular, scripts must still be same-origin ('self'), so this does
+// not permit inline script injection or remote script loading.
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "base-uri 'self'",
   "form-action 'self'",
   "frame-ancestors 'none'",
   "object-src 'none'",
-  "script-src 'self'",
+  "script-src 'self' 'unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "media-src 'self' blob:",
