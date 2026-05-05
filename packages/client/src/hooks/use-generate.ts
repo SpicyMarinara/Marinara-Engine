@@ -56,6 +56,59 @@ function parseCharacterRowData(raw: unknown): Record<string, unknown> | null {
   return null;
 }
 
+type CachedCharacterRow = {
+  id?: string;
+  data?: unknown;
+  avatarPath?: string | null;
+  name?: string;
+};
+
+function resolveCachedCharacterIdentity(
+  qc: QueryClient,
+  characterId: string | null | undefined,
+  fallbackName = "Character",
+): {
+  name: string;
+  avatarUrl: string | null;
+  avatarCrop?: { zoom: number; offsetX: number; offsetY: number } | null;
+} {
+  if (!characterId) return { name: fallbackName, avatarUrl: null };
+
+  const detail = qc.getQueryData<CachedCharacterRow>(characterKeys.detail(characterId));
+  const list = qc.getQueryData<CachedCharacterRow[]>(characterKeys.list());
+  const row = detail ?? list?.find((character) => character.id === characterId);
+  const parsed = parseCharacterRowData(row?.data);
+  const name =
+    (parsed && typeof parsed.name === "string" && parsed.name.trim()) ||
+    (typeof row?.name === "string" && row.name.trim()) ||
+    fallbackName;
+  const avatarCrop =
+    parsed &&
+    typeof parsed.extensions === "object" &&
+    parsed.extensions &&
+    "avatarCrop" in parsed.extensions
+      ? ((parsed.extensions as { avatarCrop?: { zoom: number; offsetX: number; offsetY: number } | null }).avatarCrop ??
+        null)
+      : null;
+
+  return {
+    name,
+    avatarUrl: row?.avatarPath ?? null,
+    avatarCrop,
+  };
+}
+
+function latestAssistantMessage(messages: Iterable<Message>): Message | null {
+  let latest: Message | null = null;
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    if (!latest || new Date(message.createdAt).getTime() >= new Date(latest.createdAt).getTime()) {
+      latest = message;
+    }
+  }
+  return latest;
+}
+
 /**
  * Build one or more PendingCardUpdate batches from a character_card_update
  * agent result. Each batch is scoped to a single characterId so the approval
@@ -885,25 +938,22 @@ export function useGenerate() {
                     startTypewriter();
                   });
                 }
+                const previousGroupMessage = latestAssistantMessage(persistedMessages.values());
+
                 // Pick up the just-saved message from the previous character
                 await refreshMessagesAuthoritatively(qc, params.chatId, persistedMessages.values());
                 // Increment unread if user navigated away during group generation
                 const activeNow = useChatStore.getState().activeChatId;
                 if (activeNow !== params.chatId) {
                   useChatStore.getState().incrementUnread(params.chatId);
-                  // Show floating avatar notification bubble
-                  const charDetail = qc.getQueryData<{ avatarPath?: string | null }>(
-                    characterKeys.detail(turn.characterId),
+                  const identity = resolveCachedCharacterIdentity(
+                    qc,
+                    previousGroupMessage?.characterId ?? null,
+                    turn.characterName,
                   );
-                  // Detail cache may be empty — fall back to list cache
-                  let avatarPath = charDetail?.avatarPath ?? null;
-                  if (!avatarPath) {
-                    const charList = qc.getQueryData<Array<{ id: string; avatarPath?: string | null }>>(
-                      characterKeys.list(),
-                    );
-                    avatarPath = charList?.find((c) => c.id === turn.characterId)?.avatarPath ?? null;
-                  }
-                  useChatStore.getState().addNotification(params.chatId, turn.characterName, avatarPath);
+                  useChatStore
+                    .getState()
+                    .addNotification(params.chatId, identity.name, identity.avatarUrl, identity.avatarCrop);
                   const chatList = qc.getQueryData<Chat[]>(chatKeys.list());
                   const thisChat = chatList?.find((c) => c.id === params.chatId);
                   const isRpMode = thisChat?.mode === "roleplay" || thisChat?.mode === "visual_novel";
@@ -1321,32 +1371,13 @@ export function useGenerate() {
               : Array.isArray(rawIds)
                 ? rawIds
                 : [];
-          const firstCharId = parsedIds[0];
-          if (firstCharId) {
-            const charDetail = qc.getQueryData<{ data?: { name?: string } | string; avatarPath?: string | null }>(
-              characterKeys.detail(firstCharId),
-            );
-            // Detail cache may be empty — fall back to the always-populated list cache
-            let charAvatar = charDetail?.avatarPath ?? null;
-            let charName = "Character";
-            if (charDetail) {
-              const parsed = typeof charDetail.data === "string" ? JSON.parse(charDetail.data) : charDetail.data;
-              charName = parsed?.name ?? "Character";
-            }
-            if (!charAvatar || charName === "Character") {
-              const charList = qc.getQueryData<
-                Array<{ id: string; data?: string | { name?: string }; avatarPath?: string | null }>
-              >(characterKeys.list());
-              const fromList = charList?.find((c) => c.id === firstCharId);
-              if (fromList) {
-                if (!charAvatar) charAvatar = fromList.avatarPath ?? null;
-                if (charName === "Character") {
-                  const p = typeof fromList.data === "string" ? JSON.parse(fromList.data) : fromList.data;
-                  charName = p?.name ?? "Character";
-                }
-              }
-            }
-            useChatStore.getState().addNotification(params.chatId, charName, charAvatar);
+          const notifiedMessage = latestAssistantMessage(persistedMessages.values());
+          const notifiedCharacterId = notifiedMessage?.characterId ?? parsedIds[0] ?? null;
+          if (notifiedCharacterId) {
+            const identity = resolveCachedCharacterIdentity(qc, notifiedCharacterId);
+            useChatStore
+              .getState()
+              .addNotification(params.chatId, identity.name, identity.avatarUrl, identity.avatarCrop);
           }
           const isRp = chat?.mode === "roleplay" || chat?.mode === "visual_novel";
           const soundEnabled = isRp

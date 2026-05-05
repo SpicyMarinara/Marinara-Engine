@@ -7548,17 +7548,34 @@ export async function generateRoutes(app: FastifyInstance) {
                       const imageUrl = `/api/gallery/file/${input.chatId}/${encodeURIComponent(filename)}`;
                       if (messageId) {
                         const msgRow = await chats.getMessage(messageId);
+                        const activeSwipeIndex =
+                          typeof msgRow?.activeSwipeIndex === "number" ? msgRow.activeSwipeIndex : 0;
+                        const attachment = {
+                          type: "image",
+                          url: imageUrl,
+                          filename: `selfie_${charName.toLowerCase().replace(/\s+/g, "_")}.${imageResult.ext}`,
+                        };
+                        const swipeRow = (await chats.getSwipes(messageId)).find(
+                          (swipe: any) => swipe.index === activeSwipeIndex,
+                        );
+                        if (swipeRow) {
+                          const swipeExtra = swipeRow.extra
+                            ? typeof swipeRow.extra === "string"
+                              ? JSON.parse(swipeRow.extra)
+                              : swipeRow.extra
+                            : {};
+                          const swipeAttachments = (swipeExtra.attachments as any[]) ?? [];
+                          swipeAttachments.push(attachment);
+                          await chats.updateSwipeExtra(messageId, activeSwipeIndex, { attachments: swipeAttachments });
+                        }
+
                         const msgExtra = msgRow?.extra
                           ? typeof msgRow.extra === "string"
                             ? JSON.parse(msgRow.extra)
                             : msgRow.extra
                           : {};
                         const existingAttachments = (msgExtra.attachments as any[]) ?? [];
-                        existingAttachments.push({
-                          type: "image",
-                          url: imageUrl,
-                          filename: `selfie_${charName.toLowerCase().replace(/\s+/g, "_")}.${imageResult.ext}`,
-                        });
+                        existingAttachments.push(attachment);
                         await chats.updateMessageExtra(messageId, { attachments: existingAttachments });
                       }
 
