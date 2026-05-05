@@ -14,6 +14,7 @@ import { useSidecarStore } from "./stores/sidecar.store";
 import { api } from "./lib/api-client";
 import { forceRefreshSpa } from "./lib/browser-runtime";
 import { useLegacyThemeMigration } from "./hooks/use-themes";
+import { useLegacyExtensionMigration } from "./hooks/use-extensions";
 import { useSettingsSync } from "./hooks/use-settings-sync";
 
 const VERSION_RECOVERY_KEY = "marinara:pwa-version-recovery";
@@ -49,6 +50,7 @@ export function App() {
   const fontFamily = useUIStore((s) => s.fontFamily);
   const hasModalOpen = useUIStore((s) => s.modal !== null);
   useLegacyThemeMigration();
+  useLegacyExtensionMigration();
   useSettingsSync();
   const showDownloadModal = useSidecarStore((s) => s.showDownloadModal);
   const setShowDownloadModal = useSidecarStore((s) => s.setShowDownloadModal);

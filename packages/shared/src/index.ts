@@ -19,6 +19,7 @@ export * from "./types/regex.js";
 export * from "./types/export.js";
 export * from "./types/haptic.js";
 export * from "./types/theme.js";
+export * from "./types/extension.js";
 export * from "./types/chat-preset.js";
 export * from "./types/game.js";
 export * from "./types/sidecar.js";
@@ -35,6 +36,7 @@ export * from "./schemas/agent.schema.js";
 export * from "./schemas/custom-tool.schema.js";
 export * from "./schemas/regex.schema.js";
 export * from "./schemas/theme.schema.js";
+export * from "./schemas/extension.schema.js";
 export * from "./schemas/app-settings.schema.js";
 
 // Constants

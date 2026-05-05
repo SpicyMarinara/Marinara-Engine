@@ -84,16 +84,20 @@ export interface CustomTheme {
   installedAt: string;
 }
 
-/** A user-installed extension (JS/CSS) */
-export interface InstalledExtension {
+/**
+ * Pre-migration shape of a browser-local extension. Only used to read
+ * existing localStorage state and replay it against the server
+ * (`/api/extensions`) on first load — see `useLegacyExtensionMigration`.
+ * New extensions go directly through the server-synced hooks in
+ * `use-extensions.ts` and use the canonical `InstalledExtension` type
+ * exported from `@marinara-engine/shared`.
+ */
+export interface LegacyInstalledExtension {
   id: string;
   name: string;
   description: string;
-  /** CSS to inject */
   css?: string;
-  /** JavaScript to execute */
   js?: string;
-  /** Whether the extension is enabled */
   enabled: boolean;
   installedAt: string;
 }
@@ -241,7 +245,10 @@ interface UIState {
   customThemes: CustomTheme[];
   /** True once legacy browser-local themes have been migrated to the server. */
   hasMigratedCustomThemesToServer: boolean;
-  installedExtensions: InstalledExtension[];
+  /** Legacy browser-local extensions. Migration only — see useLegacyExtensionMigration. */
+  installedExtensions: LegacyInstalledExtension[];
+  /** True once legacy browser-local extensions have been migrated to the server. */
+  hasMigratedExtensionsToServer: boolean;
 
   // ── Onboarding ──
   hasCompletedOnboarding: boolean;
@@ -364,9 +371,9 @@ interface UIState {
   addCustomTheme: (theme: CustomTheme) => void;
   updateCustomTheme: (id: string, patch: Partial<Pick<CustomTheme, "name" | "css">>) => void;
   removeCustomTheme: (id: string) => void;
-  addExtension: (ext: InstalledExtension) => void;
-  removeExtension: (id: string) => void;
-  toggleExtension: (id: string) => void;
+  /** Legacy migration helpers for browser-local extensions. */
+  setHasMigratedExtensionsToServer: (v: boolean) => void;
+  clearLegacyExtensions: () => void;
   setHasCompletedOnboarding: (v: boolean) => void;
   setGameTutorialDisabled: (v: boolean) => void;
   dismissLinkApiBanner: () => void;
@@ -532,6 +539,7 @@ export const useUIStore = create<UIState>()(
       customThemes: [],
       hasMigratedCustomThemesToServer: false,
       installedExtensions: [],
+      hasMigratedExtensionsToServer: false,
       hasCompletedOnboarding: false,
       gameTutorialDisabled: false,
       linkApiBannerDismissed: false,
@@ -825,15 +833,8 @@ export const useUIStore = create<UIState>()(
           customThemes: s.customThemes.filter((t) => t.id !== id),
           activeCustomTheme: s.activeCustomTheme === id ? null : s.activeCustomTheme,
         })),
-      addExtension: (ext) => set((s) => ({ installedExtensions: [...s.installedExtensions, ext] })),
-      removeExtension: (id) =>
-        set((s) => ({
-          installedExtensions: s.installedExtensions.filter((e) => e.id !== id),
-        })),
-      toggleExtension: (id) =>
-        set((s) => ({
-          installedExtensions: s.installedExtensions.map((e) => (e.id === id ? { ...e, enabled: !e.enabled } : e)),
-        })),
+      setHasMigratedExtensionsToServer: (v) => set({ hasMigratedExtensionsToServer: v }),
+      clearLegacyExtensions: () => set({ installedExtensions: [] }),
       setHasCompletedOnboarding: (v) => set({ hasCompletedOnboarding: v }),
       setGameTutorialDisabled: (v) => set({ gameTutorialDisabled: v }),
       dismissLinkApiBanner: () => set({ linkApiBannerDismissed: true }),
@@ -845,7 +846,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "marinara-engine-ui",
-      version: 16,
+      version: 17,
       // Debounce localStorage writes to avoid sync I/O on every state change
       storage: createJSONStorage(() => {
         let timer: ReturnType<typeof setTimeout> | null = null;
@@ -1000,6 +1001,12 @@ export const useUIStore = create<UIState>()(
             persisted.trimIncompleteModelOutput = false;
           }
         }
+        // v16 -> v17: add legacy extension migration completion flag.
+        if (version <= 16) {
+          if (persisted.hasMigratedExtensionsToServer === undefined) {
+            persisted.hasMigratedExtensionsToServer = false;
+          }
+        }
         return persisted;
       },
       partialize: (state) => ({
@@ -1058,6 +1065,7 @@ export const useUIStore = create<UIState>()(
         activeCustomTheme: state.activeCustomTheme,
         customThemes: state.customThemes,
         installedExtensions: state.installedExtensions,
+        hasMigratedExtensionsToServer: state.hasMigratedExtensionsToServer,
         hasCompletedOnboarding: state.hasCompletedOnboarding,
         linkApiBannerDismissed: state.linkApiBannerDismissed,
         echoChamberSide: state.echoChamberSide,

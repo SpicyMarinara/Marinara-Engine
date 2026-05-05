@@ -70,6 +70,7 @@ export default defineConfig({
     "./src/db/schema/regex-scripts.ts",
     "./src/db/schema/gallery.ts",
     "./src/db/schema/themes.ts",
+    "./src/db/schema/extensions.ts",
     "./src/db/schema/app-settings.ts",
   ],
   out: "./src/db/migrations",

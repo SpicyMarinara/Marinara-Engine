@@ -2,14 +2,115 @@
 // CustomThemeInjector: Injects active custom theme
 // CSS and enabled extension CSS/JS into the DOM
 // ──────────────────────────────────────────────
+//
+// Extension JS is loaded via <script src="/api/extensions/:id/script.js"> —
+// a same-origin URL that satisfies `script-src 'self'` without needing
+// 'unsafe-eval' or any 'unsafe-inline' allowance. The server wraps each
+// extension in an IIFE; this component populates `window.__marinaraExt`
+// with the per-extension `marinara` helper API immediately before
+// inserting the <script> tag, and removes the entry on cleanup so a
+// late-loading script just bails silently.
+// ──────────────────────────────────────────────
 import { useEffect } from "react";
-import { useUIStore } from "../../stores/ui.store";
 import { useThemes } from "../../hooks/use-themes";
+import { useExtensions } from "../../hooks/use-extensions";
+import type { InstalledExtension } from "@marinara-engine/shared";
+
+interface MarinaraExtensionAPI {
+  extensionId: string;
+  extensionName: string;
+  addStyle: (css: string) => HTMLStyleElement;
+  addElement: (parent: Element | string, tag: string, attrs?: Record<string, string>) => Element | null;
+  apiFetch: (path: string, options?: RequestInit) => Promise<unknown>;
+  on: (target: EventTarget, event: string, handler: EventListenerOrEventListenerObject) => void;
+  setInterval: (fn: () => void, ms: number) => number;
+  setTimeout: (fn: () => void, ms: number) => number;
+  observe: (target: Element | string, callback: MutationCallback, options?: MutationObserverInit) => MutationObserver | null;
+  onCleanup: (fn: () => void) => void;
+}
+
+declare global {
+  interface Window {
+    __marinaraExt?: Map<string, MarinaraExtensionAPI>;
+  }
+}
+
+function buildExtensionAPI(ext: InstalledExtension, cleanups: Array<() => void>): MarinaraExtensionAPI {
+  const cssIdPrefix = `marinara-ext-js-style-${ext.id}-`;
+
+  return {
+    extensionId: ext.id,
+    extensionName: ext.name,
+
+    addStyle: (css: string) => {
+      const style = document.createElement("style");
+      style.id = `${cssIdPrefix}${Date.now()}`;
+      style.textContent = css;
+      document.head.appendChild(style);
+      cleanups.push(() => style.remove());
+      return style;
+    },
+
+    addElement: (parent, tag, attrs) => {
+      const target = typeof parent === "string" ? document.querySelector(parent) : parent;
+      if (!target) return null;
+      const el = document.createElement(tag);
+      if (attrs) {
+        Object.entries(attrs).forEach(([k, v]) => {
+          if (k === "innerHTML") el.innerHTML = v;
+          else if (k === "textContent") el.textContent = v;
+          else el.setAttribute(k, v);
+        });
+      }
+      target.appendChild(el);
+      cleanups.push(() => el.remove());
+      return el;
+    },
+
+    apiFetch: async (path, options) => {
+      const res = await fetch(`/api${path}`, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
+      });
+      return res.json();
+    },
+
+    on: (target, event, handler) => {
+      target.addEventListener(event, handler);
+      cleanups.push(() => target.removeEventListener(event, handler));
+    },
+
+    setInterval: (fn, ms) => {
+      const id = window.setInterval(fn, ms);
+      cleanups.push(() => window.clearInterval(id));
+      return id;
+    },
+
+    setTimeout: (fn, ms) => {
+      const id = window.setTimeout(fn, ms);
+      cleanups.push(() => window.clearTimeout(id));
+      return id;
+    },
+
+    observe: (target, callback, options) => {
+      const el = typeof target === "string" ? document.querySelector(target) : target;
+      if (!el) return null;
+      const observer = new MutationObserver(callback);
+      observer.observe(el, options || { childList: true, subtree: true });
+      cleanups.push(() => observer.disconnect());
+      return observer;
+    },
+
+    onCleanup: (fn) => {
+      cleanups.push(fn);
+    },
+  };
+}
 
 export function CustomThemeInjector() {
-  const installedExtensions = useUIStore((s) => s.installedExtensions);
   const { data: syncedThemes = [] } = useThemes();
   const activeTheme = syncedThemes.find((theme) => theme.isActive) ?? null;
+  const { data: installedExtensions = [] } = useExtensions();
 
   // Inject active custom theme CSS
   useEffect(() => {
@@ -37,10 +138,8 @@ export function CustomThemeInjector() {
   useEffect(() => {
     const prefix = "marinara-ext-";
 
-    // Remove old extension styles
     document.querySelectorAll(`style[id^="${prefix}"]`).forEach((el) => el.remove());
 
-    // Inject enabled ones
     for (const ext of installedExtensions) {
       if (!ext.enabled || !ext.css) continue;
       const style = document.createElement("style");
@@ -54,113 +153,43 @@ export function CustomThemeInjector() {
     };
   }, [installedExtensions]);
 
-  // Execute enabled extension JS
+  // Load enabled extension JS as same-origin <script src> (CSP-safe).
   useEffect(() => {
     const cleanupFns: Array<() => void> = [];
-    const prefix = "marinara-ext-js-";
+    const tagPrefix = "marinara-ext-js-";
 
-    // Remove old extension scripts
-    document.querySelectorAll(`[id^="${prefix}"]`).forEach((el) => el.remove());
+    document.querySelectorAll(`script[id^="${tagPrefix}"]`).forEach((el) => el.remove());
+
+    const apiMap: Map<string, MarinaraExtensionAPI> = window.__marinaraExt ?? new Map();
+    window.__marinaraExt = apiMap;
 
     for (const ext of installedExtensions) {
       if (!ext.enabled || !ext.js) continue;
 
-      try {
-        const extensionCleanups: Array<() => void> = [];
+      const extensionCleanups: Array<() => void> = [];
+      const extensionAPI = buildExtensionAPI(ext, extensionCleanups);
+      apiMap.set(ext.id, extensionAPI);
 
-        // Extension API passed to JS extensions
-        const extensionAPI = {
-          extensionId: ext.id,
-          extensionName: ext.name,
+      const script = document.createElement("script");
+      script.id = `${tagPrefix}${ext.id}`;
+      script.async = false;
+      // Cache-bust on every update so toggling enabled / editing JS takes
+      // effect immediately. The server already sends Cache-Control: no-store,
+      // but the query param defends against any intermediary caching too.
+      script.src = `/api/extensions/${encodeURIComponent(ext.id)}/script.js?v=${encodeURIComponent(ext.updatedAt)}`;
+      document.head.appendChild(script);
 
-          // Inject CSS with auto-cleanup
-          addStyle: (css: string) => {
-            const style = document.createElement("style");
-            style.id = `${prefix}style-${ext.id}-${Date.now()}`;
-            style.textContent = css;
-            document.head.appendChild(style);
-            extensionCleanups.push(() => style.remove());
-            return style;
-          },
-
-          // Inject DOM element with auto-cleanup
-          addElement: (parent: Element | string, tag: string, attrs?: Record<string, string>) => {
-            const target = typeof parent === "string" ? document.querySelector(parent) : parent;
-            if (!target) return null;
-            const el = document.createElement(tag);
-            if (attrs) {
-              Object.entries(attrs).forEach(([k, v]) => {
-                if (k === "innerHTML") el.innerHTML = v;
-                else if (k === "textContent") el.textContent = v;
-                else el.setAttribute(k, v);
-              });
-            }
-            target.appendChild(el);
-            extensionCleanups.push(() => el.remove());
-            return el;
-          },
-
-          // Fetch from Marinara API
-          apiFetch: async (path: string, options?: RequestInit) => {
-            const res = await fetch(`/api${path}`, {
-              headers: { "Content-Type": "application/json" },
-              ...options,
-            });
-            return res.json();
-          },
-
-          // addEventListener with auto-cleanup
-          on: (target: EventTarget, event: string, handler: EventListenerOrEventListenerObject) => {
-            target.addEventListener(event, handler);
-            extensionCleanups.push(() => target.removeEventListener(event, handler));
-          },
-
-          // setInterval with auto-cleanup
-          setInterval: (fn: () => void, ms: number) => {
-            const id = window.setInterval(fn, ms);
-            extensionCleanups.push(() => window.clearInterval(id));
-            return id;
-          },
-
-          // setTimeout with auto-cleanup
-          setTimeout: (fn: () => void, ms: number) => {
-            const id = window.setTimeout(fn, ms);
-            extensionCleanups.push(() => window.clearTimeout(id));
-            return id;
-          },
-
-          // MutationObserver with auto-cleanup
-          observe: (target: Element | string, callback: MutationCallback, options?: MutationObserverInit) => {
-            const el = typeof target === "string" ? document.querySelector(target) : target;
-            if (!el) return null;
-            const observer = new MutationObserver(callback);
-            observer.observe(el, options || { childList: true, subtree: true });
-            extensionCleanups.push(() => observer.disconnect());
-            return observer;
-          },
-
-          // Register a cleanup function manually
-          onCleanup: (fn: () => void) => {
-            extensionCleanups.push(fn);
-          },
-        };
-
-        // Execute the JS with the marinara API available
-        const fn = new Function("marinara", ext.js);
-        fn(extensionAPI);
-
-        cleanupFns.push(() => {
-          extensionCleanups.forEach((cleanup) => {
-            try {
-              cleanup();
-            } catch (e) {
-              console.warn(`[Extension:${ext.name}] Cleanup error:`, e);
-            }
-          });
+      cleanupFns.push(() => {
+        apiMap.delete(ext.id);
+        script.remove();
+        extensionCleanups.forEach((fn) => {
+          try {
+            fn();
+          } catch (e) {
+            console.warn(`[Extension:${ext.name}] Cleanup error:`, e);
+          }
         });
-      } catch (e) {
-        console.error(`[Extension:${ext.name}] Failed to execute:`, e);
-      }
+      });
     }
 
     return () => {
