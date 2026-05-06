@@ -226,6 +226,24 @@ function normalizeKeeperFacts(value: unknown): string[] {
   return facts;
 }
 
+function dedupeKeeperContentParagraphs(content: string): string {
+  const paragraphs = content
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+
+  for (const paragraph of paragraphs) {
+    const comparable = normalizeKeeperFactForComparison(paragraph);
+    if (!comparable || seen.has(comparable)) continue;
+    seen.add(comparable);
+    deduped.push(paragraph);
+  }
+
+  return deduped.join("\n\n");
+}
+
 function mergeLorebookKeys(existingKeys: unknown, newKeys: string[]): string[] {
   const merged: string[] = [];
   const seen = new Set<string>();
@@ -251,8 +269,10 @@ export function mergeLorebookKeeperUpdateContent(args: {
   replacementContent: unknown;
   newFacts: unknown;
 }): string {
-  const existing = typeof args.existingContent === "string" ? args.existingContent.trim() : "";
-  const replacement = typeof args.replacementContent === "string" ? args.replacementContent.trim() : "";
+  const existing =
+    typeof args.existingContent === "string" ? dedupeKeeperContentParagraphs(args.existingContent) : "";
+  const replacement =
+    typeof args.replacementContent === "string" ? dedupeKeeperContentParagraphs(args.replacementContent) : "";
   const facts = normalizeKeeperFacts(args.newFacts);
 
   if (facts.length === 0) {
