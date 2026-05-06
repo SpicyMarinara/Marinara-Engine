@@ -65,6 +65,10 @@ const server = createServer((req, res) => {
         color: #0f7b45;
         font-weight: 700;
       }
+      .fail {
+        color: #b42318;
+        font-weight: 700;
+      }
     </style>
   </head>
   <body>
@@ -95,12 +99,15 @@ const server = createServer((req, res) => {
       fetch(modelsUrl)
         .then(async (response) => {
           const body = await response.text();
-          document.getElementById("status").innerHTML =
-            '<span class="pass">HTTP ' + response.status + " " + response.statusText + "</span>";
+          const statusEl = document.getElementById("status");
+          statusEl.textContent = "HTTP " + response.status + " " + response.statusText;
+          statusEl.className = response.ok ? "pass" : "fail";
           document.getElementById("body").textContent = body;
         })
         .catch((error) => {
-          document.getElementById("status").textContent = "ERROR";
+          const statusEl = document.getElementById("status");
+          statusEl.textContent = "ERROR";
+          statusEl.className = "fail";
           document.getElementById("body").textContent = error instanceof Error ? error.message : String(error);
         });
     </script>
