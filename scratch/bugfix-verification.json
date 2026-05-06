@@ -6,8 +6,8 @@
     "url": "https://github.com/Pasta-Devs/Marinara-Engine/issues/492"
   },
   "pr": {
-    "number": null,
-    "url": null
+    "number": "495",
+    "url": "https://github.com/Pasta-Devs/Marinara-Engine/pull/495"
   },
   "coreClaim": "OAI-compatible provider URLs using .local hostnames are accepted by the explicit provider mDNS policy and can fetch a /v1/models response through the real OS resolver",
   "reproduction": {
