@@ -228,7 +228,7 @@ function normalizeKeeperFacts(value: unknown): string[] {
 
 function dedupeKeeperContentParagraphs(content: string): string {
   const paragraphs = content
-    .split(/\n{2,}/)
+    .split(/\r?\n\s*\r?\n+/)
     .map((paragraph) => paragraph.trim())
     .filter(Boolean);
   const seen = new Set<string>();
@@ -284,7 +284,7 @@ export function mergeLorebookKeeperUpdateContent(args: {
     if (replacementComparable.includes(existingComparable)) return replacement;
     if (existingComparable.includes(replacementComparable)) return existing;
 
-    return `${existing}\n\n${replacement}`;
+    return dedupeKeeperContentParagraphs(`${existing}\n\n${replacement}`);
   }
 
   const baseContent = existing || replacement;
