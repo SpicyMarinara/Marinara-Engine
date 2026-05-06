@@ -3018,6 +3018,10 @@ export function GameSurface({
             onComplete();
             setSceneAnalysisFailed(true);
             applyInlineTags(tags, assets, msg);
+            if (sceneReadyMsgIdRef.current !== msg.id) {
+              sceneReadyMsgIdRef.current = msg.id;
+              setSceneReadyTick((t) => t + 1);
+            }
           },
         },
       );
@@ -3039,6 +3043,10 @@ export function GameSurface({
             console.warn("[scene-wrapup] scene-wrap failed:", err);
             setSceneAnalysisFailed(true);
             applyInlineTags(tags, assets, msg);
+            if (sceneReadyMsgIdRef.current !== msg.id) {
+              sceneReadyMsgIdRef.current = msg.id;
+              setSceneReadyTick((t) => t + 1);
+            }
           },
         },
       );
@@ -3056,6 +3064,10 @@ export function GameSurface({
         console.warn("[scene-wrapup] Scene analysis timed out after 120s, falling back to inline tags");
         setSceneAnalysisFailed(true);
         applyInlineTags(tags, assets, msg);
+        if (sceneReadyMsgIdRef.current !== msg.id) {
+          sceneReadyMsgIdRef.current = msg.id;
+          setSceneReadyTick((t) => t + 1);
+        }
       }
     }, 120_000);
   };
@@ -3202,6 +3214,10 @@ export function GameSurface({
   function applySceneResult(result: import("@marinara-engine/shared").SceneAnalysis, msg: { id: string }) {
     console.log("[scene-analysis] Result from model:", JSON.stringify(result, null, 2));
     setSceneAnalysisFailed(false);
+    if (sceneReadyMsgIdRef.current !== msg.id) {
+      sceneReadyMsgIdRef.current = msg.id;
+      setSceneReadyTick((t) => t + 1);
+    }
     // NOTE: Game state transitions are owned exclusively by the GM model via [state: ...] tags.
     // The scene model no longer emits stateChange to avoid conflicting state flips.
 
@@ -3348,15 +3364,14 @@ export function GameSurface({
         setAssetGenerationFailed(false);
         runGameAssetGeneration(assetPayload)
           .then((res) => {
-            setPendingAssetGeneration(null);
             if (res) applyGeneratedAssets(res);
-            // Ungate narration after assets are ready
-            sceneReadyMsgIdRef.current = msg.id;
-            setSceneReadyTick((t) => t + 1);
           })
           .catch(() => {
             setAssetGenerationFailed(true);
-            // Still ungate on failure so the user can interact
+          })
+          .finally(() => {
+            setPendingAssetGeneration(null);
+            // Ungate narration after assets are ready or failed
             sceneReadyMsgIdRef.current = msg.id;
             setSceneReadyTick((t) => t + 1);
           });

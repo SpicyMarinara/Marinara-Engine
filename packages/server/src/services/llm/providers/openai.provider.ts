@@ -128,6 +128,16 @@ export class OpenAIProvider extends BaseLLMProvider {
     return Math.min(topP, 1);
   }
 
+  private normalizeChatCompletionsResponseFormat(responseFormat?: { type: string }): unknown | undefined {
+    if (!responseFormat) return undefined;
+
+    if (this.isGenericCustomProvider() && responseFormat.type === "json_object") {
+      return { type: "json_schema", json_schema: { name: "response", schema: { type: "object" }, strict: true } };
+    }
+
+    return responseFormat;
+  }
+
   /**
    * Extract text and thinking from an OpenRouter/Anthropic-style content block array.
    * OpenRouter may return `content` as an array of typed blocks instead of a plain string:
@@ -669,8 +679,9 @@ export class OpenAIProvider extends BaseLLMProvider {
     this.applyOpenRouterPromptCaching(body, options);
 
     // Force response format (e.g. JSON mode)
-    if (options.responseFormat) {
-      body.response_format = options.responseFormat;
+    const normalizedResponseFormat = this.normalizeChatCompletionsResponseFormat(options.responseFormat);
+    if (normalizedResponseFormat) {
+      body.response_format = normalizedResponseFormat;
     }
 
     this.applyCustomParameters(body, options);
@@ -877,8 +888,9 @@ export class OpenAIProvider extends BaseLLMProvider {
     this.applyOpenRouterPromptCaching(body, options);
 
     // Force response format (e.g. JSON mode)
-    if (options.responseFormat) {
-      body.response_format = options.responseFormat;
+    const normalizedResponseFormat = this.normalizeChatCompletionsResponseFormat(options.responseFormat);
+    if (normalizedResponseFormat) {
+      body.response_format = normalizedResponseFormat;
     }
 
     this.applyCustomParameters(body, options);
