@@ -1,11 +1,25 @@
 // ──────────────────────────────────────────────
 // Chat: Conversation Input — Discord-style
 // ──────────────────────────────────────────────
-import { useState, useRef, useCallback, useEffect } from "react";
-import { Send, Smile, StopCircle, X, Plus, ImagePlay, AtSign, Users, UserCheck, Languages, Loader2, FileText } from "lucide-react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import {
+  Send,
+  Smile,
+  StopCircle,
+  X,
+  Plus,
+  ImagePlay,
+  AtSign,
+  Users,
+  UserCheck,
+  Languages,
+  Loader2,
+  FileText,
+  RefreshCw,
+} from "lucide-react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useChatStore } from "../../stores/chat.store";
 import { useUIStore } from "../../stores/ui.store";
 import { useGenerate } from "../../hooks/use-generate";
@@ -30,6 +44,7 @@ import { SpeechToTextButton } from "../ui/SpeechToTextButton";
 import { MariThinkingIndicator } from "./MariThinkingIndicator";
 import { MariCapabilityNotice } from "./MariCapabilityNotice";
 import { SlashCommandFeedback } from "./SlashCommandFeedback";
+import type { Message } from "@marinara-engine/shared";
 
 interface Attachment {
   type: string;
@@ -203,6 +218,28 @@ export function ConversationInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isReadingAttachments = pendingAttachmentReads > 0;
   const hasPendingAttachments = isReadingAttachments || attachments.length > 0;
+
+  // Read from the existing infinite-message cache so an empty Send can retry
+  // after a failed generation without adding a second user message.
+  const [, bumpMessagesTick] = useState(0);
+  useEffect(() => {
+    if (!activeChatId) return;
+    const targetKey = JSON.stringify(chatKeys.messages(activeChatId));
+    return qc.getQueryCache().subscribe((event) => {
+      if (JSON.stringify(event.query.queryKey) === targetKey) {
+        bumpMessagesTick((n) => n + 1);
+      }
+    });
+  }, [activeChatId, qc]);
+  const messagesData = qc.getQueryData<InfiniteData<Message[]>>(chatKeys.messages(activeChatId ?? ""));
+  const lastMessageRole = useMemo(() => {
+    const firstPage = messagesData?.pages?.[0];
+    return firstPage?.[firstPage.length - 1]?.role ?? null;
+  }, [messagesData]);
+  const canRetry = !isStreaming && groupResponseOrder !== "manual" && lastMessageRole === "user";
+  const canSubmit = hasInput || attachments.length > 0 || canRetry;
+  const showRetrySendState = canRetry && !hasInput && attachments.length === 0;
+  const sendButtonTitle = isActuallyGenerating ? "Stop generating" : showRetrySendState ? "Retry generation" : "Send";
 
   const syncInputState = useCallback(
     (value: string) => {
@@ -378,6 +415,14 @@ export function ConversationInput({
     }
     const raw = textareaRef.current?.value.trim() ?? "";
     if (!raw && attachments.length === 0) {
+      if (canRetry) {
+        try {
+          await generate({ chatId: activeChatId, connectionId: null });
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : "Generation failed";
+          toast.error(msg);
+        }
+      }
       return;
     }
 
@@ -526,6 +571,7 @@ export function ConversationInput({
   }, [
     activeChatId,
     attachments,
+    canRetry,
     isReadingAttachments,
     isStreaming,
     generate,
@@ -1143,18 +1189,24 @@ export function ConversationInput({
 
           <button
             onClick={isActuallyGenerating ? () => useChatStore.getState().stopGeneration() : handleSend}
-            disabled={!isActuallyGenerating && isReadingAttachments}
+            disabled={!isActuallyGenerating && (isReadingAttachments || !activeChatId || !canSubmit)}
             className={cn(
               "flex h-8 w-8 items-center justify-center rounded-xl transition-all duration-200",
               isActuallyGenerating
                 ? "text-foreground hover:opacity-80"
-                : (hasInput || attachments.length > 0) && !isReadingAttachments
+                : canSubmit && !isReadingAttachments
                   ? "text-foreground hover:text-foreground/80 active:scale-90"
                   : "text-foreground/20",
             )}
-            title={isActuallyGenerating ? "Stop generating" : "Send"}
+            title={sendButtonTitle}
           >
-            {isActuallyGenerating ? <StopCircle size="1rem" /> : <Send size="0.9375rem" />}
+            {isActuallyGenerating ? (
+              <StopCircle size="1rem" />
+            ) : showRetrySendState ? (
+              <RefreshCw size="0.9375rem" />
+            ) : (
+              <Send size="0.9375rem" />
+            )}
           </button>
         </div>
       </div>
