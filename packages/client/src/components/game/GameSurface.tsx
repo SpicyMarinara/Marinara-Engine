@@ -2512,7 +2512,9 @@ export function GameSurface({
   // Track which message has had its scene effects prepared so narration
   // isn't displayed until backgrounds/music/etc. are ready.
   const sceneReadyMsgIdRef = useRef<string | undefined>(undefined);
-  const applySceneResultRef = useRef<((result: import("@marinara-engine/shared").SceneAnalysis) => void) | null>(null);
+  const applySceneResultRef = useRef<((result: import("@marinara-engine/shared").SceneAnalysis) => void | Promise<void>) | null>(
+    null,
+  );
   const [sceneReadyTick, setSceneReadyTick] = useState(0);
   void sceneReadyTick; // used only to trigger re-renders
 
@@ -3168,23 +3170,22 @@ export function GameSurface({
   }
 
   const installGeneratedIllustration = useCallback(
-    (illustration: { tag: string; segment?: number }) => {
+    async (illustration: { tag: string; segment?: number }) => {
       void queryClient.invalidateQueries({ queryKey: ["gallery", activeChatId] });
-      fetchManifest().then(() => {
-        if (illustration.segment !== undefined && illustration.segment > 0) {
-          setPendingSegmentEffects((previous) => {
-            const existingIndex = previous.findIndex((effect) => effect.segment === illustration.segment);
-            if (existingIndex >= 0) {
-              return previous.map((effect, index) =>
-                index === existingIndex ? { ...effect, background: illustration.tag } : effect,
-              );
-            }
-            return [...previous, { segment: illustration.segment!, background: illustration.tag }];
-          });
-          return;
-        }
-        useGameAssetStore.getState().setCurrentBackground(illustration.tag);
-      });
+      await fetchManifest();
+      if (illustration.segment !== undefined && illustration.segment > 0) {
+        setPendingSegmentEffects((previous) => {
+          const existingIndex = previous.findIndex((effect) => effect.segment === illustration.segment);
+          if (existingIndex >= 0) {
+            return previous.map((effect, index) =>
+              index === existingIndex ? { ...effect, background: illustration.tag } : effect,
+            );
+          }
+          return [...previous, { segment: illustration.segment!, background: illustration.tag }];
+        });
+        return;
+      }
+      useGameAssetStore.getState().setCurrentBackground(illustration.tag);
     },
     [activeChatId, fetchManifest, queryClient],
   );
@@ -3276,7 +3277,7 @@ export function GameSurface({
         useGameAssetStore.getState().setCurrentBackground(res.generatedBackground!);
       }
       if (res.generatedIllustration) {
-        installGeneratedIllustration(res.generatedIllustration);
+        await installGeneratedIllustration(res.generatedIllustration);
       }
       if (res.generatedNpcAvatars?.length) {
         useGameModeStore.getState().patchNpcAvatars(res.generatedNpcAvatars);
@@ -3285,13 +3286,9 @@ export function GameSurface({
     [fetchManifest, installGeneratedIllustration],
   );
 
-  function applySceneResult(result: import("@marinara-engine/shared").SceneAnalysis, msg: { id: string }) {
+  async function applySceneResult(result: import("@marinara-engine/shared").SceneAnalysis, msg: { id: string }) {
     console.log("[scene-analysis] Result from model:", JSON.stringify(result, null, 2));
     setSceneAnalysisFailed(false);
-    if (sceneReadyMsgIdRef.current !== msg.id) {
-      sceneReadyMsgIdRef.current = msg.id;
-      setSceneReadyTick((t) => t + 1);
-    }
     // NOTE: Game state transitions are owned exclusively by the GM model via [state: ...] tags.
     // The scene model no longer emits stateChange to avoid conflicting state flips.
 
@@ -3400,10 +3397,10 @@ export function GameSurface({
       result.segmentEffects?.some((fx) => fx.background?.startsWith("backgrounds:generated:")) ||
       result.background?.startsWith("backgrounds:generated:");
     if (hasGeneratedBg) {
-      fetchManifest();
+      await fetchManifest();
     }
     if (result.generatedIllustration) {
-      installGeneratedIllustration(result.generatedIllustration);
+      await installGeneratedIllustration(result.generatedIllustration);
     }
     if (result.generatedNpcAvatars?.length) {
       useGameModeStore.getState().patchNpcAvatars(result.generatedNpcAvatars);
@@ -3497,7 +3494,7 @@ export function GameSurface({
 
         setPendingAssetGeneration(null);
         if (!res) return null;
-        applyGeneratedAssets(res);
+        await applyGeneratedAssets(res);
         if (
           options?.showSuccessToast &&
           (res.generatedBackground || res.generatedIllustration || res.generatedNpcAvatars?.length)
