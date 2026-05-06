@@ -149,11 +149,30 @@ The following requests are **exempt** from Basic Auth so you cannot lock yoursel
 
 - Loopback (`127.0.0.1`, `::1`) — if you're on the box itself, no password is needed.
 - Any IP listed in `IP_ALLOWLIST` — if you've already vouched for a network at the IP layer, no second factor is required.
+- Tailscale or Docker traffic when their bypass flag is on — see [Trusted-interface bypass](#trusted-interface-bypass-tailscale--docker) below.
 - The `/api/health` endpoint — so external uptime monitors and load balancers can probe the server without credentials.
 
 > **Always pair Basic Auth with HTTPS** when exposing the server to the public internet — Basic Auth credentials are only base64-encoded, not encrypted. Set `SSL_CERT` and `SSL_KEY`, or front Marinara with a TLS-terminating reverse proxy (nginx, Caddy, Traefik, Cloudflare Tunnel).
 
 For sensitive deployments, also consider Tailscale or Cloudflare Access — they avoid exposing the port to the open internet entirely.
+
+### Trusted-interface bypass (Tailscale / Docker)
+
+Two opt-in flags let traffic from a specific virtual interface skip both the IP allowlist and Basic Auth, the same way loopback does:
+
+```
+BYPASS_AUTH_TAILSCALE=true   # trusts 100.64.0.0/10 (Tailscale CGNAT range)
+BYPASS_AUTH_DOCKER=true      # trusts 172.16.0.0/12 (Docker bridge networks)
+```
+
+Use these when you've decided the only way you'll ever reach Marinara remotely is over Tailscale (or only from your Docker containers), and you want zero-friction access from those clients without dropping the password requirement for everyone else. Combines cleanly with `BASIC_AUTH_*`: bypassed clients skip the prompt, everyone else still has to authenticate. The server logs an `[auth-bypass]` line the first time a request actually exercises one of these flags.
+
+**Caveats:**
+
+- `100.64.0.0/10` is also used by some carrier-grade-NAT ISPs. If your server's public uplink is itself behind CGNAT, an internet client could appear with a Tailscale-shaped source IP and the bypass would let them in. On a CGNAT'd uplink, either leave `BYPASS_AUTH_TAILSCALE` off or bind `HOST` to your `tailscale0` IP so the public NIC never sees the connection.
+- `172.16.0.0/12` also covers some private LAN deployments. Only enable `BYPASS_AUTH_DOCKER` when the only thing in that range is a Docker bridge you control.
+
+For the broader "trust every private network" toggle (RFC 1918 + CGNAT + ULA + link-local), see `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK` under [Safe-by-default lockdown](#safe-by-default-lockdown). The interface-scoped flags above are usually what you actually want, because they trust *only* the interface you set up — not your entire LAN.
 
 ### Privileged APIs
 

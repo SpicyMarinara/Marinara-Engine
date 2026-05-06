@@ -12,7 +12,12 @@
 // so you can never lock yourself out of local access.
 
 import type { FastifyRequest, FastifyReply } from "fastify";
-import { getIpAllowlist, getTrustedPrivateNetworksOverride } from "../config/runtime-config.js";
+import {
+  getIpAllowlist,
+  getTrustedPrivateNetworksOverride,
+  isDockerBypassEnabled,
+  isTailscaleBypassEnabled,
+} from "../config/runtime-config.js";
 import { logger } from "../lib/logger.js";
 
 // ── CIDR helpers ──
@@ -126,6 +131,12 @@ function matchesCIDR(ipBytes: number[], cidr: CIDREntry): boolean {
 
 // ── Loopback CIDRs (always allowed) ──
 const LOOPBACK_CIDRS: CIDREntry[] = [parseCIDR("127.0.0.1")!, parseCIDR("::1")!];
+
+// ── Specific interface CIDRs used by the Tailscale / Docker bypass ──
+// Tailscale assigns Tailnet peer IPs from the CGNAT block 100.64.0.0/10.
+// Docker's default bridge networks live within 172.16.0.0/12.
+const TAILSCALE_CIDR = parseCIDR("100.64.0.0/10")!;
+const DOCKER_CIDR = parseCIDR("172.16.0.0/12")!;
 
 // ── Private / non-routable network CIDRs ──
 // Used by the safe-by-default Basic Auth lockdown to avoid breaking
@@ -266,6 +277,55 @@ export function isInIpAllowlist(ip: string): boolean {
   return false;
 }
 
+/** True if the given IP is in the Tailscale CGNAT range (100.64.0.0/10). */
+export function isTailscaleIp(ip: string): boolean {
+  const bytes = ipToBytes(ip);
+  if (!bytes) return false;
+  return matchesCIDR(bytes, TAILSCALE_CIDR);
+}
+
+/** True if the given IP is in the Docker bridge range (172.16.0.0/12). */
+export function isDockerIp(ip: string): boolean {
+  const bytes = ipToBytes(ip);
+  if (!bytes) return false;
+  return matchesCIDR(bytes, DOCKER_CIDR);
+}
+
+let bypassAnnounced = { tailscale: false, docker: false };
+
+/**
+ * True if the given IP belongs to a Tailscale or Docker interface AND the
+ * matching BYPASS_AUTH_* flag is enabled. These clients skip both the IP
+ * allowlist and Basic Auth, the same way loopback does.
+ */
+export function isTrustedInterfaceIp(ip: string): boolean {
+  const tailscaleOn = isTailscaleBypassEnabled();
+  const dockerOn = isDockerBypassEnabled();
+  if (!tailscaleOn && !dockerOn) return false;
+
+  if (tailscaleOn && isTailscaleIp(ip)) {
+    if (!bypassAnnounced.tailscale) {
+      logger.warn(
+        "[auth-bypass] BYPASS_AUTH_TAILSCALE=true — clients in 100.64.0.0/10 will skip Basic Auth and IP allowlist",
+      );
+      bypassAnnounced.tailscale = true;
+    }
+    return true;
+  }
+
+  if (dockerOn && isDockerIp(ip)) {
+    if (!bypassAnnounced.docker) {
+      logger.warn(
+        "[auth-bypass] BYPASS_AUTH_DOCKER=true — clients in 172.16.0.0/12 will skip Basic Auth and IP allowlist",
+      );
+      bypassAnnounced.docker = true;
+    }
+    return true;
+  }
+
+  return false;
+}
+
 // ── Fastify onRequest hook ──
 
 export function ipAllowlistHook(request: FastifyRequest, reply: FastifyReply, done: () => void) {
@@ -287,6 +347,10 @@ export function ipAllowlistHook(request: FastifyRequest, reply: FastifyReply, do
   for (const lb of LOOPBACK_CIDRS) {
     if (matchesCIDR(bytes, lb)) return done();
   }
+
+  // Trusted Tailscale / Docker interfaces (when their bypass flag is on)
+  // are treated like loopback — skip the allowlist check entirely.
+  if (isTrustedInterfaceIp(ip)) return done();
 
   // Check the allowlist
   for (const entry of allowlist) {

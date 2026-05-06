@@ -269,6 +269,32 @@ export function getTrustedPrivateNetworksOverride() {
   return normalizeEnvValue(process.env.TRUSTED_PRIVATE_NETWORKS);
 }
 
+/**
+ * Trust traffic from the Tailscale CGNAT range (100.64.0.0/10) unconditionally.
+ * When enabled, those clients skip both the IP allowlist and Basic Auth, the
+ * same way loopback does. Useful for "expose Marinara only to my Tailnet" setups.
+ *
+ * Caveat: if your server's public connection is itself behind a CGNAT'd ISP that
+ * uses 100.64.0.0/10, an internet client can appear with a source IP in this
+ * range. Bind HOST to your tailscale0 IP (or use a host firewall) for hard
+ * isolation when that risk applies.
+ */
+export function isTailscaleBypassEnabled() {
+  return isEnabledFlag(process.env.BYPASS_AUTH_TAILSCALE);
+}
+
+/**
+ * Trust traffic from the Docker bridge range (172.16.0.0/12) unconditionally.
+ * When enabled, those clients skip both the IP allowlist and Basic Auth.
+ *
+ * Caveat: 172.16.0.0/12 also covers some private LAN deployments. Only enable
+ * this when you're sure the only callers in that range are containers on a
+ * Docker bridge you control.
+ */
+export function isDockerBypassEnabled() {
+  return isEnabledFlag(process.env.BYPASS_AUTH_DOCKER);
+}
+
 export function isDebugAgentsEnabled() {
   const value = normalizeEnvValue(process.env.DEBUG_AGENTS);
   return value === "1" || value?.toLowerCase() === "true";
