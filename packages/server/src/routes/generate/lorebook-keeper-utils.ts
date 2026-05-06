@@ -287,7 +287,8 @@ export function mergeLorebookKeeperUpdateContent(args: {
     return dedupeKeeperContentParagraphs(`${existing}\n\n${replacement}`);
   }
 
-  const baseContent = existing || replacement;
+  const baseContent =
+    existing && replacement ? dedupeKeeperContentParagraphs(`${existing}\n\n${replacement}`) : existing || replacement;
   const existingComparable = normalizeKeeperFactForComparison(baseContent);
   const novelFacts = facts.filter((fact) => {
     const comparable = normalizeKeeperFactForComparison(fact);
