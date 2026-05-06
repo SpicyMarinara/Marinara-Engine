@@ -150,6 +150,7 @@ function getConfiguredGameAssetImageSizes(): NonNullable<GameAssetGenerationPayl
 const GAME_ASSET_GENERATION_TIMEOUT_MS = 240_000;
 const GAME_ASSET_PREVIEW_TIMEOUT_MS = 180_000;
 const GAME_ASSET_PROMPT_REVIEW_TIMEOUT_MS = 180_000;
+const IMAGE_PROMPT_REVIEW_TIMED_OUT = Symbol("IMAGE_PROMPT_REVIEW_TIMED_OUT");
 
 class TimeoutError extends Error {
   constructor(ms: number) {
@@ -3231,7 +3232,7 @@ export function GameSurface({
         }
 
         if (preview.items.length > 0) {
-          let overrides: GameImagePromptOverride[] | null | undefined;
+          let overrides: GameImagePromptOverride[] | null | typeof IMAGE_PROMPT_REVIEW_TIMED_OUT | undefined;
           try {
             overrides = await withTimeout(
               () => openImagePromptReview(preview.items),
@@ -3243,14 +3244,14 @@ export function GameSurface({
             );
           } catch (error) {
             if (isTimeoutError(error)) {
-              overrides = null;
+              overrides = IMAGE_PROMPT_REVIEW_TIMED_OUT;
             } else {
               throw error;
             }
           }
 
-          if (overrides === undefined) return null; // User explicitly cancelled
-          if (overrides) {
+          if (overrides === null || overrides === undefined) return null;
+          if (overrides !== IMAGE_PROMPT_REVIEW_TIMED_OUT) {
             setImagePromptReviewSubmitting(true);
             payload.promptOverrides = overrides;
           }
