@@ -7532,15 +7532,19 @@ export async function generateRoutes(app: FastifyInstance) {
                       const imageUrl = `/api/gallery/file/${input.chatId}/${encodeURIComponent(filename)}`;
                       if (messageId) {
                         const msgRow = await chats.getMessage(messageId);
-                        const activeSwipeIndex =
+                        const generationSwipeIndex =
                           typeof msgRow?.activeSwipeIndex === "number" ? msgRow.activeSwipeIndex : 0;
                         const attachment = {
                           type: "image",
                           url: imageUrl,
                           filename: `selfie_${charName.toLowerCase().replace(/\s+/g, "_")}.${imageResult.ext}`,
                         };
-                        await chats.appendSwipeAttachment(messageId, activeSwipeIndex, attachment);
-                        await chats.appendMessageAttachment(messageId, attachment);
+                        await chats.appendSwipeAttachment(messageId, generationSwipeIndex, attachment);
+
+                        const currentMsgRow = await chats.getMessage(messageId);
+                        if (currentMsgRow && (currentMsgRow.activeSwipeIndex ?? 0) === generationSwipeIndex) {
+                          await chats.appendMessageAttachment(messageId, attachment);
+                        }
                       }
 
                       // Send selfie event to client
