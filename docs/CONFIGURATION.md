@@ -92,21 +92,22 @@ Marinara Engine ships with layered access-control mechanisms designed for users 
 
 ### Safe-by-default lockdown
 
-By default, when no Basic Auth credentials are configured, the server **refuses connections from every non-loopback IP**. Local browser access continues to work without any configuration:
+By default, when no Basic Auth credentials are configured, the server only accepts connections from a small set of trusted sources:
 
 - Loopback (`127.0.0.1`, `::1`) — always allowed.
 - Anything in `IP_ALLOWLIST` — allowed.
+- Tailscale (`100.64.0.0/10`) and Docker bridge (`172.16.0.0/12`) — allowed by default; see [Trusted-interface bypass](#trusted-interface-bypass-tailscale--docker) to disable.
 
-LAN, Docker bridge, Kubernetes pod, and Tailscale-style private-network callers now require Basic Auth unless you set `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK=true`. This is the compatibility escape hatch for trusted private networks.
+Everything else — your home LAN's regular `192.168.x.x` / `10.x.x.x` addresses, public-internet callers, Kubernetes pod networks, ULA — requires Basic Auth or `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK=true`.
 
-Non-loopback callers in the locked-down state receive a `403 Forbidden` with a message describing the ways out:
+Locked-out callers receive a `403 Forbidden` with a message describing the ways out:
 
 1. Set `BASIC_AUTH_USER` and `BASIC_AUTH_PASS` (recommended for internet-facing servers).
 2. Add the public IP / network to `IP_ALLOWLIST`.
 3. Set `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK=true` to opt back into legacy unauthenticated private-network access.
 4. Set `ALLOW_UNAUTHENTICATED_REMOTE=true` only when unauthenticated public access is intentional.
 
-> Note: the private-network exemption applies only to the lockdown. Once you set Basic Auth credentials, the password is required from every IP except loopback and explicit `IP_ALLOWLIST` matches — including from your LAN. This matches the principle of least surprise: if you set a password, you mean it.
+> Note: even with Basic Auth credentials configured, traffic from the loopback, `IP_ALLOWLIST`, Tailscale, and Docker bridge sources above is still exempt — they're all treated as "already trusted." Set `BYPASS_AUTH_TAILSCALE=false` and/or `BYPASS_AUTH_DOCKER=false` if you want the password from those clients too. Public-internet and ordinary LAN callers always have to authenticate.
 
 #### Customising the private-network list
 
@@ -158,21 +159,27 @@ For sensitive deployments, also consider Tailscale or Cloudflare Access — they
 
 ### Trusted-interface bypass (Tailscale / Docker)
 
-Two opt-in flags let traffic from a specific virtual interface skip both the IP allowlist and Basic Auth, the same way loopback does:
+Two flags trust traffic from a specific virtual interface, skipping both the IP allowlist and Basic Auth the same way loopback does. **Both default to `true`** — a fresh install with no `.env` file is reachable over Tailscale and from Docker containers on the same host without any setup.
 
 ```
 BYPASS_AUTH_TAILSCALE=true   # trusts 100.64.0.0/10 (Tailscale CGNAT range)
 BYPASS_AUTH_DOCKER=true      # trusts 172.16.0.0/12 (Docker bridge networks)
 ```
 
-Use these when you've decided the only way you'll ever reach Marinara remotely is over Tailscale (or only from your Docker containers), and you want zero-friction access from those clients without dropping the password requirement for everyone else. Combines cleanly with `BASIC_AUTH_*`: bypassed clients skip the prompt, everyone else still has to authenticate. The server logs an `[auth-bypass]` line the first time a request actually exercises one of these flags.
+These are safe defaults because:
 
-**Caveats:**
+- A peer in your tailnet already authenticated via your Tailscale account to be there. That's a stronger trust signal than "this packet came from your LAN."
+- Docker bridge IPs are unreachable from outside the host. External traffic NATs through the bridge gateway and arrives with a different source, so a request with `172.16.x.x` / `172.17.x.x` actually came from a container on this host.
 
-- `100.64.0.0/10` is also used by some carrier-grade-NAT ISPs. If your server's public uplink is itself behind CGNAT, an internet client could appear with a Tailscale-shaped source IP and the bypass would let them in. On a CGNAT'd uplink, either leave `BYPASS_AUTH_TAILSCALE` off or bind `HOST` to your `tailscale0` IP so the public NIC never sees the connection.
-- `172.16.0.0/12` also covers some private LAN deployments. Only enable `BYPASS_AUTH_DOCKER` when the only thing in that range is a Docker bridge you control.
+Combines cleanly with `BASIC_AUTH_*`: Tailscale and Docker traffic skips the prompt, everything else (LAN, public internet) still has to authenticate. The server logs an `[auth-bypass]` line the first time a request actually exercises one of these flags.
 
-For the broader "trust every private network" toggle (RFC 1918 + CGNAT + ULA + link-local), see `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK` under [Safe-by-default lockdown](#safe-by-default-lockdown). The interface-scoped flags above are usually what you actually want, because they trust *only* the interface you set up — not your entire LAN.
+**Set to `false` if:**
+
+- Your server's public uplink is itself behind a CGNAT'd ISP that uses `100.64.0.0/10`. An internet client could appear with a Tailscale-shaped source IP and the bypass would let them in. Set `BYPASS_AUTH_TAILSCALE=false`, or bind `HOST` to your `tailscale0` IP so the public NIC never sees the connection.
+- Your non-Docker LAN uses `172.16.x.x` / `172.20.x.x` addresses. Set `BYPASS_AUTH_DOCKER=false` so non-Docker hosts in that range still hit the auth gate.
+- You want a password from your Tailnet / Docker containers too.
+
+For the broader "trust every private network" toggle (RFC 1918 + CGNAT + ULA + link-local), see `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK` under [Safe-by-default lockdown](#safe-by-default-lockdown). That one is *off* by default and stays off — it's much broader than these interface-scoped flags.
 
 ### Privileged APIs
 

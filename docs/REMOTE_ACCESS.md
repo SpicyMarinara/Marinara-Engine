@@ -2,20 +2,27 @@
 
 If you're seeing **`403 Forbidden`** when you try to open Marinara Engine from a phone, a Docker container, a Tailscale device, or any other machine that isn't the one running the server, this guide is for you.
 
-By default Marinara only answers requests coming from the same machine (`127.0.0.1` / `::1`). Anything else — your phone on the same Wi-Fi, a Tailscale tablet, a browser hitting the Docker port — gets blocked until you tell Marinara who's allowed in. This is intentional: if your server ever ends up reachable from the public internet, an unprotected install would be wide open. The fix is to set up one of the access methods below and restart.
+By default Marinara only answers requests from three trusted sources:
 
-> **TL;DR** — If you just want it to work and you're on a network you trust (home Wi-Fi, Docker on your own machine, your own Tailnet): set `BASIC_AUTH_USER` and `BASIC_AUTH_PASS` in `.env`, restart, and use those credentials when the browser prompts. That covers 95% of cases.
+1. **Loopback** (`127.0.0.1` / `::1`) — the machine running the server itself.
+2. **Your Tailnet** (`100.64.0.0/10`) — Tailscale peers, since joining your tailnet already required your Tailscale account.
+3. **Docker containers on the same host** (`172.16.0.0/12`) — bridge IPs aren't reachable from outside the host.
+
+Anything else — your phone on the same Wi-Fi, a public-internet client, a coffee-shop laptop — gets blocked until you tell Marinara who's allowed in. If those defaults are too permissive for your setup (rare; see [Option 4](#option-4-tailscale-or-docker-bypass-interface-scoped-on-by-default)), set `BYPASS_AUTH_TAILSCALE=false` / `BYPASS_AUTH_DOCKER=false`.
+
+> **TL;DR** — If you only ever access Marinara over Tailscale, or only from Docker containers on the same host, **you don't need to do anything** — it already works. If you also want to reach it from a phone on your home Wi-Fi or another LAN device: set `BASIC_AUTH_USER` and `BASIC_AUTH_PASS` in `.env`, restart, and use those credentials when the browser prompts. That covers 95% of cases.
 
 ## Which option do I pick?
 
 | Your situation | Pick this | Section |
 | --- | --- | --- |
+| Tailscale, ZeroTier-on-100.64/10, or another VPN you control | **Already works** — no setup needed | [Option 4](#option-4-tailscale-or-docker-bypass-interface-scoped-on-by-default) |
+| Docker / Podman container, accessing from the same host | **Already works** — no setup needed | [Option 4](#option-4-tailscale-or-docker-bypass-interface-scoped-on-by-default) |
 | Phone, tablet, or laptop on your home Wi-Fi | **Basic Auth** | [Option 1](#option-1-basic-auth-recommended) |
-| Docker / Podman container, accessing from the host or LAN | **Basic Auth** | [Option 1](#option-1-basic-auth-recommended) |
-| Tailscale, ZeroTier, or another VPN you control | **Basic Auth** *or* IP Allowlist *or* Tailscale bypass | [Option 1](#option-1-basic-auth-recommended) / [Option 2](#option-2-ip-allowlist) / [Option 4](#option-4-tailscale-or-docker-bypass-interface-scoped) |
 | Public-internet exposure (custom domain, port forwarding) | **Basic Auth + HTTPS** | [Option 1](#option-1-basic-auth-recommended) + [HTTPS](#serving-over-https) |
-| Containers / Tailnet should auto-bypass while LAN still needs the password | Interface bypass | [Option 4](#option-4-tailscale-or-docker-bypass-interface-scoped) |
-| You really, really don't want a password and your network is fully trusted | Private-network bypass | [Option 3](#option-3-private-network-bypass-no-password) |
+| Stable LAN IPs and you'd rather not type a password | IP Allowlist | [Option 2](#option-2-ip-allowlist) |
+| You want a password from your Tailnet / containers TOO | Disable Option 4 + use Option 1 | [Option 4](#option-4-tailscale-or-docker-bypass-interface-scoped-on-by-default) + [Option 1](#option-1-basic-auth-recommended) |
+| You really, really don't want a password and your whole LAN is trusted | Private-network bypass | [Option 3](#option-3-private-network-bypass-no-password) |
 
 Basic Auth is the most flexible choice — works from any IP, no per-device setup, and the browser remembers it. The IP Allowlist is handy when your client devices have stable IPs (Tailscale, static LAN leases) and you'd rather not type a password.
 
@@ -60,7 +67,7 @@ Restart Marinara, then open it in your browser from the remote device. You'll se
 
 - Loopback (`127.0.0.1`, `::1`) — you don't need to type your password on the host machine itself.
 - Anything in `IP_ALLOWLIST` — useful if you want some devices to skip the prompt (see below).
-- Tailscale or Docker traffic when their bypass flag is enabled — see [Option 4](#option-4-tailscale-or-docker-bypass-interface-scoped).
+- Tailscale (`100.64.0.0/10`) and Docker bridge (`172.16.0.0/12`) traffic — bypassed by default; see [Option 4](#option-4-tailscale-or-docker-bypass-interface-scoped-on-by-default) to disable.
 - `/api/health` — so uptime monitors and load balancers can keep working.
 
 **Optional:** set `BASIC_AUTH_REALM` to customise the text the browser prompt shows (default is `Marinara Engine`).
@@ -107,31 +114,30 @@ Anything outside those ranges (i.e. public-internet IPs) still gets a 403. If yo
 
 There is also `ALLOW_UNAUTHENTICATED_REMOTE=true` for unauthenticated public-internet access. **Do not turn this on.** If you genuinely need public access, use Basic Auth + HTTPS, or front Marinara with a reverse proxy that handles authentication (Cloudflare Access, Authelia, etc.).
 
-## Option 4: Tailscale or Docker bypass (interface-scoped)
+## Option 4: Tailscale or Docker bypass (interface-scoped, on by default)
 
-If your only goal is "let my Tailnet peers (or my Docker containers) reach Marinara without typing a password, but block everyone else," there's a more targeted switch than Option 3:
+Two interface-scoped flags let traffic from a Tailnet or a Docker bridge skip both the IP allowlist *and* Basic Auth, the same way loopback does. **Both flags default to `true`**, so a fresh Marinara install reachable over Tailscale or from your Docker containers Just Works without any `.env` setup.
 
 ```env
-# Trust traffic from my Tailnet (100.64.0.0/10)
-BYPASS_AUTH_TAILSCALE=true
-
-# Trust traffic from my Docker bridge (172.16.0.0/12)
-BYPASS_AUTH_DOCKER=true
+# These are the defaults — listed here so you can see how to override them.
+BYPASS_AUTH_TAILSCALE=true   # trusts 100.64.0.0/10 (Tailnet CGNAT)
+BYPASS_AUTH_DOCKER=true      # trusts 172.16.0.0/12 (Docker bridge)
 ```
 
-When either flag is on, traffic from the matching range is treated like loopback — it skips both the IP allowlist *and* Basic Auth, even if you have Basic Auth credentials configured for everyone else. The difference vs Option 3 is that this *only* trusts the Tailscale or Docker range, not the entire RFC-1918/CGNAT/ULA private-network list. So you can safely combine it with `BASIC_AUTH_USER` / `BASIC_AUTH_PASS`: your Tailnet skips the prompt, the rest of your LAN still has to type the password.
+**Why these are safe by default:**
 
-**When to use this:**
+- A peer in your Tailnet already had to authenticate to your Tailscale account to be there. That's a stronger trust signal than "this packet came from your LAN" — anyone in the coffee shop is on your LAN. Almost no one in the coffee shop is on your tailnet.
+- Docker bridge IPs are unreachable from outside the host. External traffic NATs through the bridge gateway and arrives with a different source IP, so a request that actually shows up with `172.17.x.x` or `172.18.x.x` genuinely came from a container on the same host as Marinara.
 
-- You set up Tailscale specifically to access Marinara remotely, and want zero-friction access from your Tailnet without a password.
-- Marinara runs in Docker and you have other containers (a reverse proxy, a sidecar) that need to call it without juggling credentials.
+**Combines cleanly with Basic Auth:** if you set `BASIC_AUTH_USER` / `BASIC_AUTH_PASS`, your Tailnet and Docker containers still skip the prompt while the rest of your LAN and any internet traffic still has to authenticate. That's the typical "no friction from my devices, password from anyone else" setup.
 
-**When NOT to use this:**
+**When to set these to `false`:**
 
-- **Your server's public connection is on a CGNAT'd ISP that uses `100.64.0.0/10`.** Some carrier-grade NAT setups use the same range Tailscale does. If that applies, an internet client could appear with a source IP that matches the bypass — and `BYPASS_AUTH_TAILSCALE` would let them in. The fix is either to leave the flag off and use Basic Auth, or to bind `HOST` to your `tailscale0` IP so the public NIC never receives the connection. To check, run `tailscale ip -4` and compare with the IP your ISP assigns to your WAN interface.
-- **You have a LAN that uses 172.16.x.x or 172.20.x.x addresses for non-Docker hosts.** `BYPASS_AUTH_DOCKER` trusts the entire `172.16.0.0/12` block; non-Docker callers in that range would also bypass auth. Only flip this on when the only thing in `172.16.0.0/12` is your Docker bridge.
+- **Your server's public connection is on a CGNAT'd ISP that uses `100.64.0.0/10`.** Some carrier-grade NAT setups use the same range Tailscale does. If that applies, an internet client could appear with a source IP that matches the bypass — and `BYPASS_AUTH_TAILSCALE=true` would let them in. To check, run `tailscale ip -4` and compare with the IP your ISP assigns to your WAN interface; if both are in `100.64.0.0/10`, either set `BYPASS_AUTH_TAILSCALE=false` or bind `HOST` to your `tailscale0` IP so the public NIC never sees the connection.
+- **Your non-Docker LAN uses `172.16.x.x` / `172.20.x.x` addresses.** `BYPASS_AUTH_DOCKER=true` trusts the entire `172.16.0.0/12` block; non-Docker callers in that range would also bypass auth. Set `BYPASS_AUTH_DOCKER=false` and add the specific containers to `IP_ALLOWLIST` instead.
+- **You genuinely want a password from your Tailnet / containers too** — set the corresponding flag to `false`.
 
-The server logs a `[auth-bypass]` warning the first time a request actually exercises one of these flags, so you have a paper trail of the bypass being live.
+The server logs an `[auth-bypass]` warning the first time a request actually exercises one of these flags, so you can confirm in the log when the bypass goes live.
 
 ## Serving over HTTPS
 
