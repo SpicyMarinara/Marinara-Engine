@@ -28,7 +28,7 @@ const CAPABILITY_TYPES: Array<{ type: OutputType; cap: HapticCapability }> = [
   { type: OutputType.Constrict, cap: "constrict" },
   { type: OutputType.Inflate, cap: "inflate" },
   { type: OutputType.Position, cap: "position" },
-  { type: OutputType.HwPositionWithDuration, cap: "position" },
+  { type: OutputType.PositionWithDuration, cap: "position" },
 ];
 
 /** Map our action strings to buttplug OutputType. */
@@ -200,7 +200,7 @@ class ButtplugService {
       try {
         if (action === "position") {
           const durationMs = Math.max(1, duration || 1) * 1000;
-          if (device.hasOutput(OutputType.HwPositionWithDuration)) {
+          if (device.hasOutput(OutputType.PositionWithDuration)) {
             await device.runOutput(DeviceOutput.PositionWithDuration.percent(intensity, durationMs));
             successfulTargets++;
           } else if (device.hasOutput(OutputType.Position)) {

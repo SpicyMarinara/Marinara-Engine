@@ -24,7 +24,9 @@ if (failures.length === 0) {
   });
 
   if (result.status !== 0) {
-    failures.push(result.stderr.trim() || "Impeccable context loader failed.");
+    const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
+    const errorMessage = result.error?.message ? ` (${result.error.message})` : "";
+    failures.push(stderr || `Impeccable context loader failed${errorMessage}.`);
   } else {
     try {
       context = JSON.parse(result.stdout);
