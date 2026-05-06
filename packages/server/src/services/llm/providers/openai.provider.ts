@@ -131,7 +131,7 @@ export class OpenAIProvider extends BaseLLMProvider {
   private normalizeChatCompletionsResponseFormat(responseFormat?: { type: string }): unknown | undefined {
     if (!responseFormat) return undefined;
 
-    if ((this.isGenericCustomProvider() || this.providerKind === "local-sidecar") && responseFormat.type === "json_object") {
+    if (this.isGenericCustomProvider() && responseFormat.type === "json_object") {
       return { type: "json_schema", json_schema: { name: "response", schema: { type: "object" }, strict: true } };
     }
 
