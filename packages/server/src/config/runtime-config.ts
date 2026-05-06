@@ -18,13 +18,23 @@ const DEFAULT_DATABASE_PATH = resolve(DEFAULT_DATA_DIR, DEFAULT_DATABASE_FILE);
 const REGRESSION_DATABASE_PATH = resolve(REGRESSION_DATA_DIR, DEFAULT_DATABASE_FILE);
 
 let envLoaded = false;
+// Keys that the .env file currently contributes to process.env. Tracked so a
+// reload can remove keys that were deleted from the file.
+let envFileKeys = new Set<string>();
+
+export function getEnvFilePath() {
+  return resolve(MONOREPO_ROOT, ".env");
+}
 
 export function loadRuntimeEnv() {
   if (envLoaded) return;
 
-  const envPath = resolve(MONOREPO_ROOT, ".env");
+  const envPath = getEnvFilePath();
   if (existsSync(envPath)) {
-    dotenv.config({ path: envPath });
+    const result = dotenv.config({ path: envPath });
+    if (result.parsed) {
+      envFileKeys = new Set(Object.keys(result.parsed));
+    }
   } else {
     dotenv.config();
   }
@@ -33,6 +43,67 @@ export function loadRuntimeEnv() {
 }
 
 loadRuntimeEnv();
+
+export interface EnvReloadResult {
+  added: string[];
+  updated: string[];
+  removed: string[];
+  unchanged: string[];
+}
+
+/**
+ * Re-read the .env file and propagate changes to process.env with override
+ * semantics. Keys removed from the file are deleted from process.env so that
+ * unsetting a value (e.g. clearing BASIC_AUTH_PASS) takes effect immediately.
+ *
+ * Returns a diff so callers can log or react to specific changes. Throws when
+ * the .env file is missing or unreadable so the caller can decide how to
+ * surface the failure.
+ */
+export function reloadRuntimeEnv(): EnvReloadResult {
+  const envPath = getEnvFilePath();
+  if (!existsSync(envPath)) {
+    // No .env to read — clear any keys we previously set from a now-missing file.
+    const removed = [...envFileKeys];
+    for (const key of removed) {
+      delete process.env[key];
+    }
+    envFileKeys = new Set();
+    return { added: [], updated: [], removed, unchanged: [] };
+  }
+
+  const fileContent = readFileSync(envPath);
+  const parsed = dotenv.parse(fileContent);
+  const newKeys = new Set(Object.keys(parsed));
+
+  const added: string[] = [];
+  const updated: string[] = [];
+  const unchanged: string[] = [];
+  const removed: string[] = [];
+
+  for (const [key, value] of Object.entries(parsed)) {
+    const previous = process.env[key];
+    if (!envFileKeys.has(key)) {
+      added.push(key);
+      process.env[key] = value;
+    } else if (previous !== value) {
+      updated.push(key);
+      process.env[key] = value;
+    } else {
+      unchanged.push(key);
+    }
+  }
+
+  for (const key of envFileKeys) {
+    if (!newKeys.has(key)) {
+      removed.push(key);
+      delete process.env[key];
+    }
+  }
+
+  envFileKeys = newKeys;
+  return { added, updated, removed, unchanged };
+}
 
 function normalizeEnvValue(value: string | undefined | null) {
   const trimmed = value?.trim();

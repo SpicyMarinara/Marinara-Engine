@@ -26,7 +26,7 @@ All access settings live in your `.env` file in the project root (next to `packa
 cp .env.example .env
 ```
 
-Edit it with any text editor. After saving, **restart Marinara** for changes to take effect. Quick reference for each install method:
+Edit it with any text editor. **Most security settings — Basic Auth credentials, IP allowlist, admin secret, CSRF origins — apply within a couple of seconds without a restart.** A handful of low-level settings (port, host, TLS cert paths, storage paths, encryption key) still need a restart; if a change you made isn't picked up, see [When a restart is required](#when-a-restart-is-required) below. Quick reference for each install method when you do need a restart:
 
 - **Source install (Windows / macOS / Linux)** — close the launcher window, run `start.bat` / `start.sh` again.
 - **Docker Compose** — `docker compose down && docker compose up -d`. You can also pass the variables in `docker-compose.yml` under `environment:` instead of using `.env`.
@@ -114,9 +114,15 @@ Two options when you're exposing Marinara beyond a trusted network:
 
 For sensitive deployments, consider Tailscale or Cloudflare Access — they avoid exposing the port to the open internet entirely.
 
+## When a restart is required
+
+The server watches `.env` for changes and applies most updates within a couple of seconds — no restart needed. That includes `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` / `BASIC_AUTH_REALM`, `IP_ALLOWLIST` / `IP_ALLOWLIST_ENABLED`, `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK`, `ALLOW_UNAUTHENTICATED_REMOTE`, `TRUSTED_PRIVATE_NETWORKS`, `ADMIN_SECRET`, `CSRF_TRUSTED_ORIGINS`, `LOG_LEVEL`, and the various `*_LOCAL_URLS_ENABLED` / privileged-feature flags.
+
+Changes to these still need a restart because they're bound at startup: `PORT`, `HOST`, `SSL_CERT`, `SSL_KEY`, `CORS_ORIGINS`, `DATA_DIR`, `STORAGE_BACKEND`, `FILE_STORAGE_DIR`, `DATABASE_URL`, `ENCRYPTION_KEY`, `TZ`, `AUTO_OPEN_BROWSER`, `AUTO_CREATE_DEFAULT_CONNECTION`. The server logs a warning when one of these changes so you don't wonder why it didn't take effect.
+
 ## Verifying it works
 
-After restarting, from your remote device:
+After saving `.env` (and restarting if required), from your remote device:
 
 1. Open `http://<host-ip>:7860` (or your container/Tailscale address).
 2. Basic Auth: you should see a browser password prompt. Enter your credentials.
@@ -125,7 +131,7 @@ After restarting, from your remote device:
 
 Still getting a 403? Check:
 
-- Did you restart the server after editing `.env`?
+- Did you save `.env`? The server picks up most security changes within a couple of seconds; the server log will show an `[env-watcher] Updated:` line. If your change is on the [restart-required list](#when-a-restart-is-required), restart Marinara.
 - Is the client IP what you expect? Marinara logs the blocked IP to the server console.
 - For Docker: are you connecting to the published port, or directly to the container IP?
 - For Tailscale: is the connecting device's `100.x.y.z` address in the allowlist (if you're using Option 2)?

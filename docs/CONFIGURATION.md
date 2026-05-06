@@ -88,6 +88,8 @@ Marinara Engine ships with layered access-control mechanisms designed for users 
 
 > Looking for a step-by-step walkthrough rather than a reference? See [Remote Access — Setting Up Basic Auth or an IP Allowlist](REMOTE_ACCESS.md).
 
+> **Hot reload:** changes to access-control variables (`BASIC_AUTH_*`, `IP_ALLOWLIST`, `IP_ALLOWLIST_ENABLED`, `ALLOW_UNAUTHENTICATED_*`, `TRUSTED_PRIVATE_NETWORKS`, `ADMIN_SECRET`, `CSRF_TRUSTED_ORIGINS`) take effect within a couple of seconds of saving `.env` — no restart required. The server logs an `[env-watcher]` line for each change. A short list of low-level variables (`PORT`, `HOST`, `SSL_CERT`/`SSL_KEY`, `CORS_ORIGINS`, storage paths, `ENCRYPTION_KEY`, `TZ`) still need a restart; see [Remote Access § When a restart is required](REMOTE_ACCESS.md#when-a-restart-is-required).
+
 ### Safe-by-default lockdown
 
 By default, when no Basic Auth credentials are configured, the server **refuses connections from every non-loopback IP**. Local browser access continues to work without any configuration:

@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import { buildApp } from "./app.js";
 import { logger } from "./lib/logger.js";
 import { getHost, getPort, getServerProtocol, loadTlsOptions, logStorageDiagnostics } from "./config/runtime-config.js";
+import { startEnvWatcher } from "./config/env-watcher.js";
 import { migrateTaskbarShortcuts } from "./services/setup/taskbar-shortcut-migration.js";
 
 function scheduleTaskbarShortcutMigration() {
@@ -22,6 +23,7 @@ async function main() {
   const tls = loadTlsOptions();
   logStorageDiagnostics();
   const app = await buildApp(tls ?? undefined);
+  const envWatcher = startEnvWatcher();
   const protocol = tls ? "https" : getServerProtocol();
   const port = getPort();
   const host = getHost();
@@ -37,6 +39,7 @@ async function main() {
     logger.info("Received %s; shutting down Marinara Engine", signal);
 
     try {
+      envWatcher.stop();
       await app.close();
       logger.info("Shutdown complete");
       process.exit(0);
