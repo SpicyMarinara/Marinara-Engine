@@ -48,6 +48,8 @@ import {
   Download,
   Star,
   StickyNote,
+  Drama,
+  RotateCcw,
 } from "lucide-react";
 import { cn, getAvatarCropStyle, type AvatarCrop } from "../../lib/utils";
 import { showAlertDialog, showConfirmDialog, showPromptDialog } from "../../lib/app-dialogs";
@@ -117,13 +119,23 @@ import {
   BUILT_IN_TOOLS,
   DEFAULT_AGENT_CONTEXT_SIZE,
   DEFAULT_AGENT_TOOLS,
+  DEFAULT_IMPERSONATE_PROMPT,
   DEFAULT_AGENT_MAX_TOKENS,
+  DEFAULT_AGENT_PROMPTS,
   MAX_AGENT_MAX_TOKENS,
   MIN_AGENT_MAX_TOKENS,
+  estimateAgentLoadCost,
+  AGENT_COST_HIGH_CALLS,
+  AGENT_COST_HIGH_TOKENS,
   getDefaultBuiltInAgentSettings,
 } from "@marinara-engine/shared";
 import type { Chat, CharacterGroup } from "@marinara-engine/shared";
-import { useCustomTools, type CustomToolRow } from "../../hooks/use-custom-tools";
+import {
+  isCustomToolSelectable,
+  useCustomToolCapabilities,
+  useCustomTools,
+  type CustomToolRow,
+} from "../../hooks/use-custom-tools";
 import { useHapticStatus, useHapticConnect, useHapticDisconnect, useHapticStartScan } from "../../hooks/use-haptic";
 import { normalizeSpritePlacements } from "./sprite-placement";
 
@@ -144,6 +156,16 @@ const HIDDEN_ROLEPLAY_AGENTS = new Set([
   "response-orchestrator",
   "autonomous-messenger",
 ]);
+
+const MODE_INTROS: Record<ChatMode, string> = {
+  conversation:
+    "Plain chat — no roleplay or game systems built in; autonomous messaging and other tools are optional below.",
+  roleplay:
+    "Plain roleplay surface — no built-in dice, combat, or GM pipeline; sprites, world-state tracking, and other helpers are available as optional agents below.",
+  visual_novel:
+    "Sprite- and background-driven roleplay — expressions, world state, and CYOA choices are available as optional agents below.",
+  game: "Full Game Master with built-in dice, combat, encounters, world state, and session/map tracking — the Scene Analysis toggle below adds optional cinematic visuals (backgrounds, music, weather).",
+};
 
 type AvailableAgent = {
   id: string;
@@ -205,6 +227,12 @@ function normalizeNonNegativeInteger(value: unknown, fallback: number, max: numb
   return Math.max(0, Math.min(max, Math.trunc(value)));
 }
 
+function getChatActiveAgentIds(chat: Chat): string[] {
+  const metadata = typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : (chat.metadata ?? {});
+  const activeIds = metadata && typeof metadata === "object" ? (metadata as { activeAgentIds?: unknown }).activeAgentIds : [];
+  return Array.isArray(activeIds) ? activeIds.filter((id): id is string => typeof id === "string") : [];
+}
+
 export function ChatSettingsDrawer({
   chat,
   open,
@@ -234,6 +262,7 @@ export function ChatSettingsDrawer({
   const chatMode = (chat as unknown as { mode?: string }).mode ?? "roleplay";
   const isConversation = chatMode === "conversation";
   const isGame = chatMode === "game";
+  const isRoleplayMode = chatMode === "roleplay" || chatMode === "visual_novel";
   const { data: currentPromptPresetFull } = usePresetFull(isConversation ? null : (chat.promptPresetId ?? null));
   const { data: connections } = useConnections();
   const imageConnectionsList = useMemo(
@@ -243,9 +272,17 @@ export function ChatSettingsDrawer({
       ),
     [connections],
   );
+  const textConnectionsList = useMemo(
+    () =>
+      ((connections as Array<{ id: string; name: string; model?: string; provider?: string }>) ?? []).filter(
+        (c) => c.provider !== "image_generation",
+      ),
+    [connections],
+  );
   const { data: allPersonas } = usePersonas();
   const { data: agentConfigs } = useAgentConfigs();
   const { data: customTools } = useCustomTools();
+  const { data: customToolCapabilities } = useCustomToolCapabilities();
   const { data: allChats } = useChats();
   const personas = (allPersonas ?? []) as Array<{
     id: string;
@@ -263,6 +300,7 @@ export function ChatSettingsDrawer({
     () => (typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : (chat.metadata ?? {})),
     [chat.metadata],
   );
+  const isSceneChat = metadata.sceneStatus === "active" || typeof metadata.sceneOriginChatId === "string";
   const hasGeneratedConversationSchedules =
     !!metadata.characterSchedules &&
     typeof metadata.characterSchedules === "object" &&
@@ -271,7 +309,7 @@ export function ChatSettingsDrawer({
     metadata.conversationSchedulesEnabled === true ||
     (metadata.conversationSchedulesEnabled == null && hasGeneratedConversationSchedules);
   const activeLorebookIds: string[] = metadata.activeLorebookIds ?? [];
-  const activeAgentIds: string[] = metadata.activeAgentIds ?? [];
+  const activeAgentIds = useMemo<string[]>(() => metadata.activeAgentIds ?? [], [metadata.activeAgentIds]);
   const activeToolIds: string[] = metadata.activeToolIds ?? [];
   const gameLorebookKeeperEnabled = metadata.gameLorebookKeeperEnabled === true;
   const gameLorebookKeeperLorebookId =
@@ -340,6 +378,33 @@ export function ChatSettingsDrawer({
     return agents;
   }, [agentConfigs, agentConfigsByType]);
 
+  // Estimate the per-turn cost of the active agent loadout — feeds the readout
+  // in the agents picker header and the per-row token badges. Approximate; see
+  // `estimateAgentLoadCost` doc comment for what's counted vs not.
+  const agentLoadCost = useMemo(() => {
+    const inputs = activeAgentIds.flatMap((id) => {
+      const meta = availableAgents.find((a) => a.id === id);
+      if (!meta) return [];
+      const cfg = agentConfigsByType.get(id);
+      // `||` (not `??`) — custom configs often have an empty-string promptTemplate
+      // meaning "no override", and we still want to count the built-in default.
+      const promptTemplate = cfg?.promptTemplate || DEFAULT_AGENT_PROMPTS[id] || "";
+      return [
+        {
+          type: id,
+          phase: meta.phase,
+          connectionId: cfg?.connectionId ?? null,
+          promptTemplate,
+        },
+      ];
+    });
+    const tokensByType = new Map<string, number>(inputs.map((i) => [i.type, Math.ceil(i.promptTemplate.length / 4)]));
+    return {
+      cost: estimateAgentLoadCost(inputs, chat.connectionId ?? null),
+      tokensByType,
+    };
+  }, [activeAgentIds, availableAgents, agentConfigsByType, chat.connectionId]);
+
   const lorebookKeeperConfig = agentConfigsByType.get("lorebook-keeper") ?? null;
   const lorebookKeeperEnabledByDefault = isEnabledFlag(lorebookKeeperConfig?.enabled);
   const lorebookKeeperActive =
@@ -364,13 +429,13 @@ export function ChatSettingsDrawer({
     }
     if (customTools) {
       for (const ct of customTools as CustomToolRow[]) {
-        if (ct.enabled === "true" || ct.enabled === "1") {
+        if (isCustomToolSelectable(ct, customToolCapabilities)) {
           tools.push({ id: ct.name, name: ct.name, description: ct.description });
         }
       }
     }
     return tools;
-  }, [customTools]);
+  }, [customToolCapabilities, customTools]);
 
   // ── Helpers ──
   const characters = useMemo(
@@ -488,12 +553,37 @@ export function ChatSettingsDrawer({
   }, [firstMesConfirm, createMessage, chat.id, qc]);
 
   // ── Mutations ──
+  const syncGamePartyMetadata = (nextCharacterIds: string[]) => {
+    if (!isGame) return;
+    const storedPartyIds: unknown[] = Array.isArray(metadata.gamePartyCharacterIds)
+      ? metadata.gamePartyCharacterIds
+      : Array.isArray((metadata.gameSetupConfig as { partyCharacterIds?: unknown[] } | undefined)?.partyCharacterIds)
+        ? (metadata.gameSetupConfig as { partyCharacterIds: unknown[] }).partyCharacterIds
+        : [];
+    const npcPartyIds = storedPartyIds.filter((id): id is string => typeof id === "string" && id.startsWith("npc:"));
+    const nextPartyIds = Array.from(new Set([...nextCharacterIds, ...npcPartyIds]));
+    const gameSetupConfig =
+      metadata.gameSetupConfig && typeof metadata.gameSetupConfig === "object"
+        ? { ...(metadata.gameSetupConfig as Record<string, unknown>), partyCharacterIds: nextPartyIds }
+        : metadata.gameSetupConfig;
+    updateMeta.mutate({
+      id: chat.id,
+      gamePartyCharacterIds: nextPartyIds,
+      ...(gameSetupConfig ? { gameSetupConfig } : {}),
+    });
+  };
+
   const toggleCharacter = (charId: string) => {
     const current = [...chatCharIds];
     const idx = current.indexOf(charId);
     if (idx >= 0) {
       current.splice(idx, 1);
-      updateChat.mutate({ id: chat.id, characterIds: current });
+      updateChat.mutate(
+        { id: chat.id, characterIds: current },
+        {
+          onSuccess: () => syncGamePartyMetadata(current),
+        },
+      );
       if (spriteCharacterIds.includes(charId)) {
         const nextSpritePlacements = { ...normalizeSpritePlacements(metadata.spritePlacements) };
         delete nextSpritePlacements[charId];
@@ -509,6 +599,7 @@ export function ChatSettingsDrawer({
         { id: chat.id, characterIds: current },
         {
           onSuccess: () => {
+            syncGamePartyMetadata(current);
             // Skip auto-greeting for conversation mode
             if (isConversation) return;
             const char = characters.find((c) => c.id === charId);
@@ -637,17 +728,97 @@ export function ChatSettingsDrawer({
     updateMeta.mutate({ id: chat.id, activeLorebookIds: current });
   };
 
-  const toggleAgent = (agentId: string) => {
-    const current = [...activeAgentIds];
+  const hasSecretPlotMemory = (memory: Record<string, unknown> | null | undefined) => {
+    if (!memory) return false;
+    const arc = memory.overarchingArc;
+    if (typeof arc === "string" && arc.trim()) return true;
+    if (arc && typeof arc === "object") {
+      const arcRecord = arc as Record<string, unknown>;
+      if (
+        String(arcRecord.description ?? "").trim() ||
+        String(arcRecord.protagonistArc ?? "").trim() ||
+        arcRecord.completed === true
+      ) {
+        return true;
+      }
+    }
+
+    const sceneDirections = memory.sceneDirections;
+    if (
+      Array.isArray(sceneDirections) &&
+      sceneDirections.some(
+        (entry) =>
+          typeof entry === "string"
+            ? entry.trim()
+            : !!(entry && typeof entry === "object" && String((entry as Record<string, unknown>).direction ?? "").trim()),
+      )
+    ) {
+      return true;
+    }
+
+    const pacing = memory.pacing;
+    if (typeof pacing === "string" ? pacing.trim() : pacing != null) return true;
+    const recentlyFulfilled = memory.recentlyFulfilled;
+    return Array.isArray(recentlyFulfilled) && recentlyFulfilled.some((entry) => String(entry ?? "").trim());
+  };
+
+  const toggleAgent = async (agentId: string) => {
+    const readLatestActiveAgentIds = () => {
+      const latestChat = qc.getQueryData<Chat>(chatKeys.detail(chat.id));
+      return latestChat ? getChatActiveAgentIds(latestChat) : [...activeAgentIds];
+    };
+    const wasRemoving = readLatestActiveAgentIds().includes(agentId);
+    if (wasRemoving && agentId === "secret-plot-driver") {
+      let shouldWarn: boolean;
+      try {
+        const res = await api.get<{ memory: Record<string, unknown> }>(`/agents/memory/${agentId}/${chat.id}`);
+        shouldWarn = hasSecretPlotMemory(res.memory);
+      } catch {
+        shouldWarn = true;
+      }
+      if (shouldWarn) {
+        const ok = await showConfirmDialog({
+          title: "Remove Secret Plot Driver",
+          message:
+            "Remove Secret Plot Driver from this chat? This will wipe its hidden plot memory for this chat, including the current arc and scene directions. This cannot be undone.",
+          confirmLabel: "Remove Agent",
+          tone: "destructive",
+        });
+        if (!ok) return;
+      }
+    }
+
+    const current = readLatestActiveAgentIds();
     const idx = current.indexOf(agentId);
     const isRemoving = idx >= 0;
     if (isRemoving) current.splice(idx, 1);
     else current.push(agentId);
-    updateMeta.mutate({ id: chat.id, activeAgentIds: current });
-
-    // When removing an agent that stores persistent memory, clean it up
-    if (isRemoving && agentId === "secret-plot-driver") {
-      api.delete(`/agents/memory/${agentId}/${chat.id}`).catch(() => {});
+    let metadataSaved = false;
+    try {
+      await updateMeta.mutateAsync(
+        { id: chat.id, activeAgentIds: current },
+        {
+          onSuccess: async () => {
+            metadataSaved = true;
+            // When removing an agent that stores persistent memory, clean it up after metadata is saved.
+            if (isRemoving && agentId === "secret-plot-driver") {
+              await api.delete(`/agents/memory/${agentId}/${chat.id}`);
+            }
+          },
+        },
+      );
+    } catch (error) {
+      if (metadataSaved && isRemoving && agentId === "secret-plot-driver") {
+        const rollbackIds = Array.from(new Set([...readLatestActiveAgentIds(), agentId]));
+        await updateMeta.mutateAsync({ id: chat.id, activeAgentIds: rollbackIds }).catch(() => undefined);
+      }
+      await showAlertDialog({
+        title: isRemoving ? "Couldn't Remove Agent" : "Couldn't Add Agent",
+        message:
+          error instanceof Error
+            ? error.message
+            : "The agent list could not be updated. Please try again.",
+      });
     }
   };
 
@@ -846,6 +1017,11 @@ export function ChatSettingsDrawer({
       await updateMeta.mutateAsync({
         id: chat.id,
         activeAgentIds: Array.from(new Set([...activeAgentIds, agent.id])),
+        ...(agent.id === "secret-plot-driver"
+          ? {
+              showSecretPlotPanel: true,
+            }
+          : {}),
       });
       setAgentAddPreview(null);
     } catch (error) {
@@ -1058,8 +1234,8 @@ export function ChatSettingsDrawer({
           </button>
         </div>
 
-        {/* Chat Settings Preset bar — hidden in Game Mode (not designed for it) */}
-        {!isGame && (
+        {/* Chat Settings Preset bar — hidden in Game Mode and scene chats. */}
+        {!isGame && !isSceneChat && (
           <div className="flex flex-col gap-2 border-b border-[var(--border)] px-4 py-3">
             <input
               ref={presetFileInputRef}
@@ -1191,6 +1367,16 @@ export function ChatSettingsDrawer({
         )}
 
         <div className="flex-1 overflow-y-auto">
+          {/* Hardcoded — CHAT_MODES.defaultAgents looks like the source of truth but is currently
+              unused, and wouldn't cover non-agent built-ins (GM pipeline, autonomous messaging, etc.) anyway. */}
+          {MODE_INTROS[chatMode as ChatMode] && (
+            <div className="border-b border-[var(--border)] px-4 py-2.5">
+              <p className="text-[0.625rem] leading-relaxed text-[var(--muted-foreground)]">
+                {MODE_INTROS[chatMode as ChatMode]}
+              </p>
+            </div>
+          )}
+
           {/* Chat Name */}
           <Section
             label="Chat Name"
@@ -2527,8 +2713,86 @@ export function ChatSettingsDrawer({
             </Section>
           )}
 
-          {/* Connected Conversation — roleplay/game mode: show linked OOC chat */}
-          {!isConversation && chat.connectedChatId && (
+          {/* Connected Conversation — roleplay mode: linked OOC chat + optional in-world DM command */}
+          {isRoleplayMode && (
+            <Section
+              label="Connected Conversation"
+              icon={<ArrowRightLeft size="0.875rem" />}
+              help={
+                'Link to an OOC conversation, and optionally let roleplay characters open direct-message conversations with `[dm: character="Name" message="text"]` when it naturally fits the scene.'
+              }
+            >
+              <div className="space-y-2">
+                {chat.connectedChatId ? (
+                  (() => {
+                    const linked = (allChats ?? []).find((c: Chat) => c.id === chat.connectedChatId);
+                    return (
+                      <div className="flex items-center gap-2.5 rounded-lg bg-[var(--primary)]/10 px-3 py-2 ring-1 ring-[var(--primary)]/30">
+                        <MessageCircle size="0.875rem" className="text-[var(--primary)]" />
+                        <div className="flex-1 min-w-0">
+                          <span className="truncate text-xs font-medium">{linked?.name ?? "Unknown chat"}</span>
+                          <p className="text-[0.625rem] text-[var(--muted-foreground)]">Conversation</p>
+                        </div>
+                        <button
+                          onClick={() => disconnectChat.mutate(chat.id)}
+                          className="flex h-5 w-5 items-center justify-center rounded-md text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)]"
+                          title="Disconnect"
+                        >
+                          <Unlink size="0.6875rem" />
+                        </button>
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <p className="rounded-lg bg-[var(--secondary)]/50 px-3 py-2 text-[0.625rem] leading-relaxed text-[var(--muted-foreground)]">
+                    No OOC conversation is linked. Direct-message commands can still create new Conversation DMs.
+                  </p>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateMeta.mutate({
+                      id: chat.id,
+                      roleplayDmCommandsEnabled: metadata.roleplayDmCommandsEnabled !== true,
+                    })
+                  }
+                  className={cn(
+                    "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left transition-all",
+                    metadata.roleplayDmCommandsEnabled === true
+                      ? "bg-[var(--primary)]/10 ring-1 ring-[var(--primary)]/30"
+                      : "bg-[var(--secondary)] hover:bg-[var(--accent)]",
+                  )}
+                >
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[0.6875rem] font-medium">Allow character DMs</span>
+                    <p className="text-[0.625rem] leading-relaxed text-[var(--muted-foreground)]">
+                      Adds a short hidden command reminder so characters can open a new DM conversation when they text
+                      the user in-world.
+                    </p>
+                  </div>
+                  <div
+                    className={cn(
+                      "h-5 w-9 shrink-0 rounded-full p-0.5 transition-colors",
+                      metadata.roleplayDmCommandsEnabled === true
+                        ? "bg-[var(--primary)]"
+                        : "bg-[var(--muted-foreground)]/50",
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
+                        metadata.roleplayDmCommandsEnabled === true && "translate-x-3.5",
+                      )}
+                    />
+                  </div>
+                </button>
+              </div>
+            </Section>
+          )}
+
+          {/* Connected Conversation — game mode: show linked OOC chat */}
+          {isGame && chat.connectedChatId && (
             <Section
               label="Connected Conversation"
               icon={<ArrowRightLeft size="0.875rem" />}
@@ -3288,6 +3552,29 @@ export function ChatSettingsDrawer({
                       </div>
                     ) : (
                       <>
+                        {/* Approximate per-turn cost of the active agent loadout. */}
+                        <div
+                          className={cn(
+                            "flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-[0.6875rem] ring-1",
+                            agentLoadCost.cost.level === "high"
+                              ? "bg-amber-400/10 text-amber-400/90 ring-amber-400/30"
+                              : "bg-[var(--secondary)]/60 text-[var(--muted-foreground)] ring-[var(--border)]",
+                          )}
+                          title={`Approximate. Each call also carries chat context (recent messages, characters, persona, lorebook), so real per-turn token use is higher. Smaller models may slow down or fail past ~${AGENT_COST_HIGH_CALLS} calls or ~${AGENT_COST_HIGH_TOKENS.toLocaleString()} instruction tokens.`}
+                        >
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            {agentLoadCost.cost.level === "high" && (
+                              <AlertTriangle size="0.75rem" className="shrink-0" />
+                            )}
+                            <span className="truncate">
+                              ~{agentLoadCost.cost.instructionTokens.toLocaleString()} tokens of agent instructions
+                              {" · "}~{agentLoadCost.cost.extraCalls} extra call
+                              {agentLoadCost.cost.extraCalls === 1 ? "" : "s"}/turn
+                            </span>
+                          </span>
+                          <span className="shrink-0 cursor-help text-[0.625rem] opacity-70">ⓘ</span>
+                        </div>
+
                         {activeAgentIds.length === 0 && (
                           <p className="text-[0.6875rem] text-[var(--muted-foreground)] px-1">
                             No per-chat agent overrides. Workspace default agents will be used for this chat.
@@ -3332,30 +3619,124 @@ export function ChatSettingsDrawer({
                               description={cat.description}
                               count={activeInCat.length}
                             >
+                              {cat.key === "writer" && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    updateMeta.mutate({
+                                      id: chat.id,
+                                      showInjectionsPanel: metadata.showInjectionsPanel !== true,
+                                    })
+                                  }
+                                  aria-pressed={metadata.showInjectionsPanel === true}
+                                  className="ml-auto flex w-fit max-w-full items-center gap-2 rounded-md bg-[var(--background)]/20 px-1.5 py-1 text-left text-[0.5625rem] text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]/35 hover:text-[var(--foreground)]"
+                                  title={
+                                    metadata.showInjectionsPanel === true
+                                      ? "Hide the Injections tab in the roleplay Agents menu. This is mainly for troubleshooting Prose Guardian, Narrative Director, or custom injected text before regenerating the current reply."
+                                      : "Show the Injections tab in the roleplay Agents menu. This is mainly for troubleshooting Prose Guardian, Narrative Director, or custom injected text before regenerating the current reply."
+                                  }
+                                >
+                                  <span className="flex min-w-0 items-center gap-1.5">
+                                    <FilePlus2 size="0.625rem" className="shrink-0 text-[var(--primary)]" />
+                                    <span className="truncate font-medium">Injections tab</span>
+                                  </span>
+                                  <span
+                                    className={cn(
+                                      "h-3.5 w-6 shrink-0 rounded-full p-0.5 transition-colors",
+                                      metadata.showInjectionsPanel === true
+                                        ? "bg-[var(--primary)]"
+                                        : "bg-[var(--muted-foreground)]/50",
+                                    )}
+                                  >
+                                    <span
+                                      className={cn(
+                                        "block h-2.5 w-2.5 rounded-full bg-white shadow-sm transition-transform",
+                                        metadata.showInjectionsPanel === true && "translate-x-2.5",
+                                      )}
+                                    />
+                                  </span>
+                                </button>
+                              )}
                               {/* Active agents in this category */}
                               {activeInCat.length > 0 && (
                                 <div className="flex flex-col gap-1 mb-1.5">
-                                  {activeInCat.map((agent) => (
-                                    <div
-                                      key={agent.id}
-                                      className="flex items-center gap-2.5 rounded-lg bg-[var(--primary)]/10 px-3 py-2 ring-1 ring-[var(--primary)]/30"
-                                    >
-                                      <Sparkles size="0.875rem" className="text-[var(--primary)]" />
-                                      <div className="flex-1 min-w-0">
-                                        <span className="block truncate text-xs">{agent.name}</span>
-                                        <span className="mt-0.5 block text-[0.625rem] leading-tight text-[var(--muted-foreground)] line-clamp-2">
-                                          {agent.description}
-                                        </span>
-                                      </div>
-                                      <button
-                                        onClick={() => toggleAgent(agent.id)}
-                                        className="flex h-5 w-5 items-center justify-center rounded-md text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)]"
-                                        title="Remove from chat"
+                                  {activeInCat.map((agent) => {
+                                    const tokenEst = agentLoadCost.tokensByType.get(agent.id);
+                                    const isSecretPlotDriver = agent.id === "secret-plot-driver";
+                                    return (
+                                      <div
+                                        key={agent.id}
+                                        className="rounded-lg bg-[var(--primary)]/10 px-3 py-2 ring-1 ring-[var(--primary)]/30"
                                       >
-                                        <Trash2 size="0.6875rem" />
-                                      </button>
-                                    </div>
-                                  ))}
+                                        <div className="flex items-start gap-2.5">
+                                          <Sparkles size="0.875rem" className="mt-0.5 shrink-0 text-[var(--primary)]" />
+                                          <div className="min-w-0 flex-1">
+                                            <div className="flex min-w-0 items-center gap-1.5">
+                                              <span className="block min-w-0 truncate text-xs">{agent.name}</span>
+                                              {tokenEst != null ? (
+                                                <span
+                                                  className="shrink-0 tabular-nums text-[0.625rem] text-[var(--muted-foreground)]"
+                                                  title={`~${tokenEst.toLocaleString()} tokens of agent instructions (estimated)`}
+                                                >
+                                                  ~{tokenEst.toLocaleString()}
+                                                </span>
+                                              ) : null}
+                                            </div>
+                                            <span className="mt-0.5 block text-[0.625rem] leading-tight text-[var(--muted-foreground)] line-clamp-2">
+                                              {agent.description}
+                                            </span>
+                                          </div>
+                                          <button
+                                            onClick={() => {
+                                              void toggleAgent(agent.id);
+                                            }}
+                                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)]"
+                                            title="Remove from chat"
+                                          >
+                                            <Trash2 size="0.6875rem" />
+                                          </button>
+                                        </div>
+                                        {isSecretPlotDriver && (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              updateMeta.mutate({
+                                                id: chat.id,
+                                                showSecretPlotPanel: metadata.showSecretPlotPanel !== true,
+                                              })
+                                            }
+                                            aria-pressed={metadata.showSecretPlotPanel === true}
+                                            className="ml-auto mt-1.5 flex w-fit max-w-full items-center gap-2 rounded-md bg-[var(--background)]/20 px-1.5 py-1 text-left text-[0.5625rem] text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]/35 hover:text-[var(--foreground)]"
+                                            title={
+                                              metadata.showSecretPlotPanel === true
+                                                ? "Hide the Secret Plot tab in the roleplay Agents menu. That tab lets you inspect and edit the Secret Plot Driver's hidden arc memory and scene directions for this chat."
+                                                : "Show the Secret Plot tab in the roleplay Agents menu. Use it to inspect and edit the Secret Plot Driver's hidden arc memory and scene directions for this chat."
+                                            }
+                                          >
+                                            <span className="flex min-w-0 items-center gap-1.5">
+                                              <Brain size="0.625rem" className="shrink-0 text-[var(--primary)]" />
+                                              <span className="truncate font-medium">Secret Plot tab</span>
+                                            </span>
+                                            <span
+                                              className={cn(
+                                                "h-3.5 w-6 shrink-0 rounded-full p-0.5 transition-colors",
+                                                metadata.showSecretPlotPanel === true
+                                                  ? "bg-[var(--primary)]"
+                                                  : "bg-[var(--muted-foreground)]/50",
+                                              )}
+                                            >
+                                              <span
+                                                className={cn(
+                                                  "block h-2.5 w-2.5 rounded-full bg-white shadow-sm transition-transform",
+                                                  metadata.showSecretPlotPanel === true && "translate-x-2.5",
+                                                )}
+                                              />
+                                            </span>
+                                          </button>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               )}
                               {/* Available agents to add */}
@@ -3401,24 +3782,37 @@ export function ChatSettingsDrawer({
                             >
                               {activeCustom.length > 0 && (
                                 <div className="flex flex-col gap-1 mb-1.5">
-                                  {activeCustom.map((agent) => (
-                                    <div
-                                      key={agent.id}
-                                      className="flex items-center gap-2.5 rounded-lg bg-[var(--primary)]/10 px-3 py-2 ring-1 ring-[var(--primary)]/30"
-                                    >
-                                      <Sparkles size="0.875rem" className="text-[var(--primary)]" />
-                                      <div className="flex-1 min-w-0">
-                                        <span className="block truncate text-xs">{agent.name}</span>
-                                      </div>
-                                      <button
-                                        onClick={() => toggleAgent(agent.id)}
-                                        className="flex h-5 w-5 items-center justify-center rounded-md text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)]"
-                                        title="Remove from chat"
+                                  {activeCustom.map((agent) => {
+                                    const tokenEst = agentLoadCost.tokensByType.get(agent.id);
+                                    return (
+                                      <div
+                                        key={agent.id}
+                                        className="flex items-center gap-2.5 rounded-lg bg-[var(--primary)]/10 px-3 py-2 ring-1 ring-[var(--primary)]/30"
                                       >
-                                        <Trash2 size="0.6875rem" />
-                                      </button>
-                                    </div>
-                                  ))}
+                                        <Sparkles size="0.875rem" className="text-[var(--primary)]" />
+                                        <div className="flex-1 min-w-0">
+                                          <span className="block truncate text-xs">{agent.name}</span>
+                                        </div>
+                                        {tokenEst != null ? (
+                                          <span
+                                            className="shrink-0 tabular-nums text-[0.625rem] text-[var(--muted-foreground)]"
+                                            title={`~${tokenEst.toLocaleString()} tokens of agent instructions (estimated)`}
+                                          >
+                                            ~{tokenEst.toLocaleString()}
+                                          </span>
+                                        ) : null}
+                                        <button
+                                          onClick={() => {
+                                            void toggleAgent(agent.id);
+                                          }}
+                                          className="flex h-5 w-5 items-center justify-center rounded-md text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)]"
+                                          title="Remove from chat"
+                                        >
+                                          <Trash2 size="0.6875rem" />
+                                        </button>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               )}
                               {inactiveCustom.length > 0 && (
@@ -4041,6 +4435,18 @@ export function ChatSettingsDrawer({
               )}
             </div>
           </Section>
+
+          {/* Impersonate (global settings applied to /impersonate generations) */}
+          <Section
+            label="Impersonate"
+            icon={<Drama size="0.875rem" />}
+            help="Global settings applied to every /impersonate generation across all chats."
+          >
+            <ImpersonateSettingsContent
+              presets={(presets ?? []) as Array<{ id: string; name: string }>}
+              connections={textConnectionsList}
+            />
+          </Section>
         </div>
       </div>
 
@@ -4652,6 +5058,149 @@ function AdvancedParametersSection({
         onChange={setPromptDraft}
         placeholder="Enter your custom system prompt..."
       />
+    </div>
+  );
+}
+
+// ── Impersonate settings content (rendered inside an Impersonate Section) ──
+function ImpersonateSettingsContent({
+  presets,
+  connections,
+}: {
+  presets: Array<{ id: string; name: string }>;
+  connections: Array<{ id: string; name: string }>;
+}) {
+  const promptTemplate = useUIStore((s) => s.impersonatePromptTemplate);
+  const setPromptTemplate = useUIStore((s) => s.setImpersonatePromptTemplate);
+  const showQuickButton = useUIStore((s) => s.impersonateShowQuickButton);
+  const setShowQuickButton = useUIStore((s) => s.setImpersonateShowQuickButton);
+  const presetId = useUIStore((s) => s.impersonatePresetId);
+  const setPresetId = useUIStore((s) => s.setImpersonatePresetId);
+  const connectionId = useUIStore((s) => s.impersonateConnectionId);
+  const setConnectionId = useUIStore((s) => s.setImpersonateConnectionId);
+  const blockAgents = useUIStore((s) => s.impersonateBlockAgents);
+  const setBlockAgents = useUIStore((s) => s.setImpersonateBlockAgents);
+  const hasPromptTemplate = promptTemplate.trim().length > 0;
+
+  const [defaultOpen, setDefaultOpen] = useState(false);
+
+  return (
+    <div className="space-y-2.5">
+      <div className="space-y-1">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="text-xs font-semibold">Prompt Template</span>
+            <HelpTooltip text="Optional global instruction sent to the model when you /impersonate. Leave empty to use the chat-specific prompt, or the built-in default if that chat has none. Macros like {{user}}, {{persona_description}} and {{impersonate_direction}} are replaced before sending." />
+          </div>
+          <span className="shrink-0 text-[0.625rem] text-[var(--muted-foreground)]/80">
+            {hasPromptTemplate ? "Custom" : "Using chat/built-in default"}
+          </span>
+        </div>
+        <textarea
+          value={promptTemplate}
+          onChange={(e) => setPromptTemplate(e.target.value)}
+          placeholder="Empty = use chat/built-in default"
+          rows={4}
+          className="min-h-20 w-full resize-y rounded-lg bg-[var(--secondary)] px-3 py-1.5 font-mono text-xs leading-relaxed outline-none ring-1 ring-transparent transition-shadow focus:ring-[var(--primary)]/40"
+        />
+        <div className="flex items-center justify-between gap-2">
+          <button
+            onClick={() => setDefaultOpen((v) => !v)}
+            className="flex items-center gap-1 rounded-md px-1 py-0.5 text-[0.625rem] font-medium text-[var(--muted-foreground)] transition-colors hover:bg-[var(--secondary)]/70 hover:text-[var(--foreground)]"
+          >
+            {defaultOpen ? <ChevronDown size="0.6875rem" /> : <ChevronRight size="0.6875rem" />}
+            Built-in default
+          </button>
+          {hasPromptTemplate ? (
+            <button
+              onClick={() => setPromptTemplate("")}
+              className="flex items-center gap-1 rounded-md bg-[var(--secondary)] px-2 py-0.5 text-[0.625rem] text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+              title="Reset to default"
+            >
+              <RotateCcw size="0.625rem" />
+              Reset
+            </button>
+          ) : (
+            <span className="text-[0.625rem] text-[var(--muted-foreground)]/80">Using chat/built-in default</span>
+          )}
+        </div>
+        {defaultOpen && (
+          <pre className="m-0 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-[var(--secondary)]/40 px-3 py-2 font-mono text-[0.625rem] leading-relaxed text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
+            {DEFAULT_IMPERSONATE_PROMPT}
+          </pre>
+        )}
+      </div>
+
+      <div className="grid gap-x-2 gap-y-1.5 sm:grid-cols-[minmax(7.5rem,1fr)_8.75rem]">
+        <label className="order-1 space-y-1 rounded-lg bg-[var(--secondary)]/25 px-3 py-1.5 ring-1 ring-[var(--border)]">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[0.6875rem] font-semibold">Preset</span>
+            <HelpTooltip text="Use a specific prompt preset for roleplay impersonate generations only. Conversation mode does not use prompt presets. Falls back to the chat's preset when set to 'Use chat default'." />
+          </div>
+          <select
+            value={presetId ?? ""}
+            onChange={(e) => setPresetId(e.target.value || null)}
+            className="w-full rounded-lg bg-[var(--secondary)] px-2.5 py-1.5 text-xs outline-none ring-1 ring-transparent transition-shadow focus:ring-[var(--primary)]/40"
+          >
+            <option value="">Use chat default</option>
+            {presets.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="order-3 space-y-1 rounded-lg bg-[var(--secondary)]/25 px-3 py-1.5 ring-1 ring-[var(--border)] sm:order-3">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[0.6875rem] font-semibold">Connection</span>
+            <HelpTooltip text="Use a specific connection (model/provider) for impersonate generations only. Useful for routing impersonate to a cheaper or faster model." />
+          </div>
+          <select
+            value={connectionId ?? ""}
+            onChange={(e) => setConnectionId(e.target.value || null)}
+            className="w-full rounded-lg bg-[var(--secondary)] px-2.5 py-1.5 text-xs outline-none ring-1 ring-transparent transition-shadow focus:ring-[var(--primary)]/40"
+          >
+            <option value="">Use chat default</option>
+            <option value="random">Random</option>
+            {connections.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="order-2 flex min-h-[2.875rem] min-w-0 items-center justify-between gap-1.5 rounded-lg bg-[var(--secondary)]/25 px-2.5 py-1.5 text-xs font-semibold ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--accent)]/40 sm:order-2">
+          <span className="min-w-0">Quick button</span>
+          <span className="flex shrink-0 items-center gap-1.5">
+            <input
+              type="checkbox"
+              checked={showQuickButton}
+              onChange={(e) => setShowQuickButton(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-[var(--border)] accent-[var(--primary)]"
+            />
+            <span onClick={(e) => e.preventDefault()}>
+              <HelpTooltip text="Show a one-click impersonate button in the chat input toolbar. When pressed with text in the input, it sends that text as the impersonate direction." />
+            </span>
+          </span>
+        </label>
+
+        <label className="order-4 flex min-h-[2.875rem] min-w-0 items-center justify-between gap-1.5 rounded-lg bg-[var(--secondary)]/25 px-2.5 py-1.5 text-xs font-semibold ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--accent)]/40">
+          <span className="min-w-0">Skip agents</span>
+          <span className="flex shrink-0 items-center gap-1.5">
+            <input
+              type="checkbox"
+              checked={blockAgents}
+              onChange={(e) => setBlockAgents(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-[var(--border)] accent-[var(--primary)]"
+            />
+            <span onClick={(e) => e.preventDefault()}>
+              <HelpTooltip text="When enabled, the agent pipeline (trackers, lorebook routers, etc.) is suppressed during impersonate so generations stay fast and don't trigger world-state mutations." />
+            </span>
+          </span>
+        </label>
+      </div>
     </div>
   );
 }

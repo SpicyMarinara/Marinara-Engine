@@ -81,6 +81,28 @@ const parseMetadataRecord = (raw: unknown): Record<string, any> => {
   return typeof raw === "object" ? (raw as Record<string, any>) : {};
 };
 
+const INTUITIVE_SWIPE_MIN_DISTANCE = 56;
+const INTUITIVE_SWIPE_MAX_VERTICAL_DRIFT = 44;
+
+const shouldIgnoreIntuitiveSwipeTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof Element)) return false;
+  return Boolean(
+    target.closest(
+      [
+        "input",
+        "textarea",
+        "select",
+        "button",
+        "a",
+        '[contenteditable="true"]',
+        '[role="button"]',
+        "[data-radix-popper-content-wrapper]",
+        "[data-no-intuitive-swipe]",
+      ].join(", "),
+    ),
+  );
+};
+
 const ChatConversationSurface = lazy(async () => {
   const module = await import("./ChatConversationSurface");
   return { default: module.ChatConversationSurface };
@@ -109,10 +131,13 @@ export function ChatArea() {
   const messagesPerPage = useUIStore((s) => s.messagesPerPage);
   const centerCompact = useUIStore((s) => s.centerCompact);
   const guideGenerations = useUIStore((s) => s.guideGenerations);
+  const intuitiveSwipeNavigation = useUIStore((s) => s.intuitiveSwipeNavigation);
+  const intuitiveSwipeRerollLatest = useUIStore((s) => s.intuitiveSwipeRerollLatest);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const prevScrollHeightRef = useRef(0);
   const isLoadingMoreRef = useRef(false);
+  const intuitiveTouchStartRef = useRef<{ x: number; y: number; target: EventTarget | null } | null>(null);
   // Tracks whether the initial load stagger animation has played.
   // After the first render with messages, new/re-mounted messages
   // skip the entry animation to avoid a visible flash on refetch.
@@ -683,11 +708,12 @@ export function ChatArea() {
   }, [messages]);
 
   const handleRegenerate = useCallback(
-    async (messageId: string) => {
+    async (messageId: string, options?: { skipTouchConfirm?: boolean }) => {
       if (!activeChatId || isStreaming) return;
       // On touch devices, confirm to prevent accidental taps
       if (
-        matchMedia("(pointer: coarse)").matches &&
+        !options?.skipTouchConfirm &&
+        window.matchMedia("(pointer: coarse)").matches &&
         !(await showConfirmDialog({
           title: "Regenerate Message",
           message: "Regenerate this message as a new swipe?",
@@ -823,6 +849,138 @@ export function ChatArea() {
     }
     return null;
   }, [messages]);
+
+  const latestAssistantMessageForSwipes = useMemo(() => {
+    if (!messages) return null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const candidate = messages[i]!;
+      if (candidate.role === "assistant") return candidate;
+    }
+    return null;
+  }, [messages]);
+
+  const intuitiveSwipeBlocked =
+    settingsOpen ||
+    filesOpen ||
+    galleryOpen ||
+    wizardOpen ||
+    spriteArrangeMode ||
+    multiSelectMode ||
+    Boolean(deleteDialogMessageId) ||
+    Boolean(peekPromptData) ||
+    encounterActive;
+
+  const navigateLatestSwipe = useCallback(
+    (direction: -1 | 1) => {
+      const supportsMode = chatMode === "conversation" || isRoleplay;
+      if (!supportsMode || !intuitiveSwipeNavigation || intuitiveSwipeBlocked) return false;
+      if (!activeChatId || isStreaming || agentProcessing || !latestAssistantMessageForSwipes) return false;
+
+      const swipeCount = latestAssistantMessageForSwipes.swipeCount ?? 1;
+      const activeIndex = latestAssistantMessageForSwipes.activeSwipeIndex ?? 0;
+
+      if (direction < 0) {
+        if (activeIndex <= 0) return false;
+        handleSetActiveSwipe(latestAssistantMessageForSwipes.id, activeIndex - 1);
+        return true;
+      }
+
+      if (activeIndex < swipeCount - 1) {
+        handleSetActiveSwipe(latestAssistantMessageForSwipes.id, activeIndex + 1);
+        return true;
+      }
+
+      if (!intuitiveSwipeRerollLatest) return false;
+      void handleRegenerate(latestAssistantMessageForSwipes.id, { skipTouchConfirm: true });
+      return true;
+    },
+    [
+      activeChatId,
+      agentProcessing,
+      chatMode,
+      handleRegenerate,
+      handleSetActiveSwipe,
+      intuitiveSwipeBlocked,
+      intuitiveSwipeNavigation,
+      intuitiveSwipeRerollLatest,
+      isRoleplay,
+      isStreaming,
+      latestAssistantMessageForSwipes,
+    ],
+  );
+
+  useEffect(() => {
+    if (!intuitiveSwipeNavigation || intuitiveSwipeBlocked) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      if (shouldIgnoreIntuitiveSwipeTarget(event.target)) return;
+
+      if (event.repeat && event.key === "ArrowRight" && latestAssistantMessageForSwipes) {
+        const swipeCount = latestAssistantMessageForSwipes.swipeCount ?? 1;
+        const activeIndex = latestAssistantMessageForSwipes.activeSwipeIndex ?? 0;
+        if (activeIndex >= swipeCount - 1) return;
+      }
+
+      const handled = navigateLatestSwipe(event.key === "ArrowLeft" ? -1 : 1);
+      if (handled) event.preventDefault();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [intuitiveSwipeBlocked, intuitiveSwipeNavigation, latestAssistantMessageForSwipes, navigateLatestSwipe]);
+
+  useEffect(() => {
+    if (!intuitiveSwipeNavigation || intuitiveSwipeBlocked) return;
+
+    const handleTouchStart = (event: TouchEvent) => {
+      const surface = scrollRef.current;
+      const target = event.target;
+      if (
+        event.touches.length !== 1 ||
+        !surface ||
+        !(target instanceof Node) ||
+        !surface.contains(target) ||
+        shouldIgnoreIntuitiveSwipeTarget(target)
+      ) {
+        intuitiveTouchStartRef.current = null;
+        return;
+      }
+      const touch = event.touches.item(0);
+      if (!touch) return;
+      intuitiveTouchStartRef.current = {
+        x: touch.clientX,
+        y: touch.clientY,
+        target: event.target,
+      };
+    };
+
+    const handleTouchEnd = (event: TouchEvent) => {
+      const start = intuitiveTouchStartRef.current;
+      intuitiveTouchStartRef.current = null;
+      const touch = event.changedTouches.item(0);
+      if (!start || !touch || shouldIgnoreIntuitiveSwipeTarget(start.target)) return;
+
+      const deltaX = touch.clientX - start.x;
+      const deltaY = touch.clientY - start.y;
+      const absX = Math.abs(deltaX);
+      const absY = Math.abs(deltaY);
+      if (absX < INTUITIVE_SWIPE_MIN_DISTANCE || absY > INTUITIVE_SWIPE_MAX_VERTICAL_DRIFT || absX < absY * 1.35) {
+        return;
+      }
+
+      const handled = navigateLatestSwipe(deltaX < 0 ? 1 : -1);
+      if (handled) event.preventDefault();
+    };
+
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchend", handleTouchEnd, { passive: false });
+    return () => {
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, [intuitiveSwipeBlocked, intuitiveSwipeNavigation, navigateLatestSwipe]);
 
   useEffect(() => {
     if (chat) useChatStore.getState().setActiveChat(chat);
@@ -1195,7 +1353,7 @@ export function ChatArea() {
 
               {/* Special thanks */}
               <p className="max-w-[42rem] px-1 text-center text-[0.625rem] leading-snug text-[var(--muted-foreground)]/40 sm:max-w-[46rem]">
-                Special thanks to Jorge, Cha1latte, Javedz678, Teuku, Shadota, Romu, Mm14141, MagicGoddess, John,
+                Special thanks to Xel, Jorge, Cha1latte, Javedz678, Teuku, Shadota, Romu, Mm14141, MagicGoddess, John,
                 Pwildani, Romu, Felor, MuniMuni, Guybrush01, Joshellis625, LukaTheHero, Coxde, JorgeLTE, Seele The Seal
                 King, Loungemeister, Kale, Tabris, GREGOR OVECH, Coins, Tacoman, Jorge, Promansis, Kitsumiro, Sheep,
                 Pod042, Prolix, PlutoMayhem, Mezzeh, Kuc0, Exalted, Yang Best Girl, MidnightSleeper, Geechan,

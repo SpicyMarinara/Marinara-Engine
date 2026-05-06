@@ -2,12 +2,12 @@
 // Routes: Connections
 // ──────────────────────────────────────────────
 import type { FastifyInstance } from "fastify";
-import { createConnectionSchema, inferImageSource } from "@marinara-engine/shared";
+import { MODEL_LISTS, createConnectionSchema, inferImageSource } from "@marinara-engine/shared";
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
 import { createLLMProvider } from "../services/llm/provider-registry.js";
 import { resolveConnectionImageDefaults } from "../services/image/image-generation-defaults.js";
 import { isImageLocalUrlsEnabled, isProviderLocalUrlsEnabled } from "../config/runtime-config.js";
-import { safeFetch } from "../utils/security.js";
+import { normalizeLoopbackUrl, safeFetch } from "../utils/security.js";
 
 function resolveImageGenerationSource(conn: Record<string, unknown>, baseUrl: string): string {
   const explicitSource = typeof conn.imageGenerationSource === "string" ? conn.imageGenerationSource : "";
@@ -26,6 +26,48 @@ function localUrlPolicyForProvider(provider: string, imageSource: string) {
     allowLoopback: true,
     allowedProtocols: ["https:", "http:"],
   };
+}
+
+function normalizeConnectionTestBaseUrl(baseUrl: string, provider: string): string {
+  if (provider !== "image_generation") return baseUrl;
+  try {
+    return normalizeLoopbackUrl(baseUrl).replace(/\/+$/, "");
+  } catch {
+    return baseUrl;
+  }
+}
+
+function buildStabilityUrl(baseUrl: string, targetPath: string): string {
+  try {
+    const url = new URL(baseUrl);
+    const parts = url.pathname.split("/").filter(Boolean);
+    const versionIndex = parts.findIndex((part) => part === "v1" || part === "v2beta");
+    const prefix = versionIndex >= 0 ? parts.slice(0, versionIndex) : parts;
+    url.pathname = `/${[...prefix, ...targetPath.split("/").filter(Boolean)].join("/")}`;
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return `${baseUrl.replace(/\/+$/, "")}/${targetPath.replace(/^\/+/, "")}`;
+  }
+}
+
+function isStabilityV1Base(baseUrl: string): boolean {
+  try {
+    const parts = new URL(baseUrl).pathname.split("/").filter(Boolean);
+    return parts.includes("v1") && !parts.includes("v2beta");
+  } catch {
+    return /\/v1(?:\/|$)/i.test(baseUrl) && !/\/v2beta(?:\/|$)/i.test(baseUrl);
+  }
+}
+
+function knownStabilityImageModels() {
+  return MODEL_LISTS.image_generation
+    .filter((model) => {
+      const id = model.id.toLowerCase();
+      return id.startsWith("sd3") || id.startsWith("stable-image");
+    })
+    .map((model) => ({ id: model.id, name: model.name }));
 }
 
 export async function connectionsRoutes(app: FastifyInstance) {
@@ -108,7 +150,7 @@ export async function connectionsRoutes(app: FastifyInstance) {
       // Simple models list fetch to verify the key works
       const { PROVIDERS } = await import("@marinara-engine/shared");
       const provider = PROVIDERS[conn.provider as keyof typeof PROVIDERS];
-      const baseUrl = conn.baseUrl || provider?.defaultBaseUrl || "";
+      let baseUrl = conn.baseUrl || provider?.defaultBaseUrl || "";
 
       if (!baseUrl) {
         return {
@@ -128,11 +170,15 @@ export async function connectionsRoutes(app: FastifyInstance) {
 
       const imageSource =
         conn.provider === "image_generation" ? resolveImageGenerationSource(conn as any, baseUrl) : "";
+      baseUrl = normalizeConnectionTestBaseUrl(baseUrl, conn.provider);
       // image_generation has no standard modelsEndpoint — use provider-specific checks
       let testUrl: string;
       if (conn.provider === "image_generation" && imageSource === "novelai") {
         // NovelAI: validate the API key via the user subscription endpoint
         testUrl = "https://api.novelai.net/user/subscription";
+      } else if (conn.provider === "image_generation" && imageSource === "stability") {
+        // Stability's generation endpoints live under v2beta, but account/key checks are v1.
+        testUrl = buildStabilityUrl(baseUrl, "v1/user/account");
       } else if (conn.provider === "image_generation" && imageSource === "comfyui") {
         // ComfyUI: ping the system stats endpoint
         testUrl = `${baseUrl}/system_stats`;
@@ -187,7 +233,7 @@ export async function connectionsRoutes(app: FastifyInstance) {
 
       const { PROVIDERS } = await import("@marinara-engine/shared");
       const provider = PROVIDERS[conn.provider as keyof typeof PROVIDERS];
-      const baseUrl = conn.baseUrl || provider?.defaultBaseUrl || "";
+      let baseUrl = conn.baseUrl || provider?.defaultBaseUrl || "";
 
       if (!baseUrl) {
         return reply.status(400).send({ error: "No base URL configured" });
@@ -209,6 +255,7 @@ export async function connectionsRoutes(app: FastifyInstance) {
       // ── Special handling for local image gen services ──
       const imageSource =
         conn.provider === "image_generation" ? resolveImageGenerationSource(conn as any, baseUrl) : "";
+      baseUrl = normalizeConnectionTestBaseUrl(baseUrl, conn.provider);
       const lowerBase = baseUrl.toLowerCase();
       const sanitizeProviderBody = (body: string): string => {
         if (body.includes("<html") || body.includes("<!DOCTYPE")) {
@@ -216,6 +263,63 @@ export async function connectionsRoutes(app: FastifyInstance) {
         }
         return body.slice(0, 300);
       };
+
+      // Stability AI: v2beta has task-specific generation endpoints, not /models.
+      // Validate the key via v1 account, then either fetch legacy v1 engines or return the curated v2beta list.
+      if (conn.provider === "image_generation" && imageSource === "stability") {
+        const accountRes = await safeFetch(buildStabilityUrl(baseUrl, "v1/user/account"), {
+          headers,
+          policy: localUrlPolicyForProvider(conn.provider, imageSource),
+          maxResponseBytes: 2 * 1024 * 1024,
+        });
+        if (!accountRes.ok) {
+          const body = await accountRes.text();
+          return reply.status(502).send({
+            error: `Stability AI returned ${accountRes.status}: ${sanitizeProviderBody(body)}`,
+          });
+        }
+
+        if (isStabilityV1Base(baseUrl)) {
+          const res = await safeFetch(buildStabilityUrl(baseUrl, "v1/engines/list"), {
+            headers,
+            policy: localUrlPolicyForProvider(conn.provider, imageSource),
+            maxResponseBytes: 5 * 1024 * 1024,
+          });
+          if (!res.ok) {
+            const body = await res.text();
+            return reply.status(502).send({
+              error: `Stability AI returned ${res.status}: ${sanitizeProviderBody(body)}`,
+            });
+          }
+
+          const text = await res.text();
+          let json: unknown;
+          try {
+            json = JSON.parse(text);
+          } catch {
+            return reply.status(502).send({
+              error: `Failed to fetch models: ${sanitizeProviderBody(text)}`,
+            });
+          }
+
+          const engines = Array.isArray(json)
+            ? json
+            : Array.isArray((json as { engines?: unknown }).engines)
+              ? (json as { engines: unknown[] }).engines
+              : [];
+          const models = engines
+            .map((engine) => {
+              if (!engine || typeof engine !== "object") return null;
+              const record = engine as { id?: string; name?: string; description?: string };
+              const id = record.id ?? "";
+              return id ? { id, name: record.name ?? record.description ?? id } : null;
+            })
+            .filter((model): model is { id: string; name: string } => Boolean(model));
+          return { models: models.length ? models : knownStabilityImageModels() };
+        }
+
+        return { models: knownStabilityImageModels() };
+      }
 
       // ComfyUI: fetch checkpoints from object_info
       if (conn.provider === "image_generation" && imageSource === "comfyui") {

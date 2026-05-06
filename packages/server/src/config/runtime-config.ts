@@ -18,13 +18,23 @@ const DEFAULT_DATABASE_PATH = resolve(DEFAULT_DATA_DIR, DEFAULT_DATABASE_FILE);
 const REGRESSION_DATABASE_PATH = resolve(REGRESSION_DATA_DIR, DEFAULT_DATABASE_FILE);
 
 let envLoaded = false;
+// Keys that the .env file currently contributes to process.env. Tracked so a
+// reload can remove keys that were deleted from the file.
+let envFileKeys = new Set<string>();
+
+export function getEnvFilePath() {
+  return resolve(MONOREPO_ROOT, ".env");
+}
 
 export function loadRuntimeEnv() {
   if (envLoaded) return;
 
-  const envPath = resolve(MONOREPO_ROOT, ".env");
+  const envPath = getEnvFilePath();
   if (existsSync(envPath)) {
-    dotenv.config({ path: envPath });
+    const result = dotenv.config({ path: envPath });
+    if (result.parsed) {
+      envFileKeys = new Set(Object.keys(result.parsed));
+    }
   } else {
     dotenv.config();
   }
@@ -33,6 +43,67 @@ export function loadRuntimeEnv() {
 }
 
 loadRuntimeEnv();
+
+export interface EnvReloadResult {
+  added: string[];
+  updated: string[];
+  removed: string[];
+  unchanged: string[];
+}
+
+/**
+ * Re-read the .env file and propagate changes to process.env with override
+ * semantics. Keys removed from the file are deleted from process.env so that
+ * unsetting a value (e.g. clearing BASIC_AUTH_PASS) takes effect immediately.
+ *
+ * Returns a diff so callers can log or react to specific changes. Throws when
+ * the .env file is missing or unreadable so the caller can decide how to
+ * surface the failure.
+ */
+export function reloadRuntimeEnv(): EnvReloadResult {
+  const envPath = getEnvFilePath();
+  if (!existsSync(envPath)) {
+    // No .env to read — clear any keys we previously set from a now-missing file.
+    const removed = [...envFileKeys];
+    for (const key of removed) {
+      delete process.env[key];
+    }
+    envFileKeys = new Set();
+    return { added: [], updated: [], removed, unchanged: [] };
+  }
+
+  const fileContent = readFileSync(envPath);
+  const parsed = dotenv.parse(fileContent);
+  const newKeys = new Set(Object.keys(parsed));
+
+  const added: string[] = [];
+  const updated: string[] = [];
+  const unchanged: string[] = [];
+  const removed: string[] = [];
+
+  for (const [key, value] of Object.entries(parsed)) {
+    const previous = process.env[key];
+    if (!envFileKeys.has(key)) {
+      added.push(key);
+      process.env[key] = value;
+    } else if (previous !== value) {
+      updated.push(key);
+      process.env[key] = value;
+    } else {
+      unchanged.push(key);
+    }
+  }
+
+  for (const key of envFileKeys) {
+    if (!newKeys.has(key)) {
+      removed.push(key);
+      delete process.env[key];
+    }
+  }
+
+  envFileKeys = newKeys;
+  return { added, updated, removed, unchanged };
+}
 
 function normalizeEnvValue(value: string | undefined | null) {
   const trimmed = value?.trim();
@@ -196,6 +267,44 @@ export function isUnauthenticatedPrivateNetworkAllowed() {
  */
 export function getTrustedPrivateNetworksOverride() {
   return normalizeEnvValue(process.env.TRUSTED_PRIVATE_NETWORKS);
+}
+
+/**
+ * Trust traffic from the Tailscale CGNAT range (100.64.0.0/10) unconditionally.
+ * When enabled, those clients skip both the IP allowlist and Basic Auth, the
+ * same way loopback does.
+ *
+ * Default: ON. Joining a tailnet already requires authentication via the
+ * operator's Tailscale account, which is a stronger trust signal than "any
+ * LAN." Set BYPASS_AUTH_TAILSCALE=false to require Basic Auth from your
+ * Tailnet too.
+ *
+ * Caveat: if your server's public connection is itself behind a CGNAT'd ISP
+ * that uses 100.64.0.0/10, an internet client can appear with a source IP in
+ * this range. Bind HOST to your tailscale0 IP (or use a host firewall) for
+ * hard isolation when that risk applies, or set the flag to false.
+ */
+export function isTailscaleBypassEnabled() {
+  // Default-on: only an explicit disable flag turns it off.
+  return !isDisabledFlag(process.env.BYPASS_AUTH_TAILSCALE);
+}
+
+/**
+ * Trust traffic from the Docker bridge range (172.16.0.0/12) unconditionally.
+ * When enabled, those clients skip both the IP allowlist and Basic Auth.
+ *
+ * Default: ON. Docker bridge IPs are unreachable from outside the host —
+ * external traffic is NAT'd through the bridge gateway, so a request that
+ * actually arrives with a 172.16.0.0/12 source IP genuinely came from a
+ * container on this host. Set BYPASS_AUTH_DOCKER=false to require auth from
+ * containers as well.
+ *
+ * Caveat: 172.16.0.0/12 also covers some private LAN deployments. If your
+ * non-Docker LAN uses 172.16.x.x or 172.20.x.x addresses, set the flag to
+ * false.
+ */
+export function isDockerBypassEnabled() {
+  return !isDisabledFlag(process.env.BYPASS_AUTH_DOCKER);
 }
 
 export function isDebugAgentsEnabled() {

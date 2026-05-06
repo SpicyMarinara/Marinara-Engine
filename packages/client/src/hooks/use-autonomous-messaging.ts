@@ -51,7 +51,10 @@ export function useAutonomousMessaging(
   const recordUserActivity = useCallback(async () => {
     if (!chatId) return;
     try {
-      await api.post("/conversation/activity/user", { chatId });
+      await api.post("/conversation/activity/user", {
+        chatId,
+        preserveGenerationInProgress: useChatStore.getState().abortControllers.has(chatId),
+      });
     } catch {
       // non-critical
     }

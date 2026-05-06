@@ -41,6 +41,7 @@ async function buildHookApp() {
   });
   app.get("/api/headers", async () => ({ ok: true }));
   app.post("/api/haptic/command", async () => ({ ok: true }));
+  app.get("/", async () => "ok");
   await app.ready();
   return app;
 }
@@ -63,6 +64,63 @@ test("non-loopback requests fail closed when Basic Auth is not configured", asyn
           remoteAddress: "192.168.1.50",
         });
         assert.equal(res.statusCode, 403);
+      } finally {
+        await app.close();
+      }
+    },
+  ));
+
+test("browser navigation hitting the lockdown gets the friendly HTML page", async () =>
+  withEnv(
+    {
+      BASIC_AUTH_USER: undefined,
+      BASIC_AUTH_PASS: undefined,
+      ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK: undefined,
+      ALLOW_UNAUTHENTICATED_REMOTE: undefined,
+      IP_ALLOWLIST: undefined,
+    },
+    async () => {
+      const app = await buildHookApp();
+      try {
+        const res = await app.inject({
+          method: "GET",
+          url: "/",
+          remoteAddress: "192.168.1.50",
+          headers: { accept: "text/html,application/xhtml+xml" },
+        });
+        assert.equal(res.statusCode, 403);
+        assert.match(res.headers["content-type"] ?? "", /text\/html/);
+        assert.match(res.body, /<!doctype html>/i);
+        assert.match(res.body, /BASIC_AUTH_USER/);
+        assert.match(res.body, /IP_ALLOWLIST=192\.168\.1\.50/);
+      } finally {
+        await app.close();
+      }
+    },
+  ));
+
+test("non-browser clients still get JSON 403 from the lockdown", async () =>
+  withEnv(
+    {
+      BASIC_AUTH_USER: undefined,
+      BASIC_AUTH_PASS: undefined,
+      ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK: undefined,
+      ALLOW_UNAUTHENTICATED_REMOTE: undefined,
+      IP_ALLOWLIST: undefined,
+    },
+    async () => {
+      const app = await buildHookApp();
+      try {
+        const res = await app.inject({
+          method: "GET",
+          url: "/api/headers",
+          remoteAddress: "192.168.1.50",
+          headers: { accept: "application/json" },
+        });
+        assert.equal(res.statusCode, 403);
+        assert.match(res.headers["content-type"] ?? "", /application\/json/);
+        const body = JSON.parse(res.body) as { error: string };
+        assert.equal(body.error, "Forbidden");
       } finally {
         await app.close();
       }
@@ -111,8 +169,74 @@ test("CSRF protection blocks cross-site unsafe API requests", async () =>
     }
   }));
 
-test("same-origin unsafe API requests require the CSRF header", async () =>
+test("same-origin unsafe API requests allow stale clients without the CSRF header", async () =>
   withEnv({}, async () => {
+    const app = await buildHookApp();
+    try {
+      const staleClient = await app.inject({
+        method: "POST",
+        url: "/api/mutate",
+        remoteAddress: "127.0.0.1",
+        headers: {
+          host: "127.0.0.1:7860",
+          origin: "http://127.0.0.1:7860",
+          "sec-fetch-site": "same-origin",
+        },
+      });
+      assert.equal(staleClient.statusCode, 200);
+
+      const allowed = await app.inject({
+        method: "POST",
+        url: "/api/mutate",
+        remoteAddress: "127.0.0.1",
+        headers: {
+          host: "127.0.0.1:7860",
+          origin: "http://127.0.0.1:7860",
+          "sec-fetch-site": "same-origin",
+          [CSRF_HEADER]: CSRF_HEADER_VALUE,
+        },
+      });
+      assert.equal(allowed.statusCode, 200);
+    } finally {
+      await app.close();
+    }
+  }));
+
+test("same-site unsafe API requests still require the CSRF header", async () =>
+  withEnv({ CSRF_TRUSTED_ORIGINS: "http://app.example.test" }, async () => {
+    const app = await buildHookApp();
+    try {
+      const missing = await app.inject({
+        method: "POST",
+        url: "/api/mutate",
+        remoteAddress: "127.0.0.1",
+        headers: {
+          host: "app.example.test",
+          origin: "http://app.example.test",
+          "sec-fetch-site": "same-site",
+        },
+      });
+      assert.equal(missing.statusCode, 403);
+
+      const allowed = await app.inject({
+        method: "POST",
+        url: "/api/mutate",
+        remoteAddress: "127.0.0.1",
+        headers: {
+          host: "app.example.test",
+          origin: "http://app.example.test",
+          "sec-fetch-site": "same-site",
+          [CSRF_HEADER]: CSRF_HEADER_VALUE,
+        },
+      });
+      assert.equal(allowed.statusCode, 200);
+    } finally {
+      await app.close();
+    }
+  }));
+
+test("trusted cross-origin unsafe API requests without fetch metadata require the CSRF header", async () =>
+  withEnv({ CSRF_TRUSTED_ORIGINS: "https://trusted.example.test" }, async () => {
     const app = await buildHookApp();
     try {
       const missing = await app.inject({
@@ -121,8 +245,7 @@ test("same-origin unsafe API requests require the CSRF header", async () =>
         remoteAddress: "127.0.0.1",
         headers: {
           host: "127.0.0.1:7860",
-          origin: "http://127.0.0.1:7860",
-          "sec-fetch-site": "same-origin",
+          origin: "https://trusted.example.test",
         },
       });
       assert.equal(missing.statusCode, 403);
@@ -133,8 +256,7 @@ test("same-origin unsafe API requests require the CSRF header", async () =>
         remoteAddress: "127.0.0.1",
         headers: {
           host: "127.0.0.1:7860",
-          origin: "http://127.0.0.1:7860",
-          "sec-fetch-site": "same-origin",
+          origin: "https://trusted.example.test",
           [CSRF_HEADER]: CSRF_HEADER_VALUE,
         },
       });
@@ -358,7 +480,11 @@ test("security headers and route rate limits are applied", async () =>
     try {
       const headers = await app.inject({ method: "GET", url: "/api/headers", remoteAddress: "127.0.0.1" });
       assert.equal(headers.headers["x-content-type-options"], "nosniff");
-      assert.match(String(headers.headers["content-security-policy"]), /default-src 'self'/);
+      const csp = String(headers.headers["content-security-policy"]);
+      assert.match(csp, /default-src 'self'/);
+      assert.match(csp, /script-src 'self' blob:/);
+      assert.match(csp, /media-src 'self' blob:/);
+      assert.doesNotMatch(csp, /unsafe-eval/);
 
       let lastStatus = 0;
       for (let i = 0; i < 31; i += 1) {

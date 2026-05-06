@@ -11,7 +11,7 @@
 //
 // What presets DO NOT carry: per-chat identity (name, characters,
 // persona, group, sprites, scene prompt, summary, tags, ephemeral
-// lorebook overrides, connected chat link, folder/sort placement).
+// lorebook overrides, scene lifecycle state, connected chat link, folder/sort placement).
 
 import type { ChatMode, ChatMetadata } from "./chat.js";
 
@@ -49,7 +49,18 @@ export const CHAT_PRESET_EXCLUDED_METADATA_KEYS: readonly string[] = [
   "entryStateOverrides",
   "groupScenarioOverride",
   "groupScenarioText",
+  "sceneOriginChatId",
+  "sceneInitiatorCharId",
+  "sceneDescription",
+  "sceneScenario",
   "sceneSystemPrompt",
+  "sceneRating",
+  "sceneStatus",
+  "sceneConversationContext",
+  "sceneRelationshipHistory",
+  "sceneBackground",
+  "activeSceneChatId",
+  "sceneBusyCharIds",
   // Lorebooks are owned by the chat, never by the preset.
   "activeLorebookIds",
 ] as const;

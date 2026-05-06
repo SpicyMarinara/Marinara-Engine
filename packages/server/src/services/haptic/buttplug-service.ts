@@ -20,6 +20,11 @@ import type { HapticDevice, HapticCapability, HapticDeviceCommand, HapticStatus 
 
 const DEFAULT_SERVER_URL = "ws://127.0.0.1:12345";
 
+const POSITION_WITH_DURATION_OUTPUT =
+  (OutputType as unknown as Record<string, OutputType | undefined>).HwPositionWithDuration ??
+  (OutputType as unknown as Record<string, OutputType | undefined>).PositionWithDuration ??
+  null;
+
 /** OutputType values we map to capabilities. */
 const CAPABILITY_TYPES: Array<{ type: OutputType; cap: HapticCapability }> = [
   { type: OutputType.Vibrate, cap: "vibrate" },
@@ -28,8 +33,8 @@ const CAPABILITY_TYPES: Array<{ type: OutputType; cap: HapticCapability }> = [
   { type: OutputType.Constrict, cap: "constrict" },
   { type: OutputType.Inflate, cap: "inflate" },
   { type: OutputType.Position, cap: "position" },
-  { type: OutputType.PositionWithDuration, cap: "position" },
 ];
+if (POSITION_WITH_DURATION_OUTPUT) CAPABILITY_TYPES.push({ type: POSITION_WITH_DURATION_OUTPUT, cap: "position" });
 
 /** Map our action strings to buttplug OutputType. */
 const ACTION_TO_OUTPUT: Partial<Record<HapticDeviceCommand["action"], OutputType>> = {
@@ -200,7 +205,7 @@ class ButtplugService {
       try {
         if (action === "position") {
           const durationMs = Math.max(1, duration || 1) * 1000;
-          if (device.hasOutput(OutputType.PositionWithDuration)) {
+          if (POSITION_WITH_DURATION_OUTPUT && device.hasOutput(POSITION_WITH_DURATION_OUTPUT)) {
             await device.runOutput(DeviceOutput.PositionWithDuration.percent(intensity, durationMs));
             successfulTargets++;
           } else if (device.hasOutput(OutputType.Position)) {

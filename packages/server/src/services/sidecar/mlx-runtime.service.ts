@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from "child_process";
-import { existsSync, mkdirSync, rmSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import type { SidecarDownloadProgress, SidecarRuntimeInfo } from "@marinara-engine/shared";
 import { getDataDir } from "../../utils/data-dir.js";
@@ -12,11 +12,14 @@ const MLX_PYTHON_INSTALL_DIR = join(MLX_RUNTIME_DIR, "python");
 const MLX_PYTHON_BIN_DIR = join(MLX_RUNTIME_DIR, "python-bin");
 const MLX_VENV_DIR = join(MLX_RUNTIME_DIR, ".venv");
 const MLX_HF_HOME = join(MLX_RUNTIME_DIR, "hf-home");
+const MLX_LM_PACKAGE_STAMP_PATH = join(MLX_RUNTIME_DIR, "mlx-lm-package.txt");
 const UV_BIN = process.platform === "win32" ? join(MLX_UV_DIR, "uv.exe") : join(MLX_UV_DIR, "uv");
 const VENV_PYTHON =
   process.platform === "win32" ? join(MLX_VENV_DIR, "Scripts", "python.exe") : join(MLX_VENV_DIR, "bin", "python");
 const UV_INSTALLER_URL = "https://astral.sh/uv/install.sh";
 const PYTHON_VERSION = "3.12";
+// PyPI mlx-lm 0.31.3 lacks Gemma 4 model support, so the private MLX runtime uses upstream source.
+const MLX_LM_PACKAGE_SPEC = "mlx-lm @ https://github.com/ml-explore/mlx-lm/archive/refs/heads/main.zip";
 
 export interface MlxRuntimeInstall {
   backend: "mlx";
@@ -67,6 +70,28 @@ function readInstalledVersion(): string | null {
   }
 }
 
+function readInstalledPackageSpec(): string | null {
+  if (!existsSync(MLX_LM_PACKAGE_STAMP_PATH)) {
+    return null;
+  }
+
+  try {
+    const value = readFileSync(MLX_LM_PACKAGE_STAMP_PATH, "utf-8").trim();
+    return value || null;
+  } catch {
+    return null;
+  }
+}
+
+function isInstalledPackageCurrent(): boolean {
+  return readInstalledPackageSpec() === MLX_LM_PACKAGE_SPEC;
+}
+
+function writeInstalledPackageSpec(): void {
+  mkdirSync(MLX_RUNTIME_DIR, { recursive: true });
+  writeFileSync(MLX_LM_PACKAGE_STAMP_PATH, `${MLX_LM_PACKAGE_SPEC}\n`, "utf-8");
+}
+
 function buildInstallRecord(version: string): MlxRuntimeInstall {
   return {
     backend: "mlx",
@@ -88,9 +113,10 @@ class MlxRuntimeService {
 
   getStatus(): SidecarRuntimeInfo {
     const version = readInstalledVersion();
+    const current = version !== null && isInstalledPackageCurrent();
     return {
-      installed: version !== null,
-      build: version ? `mlx-lm ${version}` : null,
+      installed: current,
+      build: version ? `mlx-lm ${version}${current ? "" : " (runtime upgrade required)"}` : null,
       variant: isSupportedPlatform() ? "macos-arm64-mlx" : null,
       backend: "mlx",
       source: "bundled",
@@ -129,7 +155,7 @@ class MlxRuntimeService {
 
   async ensureInstalled(onProgress?: (progress: SidecarDownloadProgress) => void): Promise<MlxRuntimeInstall> {
     const installedVersion = readInstalledVersion();
-    if (installedVersion) {
+    if (installedVersion && isInstalledPackageCurrent()) {
       return buildInstallRecord(installedVersion);
     }
 
@@ -185,10 +211,11 @@ class MlxRuntimeService {
         env: this.getUvEnv(),
       });
       this.emitProgress(onProgress, "downloading", "MLX runtime dependencies");
-      await this.runCommand(UV_BIN, ["pip", "install", "--python", VENV_PYTHON, "mlx-lm"], {
+      await this.runCommand(UV_BIN, ["pip", "install", "--python", VENV_PYTHON, "--upgrade", MLX_LM_PACKAGE_SPEC], {
         cwd: MLX_RUNTIME_DIR,
         env: this.getUvEnv(),
       });
+      writeInstalledPackageSpec();
       this.emitProgress(onProgress, "downloading", "Verifying MLX runtime");
     } catch (error) {
       this.emitProgress(

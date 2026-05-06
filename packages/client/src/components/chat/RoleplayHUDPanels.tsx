@@ -62,6 +62,7 @@ function TrackerSectionRefresh({
   agentType: string;
   onRerunSingleTracker?: (agentType: string) => void;
   busy?: boolean;
+  /** Tooltip when hovering the refresh control */
   title?: string;
 }) {
   if (!onRerunSingleTracker) return null;

@@ -609,7 +609,7 @@ export function buildGmFormatReminder(
       : []),
     `FORMAT:`,
     `- Narration: plain text, 1-4 sentences per beat, blank line between beats.`,
-    `- ZERO TOLERANCE FOR AI SLOP IN YOUR WRITING! Absolutely NO: "doesn't X, doesn't Y", "not X, not Y," "jaws working," "mechanical precision," "ozone," and other overused patterns like repeated negations. Replace them with creative detail, human cadence, and consequential action. Show what does happen instead of what doesn't.`,
+    `- ZERO TOLERANCE FOR AI SLOP IN YOUR WRITING! Absolutely NO: "doesn't X, doesn't Y", "not X, not Y," "jaws working," "mechanical precision," "ozone," and other overused patterns like repeated negations in your prose. Replace them with creative detail, human cadence, and consequential action. Show what does happen instead of what doesn't.`,
     `- Remember to NEVER mix narration and dialogue in the same line. Output them separately.`,
     ...(ctx.rating === "nsfw" ? [`- Adult mode enabled, explicit content allowed.`] : []),
     `- Dialogue: [Name] [expression]: "Text"`,
@@ -642,11 +642,11 @@ export function buildGmFormatReminder(
     `PLAYER INPUT:`,
     `- Continue directly from the player's input, treating it like a concluded beat. Do not reiterate it.`,
     `- Only quoted speech in the player's inputs is spoken aloud. Unquoted player text is narration, action, or internal thought, to which only the GM has access. Characters cannot perceive it unless the player makes it observable or says it out loud.`,
-    `- Never quote the player character. Narrate the player's speech, thoughts, and actions indirectly in second person. Example:`,
+    `- Never quote the player character. You may narrate their obvious, low-stakes participation indirectly when it follows their stated intent or prevents passivity (e.g., listening, nodding, or conveying the gist), but never make new strategic choices, reveal secrets, or speak exact dialogue for them. The player's speech, thoughts, and actions must be narrated indirectly in the second person. Example:`,
     `[${ctx.playerName ?? "Player"}] [thought] [smirk]: You think you're the best.`,
     `- CRITICAL: NEVER echo the player's distinctive words, phrases, or dialogue. NO PARROTTING!`,
     `- Keep the turn's length flexible, depending on the current scene and state. If the player's agency is low (exploration, travel/rest): make it longer. If it's high (combat, dialogue, or other intense situation): keep it concise. Sometimes a single line of dialogue or a narrative beat is enough to allow back-and-forth interactions.`,
-    `- Pace the plot without rushing through it; when danger is not immediate, allow breathers, rest, party banter, and small character moments.`,
+    `- Pace the plot without rushing through it; when danger is not immediate, allow breathers, party banter, and small character moments.`,
     `- End naturally when it's the player's turn to act or speak.`,
     ``,
   );
@@ -745,8 +745,12 @@ export interface SetupPromptContext {
   rating?: "sfw" | "nsfw";
   /** Full persona card text (player character) */
   personaCard?: string | null;
+  /** Exact player persona name, when known */
+  playerName?: string | null;
   /** Full party member card texts */
   partyCards?: string[];
+  /** Exact starting party member names selected by the user */
+  partyNames?: string[];
   /** GM character card text (if using a character as GM) */
   gmCharacterCard?: string | null;
   /** Enable custom HUD widgets in the game blueprint */
@@ -760,6 +764,9 @@ export interface SetupPromptContext {
 export function buildSetupPrompt(ctx: SetupPromptContext = {}): string {
   const rating = ctx.rating ?? "sfw";
   const normalizedLanguage = normalizePromptLanguage(ctx.language);
+  const playerName = ctx.playerName?.trim() || (ctx.personaCard ? "the player character named in <user_player>" : null);
+  const partyNames = (ctx.partyNames ?? []).map((name) => name.trim()).filter((name) => name.length > 0);
+  const characterCardTargets = [...(playerName ? [playerName] : []), ...partyNames];
   const ratingBlock =
     rating === "nsfw"
       ? [
@@ -798,6 +805,17 @@ export function buildSetupPrompt(ctx: SetupPromptContext = {}): string {
   if (ctx.partyCards?.length) {
     contextSections.push(`<party_info>`, `Party members accompanying the player:`, ...ctx.partyCards, `</party_info>`);
   }
+  contextSections.push(
+    `<character_card_scope>`,
+    characterCardTargets.length > 0
+      ? `Allowed characterCards names: ${characterCardTargets.join(", ")}`
+      : `Allowed characterCards names: none supplied. Use an empty characterCards array unless the setup preferences clearly define the player character.`,
+    partyNames.length > 0
+      ? `Allowed partyArcs names: ${partyNames.join(", ")}`
+      : `Allowed partyArcs names: none. Use an empty partyArcs array.`,
+    `Hard rule: characterCards are only for the player persona and the starting party members selected by the user. Do NOT create characterCards for GM characters, love interests, antagonists, lorebook figures, factions, future recruits, or NPCs merely mentioned in preferences/canon. Put non-party people in startingNpcs instead.`,
+    `</character_card_scope>`,
+  );
   if (ctx.lorebookContext?.trim()) {
     contextSections.push(
       `<lorebook_context>`,
@@ -821,7 +839,7 @@ export function buildSetupPrompt(ctx: SetupPromptContext = {}): string {
           ``,
         ]
       : []),
-    `CRITICAL: Your response MUST be a single JSON object using the EXACT keys shown in the <output_format> template below. Do NOT invent your own keys. Do NOT rename fields. The keys "worldOverview", "storyArc", "plotTwists", "startingMap", "startingNpcs", "partyArcs", "characterCards", and "blueprint" are MANDATORY and must appear at the top level. The system will reject any response that uses different key names.`,
+    `CRITICAL: Your response MUST be a single JSON object using the EXACT keys shown in the <output_format> template below. Do NOT invent your own keys. Do NOT rename fields. The keys "worldOverview", "storyArc", "plotTwists", "startingMap", "startingNpcs", "partyArcs", "characterCards", and "blueprint" are MANDATORY and must appear at the top level. The system will reject any response that uses different key names. Respect <character_card_scope> exactly.`,
     ``,
     ...(ctx.enableCustomWidgets !== false
       ? [
@@ -903,7 +921,7 @@ export function buildSetupPrompt(ctx: SetupPromptContext = {}): string {
     `  ],`,
     `  "characterCards": [`,
     `    {`,
-    `      "name": "Exact party member or player persona name",`,
+    `      "name": "Exact name from Allowed characterCards names only",`,
     `      "shortDescription": "One-sentence character summary for this game's context",`,
     `      "class": "Their class/role/archetype in this game (e.g. Rogue, Diplomat, Pyro Vision Holder)",`,
     `      "abilities": ["Ability 1 — brief description", "Ability 2 — brief description"],`,
@@ -946,6 +964,7 @@ export function buildSetupPrompt(ctx: SetupPromptContext = {}): string {
     `}`,
     ``,
     `Use EXACTLY these top-level keys: worldOverview, storyArc, plotTwists, startingMap, startingNpcs, partyArcs, characterCards, artStylePrompt, blueprint. No other top-level keys. No wrapper objects.`,
+    `Scope reminder: startingNpcs may include important non-party characters, but characterCards and partyArcs must not.`,
     `</output_format>`,
   ].join("\n");
 }

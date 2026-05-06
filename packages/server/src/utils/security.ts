@@ -217,6 +217,15 @@ function isLoopbackHostname(hostname: string): boolean {
   return LOCALHOST_NAMES.has(normalized) || isLoopbackIp(normalized);
 }
 
+export function normalizeLoopbackUrl(url: string | URL): string {
+  const parsed = typeof url === "string" ? new URL(url) : new URL(url.toString());
+  const normalized = normalizeHostnameForAddress(parsed.hostname).replace(/\.$/, "").toLowerCase();
+  if (LOCALHOST_NAMES.has(normalized)) {
+    parsed.hostname = "127.0.0.1";
+  }
+  return parsed.toString();
+}
+
 async function resolveHostname(hostname: string): Promise<Array<{ address: string; family: 4 | 6 }>> {
   const normalized = normalizeHostnameForAddress(hostname);
   if (isIpLiteral(normalized)) {

@@ -13,6 +13,11 @@ import {
 import { isDebugAgentsEnabled } from "../../config/runtime-config.js";
 import { logger } from "../../lib/logger.js";
 
+const MAX_AGENT_CONTEXT_MESSAGES = 200;
+const EXPRESSION_AGENT_RECENT_CONTEXT_MESSAGES = 2;
+const EXPRESSION_AGENT_CONTEXT_CHAR_LIMIT = 1200;
+const EXPRESSION_AGENT_RESPONSE_CHAR_LIMIT = 6000;
+
 /** Strip HTML/XML-style tags (e.g. <div style="..."> <br> <speaker>) from text to save tokens. */
 function stripHtmlTags(text: string): string {
   return text
@@ -36,6 +41,13 @@ export interface AgentExecConfig {
 export interface AgentToolContext {
   tools: LLMToolDefinition[];
   executeToolCall: (call: LLMToolCall) => Promise<string>;
+}
+
+export function normalizeAgentContextSize(value: unknown, fallback = DEFAULT_AGENT_CONTEXT_SIZE): number {
+  const parsed =
+    typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : fallback;
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return Math.max(1, Math.min(MAX_AGENT_CONTEXT_MESSAGES, Math.trunc(parsed)));
 }
 
 function redactSensitiveValue(value: unknown): unknown {
@@ -102,32 +114,15 @@ export async function executeAgent(
   const startTime = Date.now();
 
   try {
-    // Build the agent's system prompt with <role> + <lore> + <agents> + extras
     const template = config.promptTemplate || getDefaultAgentPrompt(config.type);
     if (!template) {
       return makeError(config, "No prompt template configured", startTime);
     }
 
-    const systemParts: string[] = [];
-    systemParts.push(`<role>`);
-    systemParts.push(`You are a specialized agent. Fulfill your task and return the requested output.`);
-    systemParts.push(`</role>`);
-    systemParts.push(``);
-    systemParts.push(buildLoreBlock(context));
-    systemParts.push(``);
-    systemParts.push(`<agents>`);
-    systemParts.push(`Fulfill the requested task here and return the output in the format specified:`);
-    systemParts.push(template);
-    systemParts.push(`</agents>`);
-    const extras = buildAgentExtras(context, [config.type]);
-    if (extras) {
-      systemParts.push(``);
-      systemParts.push(extras);
-    }
-
-    // Build multi-turn message array for this agent (sliced to its own contextSize)
-    const agentContextSize = (config.settings.contextSize as number) || DEFAULT_AGENT_CONTEXT_SIZE;
-    const messages = buildAgentMessages(systemParts.join("\n"), context, config.type, agentContextSize);
+    const messages =
+      config.type === "expression"
+        ? buildExpressionAgentMessages(template, context)
+        : buildStandardAgentMessages(config, template, context);
 
     // Agents use lower temperature for reliability
     const temperature = (config.settings.temperature as number) ?? 0.3;
@@ -320,6 +315,29 @@ export async function executeAgentBatch(
   model: string,
 ): Promise<AgentResult[]> {
   if (configs.length === 0) return [];
+  const isolatedConfigs = configs.filter(shouldRunAgentIndividually);
+  if (isolatedConfigs.length > 0 && isolatedConfigs.length < configs.length) {
+    logger.info(
+      "[agent-batch] Running %d compact agent(s) outside batch: [%s]",
+      isolatedConfigs.length,
+      isolatedConfigs.map((c) => c.type).join(", "),
+    );
+    const batchedConfigs = configs.filter((config) => !shouldRunAgentIndividually(config));
+    const [batchedResults, isolatedSettled] = await Promise.all([
+      executeAgentBatch(batchedConfigs, context, provider, model),
+      Promise.allSettled(isolatedConfigs.map((config) => executeAgent(config, context, provider, model))),
+    ]);
+    const isolatedResults = isolatedSettled.map((entry, index) =>
+      entry.status === "fulfilled"
+        ? entry.value
+        : makeError(
+            isolatedConfigs[index]!,
+            entry.reason instanceof Error ? entry.reason.message : "Agent execution failed",
+            Date.now(),
+          ),
+    );
+    return [...batchedResults, ...isolatedResults];
+  }
   if (configs.length === 1) {
     logger.info(`[agent-batch] Only 1 agent (${configs[0]!.type}), running individually`);
     return [await executeAgent(configs[0]!, context, provider, model)];
@@ -333,9 +351,7 @@ export async function executeAgentBatch(
     // Build merged system prompt (includes lore + agent extras)
     const systemPrompt = buildBatchSystemPrompt(configs, context);
     // Batch uses the max contextSize among its members
-    const batchContextSize = Math.max(
-      ...configs.map((c) => (c.settings.contextSize as number) || DEFAULT_AGENT_CONTEXT_SIZE),
-    );
+    const batchContextSize = Math.max(...configs.map((c) => normalizeAgentContextSize(c.settings.contextSize)));
     const messages = buildAgentMessages(systemPrompt, context, "__batch__", batchContextSize);
 
     // Each agent reserves its own configured output budget. The context fitter
@@ -574,6 +590,104 @@ function makeError(config: AgentExecConfig, error: string, startTime: number): A
   };
 }
 
+function shouldRunAgentIndividually(config: Pick<AgentExecConfig, "type">): boolean {
+  return config.type === "expression";
+}
+
+function buildStandardAgentMessages(config: AgentExecConfig, template: string, context: AgentContext): ChatMessage[] {
+  // Build the agent's system prompt with <role> + <lore> + <agents> + extras
+  const systemParts: string[] = [];
+  systemParts.push(`<role>`);
+  systemParts.push(`You are a specialized agent. Fulfill your task and return the requested output.`);
+  systemParts.push(`</role>`);
+  systemParts.push(``);
+  systemParts.push(buildLoreBlock(context));
+  systemParts.push(``);
+  systemParts.push(`<agents>`);
+  systemParts.push(`Fulfill the requested task here and return the output in the format specified:`);
+  systemParts.push(template);
+  systemParts.push(`</agents>`);
+  const extras = buildAgentExtras(context, [config.type]);
+  if (extras) {
+    systemParts.push(``);
+    systemParts.push(extras);
+  }
+
+  // Build multi-turn message array for this agent (sliced to its own contextSize)
+  const agentContextSize = normalizeAgentContextSize(config.settings.contextSize);
+  return buildAgentMessages(systemParts.join("\n"), context, config.type, agentContextSize);
+}
+
+function truncateAgentText(text: string, maxChars: number): string {
+  const cleaned = stripHtmlTags(text);
+  const chars = Array.from(cleaned);
+  if (chars.length <= maxChars) return cleaned;
+
+  const marker = "\n\n[Trimmed to keep this agent request compact]\n\n";
+  const available = Math.max(0, maxChars - marker.length);
+  const head = Math.floor(available * 0.4);
+  const tail = available - head;
+  return chars.slice(0, head).join("") + marker + chars.slice(-tail).join("");
+}
+
+function findLatestAssistantMessage(context: AgentContext): { index: number; content: string } | null {
+  for (let index = context.recentMessages.length - 1; index >= 0; index--) {
+    const message = context.recentMessages[index]!;
+    if (message.role === "assistant" && message.content.trim()) {
+      return { index, content: message.content };
+    }
+  }
+  return null;
+}
+
+function buildExpressionAgentMessages(template: string, context: AgentContext): ChatMessage[] {
+  const systemParts: string[] = [];
+  systemParts.push(`<role>`);
+  systemParts.push(`You are a specialized expression-selection agent. Keep the request compact and return only JSON.`);
+  systemParts.push(`</role>`);
+  systemParts.push(``);
+  systemParts.push(`<agents>`);
+  systemParts.push(`Fulfill the requested task here and return the output in the format specified:`);
+  systemParts.push(template);
+  systemParts.push(`</agents>`);
+
+  const spritesBlock = buildAvailableSpritesBlock(context);
+  if (spritesBlock) {
+    systemParts.push(``);
+    systemParts.push(spritesBlock);
+  }
+
+  const latestAssistant = findLatestAssistantMessage(context);
+  const responseText = context.mainResponse?.trim() || latestAssistant?.content || "";
+  const contextEndIndex = context.mainResponse?.trim() ? context.recentMessages.length : (latestAssistant?.index ?? 0);
+  const recentContext = context.recentMessages
+    .slice(0, contextEndIndex)
+    .slice(-EXPRESSION_AGENT_RECENT_CONTEXT_MESSAGES)
+    .filter((message) => message.content.trim());
+
+  const userParts: string[] = [];
+  if (recentContext.length > 0) {
+    userParts.push(`<recent_context>`);
+    for (const message of recentContext) {
+      const role = message.role === "assistant" ? "assistant" : "user";
+      userParts.push(`[${role}] ${truncateAgentText(message.content, EXPRESSION_AGENT_CONTEXT_CHAR_LIMIT)}`);
+    }
+    userParts.push(`</recent_context>`);
+    userParts.push(``);
+  }
+
+  userParts.push(`<assistant_response>`);
+  userParts.push(truncateAgentText(responseText, EXPRESSION_AGENT_RESPONSE_CHAR_LIMIT));
+  userParts.push(`</assistant_response>`);
+  userParts.push(``);
+  userParts.push(`Now return the requested format.`);
+
+  return [
+    { role: "system", content: systemParts.join("\n"), contextKind: "prompt" },
+    { role: "user", content: userParts.join("\n"), contextKind: "history" },
+  ];
+}
+
 /** Extract a useful message from fetch/network errors (preserves err.cause). */
 export function extractErrorMessage(err: unknown, fallback = "Agent execution failed"): string {
   if (!(err instanceof Error)) return fallback;
@@ -746,6 +860,22 @@ function buildLoreBlock(context: AgentContext): string {
   return parts.join("\n");
 }
 
+function buildAvailableSpritesBlock(context: AgentContext): string {
+  if (!context.memory._availableSprites) return "";
+
+  const sprites = context.memory._availableSprites as Array<{
+    characterId: string;
+    characterName: string;
+    expressions: string[];
+  }>;
+  const parts: string[] = [`<available_sprites>`];
+  for (const char of sprites) {
+    parts.push(`${char.characterName} (${char.characterId}): ${char.expressions.join(", ")}`);
+  }
+  parts.push(`</available_sprites>`);
+  return parts.join("\n");
+}
+
 /**
  * Build agent-specific context blocks (sprites, backgrounds, source material, etc.)
  * that go into the system message after lore.
@@ -789,17 +919,9 @@ function buildAgentExtras(context: AgentContext, agentTypes: string[] = []): str
     parts.push(`</current_game_state>`);
   }
 
-  if (context.memory._availableSprites) {
-    const sprites = context.memory._availableSprites as Array<{
-      characterId: string;
-      characterName: string;
-      expressions: string[];
-    }>;
-    parts.push(`<available_sprites>`);
-    for (const char of sprites) {
-      parts.push(`${char.characterName} (${char.characterId}): ${char.expressions.join(", ")}`);
-    }
-    parts.push(`</available_sprites>`);
+  if (agentTypes.includes("expression")) {
+    const availableSpritesBlock = buildAvailableSpritesBlock(context);
+    if (availableSpritesBlock) parts.push(availableSpritesBlock);
   }
 
   if (context.memory._availableBackgrounds) {
@@ -822,7 +944,7 @@ function buildAgentExtras(context: AgentContext, agentTypes: string[] = []): str
 
   if (context.memory._existingLorebookEntries) {
     const rawEntries = context.memory._existingLorebookEntries as Array<
-      string | { name?: string; keys?: string[]; locked?: boolean }
+      string | { id?: string; name?: string; content?: string; keys?: string[]; locked?: boolean }
     >;
     const entries = rawEntries
       .map((entry) => {
@@ -830,10 +952,16 @@ function buildAgentExtras(context: AgentContext, agentTypes: string[] = []): str
         if (!entry || typeof entry !== "object") return null;
 
         const name = typeof entry.name === "string" && entry.name.trim() ? entry.name.trim() : "Unnamed";
+        const id = typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : "";
+        const content = typeof entry.content === "string" ? entry.content.trim() : "";
         const keys = Array.isArray(entry.keys) ? entry.keys.filter((key) => typeof key === "string") : [];
-        const keyText = keys.length > 0 ? ` | keys: ${keys.join(", ")}` : "";
-        const lockedText = entry.locked === true ? " | locked" : "";
-        return `- ${name}${keyText}${lockedText}`;
+        const attrs = [
+          id ? `id="${escapeXml(id)}"` : "",
+          `name="${escapeXml(name)}"`,
+          keys.length > 0 ? `keys="${escapeXml(keys.join(", "))}"` : "",
+          entry.locked === true ? `locked="true"` : "",
+        ].filter(Boolean);
+        return [`<entry ${attrs.join(" ")}>`, `<content>${escapeXml(content)}</content>`, `</entry>`].join("\n");
       })
       .filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
 

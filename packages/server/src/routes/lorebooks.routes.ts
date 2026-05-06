@@ -9,6 +9,8 @@ import {
   updateLorebookEntrySchema,
   createLorebookFolderSchema,
   updateLorebookFolderSchema,
+  type CreateLorebookEntryInput,
+  type LorebookEntry,
 } from "@marinara-engine/shared";
 import type { ExportEnvelope } from "@marinara-engine/shared";
 import { createLorebooksStorage } from "../services/storage/lorebooks.storage.js";
@@ -30,6 +32,7 @@ function toSafeExportName(name: string, fallback: string) {
 }
 
 type ExportFormat = "native" | "compatible";
+type EntryTransferOperation = "copy" | "move";
 
 function resolveExportFormat(query: unknown, fallback: ExportFormat = "native"): ExportFormat {
   const raw = query && typeof query === "object" ? (query as Record<string, unknown>).format : undefined;
@@ -103,6 +106,55 @@ function buildCompatibleLorebookExport(lb: Record<string, unknown>, entries: Arr
       },
     },
     entries: exportedEntries,
+  };
+}
+
+function buildTransferredEntryInput(
+  entry: LorebookEntry,
+  targetLorebookId: string,
+  order: number,
+): CreateLorebookEntryInput {
+  return {
+    lorebookId: targetLorebookId,
+    name: entry.name,
+    content: entry.content,
+    description: entry.description,
+    keys: entry.keys,
+    secondaryKeys: entry.secondaryKeys,
+    enabled: entry.enabled,
+    constant: entry.constant,
+    selective: entry.selective,
+    selectiveLogic: entry.selectiveLogic,
+    probability: entry.probability,
+    scanDepth: entry.scanDepth,
+    matchWholeWords: entry.matchWholeWords,
+    caseSensitive: entry.caseSensitive,
+    useRegex: entry.useRegex,
+    characterFilterMode: entry.characterFilterMode,
+    characterFilterIds: entry.characterFilterIds,
+    characterTagFilterMode: entry.characterTagFilterMode,
+    characterTagFilters: entry.characterTagFilters,
+    generationTriggerFilterMode: entry.generationTriggerFilterMode,
+    generationTriggerFilters: entry.generationTriggerFilters,
+    additionalMatchingSources: entry.additionalMatchingSources,
+    position: entry.position,
+    depth: entry.depth,
+    order,
+    role: entry.role,
+    sticky: entry.sticky,
+    cooldown: entry.cooldown,
+    delay: entry.delay,
+    ephemeral: entry.ephemeral,
+    group: entry.group,
+    groupWeight: entry.groupWeight,
+    folderId: null,
+    preventRecursion: entry.preventRecursion,
+    locked: entry.locked,
+    tag: entry.tag,
+    relationships: entry.relationships,
+    dynamicState: entry.dynamicState,
+    activationConditions: entry.activationConditions,
+    schedule: entry.schedule,
   };
 }
 
@@ -288,6 +340,69 @@ export async function lorebooksRoutes(app: FastifyInstance) {
       return rest;
     });
     return storage.bulkCreateEntries(req.params.id, entries);
+  });
+
+  app.post<{ Params: { id: string } }>("/:id/entries/transfer", async (req, reply) => {
+    const body = req.body as {
+      entryIds?: unknown;
+      targetLorebookId?: unknown;
+      operation?: unknown;
+    };
+    const entryIds = Array.isArray(body.entryIds)
+      ? Array.from(new Set(body.entryIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0)))
+      : [];
+    const targetLorebookId = typeof body.targetLorebookId === "string" ? body.targetLorebookId.trim() : "";
+    const operation: EntryTransferOperation = body.operation === "move" ? "move" : "copy";
+
+    if (entryIds.length === 0) {
+      return reply.status(400).send({ error: "entryIds array is required" });
+    }
+    if (!targetLorebookId) {
+      return reply.status(400).send({ error: "targetLorebookId is required" });
+    }
+    if (operation === "move" && targetLorebookId === req.params.id) {
+      return reply.status(400).send({ error: "Choose a different lorebook to move entries" });
+    }
+
+    const sourceLorebook = await storage.getById(req.params.id);
+    if (!sourceLorebook) return reply.status(404).send({ error: "Source lorebook not found" });
+    const targetLorebook = await storage.getById(targetLorebookId);
+    if (!targetLorebook) return reply.status(404).send({ error: "Target lorebook not found" });
+
+    const sourceEntries: LorebookEntry[] = [];
+    for (const entryId of entryIds) {
+      const entry = (await storage.getEntry(entryId)) as LorebookEntry | null;
+      if (entry?.lorebookId === req.params.id) sourceEntries.push(entry);
+    }
+    if (sourceEntries.length === 0) {
+      return reply.status(404).send({ error: "No matching entries found in the source lorebook" });
+    }
+
+    const targetEntries = (await storage.listEntries(targetLorebookId)) as LorebookEntry[];
+    const maxTargetOrder = targetEntries.reduce((max, entry) => Math.max(max, entry.order ?? 0), 0);
+    const created = [];
+    for (const [index, entry] of sourceEntries.entries()) {
+      created.push(
+        await storage.createEntry(
+          buildTransferredEntryInput(entry, targetLorebookId, maxTargetOrder + (index + 1) * 10),
+        ),
+      );
+    }
+
+    if (operation === "move") {
+      for (const entry of sourceEntries) {
+        await storage.removeEntry(entry.id);
+      }
+    }
+
+    return {
+      operation,
+      sourceLorebookId: req.params.id,
+      targetLorebookId,
+      requested: entryIds.length,
+      transferred: sourceEntries.length,
+      created,
+    };
   });
 
   app.put<{ Params: { id: string } }>("/:id/entries/reorder", async (req, reply) => {

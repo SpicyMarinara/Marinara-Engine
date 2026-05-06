@@ -13,7 +13,7 @@
 
 ; ── App metadata ──
 !define APP_NAME "Marinara Engine"
-!define APP_VERSION "1.5.7"
+!define APP_VERSION "1.5.8"
 !define APP_PUBLISHER "Pasta-Devs"
 !define APP_URL "https://github.com/Pasta-Devs/Marinara-Engine"
 !define REPO_URL "https://github.com/Pasta-Devs/Marinara-Engine.git"
@@ -27,7 +27,7 @@
 !define NODE_DOWNLOAD_URL "https://nodejs.org/dist/v24.15.0/node-v24.15.0-x64.msi"
 !define GIT_SHA256 "2b96e7854f0520f0f6b709c21041d9801b1be44d5e1a0d9fa621b2fbc40f1983"
 !define NODE_SHA256 "feffb8e5cb5ac47f793666636d496ef3e975be82c84c4da5d20e6aa8fa4eb806"
-!define RELEASE_TAG "v1.5.7"
+!define RELEASE_TAG "v1.5.8"
 !ifndef RELEASE_COMMIT
 !define RELEASE_COMMIT ""
 !endif
@@ -714,6 +714,7 @@ Section "Uninstall"
   DetailPrint "Removing application files..."
   ; Only remove known app directories — preserve user data if they stored it elsewhere
   RMDir /r "$INSTDIR\node_modules"
+  RMDir /r "$INSTDIR\.pnpm-store"
   RMDir /r "$INSTDIR\packages"
   RMDir /r "$INSTDIR\android"
   RMDir /r "$INSTDIR\docs"

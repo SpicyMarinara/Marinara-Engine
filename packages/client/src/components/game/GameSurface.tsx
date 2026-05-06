@@ -1361,6 +1361,9 @@ function getSceneBackgroundTags(assetKeys: string[]): string[] {
 }
 
 const RECENT_MUSIC_HISTORY_LIMIT = 8;
+const GAME_START_GENERATION_GUIDE =
+  "Begin the game now with the first visible GM VN narration/dialogue segment. This is an invisible startup trigger, not a player action. Do not mention a start command.";
+const SYNTHETIC_GAME_START_MESSAGE_RE = /^\s*\[start(?:\s+the)?\s+game\]\s*$/i;
 
 function normalizeRecentMusicHistory(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((tag): tag is string => typeof tag === "string" && tag.length > 0) : [];
@@ -1374,6 +1377,7 @@ function appendRecentMusic(history: string[], tag: string | null | undefined): s
 function formatCombatLogContent(message: Message): string {
   const content = message.content.trim();
   if (!content) return "";
+  if (message.role === "user" && SYNTHETIC_GAME_START_MESSAGE_RE.test(content)) return "";
   if (message.role === "assistant" || message.role === "narrator") {
     return parseGmTags(content).cleanContent || content;
   }
@@ -3556,6 +3560,14 @@ export function GameSurface({
   const retryGeneration = useCallback(() => {
     setGenerationFailed(false);
     generate({ chatId: activeChatId, connectionId: null });
+  }, [activeChatId, generate]);
+
+  const generateInitialGameTurn = useCallback(() => {
+    generate({
+      chatId: activeChatId,
+      connectionId: null,
+      generationGuide: GAME_START_GENERATION_GUIDE,
+    });
   }, [activeChatId, generate]);
 
   const handleRetryTurn = useCallback(async () => {
@@ -6120,10 +6132,7 @@ export function GameSurface({
                 )}
                 {/* Show retry when generation stopped but no content arrived. */}
                 {!isStreaming && !latestAssistantMsg?.content && !startGame.isPending && (
-                  <button
-                    onClick={() => generate({ chatId: activeChatId, connectionId: null })}
-                    className={SURFACE_BTN}
-                  >
+                  <button onClick={generateInitialGameTurn} className={SURFACE_BTN}>
                     <RefreshCw size={14} />
                     Retry
                   </button>
@@ -6141,8 +6150,8 @@ export function GameSurface({
                     {
                       onSuccess: (res) => {
                         console.log("[GameSurface] startGame succeeded:", res);
-                        sendMessage("[Start the game]");
-                        console.log("[GameSurface] sendMessage called");
+                        generateInitialGameTurn();
+                        console.log("[GameSurface] initial game turn generation requested");
                       },
                       onError: (err) => {
                         startGameGuardRef.current = false;

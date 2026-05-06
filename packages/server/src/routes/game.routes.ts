@@ -113,36 +113,66 @@ import { createPromptOverridesStorage } from "../services/storage/prompt-overrid
 // Helpers
 // ──────────────────────────────────────────────
 
+const AVATAR_NAME_TITLE_WORDS = new Set(["a", "an", "the", "il", "lo", "la", "le", "l", "el", "sir", "lady", "lord"]);
+
+function normalizeAvatarLookupName(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/['’]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function avatarLookupAliases(value: string): string[] {
+  const normalized = normalizeAvatarLookupName(value);
+  const words = normalized.split(/\s+/).filter(Boolean);
+  const withoutLeadingTitle =
+    words.length > 1 && AVATAR_NAME_TITLE_WORDS.has(words[0]!) ? words.slice(1).join(" ") : normalized;
+  return Array.from(
+    new Set([
+      value.trim().toLowerCase(),
+      normalized,
+      withoutLeadingTitle,
+      ...words.filter((word) => word.length >= 3 && !AVATAR_NAME_TITLE_WORDS.has(word)),
+    ]),
+  ).filter(Boolean);
+}
+
+function addNameLookupEntry(map: Map<string, string>, name: unknown, value: unknown): void {
+  if (typeof name !== "string" || typeof value !== "string") return;
+  const trimmedValue = value.trim();
+  if (!trimmedValue) return;
+  for (const alias of avatarLookupAliases(name)) {
+    map.set(alias, trimmedValue);
+  }
+}
+
 /**
- * Fuzzy-match an NPC name against the character-avatar map.
- * Tries, in order:
- *  1. Exact match  ("Arlecchino" → "Arlecchino")
- *  2. Character name contained in NPC name  ("The Knave (Arlecchino)" contains "Arlecchino")
- *  3. NPC name contained in character name  ("Dottore" inside "Il Dottore" — if char was stored with title)
- * Minimum 3-character overlap to avoid false positives.
+ * Fuzzy-match an NPC name against the character-avatar/description map.
+ * Title aliases make "Il Dottore" resolve to a saved "Dottore" card and
+ * "Il Capitano" resolve to "Capitano" before any image generation is attempted.
  */
 function findCharAvatarFuzzy(npcName: string, charAvatarByName: Map<string, string>): string | undefined {
-  const npcLower = npcName.toLowerCase();
+  const npcAliases = avatarLookupAliases(npcName);
 
   // 1. Exact
-  const exact = charAvatarByName.get(npcLower);
-  if (exact) return exact;
-
-  // 2. Any char name that is a substring of the NPC name
-  for (const [charName, avatar] of charAvatarByName) {
-    if (charName.length >= 3 && npcLower.includes(charName)) return avatar;
+  for (const alias of npcAliases) {
+    const exact = charAvatarByName.get(alias);
+    if (exact) return exact;
   }
 
-  // 3. NPC name (or each word ≥ 3 chars) contained in a char name
+  // 2. Any character alias that overlaps the NPC aliases.
   for (const [charName, avatar] of charAvatarByName) {
-    if (npcLower.length >= 3 && charName.includes(npcLower)) return avatar;
-    // Also try individual words (handles "Il Dottore" → word "Dottore" matches char "Dottore")
-    const words = npcLower
-      .replace(/[()]/g, " ")
-      .split(/\s+/)
-      .filter((w) => w.length >= 3);
-    for (const word of words) {
-      if (charName === word) return avatar;
+    const charAliases = avatarLookupAliases(charName);
+    for (const npcAlias of npcAliases) {
+      for (const charAlias of charAliases) {
+        if (npcAlias === charAlias) return avatar;
+        if (charAlias.length >= 3 && npcAlias.includes(charAlias)) return avatar;
+        if (npcAlias.length >= 3 && charAlias.includes(npcAlias)) return avatar;
+      }
     }
   }
 
@@ -214,12 +244,12 @@ function collectIllustrationCharacterAssets(opts: {
     const name = typeof npc.name === "string" ? npc.name : null;
     const avatarUrl = typeof npc.avatarUrl === "string" ? npc.avatarUrl : null;
     const description = typeof npc.description === "string" ? npc.description.trim() : "";
-    if (name && avatarUrl) npcAvatarByName.set(name.toLowerCase(), avatarUrl);
-    if (name && description) npcDescriptionByName.set(name.toLowerCase(), description);
+    addNameLookupEntry(npcAvatarByName, name, avatarUrl);
+    addNameLookupEntry(npcDescriptionByName, name, description);
   }
   for (const npc of opts.gameNpcs) {
-    if (npc.name && npc.avatarUrl) npcAvatarByName.set(npc.name.toLowerCase(), npc.avatarUrl);
-    if (npc.name && npc.description) npcDescriptionByName.set(npc.name.toLowerCase(), npc.description);
+    addNameLookupEntry(npcAvatarByName, npc.name, npc.avatarUrl);
+    addNameLookupEntry(npcDescriptionByName, npc.name, npc.description);
   }
 
   const requestedNames = (opts.illustration.characters?.length ? opts.illustration.characters : opts.characterNames)
@@ -401,6 +431,7 @@ const regenerateSessionLorebookSchema = z.object({
   chatId: z.string().min(1),
   connectionId: z.string().optional(),
   sessionNumber: z.number().int().min(1).optional(),
+  streaming: z.boolean().optional().default(true),
 });
 
 const jsonRepairApplySchema = z.object({
@@ -566,6 +597,25 @@ function getStoredPartyCharacterIds(
     );
   }
   return Array.from(new Set([...(setupConfig.partyCharacterIds ?? []), ...chatCharacterIds]));
+}
+
+function reconcileGamePartyCharacterIds(
+  meta: Record<string, unknown>,
+  setupConfig: GameSetupConfig,
+  chatCharacterIds: string[],
+): string[] {
+  const storedPartyIds = getStoredPartyCharacterIds(meta, setupConfig, chatCharacterIds);
+  const npcPartyIds = storedPartyIds.filter(isPartyNpcId);
+  const libraryPartyIds =
+    chatCharacterIds.length > 0 ? chatCharacterIds : storedPartyIds.filter((id) => !isPartyNpcId(id));
+  return Array.from(new Set([...libraryPartyIds, ...npcPartyIds]));
+}
+
+function syncSetupConfigPartyIds(setupConfig: GameSetupConfig, partyCharacterIds: string[]): GameSetupConfig {
+  return {
+    ...setupConfig,
+    partyCharacterIds,
+  };
 }
 
 function findGameNpcByName(npcs: GameNpc[], requestedName: string): GameNpc | null {
@@ -1641,12 +1691,15 @@ async function resolveGameLorebookKeeperPartyNames(
   setupConfig: GameSetupConfig | null,
 ): Promise<string[]> {
   const chatCharacterIds = parseChatCharacterIds(chat.characterIds);
-  const rawPartyIds = Array.isArray(meta.gamePartyCharacterIds)
-    ? (meta.gamePartyCharacterIds as unknown[])
-    : ((setupConfig?.partyCharacterIds ?? chatCharacterIds) as unknown[]);
-  const partyIds = Array.from(
-    new Set(rawPartyIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0)),
-  );
+  const partyIds = setupConfig
+    ? reconcileGamePartyCharacterIds(meta, setupConfig, chatCharacterIds)
+    : Array.from(
+        new Set(
+          (Array.isArray(meta.gamePartyCharacterIds) ? meta.gamePartyCharacterIds : chatCharacterIds).filter(
+            (id): id is string => typeof id === "string" && id.trim().length > 0,
+          ),
+        ),
+      );
   if (partyIds.length === 0) return [];
 
   const characterRows = await createCharactersStorage(app.db).list();
@@ -1861,6 +1914,7 @@ async function runGameLorebookKeeperAfterConclusion(args: {
   sessionNumber: number;
   sessionSummary: SessionSummary;
   replaceExistingSessionEntries?: boolean;
+  streaming?: boolean;
 }): Promise<GameLorebookKeeperRunResult> {
   const chats = createChatsStorage(args.app.db);
   const chat = await chats.getById(args.chatId);
@@ -1910,12 +1964,14 @@ async function runGameLorebookKeeperAfterConclusion(args: {
       conn.openrouterProvider,
       conn.maxTokensOverride,
     );
+    const streaming = args.streaming ?? true;
     const options = gameGenOptions(
       conn.model,
       {
         maxTokens: Math.max(GAME_LOREBOOK_KEEPER_MIN_OUTPUT_TOKENS, generationParameters?.maxTokens ?? 0),
         temperature: 0.35,
-        stream: false,
+        stream: streaming,
+        ...(streaming ? { onToken: () => {} } : {}),
       },
       generationParameters,
     );
@@ -2599,7 +2655,7 @@ export async function gameRoutes(app: FastifyInstance) {
         try {
           const parsed = JSON.parse(ch.data) as { name?: string };
           if (parsed.name && ch.avatarPath) {
-            charAvatarByName.set(parsed.name.toLowerCase(), ch.avatarPath);
+            addNameLookupEntry(charAvatarByName, parsed.name, ch.avatarPath);
           }
         } catch {
           /* skip unparseable */
@@ -2886,6 +2942,7 @@ export async function gameRoutes(app: FastifyInstance) {
 
     // Load party character cards for context (full detail)
     const partyCards: string[] = [];
+    const partyNames: string[] = [];
     const partyRpgStats: Record<
       string,
       { enabled: boolean; attributes: Array<{ name: string; value: number }>; hp: { value: number; max: number } }
@@ -2895,6 +2952,9 @@ export async function gameRoutes(app: FastifyInstance) {
       if (pc) {
         const data = typeof pc.data === "string" ? JSON.parse(pc.data) : pc.data;
         const parts = [data.name];
+        if (typeof data.name === "string" && data.name.trim()) {
+          partyNames.push(data.name.trim());
+        }
         if (data.personality) parts.push(`Personality: ${data.personality}`);
         if (data.description) parts.push(`Description: ${data.description}`);
         const pcBackstory = data.extensions?.backstory || data.backstory;
@@ -2962,7 +3022,9 @@ export async function gameRoutes(app: FastifyInstance) {
         content: buildSetupPrompt({
           rating: setupConfig.rating ?? "sfw",
           personaCard: personaCard || null,
+          playerName: personaName,
           partyCards: partyCards.length > 0 ? partyCards : undefined,
+          partyNames,
           gmCharacterCard: gmCharacterCard || null,
           enableCustomWidgets: setupConfig.enableCustomWidgets,
           lorebookContext: setupLorebookContext,
@@ -3141,9 +3203,9 @@ export async function gameRoutes(app: FastifyInstance) {
   });
 
   // ── POST /game/start ── (transitions game from "ready" to "active")
-  // The client sends [Start the game] through the regular generate pipeline,
-  // which already builds the full GM system prompt with all world context,
-  // streams the response, and triggers scene analysis on the client side.
+  // The client then requests an invisible startup generation guide through the
+  // regular generate pipeline, which builds the full GM system prompt, streams
+  // the response, and triggers scene analysis on the client side.
   app.post("/start", async (req) => {
     logger.info("[game/start] Transitioning to active");
     const { chatId } = gameStartSchema.parse(req.body);
@@ -3194,6 +3256,13 @@ export async function gameRoutes(app: FastifyInstance) {
       const prevMeta = parseMeta(latestSession.metadata);
       const baseSessionName = latestSession.name.replace(/ — Session \d+$/, "");
       const latestStatus = (prevMeta.gameSessionStatus as string) || "active";
+      const prevSetupConfig = (prevMeta.gameSetupConfig as GameSetupConfig | null) ?? null;
+      const latestSessionCharacterIds = parseChatCharacterIds(latestSession.characterIds);
+      const carriedPartyIds = prevSetupConfig
+        ? reconcileGamePartyCharacterIds(prevMeta, prevSetupConfig, latestSessionCharacterIds)
+        : latestSessionCharacterIds;
+      const carriedSetupConfig = prevSetupConfig ? syncSetupConfigPartyIds(prevSetupConfig, carriedPartyIds) : null;
+      const carriedChatCharacterIds = carriedPartyIds.filter((id) => !isPartyNpcId(id));
       const summaries = normalizeStoredSessionSummaries(prevMeta.gamePreviousSessionSummaries);
       const currentSessionNumber = latestStatus === "concluded" ? Math.max(summaries.length, 1) : summaries.length + 1;
       const expectedLatestSessionName = `${baseSessionName} — Session ${currentSessionNumber}`;
@@ -3206,11 +3275,25 @@ export async function gameRoutes(app: FastifyInstance) {
           ...prevMeta,
           gameSessionNumber: currentSessionNumber,
           gamePreviousSessionSummaries: summaries,
+          ...(carriedSetupConfig ? { gameSetupConfig: carriedSetupConfig } : {}),
+          gamePartyCharacterIds: carriedPartyIds,
+        });
+      } else if (carriedSetupConfig) {
+        await chats.updateMetadata(latestSession.id, {
+          ...prevMeta,
+          gameSetupConfig: carriedSetupConfig,
+          gamePartyCharacterIds: carriedPartyIds,
         });
       }
 
       if (latestSession.name !== expectedLatestSessionName) {
         await chats.update(latestSession.id, { name: expectedLatestSessionName });
+      }
+
+      if (
+        JSON.stringify(parseChatCharacterIds(latestSession.characterIds)) !== JSON.stringify(carriedChatCharacterIds)
+      ) {
+        await chats.update(latestSession.id, { characterIds: carriedChatCharacterIds });
       }
 
       if (latestStatus === "ready" || latestStatus === "active") {
@@ -3241,7 +3324,7 @@ export async function gameRoutes(app: FastifyInstance) {
       const newChat = await chats.create({
         name: `${baseSessionName} — Session ${sessionNumber}`,
         mode: "game",
-        characterIds: (prevMeta.gamePartyCharacterIds as string[]) || [],
+        characterIds: carriedChatCharacterIds,
         groupId: gameId,
         personaId: latestSession.personaId,
         promptPresetId: latestSession.promptPresetId,
@@ -3279,6 +3362,8 @@ export async function gameRoutes(app: FastifyInstance) {
         gamePreviousSessionSummaries: summaries,
         gameDialogueChatId: null,
         gameCombatChatId: null,
+        ...(carriedSetupConfig ? { gameSetupConfig: carriedSetupConfig } : {}),
+        gamePartyCharacterIds: carriedPartyIds,
         enableAgents: true,
         ...(carriedInventory.length > 0 ? { gameInventory: carriedInventory } : {}),
       };
@@ -3413,6 +3498,11 @@ export async function gameRoutes(app: FastifyInstance) {
 
     const meta = parseMeta(chat.metadata);
     const setupConfig = meta.gameSetupConfig as GameSetupConfig | null;
+    const chatCharacterIds = parseChatCharacterIds(chat.characterIds);
+    const syncedPartyIds = setupConfig
+      ? reconcileGamePartyCharacterIds(meta, setupConfig, chatCharacterIds)
+      : chatCharacterIds;
+    const syncedSetupConfig = setupConfig ? syncSetupConfigPartyIds(setupConfig, syncedPartyIds) : null;
     const prevSummaries = normalizeStoredSessionSummaries(meta.gamePreviousSessionSummaries);
     const sessionNumber = prevSummaries.length + 1;
 
@@ -3524,6 +3614,8 @@ export async function gameRoutes(app: FastifyInstance) {
 
     await chats.updateMetadata(chatId, {
       ...meta,
+      ...(syncedSetupConfig ? { gameSetupConfig: syncedSetupConfig } : {}),
+      gamePartyCharacterIds: syncedPartyIds,
       gameSessionNumber: sessionNumber,
       gameSessionStatus: "concluded",
       gameStoryArc: appliedConclusion.updatedStoryArc,
@@ -3588,6 +3680,7 @@ export async function gameRoutes(app: FastifyInstance) {
       connectionId: conn.id,
       sessionNumber,
       sessionSummary: appliedConclusion.summary,
+      streaming,
     });
 
     logger.info("[game/session/conclude] Session %d concluded for chat %s", sessionNumber, chatId);
@@ -3603,6 +3696,12 @@ export async function gameRoutes(app: FastifyInstance) {
     if (!chat) throw new Error("Chat not found");
 
     const meta = parseMeta(chat.metadata);
+    const setupConfig = meta.gameSetupConfig as GameSetupConfig | null;
+    const chatCharacterIds = parseChatCharacterIds(chat.characterIds);
+    const syncedPartyIds = setupConfig
+      ? reconcileGamePartyCharacterIds(meta, setupConfig, chatCharacterIds)
+      : chatCharacterIds;
+    const syncedSetupConfig = setupConfig ? syncSetupConfigPartyIds(setupConfig, syncedPartyIds) : null;
     const prevSummaries = normalizeStoredSessionSummaries(meta.gamePreviousSessionSummaries);
     const sessionNumber = prevSummaries.length + 1;
     const currentStoryArc = (meta.gameStoryArc as string) || null;
@@ -3641,6 +3740,8 @@ export async function gameRoutes(app: FastifyInstance) {
 
     await chats.updateMetadata(chatId, {
       ...meta,
+      ...(syncedSetupConfig ? { gameSetupConfig: syncedSetupConfig } : {}),
+      gamePartyCharacterIds: syncedPartyIds,
       gameSessionNumber: sessionNumber,
       gameSessionStatus: "concluded",
       gameStoryArc: appliedConclusion.updatedStoryArc,
@@ -3709,6 +3810,7 @@ export async function gameRoutes(app: FastifyInstance) {
       chatId,
       connectionId,
       sessionNumber: requestedSessionNumber,
+      streaming,
     } = regenerateSessionLorebookSchema.parse(req.body);
     const chats = createChatsStorage(app.db);
     const chat = await chats.getById(chatId);
@@ -3732,6 +3834,7 @@ export async function gameRoutes(app: FastifyInstance) {
       sessionNumber,
       sessionSummary: summary,
       replaceExistingSessionEntries: true,
+      streaming,
     });
 
     if (result.status === "failed") {
@@ -5803,11 +5906,11 @@ export async function gameRoutes(app: FastifyInstance) {
               try {
                 const parsed = JSON.parse(ch.data) as Record<string, unknown> & { name?: string };
                 if (parsed.name && ch.avatarPath) {
-                  charAvatarByName.set(parsed.name.toLowerCase(), ch.avatarPath);
+                  addNameLookupEntry(charAvatarByName, parsed.name, ch.avatarPath);
                 }
                 const appearanceText = extractCharacterAppearanceText(parsed);
                 if (parsed.name && appearanceText) {
-                  charDescriptionByName.set(parsed.name.toLowerCase(), appearanceText);
+                  addNameLookupEntry(charDescriptionByName, parsed.name, appearanceText);
                 }
               } catch {
                 /* skip */
@@ -6181,11 +6284,11 @@ export async function gameRoutes(app: FastifyInstance) {
           try {
             const parsed = JSON.parse(ch.data) as Record<string, unknown> & { name?: string };
             if (parsed.name && ch.avatarPath) {
-              charAvatarByName.set(parsed.name.toLowerCase(), ch.avatarPath);
+              addNameLookupEntry(charAvatarByName, parsed.name, ch.avatarPath);
             }
             const appearanceText = extractCharacterAppearanceText(parsed);
             if (parsed.name && appearanceText) {
-              charDescriptionByName.set(parsed.name.toLowerCase(), appearanceText);
+              addNameLookupEntry(charDescriptionByName, parsed.name, appearanceText);
             }
           } catch {
             /* skip */
@@ -6259,7 +6362,7 @@ export async function gameRoutes(app: FastifyInstance) {
         try {
           const parsed = JSON.parse(ch.data) as { name?: string };
           if (parsed.name && ch.avatarPath) {
-            charAvatarByName.set(parsed.name.toLowerCase(), ch.avatarPath);
+            addNameLookupEntry(charAvatarByName, parsed.name, ch.avatarPath);
           }
         } catch {
           /* skip */
@@ -6418,11 +6521,11 @@ export async function gameRoutes(app: FastifyInstance) {
           try {
             const parsed = JSON.parse(ch.data) as Record<string, unknown> & { name?: string };
             if (parsed.name && ch.avatarPath) {
-              charAvatarByName.set(parsed.name.toLowerCase(), ch.avatarPath);
+              addNameLookupEntry(charAvatarByName, parsed.name, ch.avatarPath);
             }
             const appearanceText = extractCharacterAppearanceText(parsed);
             if (parsed.name && appearanceText) {
-              charDescriptionByName.set(parsed.name.toLowerCase(), appearanceText);
+              addNameLookupEntry(charDescriptionByName, parsed.name, appearanceText);
             }
           } catch {
             /* skip */
@@ -6519,7 +6622,7 @@ export async function gameRoutes(app: FastifyInstance) {
         try {
           const parsed = JSON.parse(ch.data) as { name?: string };
           if (parsed.name && ch.avatarPath) {
-            charAvatarByName.set(parsed.name.toLowerCase(), ch.avatarPath);
+            addNameLookupEntry(charAvatarByName, parsed.name, ch.avatarPath);
           }
         } catch {
           /* skip */

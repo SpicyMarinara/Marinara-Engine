@@ -13,9 +13,11 @@ Fall back to sequential in-head work only if the environment genuinely cannot sp
 #### Assessment A: LLM Design Review
 
 Read the relevant source files (HTML, CSS, JS/TS) and, if browser automation is available, visually inspect the live page. **Create a new tab** for this; do not reuse existing tabs. After navigation, label the tab by setting the document title:
+
 ```javascript
-document.title = '[LLM] ' + document.title;
+document.title = "[LLM] " + document.title;
 ```
+
 Think like a design director. Evaluate:
 
 **AI Slop Detection (CRITICAL)**: Does this look like every other AI-generated interface? Review against ALL **DON'T** guidelines from the parent impeccable skill (already loaded in this context). Check for AI color palette, gradient text, dark glows, glassmorphism, hero metric layouts, identical card grids, generic fonts, and all other tells. **The test**: If someone said "AI made this," would you believe them immediately?
@@ -23,11 +25,13 @@ Think like a design director. Evaluate:
 **Holistic Design Review**: visual hierarchy (eye flow, primary action clarity), information architecture (structure, grouping, cognitive load), emotional resonance (does it match brand and audience?), discoverability (are interactive elements obvious?), composition (balance, whitespace, rhythm), typography (hierarchy, readability, font choices), color (purposeful use, cohesion, accessibility), states & edge cases (empty, loading, error, success), microcopy (clarity, tone, helpfulness).
 
 **Cognitive Load** (consult [cognitive-load](cognitive-load.md)):
+
 - Run the 8-item cognitive load checklist. Report failure count: 0-1 = low (good), 2-3 = moderate, 4+ = critical.
 - Count visible options at each decision point. If >4, flag it.
 - Check for progressive disclosure: is complexity revealed only when needed?
 
 **Emotional Journey**:
+
 - What emotion does this interface evoke? Is that intentional?
 - **Peak-end rule**: Is the most intense moment positive? Does the experience end well?
 - **Emotional valleys**: Check for anxiety spikes at high-stakes moments (payment, delete, commit). Are there design interventions (progress indicators, reassurance copy, undo options)?
@@ -42,6 +46,7 @@ Return structured findings covering: AI slop verdict, heuristic scores, cognitiv
 Run the bundled deterministic detector, which flags 27 specific patterns (AI slop tells + general design quality).
 
 **CLI scan**:
+
 ```bash
 npx impeccable --json [--fast] [target]
 ```
@@ -64,12 +69,14 @@ The overlay is a **visual aid for the user**. It highlights issues directly in t
 2. **Create a new tab** and navigate to the page (use dev server URL for local files, or direct URL). Do not reuse existing tabs.
 3. **Label the tab** via `javascript_tool` so the user can distinguish it:
    ```javascript
-   document.title = '[Human] ' + document.title;
+   document.title = "[Human] " + document.title;
    ```
 4. **Scroll to top** to ensure the page is scrolled to the very top before injection
 5. **Inject** via `javascript_tool` (replace PORT with the port from step 1):
    ```javascript
-   const s = document.createElement('script'); s.src = 'http://localhost:PORT/detect.js'; document.head.appendChild(s);
+   const s = document.createElement("script");
+   s.src = "http://localhost:PORT/detect.js";
+   document.head.appendChild(s);
    ```
 6. Wait 2-3 seconds for the detector to render overlays
 7. **Read results from console** using `read_console_messages` with pattern `impeccable`. The detector logs all findings with the `[impeccable]` prefix. Do NOT scroll through the page to take screenshots of the overlays.
@@ -89,23 +96,24 @@ Synthesize both assessments into a single report. Do NOT simply concatenate. Wea
 Structure your feedback as a design director would:
 
 #### Design Health Score
-> *Consult [heuristics-scoring](heuristics-scoring.md)*
+
+> _Consult [heuristics-scoring](heuristics-scoring.md)_
 
 Present the Nielsen's 10 heuristics scores as a table:
 
-| # | Heuristic | Score | Key Issue |
-|---|-----------|-------|-----------|
-| 1 | Visibility of System Status | ? | [specific finding or "n/a" if solid] |
-| 2 | Match System / Real World | ? | |
-| 3 | User Control and Freedom | ? | |
-| 4 | Consistency and Standards | ? | |
-| 5 | Error Prevention | ? | |
-| 6 | Recognition Rather Than Recall | ? | |
-| 7 | Flexibility and Efficiency | ? | |
-| 8 | Aesthetic and Minimalist Design | ? | |
-| 9 | Error Recovery | ? | |
-| 10 | Help and Documentation | ? | |
-| **Total** | | **??/40** | **[Rating band]** |
+| #         | Heuristic                       | Score     | Key Issue                            |
+| --------- | ------------------------------- | --------- | ------------------------------------ |
+| 1         | Visibility of System Status     | ?         | [specific finding or "n/a" if solid] |
+| 2         | Match System / Real World       | ?         |                                      |
+| 3         | User Control and Freedom        | ?         |                                      |
+| 4         | Consistency and Standards       | ?         |                                      |
+| 5         | Error Prevention                | ?         |                                      |
+| 6         | Recognition Rather Than Recall  | ?         |                                      |
+| 7         | Flexibility and Efficiency      | ?         |                                      |
+| 8         | Aesthetic and Minimalist Design | ?         |                                      |
+| 9         | Error Recovery                  | ?         |                                      |
+| 10        | Help and Documentation          | ?         |                                      |
+| **Total** |                                 | **??/40** | **[Rating band]**                    |
 
 Be honest with scores. A 4 means genuinely excellent. Most real interfaces score 20-32.
 
@@ -120,22 +128,27 @@ Be honest with scores. A 4 means genuinely excellent. Most real interfaces score
 **Visual overlays** (if browser was used): Tell the user that overlays are now visible in the **[Human]** tab in their browser, highlighting the detected issues. Summarize what the console output reported.
 
 #### Overall Impression
+
 A brief gut reaction: what works, what doesn't, and the single biggest opportunity.
 
 #### What's Working
+
 Highlight 2-3 things done well. Be specific about why they work.
 
 #### Priority Issues
+
 The 3-5 most impactful design problems, ordered by importance.
 
 For each issue, tag with **P0-P3 severity** (consult [heuristics-scoring](heuristics-scoring.md) for severity definitions):
+
 - **[P?] What**: Name the problem clearly
 - **Why it matters**: How this hurts users or undermines goals
 - **Fix**: What to do about it (be concrete)
 - **Suggested command**: Which command could address this (from: $impeccable adapt, $impeccable animate, $impeccable audit, $impeccable bolder, $impeccable clarify, $impeccable colorize, $impeccable critique, $impeccable delight, $impeccable distill, $impeccable document, $impeccable harden, $impeccable layout, $impeccable onboard, $impeccable optimize, $impeccable overdrive, $impeccable polish, $impeccable quieter, $impeccable shape, $impeccable typeset)
 
 #### Persona Red Flags
-> *Consult [personas](personas.md)*
+
+> _Consult [personas](personas.md)_
 
 Auto-select 2-3 personas most relevant to this interface type (use the selection table in the reference). If `AGENTS.md` contains a `## Design Context` section from `impeccable teach`, also generate 1-2 project-specific personas from the audience/brand info.
 
@@ -148,15 +161,19 @@ For each selected persona, walk through the primary user action and list specifi
 Be specific. Name the exact elements and interactions that fail each persona. Don't write generic persona descriptions; write what broke for them.
 
 #### Minor Observations
+
 Quick notes on smaller issues worth addressing.
 
 #### Questions to Consider
+
 Provocative questions that might unlock better solutions:
+
 - "What if the primary action were more prominent?"
 - "Does this need to feel this complex?"
 - "What would a confident version of this look like?"
 
 **Remember**:
+
 - Be direct. Vague feedback wastes everyone's time.
 - Be specific. "The submit button," not "some elements."
 - Say what's wrong AND why it matters to users.
@@ -179,6 +196,7 @@ Ask questions along these lines (adapt to the specific findings; do NOT ask gene
 4. **Constraints** (optional; only ask if relevant): If the findings touch many areas, ask if anything is off-limits. For example: "Should any sections stay as-is?" This prevents the plan from touching things the user considers done.
 
 **Rules for questions**:
+
 - Every question must reference specific findings from the report. Never ask generic "who is your audience?" questions.
 - Keep it to 2-4 questions maximum. Respect the user's time.
 - Offer concrete options, not open-ended prompts.
@@ -194,9 +212,10 @@ List recommended commands in priority order, based on the user's answers:
 
 1. **`$command-name`**: Brief description of what to fix (specific context from critique findings)
 2. **`$command-name`**: Brief description (specific context)
-...
+   ...
 
 **Rules for recommendations**:
+
 - Only recommend commands from: $impeccable adapt, $impeccable animate, $impeccable audit, $impeccable bolder, $impeccable clarify, $impeccable colorize, $impeccable critique, $impeccable delight, $impeccable distill, $impeccable document, $impeccable harden, $impeccable layout, $impeccable onboard, $impeccable optimize, $impeccable overdrive, $impeccable polish, $impeccable quieter, $impeccable shape, $impeccable typeset
 - Order by the user's stated priorities first, then by impact
 - Each item's description should carry enough context that the command knows what to focus on

@@ -20,7 +20,7 @@ import {
   type ImageGenerationDefaultsProfile,
 } from "@marinara-engine/shared";
 import { isImageLocalUrlsEnabled } from "../../config/runtime-config.js";
-import { safeFetch } from "../../utils/security.js";
+import { normalizeLoopbackUrl, safeFetch, validateOutboundUrl } from "../../utils/security.js";
 
 const GALLERY_DIR = join(DATA_DIR, "gallery");
 
@@ -44,6 +44,8 @@ export interface ImageGenRequest {
   comfyWorkflow?: string;
   /** Optional connection-scoped defaults for local Stable Diffusion backends. */
   imageDefaults?: ImageGenerationDefaultsProfile | null;
+  /** Allow this explicit image-generation connection to call local/private URLs. */
+  allowLocalUrls?: boolean;
   /** Optional base64-encoded reference image for img2img / character consistency. */
   referenceImage?: string;
   /** Optional array of base64-encoded reference images (avatars). Providers that support multiple refs use all; others use the first. */
@@ -105,28 +107,35 @@ export async function generateImage(
   request: ImageGenRequest,
 ): Promise<ImageGenResult> {
   const resolvedSource = resolveImageBackend(source, baseUrl, serviceHint, request.model);
+  const normalizedBaseUrl = normalizeImageUrl(baseUrl);
+  const scopedRequest = {
+    ...request,
+    allowLocalUrls:
+      request.allowLocalUrls ?? (await shouldAllowLocalUrlsForImageConnection(normalizedBaseUrl, resolvedSource)),
+  };
+
   switch (resolvedSource) {
     case "openai":
-      return generateOpenAI(baseUrl, apiKey, request);
+      return generateOpenAI(normalizedBaseUrl, apiKey, scopedRequest);
     case "nanogpt":
-      return generateNanoGPT(baseUrl, apiKey, request);
+      return generateNanoGPT(normalizedBaseUrl, apiKey, scopedRequest);
     case "pollinations":
-      return generatePollinations(request);
+      return generatePollinations(scopedRequest);
     case "stability":
-      return generateStability(baseUrl, apiKey, request);
+      return generateStability(normalizedBaseUrl, apiKey, scopedRequest);
     case "togetherai":
-      return generateTogetherAI(baseUrl, apiKey, request);
+      return generateTogetherAI(normalizedBaseUrl, apiKey, scopedRequest);
     case "novelai":
-      return generateNovelAI(baseUrl, apiKey, request);
+      return generateNovelAI(normalizedBaseUrl, apiKey, scopedRequest);
     case "comfyui":
-      return generateComfyUI(baseUrl, request);
+      return generateComfyUI(normalizedBaseUrl, scopedRequest);
     case "automatic1111":
-      return generateAutomatic1111(baseUrl, request);
+      return generateAutomatic1111(normalizedBaseUrl, scopedRequest);
     case "gemini_image":
-      return generateViaChatCompletions(baseUrl, apiKey, request);
+      return generateViaChatCompletions(normalizedBaseUrl, apiKey, scopedRequest);
     default:
       // Fallback: try OpenAI-compatible endpoint
-      return generateOpenAI(baseUrl, apiKey, request);
+      return generateOpenAI(normalizedBaseUrl, apiKey, scopedRequest);
   }
 }
 
@@ -148,6 +157,30 @@ export function saveImageToDisk(chatId: string, base64: string, ext: string): st
 /** Default 5-minute timeout for image generation API calls (overridable via env). */
 const IMAGE_GEN_TIMEOUT = Number(process.env.IMAGE_GEN_TIMEOUT_MS ?? 300_000);
 const MAX_IMAGE_RESPONSE_BYTES = 30 * 1024 * 1024;
+const LOCAL_IMAGE_BACKENDS = new Set(["comfyui", "automatic1111"]);
+
+function normalizeImageUrl(url: string | URL): string {
+  try {
+    return normalizeLoopbackUrl(url);
+  } catch {
+    return url.toString();
+  }
+}
+
+async function shouldAllowLocalUrlsForImageConnection(baseUrl: string, resolvedSource: string): Promise<boolean> {
+  if (isImageLocalUrlsEnabled() || LOCAL_IMAGE_BACKENDS.has(resolvedSource)) return true;
+
+  try {
+    await validateOutboundUrl(baseUrl, {
+      allowLoopback: true,
+      allowedProtocols: ["https:", "http:"],
+    });
+    return false;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "";
+    return /private|loopback|local|reserved/i.test(message);
+  }
+}
 
 function imageFetch(url: string | URL, init?: RequestInit, options: { allowLocal?: boolean } = {}) {
   return safeFetch(url, {
@@ -245,8 +278,13 @@ function nanoGPTImagesUrl(baseUrl: string): string {
   }
 }
 
-async function downloadImageUrl(imageUrl: string): Promise<ImageGenResult> {
-  const imgResp = await imageFetch(imageUrl, { signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT) });
+async function downloadImageUrl(imageUrl: string, allowLocalUrls = false): Promise<ImageGenResult> {
+  const normalizedImageUrl = normalizeImageUrl(imageUrl);
+  const imgResp = await imageFetch(
+    normalizedImageUrl,
+    { signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT) },
+    { allowLocal: allowLocalUrls },
+  );
   if (!imgResp.ok) {
     throw new Error(`Failed to download generated image (${imgResp.status})`);
   }
@@ -257,10 +295,10 @@ async function downloadImageUrl(imageUrl: string): Promise<ImageGenResult> {
   const contentType = imgResp.headers.get("content-type") ?? "";
   let mimeType = "image/png";
   let ext = "png";
-  if (contentType.includes("jpeg") || contentType.includes("jpg") || imageUrl.match(/\.jpe?g/i)) {
+  if (contentType.includes("jpeg") || contentType.includes("jpg") || normalizedImageUrl.match(/\.jpe?g/i)) {
     mimeType = "image/jpeg";
     ext = "jpg";
-  } else if (contentType.includes("webp") || imageUrl.match(/\.webp/i)) {
+  } else if (contentType.includes("webp") || normalizedImageUrl.match(/\.webp/i)) {
     mimeType = "image/webp";
     ext = "webp";
   }
@@ -285,15 +323,19 @@ async function generateOpenAI(baseUrl: string, apiKey: string, request: ImageGen
     body.response_format = "b64_json";
   }
 
-  const resp = await imageFetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+  const resp = await imageFetch(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
     },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
-  });
+    { allowLocal: request.allowLocalUrls },
+  );
 
   if (!resp.ok) {
     const errText = await resp.text().catch(() => "Unknown error");
@@ -309,10 +351,13 @@ async function generateOpenAI(baseUrl: string, apiKey: string, request: ImageGen
 
 async function generateNanoGPT(baseUrl: string, apiKey: string, request: ImageGenRequest): Promise<ImageGenResult> {
   const url = nanoGPTImagesUrl(baseUrl);
+  const size = isOpenAIGptImageModel(request.model)
+    ? openAIImageSize(request)
+    : `${request.width ?? 1024}x${request.height ?? 1024}`;
   const body: Record<string, unknown> = {
     prompt: request.prompt,
     n: 1,
-    size: `${request.width ?? 1024}x${request.height ?? 1024}`,
+    size,
     response_format: "b64_json",
   };
   if (request.model) body.model = request.model;
@@ -332,15 +377,19 @@ async function generateNanoGPT(baseUrl: string, apiKey: string, request: ImageGe
     body.imageDataUrls = references.map(imageDataUrlFromReference);
   }
 
-  const resp = await imageFetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+  const resp = await imageFetch(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
     },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
-  });
+    { allowLocal: request.allowLocalUrls },
+  );
 
   if (!resp.ok) {
     const errText = await resp.text().catch(() => "Unknown error");
@@ -350,7 +399,7 @@ async function generateNanoGPT(baseUrl: string, apiKey: string, request: ImageGe
   const data = (await resp.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
   const result = data.data?.[0];
   if (result?.b64_json) return { base64: result.b64_json, mimeType: "image/png", ext: "png" };
-  if (result?.url) return downloadImageUrl(result.url);
+  if (result?.url) return downloadImageUrl(result.url, request.allowLocalUrls);
 
   throw new Error("No image data in NanoGPT response");
 }
@@ -377,11 +426,97 @@ async function generatePollinations(request: ImageGenRequest): Promise<ImageGenR
   return { base64, mimeType: "image/jpeg", ext: "jpg" };
 }
 
+function buildStabilityUrl(baseUrl: string, targetPath: string): string {
+  try {
+    const url = new URL(baseUrl);
+    const parts = url.pathname.split("/").filter(Boolean);
+    const versionIndex = parts.findIndex((part) => part === "v1" || part === "v2beta");
+    const prefix = versionIndex >= 0 ? parts.slice(0, versionIndex) : parts;
+    url.pathname = `/${[...prefix, ...targetPath.split("/").filter(Boolean)].join("/")}`;
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return `${baseUrl.replace(/\/+$/, "")}/${targetPath.replace(/^\/+/, "")}`;
+  }
+}
+
+function isStabilityV1Base(baseUrl: string): boolean {
+  try {
+    const parts = new URL(baseUrl).pathname.split("/").filter(Boolean);
+    return parts.includes("v1") && !parts.includes("v2beta");
+  } catch {
+    return /\/v1(?:\/|$)/i.test(baseUrl) && !/\/v2beta(?:\/|$)/i.test(baseUrl);
+  }
+}
+
+function normalizeStabilitySd3Model(model?: string): string {
+  const raw = model?.trim() || "sd3.5-large";
+  const lower = raw.toLowerCase();
+  if (lower === "sd3-large") return "sd3.5-large";
+  if (lower === "sd3-large-turbo") return "sd3.5-large-turbo";
+  if (lower === "sd3-medium") return "sd3.5-medium";
+  return raw;
+}
+
+function resolveStabilityV2Endpoint(baseUrl: string, request: ImageGenRequest): { url: string; model: string | null } {
+  const hasReference = Boolean(request.referenceImage || request.referenceImages?.length);
+  const model = request.model?.trim().toLowerCase() ?? "";
+
+  if (!hasReference && (model === "stable-image-ultra" || model === "ultra")) {
+    return { url: buildStabilityUrl(baseUrl, "v2beta/stable-image/generate/ultra"), model: null };
+  }
+
+  if (!hasReference && (model === "stable-image-core" || model === "core")) {
+    return { url: buildStabilityUrl(baseUrl, "v2beta/stable-image/generate/core"), model: null };
+  }
+
+  return {
+    url: buildStabilityUrl(baseUrl, "v2beta/stable-image/generate/sd3"),
+    model: normalizeStabilitySd3Model(request.model),
+  };
+}
+
+function stabilityAspectRatio(width?: number, height?: number): string | null {
+  if (!width || !height) return null;
+  const ratio = width / height;
+  const candidates = [
+    ["21:9", 21 / 9],
+    ["16:9", 16 / 9],
+    ["3:2", 3 / 2],
+    ["5:4", 5 / 4],
+    ["1:1", 1],
+    ["4:5", 4 / 5],
+    ["2:3", 2 / 3],
+    ["9:16", 9 / 16],
+    ["9:21", 9 / 21],
+  ] as const;
+  return candidates.reduce((best, candidate) =>
+    Math.abs(candidate[1] - ratio) < Math.abs(best[1] - ratio) ? candidate : best,
+  )[0];
+}
+
+function normalizeStabilityV1Engine(model?: string): string {
+  const raw = model?.trim() ?? "";
+  const lower = raw.toLowerCase();
+  if (!raw || lower.startsWith("sd3") || lower.startsWith("stable-image") || lower.includes("/")) {
+    return "stable-diffusion-xl-1024-v1-0";
+  }
+  return raw;
+}
+
 async function generateStability(baseUrl: string, apiKey: string, request: ImageGenRequest): Promise<ImageGenResult> {
-  const url = `${baseUrl.replace(/\/+$/, "")}/stable-image/generate/sd3`;
+  if (isStabilityV1Base(baseUrl)) {
+    return generateStabilityV1(baseUrl, apiKey, request);
+  }
+
+  const endpoint = resolveStabilityV2Endpoint(baseUrl, request);
   const formData = new FormData();
   formData.append("prompt", request.prompt);
   if (request.negativePrompt) formData.append("negative_prompt", request.negativePrompt);
+  if (endpoint.model) formData.append("model", endpoint.model);
+  const aspectRatio = stabilityAspectRatio(request.width, request.height);
+  if (aspectRatio) formData.append("aspect_ratio", aspectRatio);
   if (request.referenceImage) {
     formData.append(
       "image",
@@ -401,15 +536,19 @@ async function generateStability(baseUrl: string, apiKey: string, request: Image
   }
   formData.append("output_format", "png");
 
-  const resp = await imageFetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      Accept: "image/*",
+  const resp = await imageFetch(
+    endpoint.url,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "image/*",
+      },
+      body: formData,
+      signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
     },
-    body: formData,
-    signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
-  });
+    { allowLocal: request.allowLocalUrls },
+  );
 
   if (!resp.ok) {
     const errText = await resp.text().catch(() => "Unknown error");
@@ -418,6 +557,48 @@ async function generateStability(baseUrl: string, apiKey: string, request: Image
 
   const arrayBuffer = await resp.arrayBuffer();
   const base64 = Buffer.from(arrayBuffer).toString("base64");
+
+  return { base64, mimeType: "image/png", ext: "png" };
+}
+
+async function generateStabilityV1(baseUrl: string, apiKey: string, request: ImageGenRequest): Promise<ImageGenResult> {
+  const engine = normalizeStabilityV1Engine(request.model);
+  const url = buildStabilityUrl(baseUrl, `v1/generation/${engine}/text-to-image`);
+  const textPrompts: Array<{ text: string; weight: number }> = [{ text: request.prompt, weight: 1 }];
+  if (request.negativePrompt) textPrompts.push({ text: request.negativePrompt, weight: -1 });
+
+  const body = {
+    text_prompts: textPrompts,
+    cfg_scale: 7,
+    height: request.height ?? 1024,
+    width: request.width ?? 1024,
+    samples: 1,
+    steps: 30,
+  };
+
+  const resp = await imageFetch(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
+    },
+    { allowLocal: request.allowLocalUrls },
+  );
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => "Unknown error");
+    throw new Error(`Stability image generation failed (${resp.status}): ${sanitizeErrorText(errText)}`);
+  }
+
+  const data = (await resp.json()) as { artifacts?: Array<{ base64?: string }> };
+  const base64 = data.artifacts?.find((artifact) => artifact.base64)?.base64;
+  if (!base64) throw new Error("No image data in Stability response");
 
   return { base64, mimeType: "image/png", ext: "png" };
 }
@@ -434,15 +615,19 @@ async function generateTogetherAI(baseUrl: string, apiKey: string, request: Imag
   };
   if (request.negativePrompt) body.negative_prompt = request.negativePrompt;
 
-  const resp = await imageFetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+  const resp = await imageFetch(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
     },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
-  });
+    { allowLocal: request.allowLocalUrls },
+  );
 
   if (!resp.ok) {
     const errText = await resp.text().catch(() => "Unknown error");
@@ -515,15 +700,19 @@ async function generateNovelAI(baseUrl: string, apiKey: string, request: ImageGe
     parameters,
   };
 
-  const resp = await imageFetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+  const resp = await imageFetch(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
     },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
-  });
+    { allowLocal: request.allowLocalUrls },
+  );
 
   if (!resp.ok) {
     const errText = await resp.text().catch(() => "Unknown error");
@@ -651,20 +840,24 @@ async function generateViaChatCompletions(
     messageContent = request.prompt;
   }
 
-  const resp = await imageFetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+  const resp = await imageFetch(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: request.model || "nai-diffusion-4-5-full",
+        messages: [{ role: "user", content: messageContent }],
+        stream: false,
+        temperature: 0.7,
+      }),
+      signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
     },
-    body: JSON.stringify({
-      model: request.model || "nai-diffusion-4-5-full",
-      messages: [{ role: "user", content: messageContent }],
-      stream: false,
-      temperature: 0.7,
-    }),
-    signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
-  });
+    { allowLocal: request.allowLocalUrls },
+  );
 
   if (!resp.ok) {
     const errText = await resp.text().catch(() => "Unknown error");
@@ -684,7 +877,7 @@ async function generateViaChatCompletions(
     throw new Error(`No image URL found in proxy response: ${content.slice(0, 200)}`);
   }
 
-  return downloadImageUrl(imageUrl);
+  return downloadImageUrl(imageUrl, request.allowLocalUrls);
 }
 
 // ── ComfyUI ──

@@ -30,13 +30,13 @@
  * fallback directories are read-only as far as auto-rename is concerned.
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from "node:fs";
+import path from "node:path";
 
-const PRODUCT_NAMES = ['PRODUCT.md', 'Product.md', 'product.md'];
-const DESIGN_NAMES = ['DESIGN.md', 'Design.md', 'design.md'];
-const LEGACY_NAMES = ['.impeccable.md'];
-const FALLBACK_DIRS = ['.agents/context', 'docs'];
+const PRODUCT_NAMES = ["PRODUCT.md", "Product.md", "product.md"];
+const DESIGN_NAMES = ["DESIGN.md", "Design.md", "design.md"];
+const LEGACY_NAMES = [".impeccable.md"];
+const FALLBACK_DIRS = [".agents/context", "docs"];
 
 /**
  * Resolve the directory that holds PRODUCT.md / DESIGN.md / DESIGN.json for
@@ -84,7 +84,7 @@ export function loadContext(cwd = process.cwd()) {
   if (!productPath && contextDir === cwd) {
     const legacyPath = firstExisting(cwd, LEGACY_NAMES);
     if (legacyPath) {
-      const newPath = path.join(cwd, 'PRODUCT.md');
+      const newPath = path.join(cwd, "PRODUCT.md");
       try {
         fs.renameSync(legacyPath, newPath);
         productPath = newPath;
@@ -123,7 +123,11 @@ function firstExisting(dir, names) {
 }
 
 function safeRead(p) {
-  try { return fs.readFileSync(p, 'utf-8'); } catch { return null; }
+  try {
+    return fs.readFileSync(p, "utf-8");
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +140,6 @@ function cli() {
 }
 
 const _running = process.argv[1];
-if (_running?.endsWith('load-context.mjs') || _running?.endsWith('load-context.mjs/')) {
+if (_running?.endsWith("load-context.mjs") || _running?.endsWith("load-context.mjs/")) {
   cli();
 }

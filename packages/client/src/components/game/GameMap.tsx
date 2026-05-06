@@ -838,11 +838,11 @@ export function MobileMapButton({
             </div>
 
             {/* Selected node footer — shown when a node is tapped */}
-            {selectedNodeData && selectedNodeData.discovered && (
+            {selectedNodeData && (
               <div className="flex items-center gap-2 border-t border-white/10 px-4 py-2.5">
-                <span className="text-sm">{selectedNodeData.emoji}</span>
+                <span className="text-sm">{selectedNodeData.discovered ? selectedNodeData.emoji : "❓"}</span>
                 <span className="min-w-0 flex-1 truncate text-xs font-medium text-[var(--foreground)]">
-                  {selectedNodeData.label}
+                  {selectedNodeData.discovered ? selectedNodeData.label : "Unknown location"}
                 </span>
                 {canTravel && selectedNode !== currentNode?.id && (
                   <button

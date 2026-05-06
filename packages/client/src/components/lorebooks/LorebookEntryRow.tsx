@@ -15,6 +15,7 @@ import {
 import {
   ChevronDown,
   CheckCircle2,
+  CheckSquare2,
   CircleDashed,
   FileText,
   GripVertical,
@@ -24,6 +25,7 @@ import {
   MoreHorizontal,
   Regex,
   Settings2,
+  Square,
   ToggleLeft,
   ToggleRight,
   Trash2,
@@ -69,6 +71,9 @@ interface Props {
   onDragOver: (e: ReactDragEvent<HTMLDivElement>) => void;
   onDrop: (e: ReactDragEvent<HTMLDivElement>) => void;
   onDragEnd: () => void;
+  selectionMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelected?: () => void;
 }
 
 /** Maps the (constant, selective) boolean pair into a single status enum for the inline select. */
@@ -171,6 +176,9 @@ export function LorebookEntryRow({
   onDragOver,
   onDrop,
   onDragEnd,
+  selectionMode = false,
+  isSelected = false,
+  onToggleSelected,
 }: Props) {
   const updateEntry = useUpdateLorebookEntry();
   const deleteEntry = useDeleteLorebookEntry();
@@ -309,6 +317,7 @@ export function LorebookEntryRow({
       className={cn(
         "rounded-xl bg-[var(--secondary)] ring-1 ring-[var(--border)] transition-all",
         isExpanded ? "ring-amber-400/40" : "hover:ring-amber-400/30",
+        selectionMode && isSelected && "bg-amber-400/10 ring-amber-400/40",
         isDragging && "opacity-40",
       )}
       draggable={draggable && isDragReady}
@@ -318,7 +327,10 @@ export function LorebookEntryRow({
       onDragEnd={onDragEnd}
     >
       {/* ── Compact row ── */}
-      <div className="group flex cursor-pointer items-center gap-1 px-2 py-1.5 sm:gap-2" onClick={onToggleExpand}>
+      <div
+        className="group flex cursor-pointer items-center gap-1 px-2 py-1.5 sm:gap-2"
+        onClick={selectionMode ? onToggleSelected : onToggleExpand}
+      >
         {/* Drag handle */}
         <button
           type="button"
@@ -341,6 +353,26 @@ export function LorebookEntryRow({
         >
           <GripVertical size="0.875rem" />
         </button>
+
+        {selectionMode && (
+          <button
+            type="button"
+            aria-label={isSelected ? "Deselect entry" : "Select entry"}
+            title={isSelected ? "Deselect entry" : "Select entry"}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSelected?.();
+            }}
+            className={cn(
+              "flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--ring)]",
+              isSelected
+                ? "bg-amber-400/15 text-amber-400 ring-1 ring-amber-400/30"
+                : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
+            )}
+          >
+            {isSelected ? <CheckSquare2 size="0.875rem" /> : <Square size="0.875rem" />}
+          </button>
+        )}
 
         {/* Expand chevron */}
         <button

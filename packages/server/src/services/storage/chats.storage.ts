@@ -33,23 +33,33 @@ export type MetadataPatch = Record<string, unknown>;
 export type MetadataUpdater = (current: MetadataPatch) => MetadataPatch | Promise<MetadataPatch>;
 
 const metadataPatchQueues = new Map<string, Promise<void>>();
+const messageExtraPatchQueues = new Map<string, Promise<void>>();
+const swipeExtraPatchQueues = new Map<string, Promise<void>>();
 
-async function withMetadataPatchQueue<T>(chatId: string, operation: () => Promise<T>): Promise<T> {
-  const previous = metadataPatchQueues.get(chatId) ?? Promise.resolve();
+async function withPatchQueue<T>(
+  queues: Map<string, Promise<void>>,
+  key: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const previous = queues.get(key) ?? Promise.resolve();
   const queued = previous.catch(() => undefined).then(operation);
   const queuedVoid = queued.then(
     () => undefined,
     () => undefined,
   );
-  metadataPatchQueues.set(chatId, queuedVoid);
+  queues.set(key, queuedVoid);
 
   try {
     return await queued;
   } finally {
-    if (metadataPatchQueues.get(chatId) === queuedVoid) {
-      metadataPatchQueues.delete(chatId);
+    if (queues.get(key) === queuedVoid) {
+      queues.delete(key);
     }
   }
+}
+
+async function withMetadataPatchQueue<T>(chatId: string, operation: () => Promise<T>): Promise<T> {
+  return withPatchQueue(metadataPatchQueues, chatId, operation);
 }
 
 function parseMetadata(raw: unknown): MetadataPatch {
@@ -442,15 +452,33 @@ export function createChatsStorage(db: DB) {
 
     /** Merge partial data into a message's extra JSON field. */
     async updateMessageExtra(id: string, partial: Record<string, unknown>) {
-      const msg = await this.getMessage(id);
-      if (!msg) return null;
-      const existing = typeof msg.extra === "string" ? JSON.parse(msg.extra) : (msg.extra ?? {});
-      const merged = { ...existing, ...partial };
-      await db
-        .update(messages)
-        .set({ extra: JSON.stringify(merged) })
-        .where(eq(messages.id, id));
-      return this.getMessage(id);
+      return withPatchQueue(messageExtraPatchQueues, id, async () => {
+        const msg = await this.getMessage(id);
+        if (!msg) return null;
+        const existing = typeof msg.extra === "string" ? JSON.parse(msg.extra) : (msg.extra ?? {});
+        const merged = { ...existing, ...partial };
+        await db
+          .update(messages)
+          .set({ extra: JSON.stringify(merged) })
+          .where(eq(messages.id, id));
+        return this.getMessage(id);
+      });
+    },
+
+    /** Atomically append an attachment to a message's extra JSON field. */
+    async appendMessageAttachment(id: string, attachment: Record<string, unknown>) {
+      return withPatchQueue(messageExtraPatchQueues, id, async () => {
+        const msg = await this.getMessage(id);
+        if (!msg) return null;
+        const existing = typeof msg.extra === "string" ? JSON.parse(msg.extra) : (msg.extra ?? {});
+        const attachments = Array.isArray(existing.attachments) ? existing.attachments : [];
+        const merged = { ...existing, attachments: [...attachments, attachment] };
+        await db
+          .update(messages)
+          .set({ extra: JSON.stringify(merged) })
+          .where(eq(messages.id, id));
+        return this.getMessage(id);
+      });
     },
 
     async removeMessage(id: string) {
@@ -605,15 +633,33 @@ export function createChatsStorage(db: DB) {
 
     /** Merge partial data into a swipe's extra JSON field. */
     async updateSwipeExtra(messageId: string, swipeIndex: number, partial: Record<string, unknown>) {
-      const swipes = await this.getSwipes(messageId);
-      const target = swipes.find((s: any) => s.index === swipeIndex);
-      if (!target) return;
-      const existing = typeof target.extra === "string" ? JSON.parse(target.extra) : (target.extra ?? {});
-      const merged = { ...existing, ...partial };
-      await db
-        .update(messageSwipes)
-        .set({ extra: JSON.stringify(merged) })
-        .where(eq(messageSwipes.id, target.id));
+      return withPatchQueue(swipeExtraPatchQueues, `${messageId}:${swipeIndex}`, async () => {
+        const swipes = await this.getSwipes(messageId);
+        const target = swipes.find((s: any) => s.index === swipeIndex);
+        if (!target) return;
+        const existing = typeof target.extra === "string" ? JSON.parse(target.extra) : (target.extra ?? {});
+        const merged = { ...existing, ...partial };
+        await db
+          .update(messageSwipes)
+          .set({ extra: JSON.stringify(merged) })
+          .where(eq(messageSwipes.id, target.id));
+      });
+    },
+
+    /** Atomically append an attachment to a swipe's extra JSON field. */
+    async appendSwipeAttachment(messageId: string, swipeIndex: number, attachment: Record<string, unknown>) {
+      return withPatchQueue(swipeExtraPatchQueues, `${messageId}:${swipeIndex}`, async () => {
+        const swipes = await this.getSwipes(messageId);
+        const target = swipes.find((s: any) => s.index === swipeIndex);
+        if (!target) return;
+        const existing = typeof target.extra === "string" ? JSON.parse(target.extra) : (target.extra ?? {});
+        const attachments = Array.isArray(existing.attachments) ? existing.attachments : [];
+        const merged = { ...existing, attachments: [...attachments, attachment] };
+        await db
+          .update(messageSwipes)
+          .set({ extra: JSON.stringify(merged) })
+          .where(eq(messageSwipes.id, target.id));
+      });
     },
 
     // ── Chat Connections ──

@@ -272,7 +272,10 @@ export function useConcludeSession() {
 
   return useMutation({
     mutationFn: (data: { chatId: string; connectionId?: string; nextSessionRequest?: string }) =>
-      api.post<ConcludeSessionResponse>("/game/session/conclude", data),
+      api.post<ConcludeSessionResponse>("/game/session/conclude", {
+        ...data,
+        streaming: useUIStore.getState().enableStreaming,
+      }),
     onMutate: (variables) => {
       console.info("[game/session/conclude] Starting conclude request", variables);
       toast.loading("Ending session and generating summary...", {
@@ -342,7 +345,10 @@ export function useRegenerateSessionLorebook() {
 
   return useMutation({
     mutationFn: (data: { chatId: string; sessionNumber: number; connectionId?: string }) =>
-      api.post<RegenerateSessionLorebookResponse>("/game/session/regenerate-lorebook", data),
+      api.post<RegenerateSessionLorebookResponse>("/game/session/regenerate-lorebook", {
+        ...data,
+        streaming: useUIStore.getState().enableStreaming,
+      }),
     onMutate: (variables) => {
       toast.loading(`Regenerating session ${variables.sessionNumber} lorebook...`, {
         id: `game-session-lorebook:${variables.chatId}:${variables.sessionNumber}`,

@@ -8,12 +8,13 @@
 // Supported commands:
 // - [schedule_update: status="online", activity="free time"]
 // - [cross_post: target="group"] or [cross_post: target="CharName"]
-// - [selfie] or [selfie: context="description of the selfie"]
+// - [selfie], [selfie: context="description of the selfie"], [selfie: "description"], or [selfie: description]
 // - [memory: target="CharName", summary="description of the memory"]
 // - [scene: scenario="...", background="...", plan="..."] (initiate a mini-roleplay scene)
 // - [haptic: action="vibrate", intensity=0.5, duration=3] (haptic device feedback)
 // - <influence>text</influence> (OOC influence for connected roleplay, one-shot)
 // - <note>text</note> (durable note for connected roleplay, persists until cleared)
+// - [dm: character="CharName", message="text"] (Roleplay-only: open a direct-message conversation)
 //
 // Assistant commands (Professor Mari):
 // - [create_persona: name="...", description="...", personality="...", appearance="..."]
@@ -74,6 +75,14 @@ export interface NoteCommand {
   type: "note";
   /** The durable note text to persist in the connected roleplay's prompt until cleared */
   content: string;
+}
+
+export interface DirectMessageCommand {
+  type: "dm";
+  /** Target character name or ID */
+  character: string;
+  /** Text the character sends in the generated conversation DM */
+  message: string;
 }
 
 export interface HapticCommand {
@@ -214,16 +223,18 @@ export type CharacterCommand =
   | SceneCommand
   | InfluenceCommand
   | NoteCommand
+  | DirectMessageCommand
   | HapticCommand
   | AssistantCommand;
 
 /** Regex patterns for each command type */
 const SCHEDULE_UPDATE_RE = /\[schedule_update:\s*([^\]]+)\]/gi;
 const CROSS_POST_RE = /\[cross_post:\s*target="([^"]+)"\]/gi;
-const SELFIE_RE = /\[selfie(?::\s*context="([^"]*)")?\]/gi;
+const SELFIE_RE = /\[selfie(?::\s*(?:context="([^"]*)"|"([^"]*)"|([^\]\r\n"]+)))?\]/gi;
 const MEMORY_RE = /\[memory:\s*target="([^"]+)"\s*,\s*summary="([^"]+)"\]/gi;
 const SCENE_RE = /\[scene:\s*([^\]]+)\]/gi;
 const HAPTIC_RE = /\[haptic:\s*([^\]]+)\]/gi;
+const DIRECT_MESSAGE_RE = /\[dm:\s*([^\]]+)\]/gi;
 const INFLUENCE_RE = /<influence>([\s\S]*?)<\/influence>/gi;
 const NOTE_RE = /<note>([\s\S]*?)<\/note>/gi;
 
@@ -438,7 +449,8 @@ export function parseCharacterCommands(content: string): {
 
   // Parse selfie commands
   for (const match of content.matchAll(SELFIE_RE)) {
-    commands.push({ type: "selfie", context: match[1] || undefined });
+    const context = (match[1] ?? match[2] ?? match[3])?.trim();
+    commands.push({ type: "selfie", context: context || undefined });
   }
 
   // Parse memory commands
@@ -628,6 +640,31 @@ export function parseCharacterCommands(content: string): {
     .replace(NAVIGATE_RE, "")
     .replace(FETCH_RE, "")
     .replace(/\n{3,}/g, "\n\n") // collapse excessive newlines left by removals
+    .trim();
+
+  return { cleanContent, commands };
+}
+
+/** Parse Roleplay-only direct-message commands without enabling the wider Conversation command set. */
+export function parseDirectMessageCommands(content: string): {
+  cleanContent: string;
+  commands: DirectMessageCommand[];
+} {
+  const commands: DirectMessageCommand[] = [];
+
+  for (const match of content.matchAll(DIRECT_MESSAGE_RE)) {
+    const params = match[1]!;
+    const character = parseQuotedParam(params, "character");
+    const message = parseQuotedParam(params, "message");
+    const cleanMessage = message ? stripConversationPromptTimestamps(message.trim()) : "";
+    if (character && cleanMessage) {
+      commands.push({ type: "dm", character, message: cleanMessage });
+    }
+  }
+
+  const cleanContent = content
+    .replace(DIRECT_MESSAGE_RE, "")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 
   return { cleanContent, commands };

@@ -2,7 +2,10 @@
 // Generic API client for communicating with the backend
 // ──────────────────────────────────────────────
 
+import { CSRF_HEADER, CSRF_HEADER_VALUE } from "@marinara-engine/shared";
+
 const BASE = "/api";
+const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 export const ADMIN_SECRET_STORAGE_KEY = "marinara_admin_secret";
 
 export function getAdminSecretHeader(): Record<string, string> {
@@ -86,6 +89,10 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   for (const [name, value] of Object.entries(getAdminSecretHeader())) {
     headers.set(name, value);
   }
+  const method = (init?.method ?? "GET").toUpperCase();
+  if (UNSAFE_METHODS.has(method)) {
+    headers.set(CSRF_HEADER, CSRF_HEADER_VALUE);
+  }
 
   // Only default string bodies to JSON; FormData/Blob/etc. need browser-managed headers.
   if (typeof init?.body === "string" && !headers.has("Content-Type")) {
@@ -149,7 +156,7 @@ export const api = {
   downloadPost: async (path: string, body: unknown, fallbackFilename = "export.bin") => {
     const res = await fetch(`${BASE}${path}`, {
       method: "POST",
-      headers: { ...getAdminSecretHeader(), "Content-Type": "application/json" },
+      headers: { ...getAdminSecretHeader(), [CSRF_HEADER]: CSRF_HEADER_VALUE, "Content-Type": "application/json" },
       body: JSON.stringify(body),
       cache: "no-store",
     });
@@ -180,7 +187,7 @@ export const api = {
   stream: async function* (path: string, body?: unknown): AsyncGenerator<string> {
     const res = await fetch(`${BASE}${path}`, {
       method: "POST",
-      headers: { ...getAdminSecretHeader(), "Content-Type": "application/json" },
+      headers: { ...getAdminSecretHeader(), [CSRF_HEADER]: CSRF_HEADER_VALUE, "Content-Type": "application/json" },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       cache: "no-store",
     });
@@ -238,7 +245,7 @@ export const api = {
   ): AsyncGenerator<{ type: string; data: unknown }> {
     const res = await fetch(`${BASE}${path}`, {
       method: "POST",
-      headers: { ...getAdminSecretHeader(), "Content-Type": "application/json" },
+      headers: { ...getAdminSecretHeader(), [CSRF_HEADER]: CSRF_HEADER_VALUE, "Content-Type": "application/json" },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       cache: "no-store",
       signal,
@@ -289,7 +296,7 @@ export const api = {
   upload: async <T>(path: string, formData: FormData): Promise<T> => {
     const res = await fetch(`${BASE}${path}`, {
       method: "POST",
-      headers: getAdminSecretHeader(),
+      headers: { ...getAdminSecretHeader(), [CSRF_HEADER]: CSRF_HEADER_VALUE },
       body: formData,
     });
 

@@ -7,7 +7,12 @@ import { useUIStore } from "../../stores/ui.store";
 import { showConfirmDialog } from "../../lib/app-dialogs";
 import { useAgentConfigs, useUpdateAgent, useCreateAgent, type AgentConfigRow } from "../../hooks/use-agents";
 import { useConnections } from "../../hooks/use-connections";
-import { useCustomTools, type CustomToolRow } from "../../hooks/use-custom-tools";
+import {
+  isCustomToolSelectable,
+  useCustomToolCapabilities,
+  useCustomTools,
+  type CustomToolRow,
+} from "../../hooks/use-custom-tools";
 import {
   ArrowLeft,
   Save,
@@ -159,6 +164,7 @@ export function AgentEditor() {
   const { data: agentConfigs } = useAgentConfigs();
   const { data: connections } = useConnections();
   const { data: customToolsRaw } = useCustomTools();
+  const { data: customToolCapabilities } = useCustomToolCapabilities();
   const updateAgent = useUpdateAgent();
   const createAgent = useCreateAgent();
   const deleteAgent = useDeleteAgent();
@@ -1731,7 +1737,7 @@ export function AgentEditor() {
                 />
               ))}
               {(customToolsRaw as CustomToolRow[] | undefined)
-                ?.filter((t) => t.enabled === "true")
+                ?.filter((tool) => isCustomToolSelectable(tool, customToolCapabilities))
                 .map((tool) => (
                   <ToolCard
                     key={tool.name}

@@ -18,7 +18,7 @@ The shell launchers (`start.sh`, `start.bat`, `start-termux.sh`) already bind to
 
 Loopback (`127.0.0.1`) works without a password, but other devices on your LAN now require authentication by default. Set `BASIC_AUTH_USER` and `BASIC_AUTH_PASS` in `.env`, then restart Marinara. For privileged actions from that browser, also set `ADMIN_SECRET` and save it in **Settings -> Advanced -> Admin Access**.
 
-You can restore the old unauthenticated LAN behavior with `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK=true`, but only do this on a network you fully trust.
+You can restore the old unauthenticated LAN behavior with `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK=true`, but only do this on a network you fully trust. For a step-by-step walkthrough covering Basic Auth, IP Allowlist, and the private-network bypass, see [Remote Access — Setting Up Basic Auth or an IP Allowlist](REMOTE_ACCESS.md).
 
 ## 3. Find your host device's local IP address
 
@@ -93,5 +93,75 @@ Connected chats (the link between a conversation and a roleplay or game) are int
 - `<note>...</note>` — durable; appears on every roleplay turn until you clear it from the chat settings drawer. Use this for facts the roleplay character should keep remembering.
 
 This is by design — pulling raw DM messages into every roleplay turn would inflate the prompt and dilute the story. If you want something from the DM to stick in the roleplay, ask the conversation character to wrap it in a `<note>`.
+
+</details>
+
+---
+
+<a id="how-do-i-use-one-lorebook-with-multiple-characters"></a>
+
+<details>
+<summary><strong>How do I use one lorebook with multiple characters, or scope it to a specific chat?</strong></summary>
+<br>
+
+Marinara has three different ways to scope a lorebook, each at a different level. Pick whichever matches your use case:
+
+**1. Bind a lorebook to one character or persona** (lorebook editor → `Linked Character` / `Linked Persona`).
+
+The lorebook auto-activates in any chat that includes that character or uses that persona. Best when the lore is specifically _about_ that character (e.g., their backstory, their world). The two link types are mutually exclusive — pick one or the other, not both. Each link is single-value, so this is the right tool for one lorebook ↔ one character.
+
+**2. Attach lorebooks per-chat via the chat settings drawer** (gear icon → **Lorebooks** section → **+ Add Lorebook**).
+
+Multi-select. Use this when you want one lorebook active across multiple characters, or scoped to just one specific chat, or when you want several lorebooks layered together for a single chat. The lorebook's `Linked Character` / `Linked Persona` fields can be empty for this — chat attachment is independent of those links.
+
+**3. Filter individual entries by character** (lorebook entry editor → `Character Filters`).
+
+Inside a single shared lorebook, you can mark each entry as only firing when specific characters (or character tags) are present in the chat. Best for a "world bible" lorebook shared across many chats where some entries are character-specific.
+
+**Common scenario — "I want this lorebook for Character A _and_ Character B":** leave the lorebook's character link empty, and attach the lorebook via the chat settings drawer in any chat that includes either character. The same lorebook can be attached to as many chats as you want.
+
+</details>
+
+---
+
+<details>
+<summary><strong>Does retrying agents rerun every agent or just one?</strong></summary>
+<br>
+
+It depends which retry button you use.
+
+**Re-run Trackers** in the Roleplay HUD's Agents menu keeps the original broad behavior: it reruns all active tracker agents for that chat. Use this when the overall HUD state feels stale.
+
+Individual tracker controls are narrower. If you open a specific HUD widget and rerun it from there, Marinara sends only that tracker through the retry pipeline.
+
+Other retry controls are also scoped to what they say on the button: **Retry Failed Agents** retries the failed agents from the last generation, while Injections-tab re-runs only refresh the selected cached prompt injection for the current assistant message.
+
+</details>
+
+---
+
+<a id="what-happens-if-i-enable-an-agent-and-also-have-similar-instructions-in-my-preset"></a>
+
+<details>
+<summary><strong>What happens if I enable an agent and also have similar instructions in my preset?</strong></summary>
+<br>
+
+Both contribute to the prompt, but in different ways: a preset section is static text concatenated every turn, while an agent runs at request time and produces its own output. If both target the same behavior, the model receives both — usually redundant, occasionally conflicting, and always extra tokens.
+
+Common overlaps to watch for:
+
+- Writing-style or anti-repetition directives in the preset and the **Prose Guardian** agent.
+- Plot-steering, twist, pacing, or "what should happen next" directives in the preset and the **Narrative Director** or **Secret Plot Driver** agents.
+- "Track time / weather / location" instructions and the **World State** agent.
+- "Track character mood / outfit / stats" instructions and the **Character Tracker** agent.
+- Quest-tracking, combat-mechanics, or persona-stat instructions and their respective agents.
+- HTML/CSS visual-styling prompts and the **Immersive HTML** agent.
+- "Summarize past events" instructions and the **Automated Chat Summary** agent.
+
+**The general rule:** pick one place to express each behavior. If you've enabled an agent that covers a behavior, you can usually remove the matching preset directive. If you'd rather keep your preset version (e.g., it's tuned for a particular character), disable the corresponding agent.
+
+For story direction, choose the tool by how persistent you want the guidance to be. Use **Narrative Director** for occasional next-beat steering. Use **Secret Plot Driver** when you want hidden long-term arc memory and scene directions across turns. Use a preset only when the instruction should be static every turn.
+
+**One important exception:** the `agent_data` marker section, and the `{{agent::TYPE}}` macro, are the _intended_ way to thread an agent's output into a specific spot in the preset. That's wiring, not overlap — several agents (World State, Quest Tracker, Character Tracker, and others) set this up for you by default. The pattern to avoid is hand-writing preset sections that duplicate an agent's _behavior_, not using the marker section that carries the agent's _output_.
 
 </details>

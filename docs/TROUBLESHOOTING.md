@@ -85,7 +85,8 @@ If you'd prefer to avoid the paste-back step on a LAN install, the cleanest fix 
 
 If a Docker or Podman container fails with permission errors on the data volume:
 
-- **Non-root container user:** The full image now runs as the `node` user. Named volumes work automatically. For bind mounts, make the host directory writable by UID/GID `1000`, or use a named volume.
+- **Named volumes after updating:** The official images repair `/app/data` ownership at startup, then drop back to the non-root runtime user. Pull the latest image and restart with `docker compose pull && docker compose up -d`.
+- **Bind mounts:** Make the host directory writable by UID/GID `1000`, or use a named volume. If your filesystem blocks container `chown`, fix ownership on the host instead.
 - **SELinux (Fedora, RHEL):** Add the `:Z` suffix to the volume mount — e.g., `-v marinara-data:/app/data:Z`.
 - **Rootless Podman:** Make sure the host directory is owned by your user, or use a named volume instead of a bind mount.
 

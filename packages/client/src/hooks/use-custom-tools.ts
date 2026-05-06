@@ -18,9 +18,20 @@ export interface CustomToolRow {
   updatedAt: string;
 }
 
+export interface CustomToolCapabilities {
+  scriptExecutionEnabled: boolean;
+}
+
+export function isCustomToolSelectable(tool: CustomToolRow, capabilities?: CustomToolCapabilities | null): boolean {
+  const enabled = tool.enabled === "true" || tool.enabled === "1";
+  if (!enabled) return false;
+  return tool.executionType !== "script" || capabilities?.scriptExecutionEnabled === true;
+}
+
 const toolKeys = {
   all: ["custom-tools"] as const,
   detail: (id: string) => ["custom-tools", id] as const,
+  capabilities: ["custom-tools", "capabilities"] as const,
 };
 
 export function useCustomTools() {
@@ -35,6 +46,13 @@ export function useCustomTool(id: string | null) {
     queryKey: toolKeys.detail(id ?? ""),
     queryFn: () => api.get<CustomToolRow>(`/custom-tools/${id}`),
     enabled: !!id,
+  });
+}
+
+export function useCustomToolCapabilities() {
+  return useQuery({
+    queryKey: toolKeys.capabilities,
+    queryFn: () => api.get<CustomToolCapabilities>("/custom-tools/capabilities"),
   });
 }
 

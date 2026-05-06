@@ -41,13 +41,15 @@ const activityStates = new Map<string, ChatActivityState>();
 /**
  * Record that the user sent a message in a chat.
  */
-export function recordUserActivity(chatId: string): void {
+export function recordUserActivity(chatId: string, opts: { preserveGenerationInProgress?: boolean } = {}): void {
   const now = Date.now();
   const existing = activityStates.get(chatId);
   if (existing) {
     existing.lastUserMessageAt = now;
     existing.autonomousMessages.clear(); // Reset — user is active again
-    existing.generationInProgressSince = null;
+    if (!opts.preserveGenerationInProgress) {
+      existing.generationInProgressSince = null;
+    }
   } else {
     activityStates.set(chatId, {
       lastUserMessageAt: now,
@@ -80,9 +82,31 @@ export function recordAssistantActivity(chatId: string, characterId?: string): v
 /**
  * Mark that an autonomous generation is in progress for a chat.
  */
-export function markGenerationInProgress(chatId: string): void {
+export function markGenerationInProgress(chatId: string): number {
+  const now = Date.now();
   const state = activityStates.get(chatId);
-  if (state) state.generationInProgressSince = Date.now();
+  if (state) {
+    state.generationInProgressSince = now;
+  } else {
+    activityStates.set(chatId, {
+      lastUserMessageAt: 0,
+      lastAssistantMessageAt: 0,
+      autonomousMessages: new Map(),
+      generationInProgressSince: now,
+    });
+  }
+  return now;
+}
+
+/**
+ * Clear a generation-in-progress marker. If `startedAt` is supplied, only
+ * clear the marker that this caller created.
+ */
+export function clearGenerationInProgress(chatId: string, startedAt?: number): void {
+  const state = activityStates.get(chatId);
+  if (!state) return;
+  if (startedAt != null && state.generationInProgressSince !== startedAt) return;
+  state.generationInProgressSince = null;
 }
 
 /**

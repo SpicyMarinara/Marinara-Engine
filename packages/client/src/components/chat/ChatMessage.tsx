@@ -157,6 +157,8 @@ const IMAGE_URL_RE = /^https?:\/\/\S+\.(?:gif|png|jpe?g|webp)(?:\?[^\s]*)?$/i;
 
 /** Regex to match <speaker="name">dialogue</speaker> tags. */
 const SPEAKER_TAG_RE = /<speaker="([^"]*)">([\s\S]*?)<\/speaker>/g;
+const INLINE_MARKDOWN_CONTAINER_RE =
+  /\*\*\*[\s\S]+?\*\*\*|\*\*[\s\S]+?\*\*|__[\s\S]+?__|(?<!\*)\*(?!\*)[\s\S]+?(?<!\*)\*(?!\*)|==[\s\S]+?==|~~[\s\S]+?~~|(?<![_\w])_[^_]+?_(?![_\w])/g;
 
 /**
  * Process speaker tags into ReactNodes with per-character dialogue coloring.
@@ -201,6 +203,16 @@ function renderWithSpeakerTags(
   return nodes;
 }
 
+function collectInlineMarkdownRanges(text: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  const regex = new RegExp(INLINE_MARKDOWN_CONTAINER_RE.source, INLINE_MARKDOWN_CONTAINER_RE.flags);
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    ranges.push([match.index, match.index + match[0].length]);
+  }
+  return ranges;
+}
+
 /**
  * Highlight quoted dialogue — text in supported dialogue quote pairs
  * like "", «», 「」, and 『』 gets bold + colored.
@@ -227,14 +239,18 @@ function highlightDialogue(text: string, dialogueColor?: string, boldDialogue = 
     protectedRanges.push([pm.index, pm.index + pm[0].length]);
   }
   const isProtected = (pos: number) => protectedRanges.some(([s, e]) => pos >= s && pos < e);
+  const markdownRanges = collectInlineMarkdownRanges(text);
+  const isInsideInlineMarkdown = (start: number, end: number) => markdownRanges.some(([s, e]) => start > s && end < e);
 
-  // Step 2: Find quote pairs, skipping any that start inside a protected zone.
+  // Step 2: Find quote pairs, skipping protected zones and quotes already enclosed by inline markdown.
   const quoteRe = new RegExp(`(?:${DIALOGUE_QUOTE_PATTERN_SOURCE})`, "g");
   const quotePairs: Array<{ start: number; end: number }> = [];
   let qm: RegExpExecArray | null;
   while ((qm = quoteRe.exec(text)) !== null) {
-    if (!isProtected(qm.index)) {
-      quotePairs.push({ start: qm.index, end: qm.index + qm[0].length });
+    const start = qm.index;
+    const end = qm.index + qm[0].length;
+    if (!isProtected(start) && !isInsideInlineMarkdown(start, end)) {
+      quotePairs.push({ start, end });
     }
   }
 

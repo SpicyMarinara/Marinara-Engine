@@ -3,7 +3,7 @@
 // and localhost llama-server inference
 // ──────────────────────────────────────────────
 
-import type { FastifyPluginAsync, FastifyReply } from "fastify";
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import { logger, logDebugOverride } from "../lib/logger.js";
 import { z } from "zod";
 import { sidecarModelService } from "../services/sidecar/sidecar-model.service.js";
@@ -33,13 +33,25 @@ import {
   type SidecarQuantization,
 } from "@marinara-engine/shared";
 import { isSidecarRuntimeInstallEnabled } from "../config/runtime-config.js";
-import { requirePrivilegedAccess } from "../middleware/privileged-gate.js";
+import { isAdminAuthorized, requirePrivilegedAccess } from "../middleware/privileged-gate.js";
 
 const quantizationSchema = z.enum(["q8_0", "q4_k_m"]);
 const hfRepoSchema = z
   .string()
   .trim()
   .regex(/^[^/\s]+\/[^/\s]+$/, "Repository must be in owner/repo format");
+
+export function isRuntimeInstallRequestAllowed(request: FastifyRequest): boolean {
+  return isSidecarRuntimeInstallEnabled() || isAdminAuthorized(request);
+}
+
+function runtimeInstallDisabledPayload() {
+  return {
+    error: "Sidecar runtime install is disabled",
+    message:
+      "Set SIDECAR_RUNTIME_INSTALL_ENABLED=true or enter the matching Admin Access secret to allow runtime installation from the API.",
+  };
+}
 
 export const sidecarRoutes: FastifyPluginAsync = async (app) => {
   app.get("/status", async () => {
@@ -83,11 +95,8 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/runtime/install", async (req, reply) => {
     if (!requirePrivilegedAccess(req, reply, { feature: "Sidecar runtime install" })) return;
-    if (!isSidecarRuntimeInstallEnabled()) {
-      return reply.status(403).send({
-        error: "Sidecar runtime install is disabled",
-        message: "Set SIDECAR_RUNTIME_INSTALL_ENABLED=true to allow runtime installation from the API.",
-      });
+    if (!isRuntimeInstallRequestAllowed(req)) {
+      return reply.status(403).send(runtimeInstallDisabledPayload());
     }
     const body = z.object({ reinstall: z.boolean().optional() }).parse(req.body ?? {});
 
@@ -134,8 +143,8 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/reinstall", async (req, reply) => {
     if (!requirePrivilegedAccess(req, reply, { feature: "Sidecar runtime reinstall" })) return;
-    if (!isSidecarRuntimeInstallEnabled()) {
-      return reply.status(403).send({ error: "Sidecar runtime install is disabled" });
+    if (!isRuntimeInstallRequestAllowed(req)) {
+      return reply.status(403).send(runtimeInstallDisabledPayload());
     }
     await sidecarProcessService.reinstallRuntime();
     return { ok: true };

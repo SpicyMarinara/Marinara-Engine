@@ -46,16 +46,23 @@ function updateSharedDefaults(content, version) {
 }
 
 function updateInstallerNsi(content, version) {
-  return replaceOrThrow(content, /!define APP_VERSION "[^"]+"/, `!define APP_VERSION "${version}"`, "NSIS APP_VERSION");
+  const next = replaceOrThrow(
+    content,
+    /!define APP_VERSION "[^"]+"/,
+    `!define APP_VERSION "${version}"`,
+    "NSIS APP_VERSION",
+  );
+  return replaceOrThrow(next, /!define RELEASE_TAG "v[^"]+"/, `!define RELEASE_TAG "v${version}"`, "NSIS RELEASE_TAG");
 }
 
 function updateInstallerBat(content, version) {
-  return replaceOrThrow(
+  const next = replaceOrThrow(
     content,
     /(echo\s+\^\|\s+v)(\d+\.\d+\.\d+)(\s+\^\|)/,
     `$1${version}$3`,
     "installer banner version",
   );
+  return replaceOrThrow(next, /set "RELEASE_TAG=v[^"]+"/, `set "RELEASE_TAG=v${version}"`, "installer release tag");
 }
 
 function updateAndroidBuildGradle(content, version, androidVersionCode) {

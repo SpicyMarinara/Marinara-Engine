@@ -4,7 +4,13 @@ import { promises as dns } from "node:dns";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join, resolve, win32 } from "node:path";
 import { tmpdir } from "node:os";
-import { assertInsideDir, isAllowedImageBuffer, safeFetch, validateOutboundUrl } from "../src/utils/security.js";
+import {
+  assertInsideDir,
+  isAllowedImageBuffer,
+  normalizeLoopbackUrl,
+  safeFetch,
+  validateOutboundUrl,
+} from "../src/utils/security.js";
 
 test("assertInsideDir rejects sibling prefix escapes", async () => {
   const root = await mkdtemp(join(tmpdir(), "marinara-sec-root-"));
@@ -48,6 +54,12 @@ test("AVIF validation requires an AVIF-compatible ftyp brand", () => {
 
   assert.equal(isAllowedImageBuffer(avif, ".avif")?.mimeType, "image/avif");
   assert.equal(isAllowedImageBuffer(heic, ".avif"), null);
+});
+
+test("normalizeLoopbackUrl maps localhost names to IPv4 loopback", () => {
+  assert.equal(normalizeLoopbackUrl("http://localhost:8188/object_info"), "http://127.0.0.1:8188/object_info");
+  assert.equal(normalizeLoopbackUrl("http://localhost.localdomain:7860"), "http://127.0.0.1:7860/");
+  assert.equal(normalizeLoopbackUrl("http://127.0.0.1:7860"), "http://127.0.0.1:7860/");
 });
 
 test("validateOutboundUrl rejects local/private/metadata destinations", async () => {

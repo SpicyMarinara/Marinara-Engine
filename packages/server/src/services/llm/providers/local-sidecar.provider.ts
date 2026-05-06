@@ -13,7 +13,7 @@ export class LocalSidecarProvider extends BaseLLMProvider {
   private async createDelegate(): Promise<OpenAIProvider> {
     const baseUrl = await sidecarProcessService.ensureReady({ forceStart: true });
     const contextSize = sidecarModelService.getConfig().contextSize;
-    return new OpenAIProvider(`${baseUrl}/v1`, "local-sidecar", contextSize, null);
+    return new OpenAIProvider(`${baseUrl}/v1`, "local-sidecar", contextSize, null, null, "local-sidecar");
   }
 
   private getRequestModel(): string {

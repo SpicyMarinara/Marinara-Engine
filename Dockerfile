@@ -18,7 +18,7 @@ RUN corepack enable && corepack install
 
 # Install all dependencies (including dev for building)
 # Use cache mount to avoid storing pnpm store in image
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+RUN --mount=type=cache,target=/app/.pnpm-store \
     pnpm install --frozen-lockfile
 
 # Copy source code
@@ -61,7 +61,7 @@ RUN corepack enable && corepack install
 # Install production deps only
 # Use cache mount to avoid storing pnpm store in image
 # Strip onnxruntime-web WASM blobs, uses onnxruntime-node (native)
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+RUN --mount=type=cache,target=/app/.pnpm-store \
     pnpm install --frozen-lockfile --prod && \
     rm -rf /app/node_modules/.pnpm/onnxruntime-web@*
 
@@ -69,6 +69,7 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 COPY --from=builder /app/packages/shared/dist packages/shared/dist
 COPY --from=builder /app/packages/server/dist packages/server/dist
 COPY --from=builder /app/packages/client/dist packages/client/dist
+COPY scripts/docker-entrypoint.mjs /usr/local/bin/marinara-docker-entrypoint.mjs
 
 # Ensure /app/data exists for runtime use (file storage, uploads, generated assets)
 RUN mkdir -p /app/data && \
@@ -85,9 +86,12 @@ VOLUME /app/data
 ENV PORT=7860
 ENV HOST=0.0.0.0
 ENV NODE_ENV=production
+ENV MARINARA_DOCKER_USER=node
+ENV MARINARA_DOCKER_GROUP=node
 EXPOSE 7860
 
-USER node
+USER root
 
 # Run the server (serves both API and client SPA)
+ENTRYPOINT ["node", "/usr/local/bin/marinara-docker-entrypoint.mjs"]
 CMD ["node", "packages/server/dist/index.js"]

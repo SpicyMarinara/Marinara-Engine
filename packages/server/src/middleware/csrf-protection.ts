@@ -104,6 +104,31 @@ function hasCsrfHeader(request: FastifyRequest): boolean {
   return raw === CSRF_HEADER_VALUE;
 }
 
+function getRequestOrigin(request: FastifyRequest): string | null {
+  const host = firstHeader(request.headers.host);
+  if (!host) return null;
+
+  try {
+    return new URL(`${getRequestProtocol(request)}://${host}`).origin;
+  } catch {
+    return null;
+  }
+}
+
+function canUseSameOriginCompatibility(
+  request: FastifyRequest,
+  origin: string | null,
+  referer: string | null,
+  originTrusted: boolean,
+  secFetchSite: string | null,
+): boolean {
+  if (!originTrusted || hasWildcardTrustedOrigin()) return false;
+  if (secFetchSite && secFetchSite.toLowerCase() !== "same-origin") return false;
+
+  const sourceOrigin = origin ? normalizeOrigin(origin) : referer ? normalizeOrigin(referer) : null;
+  return !!sourceOrigin && sourceOrigin === getRequestOrigin(request);
+}
+
 export function csrfProtectionHook(request: FastifyRequest, reply: FastifyReply, done: () => void) {
   if (!UNSAFE_METHODS.has(request.method.toUpperCase())) return done();
   if (!request.url.startsWith("/api/")) return done();
@@ -133,6 +158,7 @@ export function csrfProtectionHook(request: FastifyRequest, reply: FastifyReply,
   }
 
   if ((origin || referer || secFetchSite) && !hasCsrfHeader(request)) {
+    if (canUseSameOriginCompatibility(request, origin, referer, originTrusted, secFetchSite)) return done();
     reply.status(403).send({ error: `Missing ${CSRF_HEADER} header` });
     return;
   }

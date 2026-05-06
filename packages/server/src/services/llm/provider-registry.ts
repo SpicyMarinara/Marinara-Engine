@@ -46,7 +46,14 @@ export function createLLMProvider(
     case "xai":
     case "mistral":
     case "custom":
-      return new OpenAIProvider(baseUrl, apiKey, normalizedMaxContext, openrouterProvider, normalizedMaxTokensOverride);
+      return new OpenAIProvider(
+        baseUrl,
+        apiKey,
+        normalizedMaxContext,
+        openrouterProvider,
+        normalizedMaxTokensOverride,
+        provider,
+      );
     case "cohere":
       return new OpenAIProvider(
         normalizeCohereOpenAIBaseUrl(baseUrl),
@@ -54,6 +61,7 @@ export function createLLMProvider(
         normalizedMaxContext,
         openrouterProvider,
         normalizedMaxTokensOverride,
+        "cohere",
       );
     case "anthropic":
       return new AnthropicProvider(
@@ -74,6 +82,13 @@ export function createLLMProvider(
     case "google":
       return new GoogleProvider(baseUrl, apiKey, normalizedMaxContext, openrouterProvider, normalizedMaxTokensOverride);
     default:
-      return new OpenAIProvider(baseUrl, apiKey, normalizedMaxContext, openrouterProvider, normalizedMaxTokensOverride);
+      return new OpenAIProvider(
+        baseUrl,
+        apiKey,
+        normalizedMaxContext,
+        openrouterProvider,
+        normalizedMaxTokensOverride,
+        "custom",
+      );
   }
 }

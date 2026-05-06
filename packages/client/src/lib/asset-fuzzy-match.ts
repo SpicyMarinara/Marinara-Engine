@@ -6,17 +6,24 @@
 // tags in the manifest using keyword overlap scoring.
 // ──────────────────────────────────────────────
 
-/** Score how well a prose description matches an asset tag by keyword overlap. */
-function tagScore(prose: string, tag: string): number {
+/**
+ * Score how well a prose description matches an asset tag by keyword overlap.
+ * The category word is excluded from scoring on both sides because it is the
+ * universal prefix of every tag in the manifest — counting it would give
+ * every candidate a free point and make the "first tag wins" tie-breaker
+ * pick an arbitrary library bg for any novel scene.
+ */
+function tagScore(prose: string, tag: string, category: string): number {
+  const categoryLower = category.toLowerCase();
   const words = prose
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
-    .filter((w) => w.length > 2);
+    .filter((w) => w.length > 2 && w !== categoryLower);
   const parts = tag
     .toLowerCase()
     .split(/[:\-_]+/)
-    .filter((p) => p.length > 1);
+    .filter((p) => p.length > 1 && p !== categoryLower);
 
   let score = 0;
   for (const part of parts) {
@@ -30,13 +37,23 @@ function tagScore(prose: string, tag: string): number {
   return score;
 }
 
-/** Find the best-matching tag for a prose description. Returns null if no reasonable match. */
-function bestMatch(prose: string, tags: string[]): string | null {
+/**
+ * Find the best-matching tag for a prose description. For backgrounds we
+ * require at least two specific-word overlaps so a brand-new location with
+ * only the (already stripped) category prefix in common does not get pinned
+ * to whichever library tag happens to come first in iteration order. Audio
+ * categories keep the original ≥1 threshold — single-word matches like
+ * "tense" or "combat" are meaningful in the deeper audio hierarchy and the
+ * "no fuzzy match" fall-through for those categories is silent (returns the
+ * original tag, no playback) rather than visually disruptive.
+ */
+function bestMatch(prose: string, tags: string[], category: string): string | null {
   if (!tags.length) return null;
+  const minOverlap = category === "backgrounds" ? 2 : 1;
   let best: string | null = null;
-  let bestScore = 0;
+  let bestScore = minOverlap - 1;
   for (const tag of tags) {
-    const s = tagScore(prose, tag);
+    const s = tagScore(prose, tag, category);
     if (s > bestScore) {
       bestScore = s;
       best = tag;
@@ -63,8 +80,14 @@ export function resolveAssetTag(
   // Collect tags in this category
   const categoryTags = Object.keys(manifest).filter((k) => k.startsWith(category + ":"));
 
+  // Generated background tags are already canonical even before the asset
+  // exists in the manifest; do not fuzzy-match them back onto library entries.
+  if (category === "backgrounds" && tag.startsWith("backgrounds:generated:")) {
+    return tag;
+  }
+
   // Try fuzzy match
-  const matched = bestMatch(tag, categoryTags);
+  const matched = bestMatch(tag, categoryTags, category);
   if (matched) {
     console.debug(`[asset-resolve] "${tag}" → "${matched}"`);
     return matched;

@@ -27,6 +27,10 @@ export interface SlashCommandContext {
     userMessage?: string;
     impersonate?: boolean;
     attachments?: { type: string; data: string }[];
+    impersonatePresetId?: string;
+    impersonateConnectionId?: string;
+    impersonateBlockAgents?: boolean;
+    impersonatePromptTemplate?: string;
   }) => Promise<boolean | void>;
   /** Insert a message directly into the chat (no LLM) */
   createMessage: (data: { role: string; content: string; characterId?: string | null }) => void;
@@ -224,11 +228,18 @@ const COMMANDS: SlashCommand[] = [
     usage: "/impersonate [direction]",
     async execute(args, ctx) {
       const direction = args.trim();
+      const { impersonatePresetId, impersonateConnectionId, impersonateBlockAgents, impersonatePromptTemplate } =
+        useUIStore.getState();
+      const trimmedPromptTemplate = impersonatePromptTemplate.trim();
       await ctx.generate({
         chatId: ctx.chatId,
         connectionId: null,
         impersonate: true,
         ...(direction ? { userMessage: direction } : {}),
+        ...(impersonatePresetId ? { impersonatePresetId } : {}),
+        ...(impersonateConnectionId ? { impersonateConnectionId } : {}),
+        ...(impersonateBlockAgents !== undefined ? { impersonateBlockAgents } : {}),
+        ...(trimmedPromptTemplate ? { impersonatePromptTemplate: trimmedPromptTemplate } : {}),
       });
       return { handled: true };
     },

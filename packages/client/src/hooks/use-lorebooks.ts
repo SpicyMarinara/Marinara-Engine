@@ -173,6 +173,40 @@ export function useBulkCreateEntries() {
   });
 }
 
+export function useTransferLorebookEntries() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sourceLorebookId,
+      targetLorebookId,
+      entryIds,
+      operation,
+    }: {
+      sourceLorebookId: string;
+      targetLorebookId: string;
+      entryIds: string[];
+      operation: "copy" | "move";
+    }) =>
+      api.post<{
+        operation: "copy" | "move";
+        sourceLorebookId: string;
+        targetLorebookId: string;
+        requested: number;
+        transferred: number;
+        created: LorebookEntry[];
+      }>(`/lorebooks/${sourceLorebookId}/entries/transfer`, {
+        targetLorebookId,
+        entryIds,
+        operation,
+      }),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: lorebookKeys.entries(variables.sourceLorebookId) });
+      qc.invalidateQueries({ queryKey: lorebookKeys.entries(variables.targetLorebookId) });
+      qc.invalidateQueries({ queryKey: [...lorebookKeys.all, "active"] });
+    },
+  });
+}
+
 export function useReorderLorebookEntries() {
   const qc = useQueryClient();
   return useMutation({

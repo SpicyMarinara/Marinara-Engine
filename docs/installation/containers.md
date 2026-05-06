@@ -18,6 +18,8 @@ Data (file-backed storage, uploads, fonts, default backgrounds) is stored in the
 docker volume inspect marinara-data
 ```
 
+On startup, the official image repairs ownership of `/app/data` for named volumes, then drops back to the non-root runtime user. This lets older Docker installs migrate to file-backed storage without manual `chown` steps.
+
 To pull the latest image and restart:
 
 ```bash

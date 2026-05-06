@@ -2,16 +2,100 @@
 // Routes: Agents
 // ──────────────────────────────────────────────
 import type { FastifyInstance } from "fastify";
-import { createAgentConfigSchema, updateAgentConfigSchema, BUILT_IN_AGENTS } from "@marinara-engine/shared";
+import {
+  createAgentConfigSchema,
+  updateAgentConfigSchema,
+  BUILT_IN_AGENTS,
+  getDefaultBuiltInAgentSettings,
+} from "@marinara-engine/shared";
 import { createAgentsStorage } from "../services/storage/agents.storage.js";
+import { createChatsStorage } from "../services/storage/chats.storage.js";
 import { z } from "zod";
 
 const updateAgentRunSchema = z.object({
   resultData: z.unknown(),
 });
 
+const secretPlotArcSchema = z
+  .object({
+    description: z.string().optional(),
+    protagonistArc: z.string().optional(),
+    completed: z.boolean().optional(),
+  })
+  .passthrough();
+
+const secretPlotDirectionTextSchema = z.string().trim().min(1);
+
+const secretPlotMemoryPatchSchema = z
+  .object({
+    overarchingArc: z.union([z.string(), secretPlotArcSchema, z.null()]).optional(),
+    sceneDirections: z
+      .union([
+        z.array(
+          z.object({
+            direction: secretPlotDirectionTextSchema,
+            fulfilled: z.boolean().optional(),
+          }),
+        ),
+        z.null(),
+      ])
+      .optional(),
+    recentlyFulfilled: z.union([z.array(z.string()), z.null()]).optional(),
+    staleDetected: z.union([z.boolean(), z.null()]).optional(),
+    pacing: z.union([z.string(), z.null()]).optional(),
+  })
+  .passthrough();
+
+function normalizeSecretPlotMemoryPatch(patch: Record<string, unknown>): Record<string, unknown> {
+  const parsed = secretPlotMemoryPatchSchema.parse(patch);
+  const normalized: Record<string, unknown> = { ...parsed };
+  if ("sceneDirections" in parsed) {
+    normalized.sceneDirections = (parsed.sceneDirections ?? [])
+      .map((entry) => ({ ...entry, direction: entry.direction.trim() }))
+      .filter((entry) => entry.direction.length > 0);
+  }
+  if ("recentlyFulfilled" in parsed) normalized.recentlyFulfilled = parsed.recentlyFulfilled ?? [];
+  if ("staleDetected" in parsed) normalized.staleDetected = parsed.staleDetected === true;
+  return normalized;
+}
+
+function parseAgentSettings(value: unknown): Record<string, unknown> {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function normalizeRunInterval(value: unknown, fallback: number, max = 100): number {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(parsed) && parsed >= 1 ? Math.min(max, Math.floor(parsed)) : fallback;
+}
+
 export async function agentsRoutes(app: FastifyInstance) {
   const storage = createAgentsStorage(app.db);
+  const chats = createChatsStorage(app.db);
+  const getOrCreateConfigByType = async (agentType: string) => {
+    const existing = await storage.getByType(agentType);
+    if (existing) return existing;
+    const builtIn = BUILT_IN_AGENTS.find((a) => a.id === agentType);
+    if (!builtIn) return null;
+    return storage.create({
+      type: builtIn.id,
+      name: builtIn.name,
+      description: builtIn.description,
+      phase: builtIn.phase,
+      enabled: builtIn.enabledByDefault,
+      connectionId: null,
+      promptTemplate: "",
+      settings: getDefaultBuiltInAgentSettings(builtIn.id),
+    });
+  };
 
   app.get("/", async () => {
     return storage.list();
@@ -21,6 +105,46 @@ export async function agentsRoutes(app: FastifyInstance) {
   app.get<{ Params: { chatId: string }; Querystring: { limit?: string } }>("/runs/:chatId/custom", async (req) => {
     const parsedLimit = req.query.limit ? Number.parseInt(req.query.limit, 10) : undefined;
     return storage.listCustomRunsForChat(req.params.chatId, parsedLimit);
+  });
+
+  /** Get run interval status for built-in cadence-gated agents. */
+  app.get<{ Params: { agentType: string; chatId: string } }>("/cadence/:agentType/:chatId", async (req, reply) => {
+    const { agentType, chatId } = req.params;
+    const builtIn = BUILT_IN_AGENTS.find((agent) => agent.id === agentType);
+    if (!builtIn) return reply.status(404).send({ error: "Unknown agent type" });
+
+    const defaults = getDefaultBuiltInAgentSettings(agentType);
+    const fallback = normalizeRunInterval(defaults.runInterval, 1);
+    const config = await storage.getByType(agentType);
+    const settings = { ...defaults, ...parseAgentSettings(config?.settings) };
+    const runInterval = normalizeRunInterval(settings.runInterval, fallback);
+
+    const lastRun = await storage.getLastSuccessfulRunByType(agentType, chatId);
+    const messages = await chats.listMessages(chatId);
+    let assistantMessagesSinceLastRun: number | null = null;
+    let lastRunMessageFound: boolean | null = null;
+
+    if (lastRun) {
+      const lastRunIdx = messages.findIndex((message: any) => message.id === lastRun.messageId);
+      lastRunMessageFound = lastRunIdx >= 0;
+      assistantMessagesSinceLastRun =
+        lastRunIdx >= 0
+          ? messages.slice(lastRunIdx + 1).filter((message: any) => message.role === "assistant").length
+          : runInterval;
+    }
+
+    const remainingAssistantMessages =
+      runInterval <= 1 || !lastRun ? 0 : Math.max(0, runInterval - ((assistantMessagesSinceLastRun ?? 0) + 1));
+
+    return {
+      agentType,
+      runInterval,
+      lastSuccessfulRun: lastRun ? { messageId: lastRun.messageId, createdAt: lastRun.createdAt } : null,
+      assistantMessagesSinceLastRun,
+      remainingAssistantMessages,
+      runsNextAssistantMessage: remainingAssistantMessages === 0,
+      lastRunMessageFound,
+    };
   });
 
   /** Edit the persisted output of a custom agent run. */
@@ -43,6 +167,15 @@ export async function agentsRoutes(app: FastifyInstance) {
   app.post("/", async (req) => {
     const input = createAgentConfigSchema.parse(req.body);
     return storage.create(input);
+  });
+
+  app.patch<{ Params: { agentType: string } }>("/type/:agentType", async (req, reply) => {
+    const config = await getOrCreateConfigByType(req.params.agentType);
+    if (!config) {
+      return reply.status(404).send({ error: "Agent is not configured" });
+    }
+    const data = updateAgentConfigSchema.parse(req.body);
+    return storage.update(config.id, data);
   });
 
   app.patch<{ Params: { id: string } }>("/:id", async (req) => {
@@ -131,6 +264,47 @@ export async function agentsRoutes(app: FastifyInstance) {
     }
 
     return reply.status(204).send();
+  });
+
+  /** Read persistent memory for an agent in a chat (JSON values). */
+  app.get<{ Params: { agentType: string; chatId: string } }>("/memory/:agentType/:chatId", async (req, reply) => {
+    const config = await storage.getByType(req.params.agentType);
+    if (!config) {
+      return reply.status(404).send({ error: "Agent is not configured" });
+    }
+    const memory = await storage.getMemory(config.id, req.params.chatId);
+    return { agentConfigId: config.id, memory };
+  });
+
+  /** Patch memory keys for an agent in a chat. Body: { patch: { key: value, ... } } */
+  app.patch<{
+    Params: { agentType: string; chatId: string };
+    Body: { patch?: Record<string, unknown> };
+  }>("/memory/:agentType/:chatId", async (req, reply) => {
+    const config = await getOrCreateConfigByType(req.params.agentType);
+    if (!config) {
+      return reply.status(404).send({ error: "Agent is not configured" });
+    }
+    const body = (req.body ?? {}) as { patch?: Record<string, unknown> };
+    const patch = body.patch;
+    if (!patch || typeof patch !== "object") {
+      return reply.status(400).send({ error: "Body must be { patch: { key: value, ... } }" });
+    }
+    let normalizedPatch: Record<string, unknown>;
+    try {
+      normalizedPatch = req.params.agentType === "secret-plot-driver" ? normalizeSecretPlotMemoryPatch(patch) : patch;
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return reply.status(400).send({
+          error: "Invalid Secret Plot memory patch",
+          issues: err.issues,
+        });
+      }
+      throw err;
+    }
+    await storage.setMemories(config.id, req.params.chatId, normalizedPatch);
+    const memory = await storage.getMemory(config.id, req.params.chatId);
+    return { agentConfigId: config.id, memory };
   });
 
   /** Clear all memory for a specific agent in a specific chat (used when removing an agent from a chat). */

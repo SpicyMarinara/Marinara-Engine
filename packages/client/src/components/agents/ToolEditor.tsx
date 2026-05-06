@@ -9,6 +9,7 @@ import {
   useCreateCustomTool,
   useUpdateCustomTool,
   useDeleteCustomTool,
+  useCustomToolCapabilities,
   type CustomToolRow,
 } from "../../hooks/use-custom-tools";
 import {
@@ -35,6 +36,9 @@ const EXEC_TYPES = [
   { value: "script", label: "Script", icon: Code2, description: "Runs a JavaScript expression server-side." },
 ] as const;
 
+const SCRIPT_TOOLS_DISABLED_MESSAGE =
+  "Script tools are disabled. Set CUSTOM_TOOL_SCRIPT_ENABLED=true in your .env and restart Marinara to enable local script tools.";
+
 // ═══════════════════════════════════════════════
 //  Main Editor
 // ═══════════════════════════════════════════════
@@ -46,6 +50,8 @@ export function ToolEditor() {
   const createTool = useCreateCustomTool();
   const updateTool = useUpdateCustomTool();
   const deleteTool = useDeleteCustomTool();
+  const { data: toolCapabilities } = useCustomToolCapabilities();
+  const scriptToolsEnabled = toolCapabilities?.scriptExecutionEnabled === true;
 
   const dbTool = useMemo(() => {
     if (!toolDetailId || !allTools) return null;
@@ -150,6 +156,10 @@ export function ToolEditor() {
       setSaveError("Description is required.");
       return;
     }
+    if (localExecType === "script" && !scriptToolsEnabled) {
+      setSaveError(SCRIPT_TOOLS_DISABLED_MESSAGE);
+      return;
+    }
 
     const payload = {
       name: localName,
@@ -188,6 +198,7 @@ export function ToolEditor() {
     updateTool,
     buildParamsSchema,
     openToolDetail,
+    scriptToolsEnabled,
   ]);
 
   const handleDelete = async () => {
@@ -439,11 +450,16 @@ export function ToolEditor() {
             <div className="grid grid-cols-3 gap-2">
               {EXEC_TYPES.map((et) => {
                 const isActive = localExecType === et.value;
+                const isDisabledScript = et.value === "script" && !scriptToolsEnabled && !isActive;
                 const Icon = et.icon;
                 return (
                   <button
                     key={et.value}
+                    type="button"
+                    disabled={isDisabledScript}
+                    title={isDisabledScript ? SCRIPT_TOOLS_DISABLED_MESSAGE : et.description}
                     onClick={() => {
+                      if (isDisabledScript) return;
                       setLocalExecType(et.value);
                       markDirty();
                     }}
@@ -452,6 +468,7 @@ export function ToolEditor() {
                       isActive
                         ? "bg-[var(--primary)]/10 ring-[var(--primary)] text-[var(--primary)]"
                         : "ring-[var(--border)] text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
+                      isDisabledScript && "cursor-not-allowed opacity-45 hover:bg-transparent",
                     )}
                   >
                     <Icon size="1rem" />
@@ -460,6 +477,19 @@ export function ToolEditor() {
                 );
               })}
             </div>
+            {!scriptToolsEnabled && (
+              <div className="mt-3 flex gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-200">
+                <AlertCircle size="0.875rem" className="mt-0.5 shrink-0" />
+                <div>
+                  <div className="font-medium">Script tools are disabled on this server.</div>
+                  <div className="mt-1 text-amber-100/80">
+                    Set <code className="rounded bg-black/20 px-1">CUSTOM_TOOL_SCRIPT_ENABLED=true</code> in{" "}
+                    <code className="rounded bg-black/20 px-1">.env</code> and restart Marinara before saving Script
+                    tools.
+                  </div>
+                </div>
+              </div>
+            )}
             <p className="mt-1.5 text-[0.625rem] text-[var(--muted-foreground)]">{execMeta.description}</p>
           </FieldGroup>
 

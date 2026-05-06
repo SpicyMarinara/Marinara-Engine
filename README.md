@@ -101,7 +101,7 @@
 
 ## Latest Release
 
-Current stable release: **[v1.5.7](https://github.com/Pasta-Devs/Marinara-Engine/releases/tag/v1.5.7)**.
+Current stable release: **[v1.5.8](https://github.com/Pasta-Devs/Marinara-Engine/releases/tag/v1.5.8)**.
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release notes. Tagged releases use the `vX.Y.Z` format and are published on the [Releases](https://github.com/Pasta-Devs/Marinara-Engine/releases) page.
 

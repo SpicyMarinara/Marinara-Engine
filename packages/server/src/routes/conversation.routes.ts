@@ -478,9 +478,11 @@ export async function conversationRoutes(app: FastifyInstance) {
   // POST /activity/user — Record user activity (called on message send)
   // ─────────────────────────────────────────────
   app.post<{
-    Body: { chatId: string };
+    Body: { chatId: string; preserveGenerationInProgress?: boolean };
   }>("/activity/user", async (req, reply) => {
-    recordUserActivity(req.body.chatId);
+    recordUserActivity(req.body.chatId, {
+      preserveGenerationInProgress: req.body.preserveGenerationInProgress === true,
+    });
     return reply.send({ ok: true });
   });
 

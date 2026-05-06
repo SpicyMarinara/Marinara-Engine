@@ -15,5 +15,6 @@ export * from "./checkpoints.js";
 export * from "./regex-scripts.js";
 export * from "./gallery.js";
 export * from "./themes.js";
+export * from "./extensions.js";
 export * from "./app-settings.js";
 export * from "./prompt-overrides.js";

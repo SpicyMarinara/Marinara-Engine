@@ -10,8 +10,8 @@
  * (prev/next + accept/discard). Feels like Spotlight, not a modal.
  */
 (function () {
-  'use strict';
-  if (typeof window === 'undefined') return;
+  "use strict";
+  if (typeof window === "undefined") return;
 
   // Guard against double-init. Bun's HTML loader may process the <script> tag
   // and create a bundled copy alongside the external load, or HMR may re-execute.
@@ -34,74 +34,76 @@
   // so Accept / knobs / cycle-dots match the site's accent, not a washed
   // theme-adjusted one.
   const C = {
-    brand:     'oklch(60% 0.25 350)',
-    brandHov:  'oklch(52% 0.25 350)',
-    brandSoft: 'oklch(60% 0.25 350 / 0.15)',
-    ink:       'oklch(15% 0.01 350)',
-    ash:       'oklch(55% 0 0)',
-    paper:     'oklch(98% 0.005 350 / 0.92)',
-    paperSolid:'oklch(98% 0.005 350)',
-    mist:      'oklch(90% 0.01 350 / 0.6)',
-    white:     'oklch(99% 0 0)',
+    brand: "oklch(60% 0.25 350)",
+    brandHov: "oklch(52% 0.25 350)",
+    brandSoft: "oklch(60% 0.25 350 / 0.15)",
+    ink: "oklch(15% 0.01 350)",
+    ash: "oklch(55% 0 0)",
+    paper: "oklch(98% 0.005 350 / 0.92)",
+    paperSolid: "oklch(98% 0.005 350)",
+    mist: "oklch(90% 0.01 350 / 0.6)",
+    white: "oklch(99% 0 0)",
   };
-  const FONT = 'system-ui, -apple-system, sans-serif';
-  const MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+  const FONT = "system-ui, -apple-system, sans-serif";
+  const MONO = "ui-monospace, SFMono-Regular, Menlo, monospace";
   // z-index: detect overlays use 99999, so our UI must be above them
   const Z = { highlight: 100001, bar: 100005, picker: 100007, toast: 100010 };
-  const EASE = 'cubic-bezier(0.22, 1, 0.36, 1)'; // ease-out-quint
-  const PREFIX = 'impeccable-live';
+  const EASE = "cubic-bezier(0.22, 1, 0.36, 1)"; // ease-out-quint
+  const PREFIX = "impeccable-live";
   const HIGHLIGHT_TRANSITION =
-    'top 140ms ' + EASE +
-    ', left 140ms ' + EASE +
-    ', width 140ms ' + EASE +
-    ', height 140ms ' + EASE +
-    ', opacity 150ms ease';
-  const TOOLTIP_TRANSITION =
-    'top 140ms ' + EASE + ', left 140ms ' + EASE + ', opacity 150ms ease';
+    "top 140ms " +
+    EASE +
+    ", left 140ms " +
+    EASE +
+    ", width 140ms " +
+    EASE +
+    ", height 140ms " +
+    EASE +
+    ", opacity 150ms ease";
+  const TOOLTIP_TRANSITION = "top 140ms " + EASE + ", left 140ms " + EASE + ", opacity 150ms ease";
 
-  const SKIP_TAGS = new Set([
-    'html', 'head', 'body', 'script', 'style', 'link', 'meta', 'noscript', 'br', 'wbr',
-  ]);
+  const SKIP_TAGS = new Set(["html", "head", "body", "script", "style", "link", "meta", "noscript", "br", "wbr"]);
 
   // SVG icons stack above each chip label. All strokes use currentColor so the
   // icon recolors to C.brand when its chip is selected. 20x20 render, 24-viewBox,
   // 1.5 stroke — visually consistent with the Foundation grid on the homepage.
-  const ICON_ATTRS = 'width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display:block"';
+  const ICON_ATTRS =
+    'width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display:block"';
   const ICONS = {
     impeccable: `<svg ${ICON_ATTRS}><path d="M4 20l4-1L18 9l-3-3L5 16z"/><path d="M14 7l3 3"/></svg>`,
-    bolder:     `<svg ${ICON_ATTRS}><rect x="6" y="12" width="4" height="7" rx="0.5"/><rect x="14" y="5" width="4" height="14" rx="0.5"/></svg>`,
-    quieter:    `<svg ${ICON_ATTRS}><rect x="6" y="5" width="4" height="14" rx="0.5"/><rect x="14" y="12" width="4" height="7" rx="0.5"/></svg>`,
-    distill:    `<svg ${ICON_ATTRS}><path d="M4 5h16l-6 8v7l-4-2v-5z"/></svg>`,
-    polish:     `<svg ${ICON_ATTRS}><path d="M15 3l1 3 3 1-3 1-1 3-1-3-3-1 3-1z"/><path d="M7 13l0.6 1.8 1.8 0.6-1.8 0.6-0.6 1.8-0.6-1.8-1.8-0.6 1.8-0.6z"/></svg>`,
-    typeset:    `<svg ${ICON_ATTRS}><path d="M5 6h14" stroke-width="2.6"/><path d="M5 12h9" stroke-width="1.9"/><path d="M5 18h5" stroke-width="1.3"/></svg>`,
-    colorize:   `<svg ${ICON_ATTRS}><circle cx="9" cy="10" r="5"/><circle cx="15" cy="10" r="5"/><circle cx="12" cy="15" r="5"/></svg>`,
-    layout:     `<svg ${ICON_ATTRS}><rect x="3" y="4" width="8" height="16" rx="0.5"/><rect x="13" y="4" width="8" height="7" rx="0.5"/><rect x="13" y="13" width="8" height="7" rx="0.5"/></svg>`,
-    adapt:      `<svg ${ICON_ATTRS}><rect x="2.5" y="5" width="12" height="11" rx="1"/><line x1="2.5" y1="19" x2="14.5" y2="19"/><rect x="16.5" y="8" width="5" height="11" rx="1"/></svg>`,
-    animate:    `<svg ${ICON_ATTRS}><path d="M3 18c4-4 6-10 10-10"/><path d="M13 8c3 0 5 5 8 10"/><circle cx="13" cy="8" r="1.6" fill="currentColor" stroke="none"/></svg>`,
-    delight:    `<svg ${ICON_ATTRS}><path d="M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/></svg>`,
-    overdrive:  `<svg ${ICON_ATTRS}><path d="M13 3L5 13h5l-1 8 9-12h-6z"/></svg>`,
+    bolder: `<svg ${ICON_ATTRS}><rect x="6" y="12" width="4" height="7" rx="0.5"/><rect x="14" y="5" width="4" height="14" rx="0.5"/></svg>`,
+    quieter: `<svg ${ICON_ATTRS}><rect x="6" y="5" width="4" height="14" rx="0.5"/><rect x="14" y="12" width="4" height="7" rx="0.5"/></svg>`,
+    distill: `<svg ${ICON_ATTRS}><path d="M4 5h16l-6 8v7l-4-2v-5z"/></svg>`,
+    polish: `<svg ${ICON_ATTRS}><path d="M15 3l1 3 3 1-3 1-1 3-1-3-3-1 3-1z"/><path d="M7 13l0.6 1.8 1.8 0.6-1.8 0.6-0.6 1.8-0.6-1.8-1.8-0.6 1.8-0.6z"/></svg>`,
+    typeset: `<svg ${ICON_ATTRS}><path d="M5 6h14" stroke-width="2.6"/><path d="M5 12h9" stroke-width="1.9"/><path d="M5 18h5" stroke-width="1.3"/></svg>`,
+    colorize: `<svg ${ICON_ATTRS}><circle cx="9" cy="10" r="5"/><circle cx="15" cy="10" r="5"/><circle cx="12" cy="15" r="5"/></svg>`,
+    layout: `<svg ${ICON_ATTRS}><rect x="3" y="4" width="8" height="16" rx="0.5"/><rect x="13" y="4" width="8" height="7" rx="0.5"/><rect x="13" y="13" width="8" height="7" rx="0.5"/></svg>`,
+    adapt: `<svg ${ICON_ATTRS}><rect x="2.5" y="5" width="12" height="11" rx="1"/><line x1="2.5" y1="19" x2="14.5" y2="19"/><rect x="16.5" y="8" width="5" height="11" rx="1"/></svg>`,
+    animate: `<svg ${ICON_ATTRS}><path d="M3 18c4-4 6-10 10-10"/><path d="M13 8c3 0 5 5 8 10"/><circle cx="13" cy="8" r="1.6" fill="currentColor" stroke="none"/></svg>`,
+    delight: `<svg ${ICON_ATTRS}><path d="M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/></svg>`,
+    overdrive: `<svg ${ICON_ATTRS}><path d="M13 3L5 13h5l-1 8 9-12h-6z"/></svg>`,
   };
 
   const ACTIONS = [
-    { value: 'impeccable', label: 'Freeform' },
-    { value: 'bolder',     label: 'Bolder' },
-    { value: 'quieter',    label: 'Quieter' },
-    { value: 'distill',    label: 'Distill' },
-    { value: 'polish',     label: 'Polish' },
-    { value: 'typeset',    label: 'Typeset' },
-    { value: 'colorize',   label: 'Colorize' },
-    { value: 'layout',     label: 'Layout' },
-    { value: 'adapt',      label: 'Adapt' },
-    { value: 'animate',    label: 'Animate' },
-    { value: 'delight',    label: 'Delight' },
-    { value: 'overdrive',  label: 'Overdrive' },
+    { value: "impeccable", label: "Freeform" },
+    { value: "bolder", label: "Bolder" },
+    { value: "quieter", label: "Quieter" },
+    { value: "distill", label: "Distill" },
+    { value: "polish", label: "Polish" },
+    { value: "typeset", label: "Typeset" },
+    { value: "colorize", label: "Colorize" },
+    { value: "layout", label: "Layout" },
+    { value: "adapt", label: "Adapt" },
+    { value: "animate", label: "Animate" },
+    { value: "delight", label: "Delight" },
+    { value: "overdrive", label: "Overdrive" },
   ];
 
   // ---------------------------------------------------------------------------
   // State
   // ---------------------------------------------------------------------------
 
-  let state = 'IDLE';
+  let state = "IDLE";
   let hoveredElement = null;
   let selectedElement = null;
   let currentSessionId = null;
@@ -110,7 +112,7 @@
   let visibleVariant = 0;
   let variantObserver = null;
   let hasProjectContext = false;
-  let selectedAction = 'impeccable';
+  let selectedAction = "impeccable";
   let selectedCount = 3;
 
   // Scroll lock — holds window.scrollY at a fixed value while the session is
@@ -126,9 +128,11 @@
   // (Previously: saveSession wrote scrollY alongside state, so every call
   // during resume overwrote the pre-reload value with whatever the browser
   // had landed on, typically 0.)
-  const SCROLL_KEY_SUFFIX = '-scroll';
+  const SCROLL_KEY_SUFFIX = "-scroll";
   function writeScrollY(y) {
-    try { localStorage.setItem(LS_KEY + SCROLL_KEY_SUFFIX, String(y)); } catch {}
+    try {
+      localStorage.setItem(LS_KEY + SCROLL_KEY_SUFFIX, String(y));
+    } catch {}
   }
   function readScrollY() {
     try {
@@ -136,10 +140,14 @@
       if (raw == null) return null;
       const n = parseFloat(raw);
       return isFinite(n) ? n : null;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
   function clearScrollY() {
-    try { localStorage.removeItem(LS_KEY + SCROLL_KEY_SUFFIX); } catch {}
+    try {
+      localStorage.removeItem(LS_KEY + SCROLL_KEY_SUFFIX);
+    } catch {}
   }
 
   // Pre-empt the browser: apply manual scroll restoration and jump to the
@@ -148,18 +156,18 @@
   // which is often hundreds of pixels short of the final value until
   // async-loaded fonts swap in and reflow.
   try {
-    history.scrollRestoration = 'manual';
+    history.scrollRestoration = "manual";
     const savedY = readScrollY();
     if (savedY != null) {
       const apply = () => {
         if (Math.abs(window.scrollY - savedY) > 0.5) {
-          console.log('[impeccable.scroll] early restore', { from: window.scrollY, to: savedY });
+          console.log("[impeccable.scroll] early restore", { from: window.scrollY, to: savedY });
           window.scrollTo(0, savedY);
         }
       };
       apply();
       if (document.fonts?.ready) document.fonts.ready.then(apply).catch(() => {});
-      window.addEventListener('load', apply, { once: true });
+      window.addEventListener("load", apply, { once: true });
     }
   } catch {}
 
@@ -188,14 +196,16 @@
   }
 
   function desc(el) {
-    if (!el) return '';
+    if (!el) return "";
     let s = el.tagName.toLowerCase();
-    if (el.id) s += '#' + el.id;
-    else if (el.classList.length) s += '.' + [...el.classList].slice(0, 2).join('.');
+    if (el.id) s += "#" + el.id;
+    else if (el.classList.length) s += "." + [...el.classList].slice(0, 2).join(".");
     return s;
   }
 
-  function id8() { return crypto.randomUUID().replace(/-/g, '').slice(0, 8); }
+  function id8() {
+    return crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+  }
 
   // Modal-aware chrome: keep our floating UI clickable inside Radix /
   // Headless UI / vaul portals.
@@ -228,12 +238,12 @@
   function defangOutsideHandlers(rootEl, { setPointerEvents = true } = {}) {
     if (!rootEl) return;
     if (setPointerEvents) {
-      rootEl.style.setProperty('pointer-events', 'auto', 'important');
+      rootEl.style.setProperty("pointer-events", "auto", "important");
     }
     const stop = (e) => e.stopPropagation();
-    rootEl.addEventListener('pointerdown', stop);
-    rootEl.addEventListener('mousedown', stop);
-    rootEl.addEventListener('focusin', stop);
+    rootEl.addEventListener("pointerdown", stop);
+    rootEl.addEventListener("mousedown", stop);
+    rootEl.addEventListener("focusin", stop);
   }
 
   // ---------------------------------------------------------------------------
@@ -241,27 +251,41 @@
   // ---------------------------------------------------------------------------
 
   function initHighlight() {
-    highlightEl = document.createElement('div');
-    highlightEl.id = PREFIX + '-highlight';
+    highlightEl = document.createElement("div");
+    highlightEl.id = PREFIX + "-highlight";
     Object.assign(highlightEl.style, {
-      position: 'fixed', top: '0', left: '0', width: '0', height: '0',
-      border: '2px solid ' + C.brand, borderRadius: '3px',
-      pointerEvents: 'none', zIndex: Z.highlight, boxSizing: 'border-box',
+      position: "fixed",
+      top: "0",
+      left: "0",
+      width: "0",
+      height: "0",
+      border: "2px solid " + C.brand,
+      borderRadius: "3px",
+      pointerEvents: "none",
+      zIndex: Z.highlight,
+      boxSizing: "border-box",
       transition: HIGHLIGHT_TRANSITION,
-      display: 'none', opacity: '0',
+      display: "none",
+      opacity: "0",
     });
     document.body.appendChild(highlightEl);
 
-    tooltipEl = document.createElement('div');
-    tooltipEl.id = PREFIX + '-tooltip';
+    tooltipEl = document.createElement("div");
+    tooltipEl.id = PREFIX + "-tooltip";
     Object.assign(tooltipEl.style, {
-      position: 'fixed',
-      background: C.ink, color: C.white,
-      fontFamily: MONO, fontSize: '10px', fontWeight: '500',
-      padding: '2px 6px', borderRadius: '3px',
-      zIndex: Z.highlight + 1, pointerEvents: 'none',
-      whiteSpace: 'nowrap', display: 'none',
-      letterSpacing: '0.02em',
+      position: "fixed",
+      background: C.ink,
+      color: C.white,
+      fontFamily: MONO,
+      fontSize: "10px",
+      fontWeight: "500",
+      padding: "2px 6px",
+      borderRadius: "3px",
+      zIndex: Z.highlight + 1,
+      pointerEvents: "none",
+      whiteSpace: "nowrap",
+      display: "none",
+      letterSpacing: "0.02em",
       transition: TOOLTIP_TRANSITION,
     });
     document.body.appendChild(tooltipEl);
@@ -270,34 +294,42 @@
   function showHighlight(el) {
     if (!el || !highlightEl) return;
     const r = el.getBoundingClientRect();
-    const top = (r.top - 2) + 'px', left = (r.left - 2) + 'px';
-    const width = (r.width + 4) + 'px', height = (r.height + 4) + 'px';
+    const top = r.top - 2 + "px",
+      left = r.left - 2 + "px";
+    const width = r.width + 4 + "px",
+      height = r.height + 4 + "px";
     const tipTop = r.top - 20;
-    const tipY = (tipTop < 4 ? r.bottom + 4 : tipTop) + 'px';
-    const tipX = Math.max(4, r.left) + 'px';
+    const tipY = (tipTop < 4 ? r.bottom + 4 : tipTop) + "px";
+    const tipX = Math.max(4, r.left) + "px";
     tooltipEl.textContent = desc(el);
 
-    const hiWasHidden = highlightEl.style.display === 'none' || highlightEl.style.opacity === '0';
+    const hiWasHidden = highlightEl.style.display === "none" || highlightEl.style.opacity === "0";
     if (hiWasHidden) {
       // Snap to first target without animating from (0,0), then fade in.
-      highlightEl.style.transition = 'none';
-      Object.assign(highlightEl.style, { top, left, width, height, display: 'block' });
-      tooltipEl.style.transition = 'none';
-      Object.assign(tooltipEl.style, { top: tipY, left: tipX, display: 'block' });
+      highlightEl.style.transition = "none";
+      Object.assign(highlightEl.style, { top, left, width, height, display: "block" });
+      tooltipEl.style.transition = "none";
+      Object.assign(tooltipEl.style, { top: tipY, left: tipX, display: "block" });
       void highlightEl.offsetWidth;
       highlightEl.style.transition = HIGHLIGHT_TRANSITION;
-      highlightEl.style.opacity = '1';
+      highlightEl.style.opacity = "1";
       tooltipEl.style.transition = TOOLTIP_TRANSITION;
-      tooltipEl.style.opacity = '1';
+      tooltipEl.style.opacity = "1";
     } else {
-      Object.assign(highlightEl.style, { top, left, width, height, display: 'block', opacity: '1' });
-      Object.assign(tooltipEl.style, { top: tipY, left: tipX, display: 'block', opacity: '1' });
+      Object.assign(highlightEl.style, { top, left, width, height, display: "block", opacity: "1" });
+      Object.assign(tooltipEl.style, { top: tipY, left: tipX, display: "block", opacity: "1" });
     }
   }
 
   function hideHighlight() {
-    if (highlightEl) { highlightEl.style.opacity = '0'; highlightEl.style.display = 'none'; }
-    if (tooltipEl) { tooltipEl.style.opacity = '0'; tooltipEl.style.display = 'none'; }
+    if (highlightEl) {
+      highlightEl.style.opacity = "0";
+      highlightEl.style.display = "none";
+    }
+    if (tooltipEl) {
+      tooltipEl.style.opacity = "0";
+      tooltipEl.style.display = "none";
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -310,8 +342,8 @@
   // correlate directly with the captured PNG.
   // ---------------------------------------------------------------------------
 
-  const DRAG_THRESHOLD = 5;       // px — below this, treat pointerup as a click
-  const PIN_DBL_CLICK_MS = 300;   // two clicks on the same pin within this delete it
+  const DRAG_THRESHOLD = 5; // px — below this, treat pointerup as a click
+  const PIN_DBL_CLICK_MS = 300; // two clicks on the same pin within this delete it
   let annotOverlayEl = null;
   let annotSvgEl = null;
   let annotPinsEl = null;
@@ -322,58 +354,79 @@
   //   { kind: 'new',   x0, y0, moved, strokeEl, strokePoints }   creating a stroke/pin
   //   { kind: 'pin',   idx, startPointer, startPin, moved }     dragging an existing pin
   let annotPointer = null;
-  let annotEditing = null;        // { idx, input, wrapEl }
+  let annotEditing = null; // { idx, input, wrapEl }
   let annotLastPinClick = { idx: -1, time: 0 }; // for click-click-to-delete
 
   function initAnnotOverlay() {
-    annotOverlayEl = document.createElement('div');
-    annotOverlayEl.id = PREFIX + '-annot';
+    annotOverlayEl = document.createElement("div");
+    annotOverlayEl.id = PREFIX + "-annot";
     Object.assign(annotOverlayEl.style, {
-      position: 'fixed', top: '0', left: '0', width: '0', height: '0',
-      pointerEvents: 'auto', zIndex: Z.highlight + 2,
-      display: 'none', overflow: 'visible',
-      cursor: 'crosshair', touchAction: 'none',
+      position: "fixed",
+      top: "0",
+      left: "0",
+      width: "0",
+      height: "0",
+      pointerEvents: "auto",
+      zIndex: Z.highlight + 2,
+      display: "none",
+      overflow: "visible",
+      cursor: "crosshair",
+      touchAction: "none",
     });
 
-    annotSvgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    annotSvgEl.id = PREFIX + '-annot-svg';
+    annotSvgEl = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    annotSvgEl.id = PREFIX + "-annot-svg";
     Object.assign(annotSvgEl.style, {
-      position: 'absolute', top: '0', left: '0',
-      width: '100%', height: '100%',
+      position: "absolute",
+      top: "0",
+      left: "0",
+      width: "100%",
+      height: "100%",
       // The SVG itself doesn't absorb clicks; individual hit-paths opt-in via
       // pointer-events=stroke so gaps still fall through to the overlay.
-      pointerEvents: 'none', overflow: 'visible',
+      pointerEvents: "none",
+      overflow: "visible",
     });
     annotOverlayEl.appendChild(annotSvgEl);
 
-    annotPinsEl = document.createElement('div');
-    annotPinsEl.id = PREFIX + '-annot-pins';
+    annotPinsEl = document.createElement("div");
+    annotPinsEl.id = PREFIX + "-annot-pins";
     Object.assign(annotPinsEl.style, {
-      position: 'absolute', inset: '0',
-      pointerEvents: 'none',
+      position: "absolute",
+      inset: "0",
+      pointerEvents: "none",
     });
     annotOverlayEl.appendChild(annotPinsEl);
 
-    annotClearChipEl = document.createElement('div');
-    annotClearChipEl.id = PREFIX + '-annot-clear';
-    annotClearChipEl.dataset.annotClear = 'true';
-    annotClearChipEl.textContent = 'Clear';
+    annotClearChipEl = document.createElement("div");
+    annotClearChipEl.id = PREFIX + "-annot-clear";
+    annotClearChipEl.dataset.annotClear = "true";
+    annotClearChipEl.textContent = "Clear";
     Object.assign(annotClearChipEl.style, {
-      position: 'absolute', top: '8px', right: '8px',
-      background: C.ink, color: C.white,
-      fontFamily: FONT, fontSize: '10px', fontWeight: '500',
-      letterSpacing: '0.08em', textTransform: 'uppercase',
-      padding: '5px 12px', borderRadius: '999px',
-      cursor: 'pointer', pointerEvents: 'auto',
-      display: 'none', userSelect: 'none',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+      position: "absolute",
+      top: "8px",
+      right: "8px",
+      background: C.ink,
+      color: C.white,
+      fontFamily: FONT,
+      fontSize: "10px",
+      fontWeight: "500",
+      letterSpacing: "0.08em",
+      textTransform: "uppercase",
+      padding: "5px 12px",
+      borderRadius: "999px",
+      cursor: "pointer",
+      pointerEvents: "auto",
+      display: "none",
+      userSelect: "none",
+      boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
     });
     annotOverlayEl.appendChild(annotClearChipEl);
 
-    annotOverlayEl.addEventListener('pointerdown', onAnnotDown);
-    annotOverlayEl.addEventListener('pointermove', onAnnotMove);
-    annotOverlayEl.addEventListener('pointerup', onAnnotUp);
-    annotOverlayEl.addEventListener('pointercancel', onAnnotUp);
+    annotOverlayEl.addEventListener("pointerdown", onAnnotDown);
+    annotOverlayEl.addEventListener("pointermove", onAnnotMove);
+    annotOverlayEl.addEventListener("pointerup", onAnnotUp);
+    annotOverlayEl.addEventListener("pointercancel", onAnnotUp);
     document.body.appendChild(annotOverlayEl);
     // Modal-host friendliness: pointer-events is already 'auto' on this
     // overlay; we only need to silence the host's outside-interaction
@@ -385,19 +438,19 @@
   function updateClearChip() {
     if (!annotClearChipEl) return;
     const hasAny = annotState.comments.length > 0 || annotState.strokes.length > 0;
-    annotClearChipEl.style.display = hasAny ? 'block' : 'none';
+    annotClearChipEl.style.display = hasAny ? "block" : "none";
   }
 
   function showAnnotOverlay(el) {
     if (!annotOverlayEl || !el) return;
     annotActive = true;
     positionAnnotOverlay(el);
-    annotOverlayEl.style.display = 'block';
+    annotOverlayEl.style.display = "block";
   }
 
   function hideAnnotOverlay() {
     annotActive = false;
-    if (annotOverlayEl) annotOverlayEl.style.display = 'none';
+    if (annotOverlayEl) annotOverlayEl.style.display = "none";
     // Drop any in-progress edit without touching annotState — clearAnnotations
     // (if the caller is exiting configure mode) handles state reset.
     annotEditing = null;
@@ -407,17 +460,19 @@
     if (!annotOverlayEl || !el) return;
     const r = el.getBoundingClientRect();
     Object.assign(annotOverlayEl.style, {
-      top: r.top + 'px', left: r.left + 'px',
-      width: r.width + 'px', height: r.height + 'px',
+      top: r.top + "px",
+      left: r.left + "px",
+      width: r.width + "px",
+      height: r.height + "px",
     });
-    annotSvgEl.setAttribute('viewBox', '0 0 ' + r.width + ' ' + r.height);
+    annotSvgEl.setAttribute("viewBox", "0 0 " + r.width + " " + r.height);
   }
 
   function clearAnnotations() {
     annotState.comments = [];
     annotState.strokes = [];
     if (annotSvgEl) while (annotSvgEl.firstChild) annotSvgEl.removeChild(annotSvgEl.firstChild);
-    if (annotPinsEl) annotPinsEl.innerHTML = '';
+    if (annotPinsEl) annotPinsEl.innerHTML = "";
     annotPointer = null;
     annotEditing = null;
     annotLastPinClick = { idx: -1, time: 0 };
@@ -430,25 +485,25 @@
     while (annotSvgEl.firstChild) annotSvgEl.removeChild(annotSvgEl.firstChild);
     annotState.strokes.forEach((s, idx) => {
       const d = pointsToPath(s.points);
-      const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      hit.setAttribute('d', d);
-      hit.setAttribute('stroke', 'transparent');
-      hit.setAttribute('stroke-width', '16');
-      hit.setAttribute('stroke-linecap', 'round');
-      hit.setAttribute('stroke-linejoin', 'round');
-      hit.setAttribute('fill', 'none');
-      hit.setAttribute('pointer-events', 'stroke');
-      hit.style.cursor = 'pointer';
+      const hit = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      hit.setAttribute("d", d);
+      hit.setAttribute("stroke", "transparent");
+      hit.setAttribute("stroke-width", "16");
+      hit.setAttribute("stroke-linecap", "round");
+      hit.setAttribute("stroke-linejoin", "round");
+      hit.setAttribute("fill", "none");
+      hit.setAttribute("pointer-events", "stroke");
+      hit.style.cursor = "pointer";
       hit.dataset.annotStroke = String(idx);
       annotSvgEl.appendChild(hit);
-      const visible = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      visible.setAttribute('d', d);
-      visible.setAttribute('stroke', C.brand);
-      visible.setAttribute('stroke-width', '3');
-      visible.setAttribute('stroke-linecap', 'round');
-      visible.setAttribute('stroke-linejoin', 'round');
-      visible.setAttribute('fill', 'none');
-      visible.setAttribute('pointer-events', 'none');
+      const visible = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      visible.setAttribute("d", d);
+      visible.setAttribute("stroke", C.brand);
+      visible.setAttribute("stroke-width", "3");
+      visible.setAttribute("stroke-linecap", "round");
+      visible.setAttribute("stroke-linejoin", "round");
+      visible.setAttribute("fill", "none");
+      visible.setAttribute("pointer-events", "none");
       annotSvgEl.appendChild(visible);
     });
     updateClearChip();
@@ -463,29 +518,31 @@
     if (!annotActive) return;
 
     // 1) Clear chip → wipe all annotations
-    if (e.target.closest?.('[data-annot-clear]')) {
+    if (e.target.closest?.("[data-annot-clear]")) {
       if (annotEditing) annotEditing = null;
       clearAnnotations();
       renderAllPins();
       redrawStrokes();
-      e.stopPropagation(); e.preventDefault();
+      e.stopPropagation();
+      e.preventDefault();
       return;
     }
 
     // 2) Stroke hit path → delete that stroke
-    const strokeHit = e.target.closest?.('[data-annot-stroke]');
+    const strokeHit = e.target.closest?.("[data-annot-stroke]");
     if (strokeHit) {
       const idx = parseInt(strokeHit.dataset.annotStroke, 10);
       if (Number.isInteger(idx)) {
         annotState.strokes.splice(idx, 1);
         redrawStrokes();
       }
-      e.stopPropagation(); e.preventDefault();
+      e.stopPropagation();
+      e.preventDefault();
       return;
     }
 
     // 3) Pin → drag, edit, or delete-on-double-click
-    const pinWrap = e.target.closest?.('[data-annot-pin]');
+    const pinWrap = e.target.closest?.("[data-annot-pin]");
     if (pinWrap) {
       const idx = parseInt(pinWrap.dataset.annotPin, 10);
       if (!Number.isInteger(idx)) return;
@@ -496,7 +553,8 @@
         annotState.comments.splice(idx, 1);
         annotLastPinClick = { idx: -1, time: 0 };
         renderAllPins();
-        e.stopPropagation(); e.preventDefault();
+        e.stopPropagation();
+        e.preventDefault();
         return;
       }
       annotLastPinClick = { idx, time: now };
@@ -508,33 +566,41 @@
       const p = localCoords(e);
       const pin = annotState.comments[idx];
       annotPointer = {
-        kind: 'pin', idx,
+        kind: "pin",
+        idx,
         startPointer: p,
         startPin: { x: pin.x, y: pin.y },
         moved: false,
       };
-      try { annotOverlayEl.setPointerCapture(e.pointerId); } catch {}
-      e.stopPropagation(); e.preventDefault();
+      try {
+        annotOverlayEl.setPointerCapture(e.pointerId);
+      } catch {}
+      e.stopPropagation();
+      e.preventDefault();
       return;
     }
 
     // 4) Empty area → commit any open edit, then start new annotation
     if (annotEditing) {
       finalizeEditingPin();
-      e.stopPropagation(); e.preventDefault();
+      e.stopPropagation();
+      e.preventDefault();
       return;
     }
     const p = localCoords(e);
-    annotPointer = { kind: 'new', x0: p.x, y0: p.y, moved: false, strokeEl: null, strokePoints: null };
-    try { annotOverlayEl.setPointerCapture(e.pointerId); } catch {}
-    e.stopPropagation(); e.preventDefault();
+    annotPointer = { kind: "new", x0: p.x, y0: p.y, moved: false, strokeEl: null, strokePoints: null };
+    try {
+      annotOverlayEl.setPointerCapture(e.pointerId);
+    } catch {}
+    e.stopPropagation();
+    e.preventDefault();
   }
 
   function onAnnotMove(e) {
     if (!annotActive || !annotPointer) return;
     const p = localCoords(e);
 
-    if (annotPointer.kind === 'pin') {
+    if (annotPointer.kind === "pin") {
       const dx = p.x - annotPointer.startPointer.x;
       const dy = p.y - annotPointer.startPointer.y;
       if (!annotPointer.moved) {
@@ -542,7 +608,10 @@
         annotPointer.moved = true;
       }
       const pin = annotState.comments[annotPointer.idx];
-      if (!pin) { annotPointer = null; return; }
+      if (!pin) {
+        annotPointer = null;
+        return;
+      }
       pin.x = annotPointer.startPin.x + dx;
       pin.y = annotPointer.startPin.y + dy;
       renderAllPins();
@@ -551,33 +620,36 @@
     }
 
     // kind === 'new'
-    const dx = p.x - annotPointer.x0, dy = p.y - annotPointer.y0;
+    const dx = p.x - annotPointer.x0,
+      dy = p.y - annotPointer.y0;
     if (!annotPointer.moved) {
       if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
       annotPointer.moved = true;
-      const strokeEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      strokeEl.setAttribute('stroke', C.brand);
-      strokeEl.setAttribute('stroke-width', '3');
-      strokeEl.setAttribute('stroke-linecap', 'round');
-      strokeEl.setAttribute('stroke-linejoin', 'round');
-      strokeEl.setAttribute('fill', 'none');
-      strokeEl.setAttribute('pointer-events', 'none');
+      const strokeEl = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      strokeEl.setAttribute("stroke", C.brand);
+      strokeEl.setAttribute("stroke-width", "3");
+      strokeEl.setAttribute("stroke-linecap", "round");
+      strokeEl.setAttribute("stroke-linejoin", "round");
+      strokeEl.setAttribute("fill", "none");
+      strokeEl.setAttribute("pointer-events", "none");
       annotSvgEl.appendChild(strokeEl);
       annotPointer.strokeEl = strokeEl;
       annotPointer.strokePoints = [[annotPointer.x0, annotPointer.y0]];
     }
     annotPointer.strokePoints.push([p.x, p.y]);
-    annotPointer.strokeEl.setAttribute('d', pointsToPath(annotPointer.strokePoints));
+    annotPointer.strokeEl.setAttribute("d", pointsToPath(annotPointer.strokePoints));
     e.stopPropagation();
   }
 
   function onAnnotUp(e) {
     if (!annotActive || !annotPointer) return;
 
-    if (annotPointer.kind === 'pin') {
+    if (annotPointer.kind === "pin") {
       const wasDrag = annotPointer.moved;
       const idx = annotPointer.idx;
-      try { annotOverlayEl.releasePointerCapture(e.pointerId); } catch {}
+      try {
+        annotOverlayEl.releasePointerCapture(e.pointerId);
+      } catch {}
       annotPointer = null;
       if (wasDrag) {
         // A drag is an intentional reposition; a follow-up click shouldn't be
@@ -598,26 +670,28 @@
       redrawStrokes();
     } else {
       const idx = annotState.comments.length;
-      annotState.comments.push({ x: annotPointer.x0, y: annotPointer.y0, text: '' });
+      annotState.comments.push({ x: annotPointer.x0, y: annotPointer.y0, text: "" });
       renderAllPins();
       beginEditPin(idx);
     }
-    try { annotOverlayEl.releasePointerCapture(e.pointerId); } catch {}
+    try {
+      annotOverlayEl.releasePointerCapture(e.pointerId);
+    } catch {}
     annotPointer = null;
     e.stopPropagation();
   }
 
   function pointsToPath(points) {
-    if (!points || points.length === 0) return '';
-    let d = 'M' + points[0][0].toFixed(1) + ' ' + points[0][1].toFixed(1);
+    if (!points || points.length === 0) return "";
+    let d = "M" + points[0][0].toFixed(1) + " " + points[0][1].toFixed(1);
     for (let i = 1; i < points.length; i++) {
-      d += ' L' + points[i][0].toFixed(1) + ' ' + points[i][1].toFixed(1);
+      d += " L" + points[i][0].toFixed(1) + " " + points[i][1].toFixed(1);
     }
     return d;
   }
 
   function renderAllPins() {
-    annotPinsEl.innerHTML = '';
+    annotPinsEl.innerHTML = "";
     annotState.comments.forEach((c, idx) => {
       annotPinsEl.appendChild(buildPinElement(c, idx));
     });
@@ -626,35 +700,47 @@
 
   function buildPinElement(comment, idx) {
     const interactive = idx >= 0;
-    const wrap = document.createElement('div');
+    const wrap = document.createElement("div");
     if (interactive) wrap.dataset.annotPin = String(idx);
     Object.assign(wrap.style, {
-      position: 'absolute',
-      left: (comment.x - 7) + 'px', top: (comment.y - 7) + 'px',
-      pointerEvents: interactive ? 'auto' : 'none',
-      display: 'flex', alignItems: 'flex-start', gap: '6px',
-      cursor: interactive ? 'grab' : 'default',
-      touchAction: 'none',
+      position: "absolute",
+      left: comment.x - 7 + "px",
+      top: comment.y - 7 + "px",
+      pointerEvents: interactive ? "auto" : "none",
+      display: "flex",
+      alignItems: "flex-start",
+      gap: "6px",
+      cursor: interactive ? "grab" : "default",
+      touchAction: "none",
     });
-    const dot = document.createElement('div');
+    const dot = document.createElement("div");
     Object.assign(dot.style, {
-      width: '14px', height: '14px', borderRadius: '50%',
-      background: C.brand, border: '2px solid ' + C.white,
-      boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
-      flexShrink: '0',
+      width: "14px",
+      height: "14px",
+      borderRadius: "50%",
+      background: C.brand,
+      border: "2px solid " + C.white,
+      boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
+      flexShrink: "0",
     });
     wrap.appendChild(dot);
 
     if (comment.text) {
-      const bubble = document.createElement('div');
+      const bubble = document.createElement("div");
       bubble.textContent = comment.text;
       Object.assign(bubble.style, {
-        background: C.ink, color: C.white,
-        fontFamily: FONT, fontSize: '12px', lineHeight: '1.4',
-        padding: '4px 8px', borderRadius: '3px',
-        marginTop: '-2px', maxWidth: '220px',
-        pointerEvents: 'none', whiteSpace: 'pre-wrap',
-        wordBreak: 'break-word',
+        background: C.ink,
+        color: C.white,
+        fontFamily: FONT,
+        fontSize: "12px",
+        lineHeight: "1.4",
+        padding: "4px 8px",
+        borderRadius: "3px",
+        marginTop: "-2px",
+        maxWidth: "220px",
+        pointerEvents: "none",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
       });
       wrap.appendChild(bubble);
     }
@@ -665,41 +751,49 @@
     const wrapEl = annotPinsEl.querySelector('[data-annot-pin="' + idx + '"]');
     if (!wrapEl) return;
     // Strip any existing bubble (but keep the dot)
-    wrapEl.querySelectorAll('div:not(:first-child)').forEach(n => n.remove());
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.placeholder = 'Note…';
+    wrapEl.querySelectorAll("div:not(:first-child)").forEach((n) => n.remove());
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = "Note…";
     Object.assign(input.style, {
-      background: C.ink, color: C.white,
-      fontFamily: FONT, fontSize: '12px', lineHeight: '1.4',
-      padding: '4px 8px', borderRadius: '3px',
-      border: '1px solid ' + C.brand,
-      outline: 'none', marginTop: '-2px',
-      width: '220px', pointerEvents: 'auto',
+      background: C.ink,
+      color: C.white,
+      fontFamily: FONT,
+      fontSize: "12px",
+      lineHeight: "1.4",
+      padding: "4px 8px",
+      borderRadius: "3px",
+      border: "1px solid " + C.brand,
+      outline: "none",
+      marginTop: "-2px",
+      width: "220px",
+      pointerEvents: "auto",
     });
-    const originalText = annotState.comments[idx].text || '';
+    const originalText = annotState.comments[idx].text || "";
     input.value = originalText;
     wrapEl.appendChild(input);
     annotEditing = { idx, input, wrapEl, originalText };
-    input.addEventListener('keydown', onAnnotInputKey, true);
-    input.addEventListener('blur', () => {
+    input.addEventListener("keydown", onAnnotInputKey, true);
+    input.addEventListener("blur", () => {
       // Fires on both focus-loss and programmatic blur; commit unless we
       // already handled it.
       if (annotEditing && annotEditing.input === input) finalizeEditingPin();
     });
     // Stop clicks/pointerdowns inside the input from bubbling to the overlay
-    ['pointerdown', 'click'].forEach(ev => {
-      input.addEventListener(ev, e => e.stopPropagation());
+    ["pointerdown", "click"].forEach((ev) => {
+      input.addEventListener(ev, (e) => e.stopPropagation());
     });
     setTimeout(() => input.focus(), 0);
   }
 
   function onAnnotInputKey(e) {
-    if (e.key === 'Enter') {
-      e.preventDefault(); e.stopPropagation();
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
       finalizeEditingPin();
-    } else if (e.key === 'Escape') {
-      e.preventDefault(); e.stopPropagation();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
       cancelEditingPin();
     } else {
       // Keep arrows / backspace from hitting global handlers
@@ -739,27 +833,35 @@
     const comments = snapshot ? snapshot.comments : annotState.comments;
     const strokes = snapshot ? snapshot.strokes : annotState.strokes;
     if (comments.length === 0 && strokes.length === 0) return null;
-    const wrap = document.createElement('div');
+    const wrap = document.createElement("div");
     Object.assign(wrap.style, {
-      position: 'absolute', top: '0', left: '0',
-      width: rect.width + 'px', height: rect.height + 'px',
-      pointerEvents: 'none', overflow: 'visible',
+      position: "absolute",
+      top: "0",
+      left: "0",
+      width: rect.width + "px",
+      height: rect.height + "px",
+      pointerEvents: "none",
+      overflow: "visible",
     });
     if (strokes.length > 0) {
-      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      svg.setAttribute('viewBox', '0 0 ' + rect.width + ' ' + rect.height);
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", "0 0 " + rect.width + " " + rect.height);
       Object.assign(svg.style, {
-        position: 'absolute', top: '0', left: '0',
-        width: '100%', height: '100%', overflow: 'visible',
+        position: "absolute",
+        top: "0",
+        left: "0",
+        width: "100%",
+        height: "100%",
+        overflow: "visible",
       });
       for (const s of strokes) {
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('stroke', C.brand);
-        path.setAttribute('stroke-width', '3');
-        path.setAttribute('stroke-linecap', 'round');
-        path.setAttribute('stroke-linejoin', 'round');
-        path.setAttribute('fill', 'none');
-        path.setAttribute('d', pointsToPath(s.points));
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("stroke", C.brand);
+        path.setAttribute("stroke-width", "3");
+        path.setAttribute("stroke-linecap", "round");
+        path.setAttribute("stroke-linejoin", "round");
+        path.setAttribute("fill", "none");
+        path.setAttribute("d", pointsToPath(s.points));
         svg.appendChild(path);
       }
       wrap.appendChild(svg);
@@ -782,37 +884,48 @@
     for (const sheet of document.styleSheets) {
       try {
         for (const rule of sheet.cssRules) {
-          if (rule.style) for (let i = 0; i < rule.style.length; i++) {
-            const p = rule.style[i];
-            if (p.startsWith('--') && !props[p]) {
-              const v = cs.getPropertyValue(p).trim();
-              if (v) props[p] = v;
+          if (rule.style)
+            for (let i = 0; i < rule.style.length; i++) {
+              const p = rule.style[i];
+              if (p.startsWith("--") && !props[p]) {
+                const v = cs.getPropertyValue(p).trim();
+                if (v) props[p] = v;
+              }
             }
-          }
         }
-      } catch { /* cross-origin */ }
+      } catch {
+        /* cross-origin */
+      }
     }
     return {
-      tagName: el.tagName.toLowerCase(), id: el.id || null,
+      tagName: el.tagName.toLowerCase(),
+      id: el.id || null,
       classes: [...el.classList],
-      textContent: (el.textContent || '').slice(0, 500),
+      textContent: (el.textContent || "").slice(0, 500),
       outerHTML: el.outerHTML.slice(0, 10000),
       computedStyles: {
-        'font-family': cs.fontFamily, 'font-size': cs.fontSize,
-        'font-weight': cs.fontWeight, 'line-height': cs.lineHeight,
-        'color': cs.color, 'background': cs.background,
-        'background-color': cs.backgroundColor,
-        'padding': cs.padding, 'margin': cs.margin,
-        'display': cs.display, 'position': cs.position,
-        'gap': cs.gap, 'border-radius': cs.borderRadius,
-        'box-shadow': cs.boxShadow,
+        "font-family": cs.fontFamily,
+        "font-size": cs.fontSize,
+        "font-weight": cs.fontWeight,
+        "line-height": cs.lineHeight,
+        color: cs.color,
+        background: cs.background,
+        "background-color": cs.backgroundColor,
+        padding: cs.padding,
+        margin: cs.margin,
+        display: cs.display,
+        position: cs.position,
+        gap: cs.gap,
+        "border-radius": cs.borderRadius,
+        "box-shadow": cs.boxShadow,
       },
       cssCustomProperties: props,
       parentContext: el.parentElement
-        ? '<' + el.parentElement.tagName.toLowerCase()
-          + (el.parentElement.id ? ' id="' + el.parentElement.id + '"' : '')
-          + (el.parentElement.className ? ' class="' + el.parentElement.className + '"' : '')
-          + '>'
+        ? "<" +
+          el.parentElement.tagName.toLowerCase() +
+          (el.parentElement.id ? ' id="' + el.parentElement.id + '"' : "") +
+          (el.parentElement.className ? ' class="' + el.parentElement.className + '"' : "") +
+          ">"
         : null,
       boundingRect: { width: Math.round(r.width), height: Math.round(r.height) },
     };
@@ -831,28 +944,34 @@
   // the Tune popover opens below the bar, a downward shadow lands on the
   // dark popover and reads as a bright ghost line. We swap to UP-only while
   // tune is open below so the popover's top edge is clean.
-  const BAR_SHADOW_DEFAULT = '0 4px 20px oklch(0% 0 0 / 0.08), 0 1px 3px oklch(0% 0 0 / 0.06)';
-  const BAR_SHADOW_UP = '0 -4px 20px oklch(0% 0 0 / 0.08), 0 -1px 3px oklch(0% 0 0 / 0.06)';
+  const BAR_SHADOW_DEFAULT = "0 4px 20px oklch(0% 0 0 / 0.08), 0 1px 3px oklch(0% 0 0 / 0.06)";
+  const BAR_SHADOW_UP = "0 -4px 20px oklch(0% 0 0 / 0.08), 0 -1px 3px oklch(0% 0 0 / 0.06)";
   const BAR_SHADOW_DOWN = BAR_SHADOW_DEFAULT;
 
   function initBar() {
     BP = barPaletteForTheme(detectPageTheme());
-    barEl = document.createElement('div');
-    barEl.id = PREFIX + '-bar';
+    barEl = document.createElement("div");
+    barEl.id = PREFIX + "-bar";
     Object.assign(barEl.style, {
-      position: 'fixed', zIndex: Z.bar,
-      display: 'none', opacity: '0',
-      transform: 'translateY(6px)',
-      transition: 'opacity 0.25s ' + EASE + ', transform 0.3s ' + EASE,
+      position: "fixed",
+      zIndex: Z.bar,
+      display: "none",
+      opacity: "0",
+      transform: "translateY(6px)",
+      transition: "opacity 0.25s " + EASE + ", transform 0.3s " + EASE,
       background: BP.surface,
-      backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
-      border: '1px solid ' + BP.hairline,
-      borderRadius: '10px',
+      backdropFilter: "blur(16px)",
+      WebkitBackdropFilter: "blur(16px)",
+      border: "1px solid " + BP.hairline,
+      borderRadius: "10px",
       boxShadow: BAR_SHADOW_DEFAULT,
-      transition: 'box-shadow 0.2s ease, opacity 0.25s ' + EASE + ', transform 0.3s ' + EASE,
-      fontFamily: FONT, fontSize: '13px', color: BP.text,
-      padding: '6px',
-      maxWidth: '520px', minWidth: '320px',
+      transition: "box-shadow 0.2s ease, opacity 0.25s " + EASE + ", transform 0.3s " + EASE,
+      fontFamily: FONT,
+      fontSize: "13px",
+      color: BP.text,
+      padding: "6px",
+      maxWidth: "520px",
+      minWidth: "320px",
     });
     document.body.appendChild(barEl);
     defangOutsideHandlers(barEl);
@@ -883,71 +1002,86 @@
     let left = r.left + (r.width - barW) / 2;
     if (left < GAP) left = GAP;
     if (left + barW > window.innerWidth - GAP) left = window.innerWidth - barW - GAP;
-    Object.assign(barEl.style, { top: top + 'px', left: left + 'px' });
+    Object.assign(barEl.style, { top: top + "px", left: left + "px" });
   }
 
   function showBar(mode) {
-    barEl.innerHTML = '';
-    if (mode === 'configure') barEl.appendChild(buildConfigureRow());
-    else if (mode === 'generating') barEl.appendChild(buildGeneratingRow());
-    else if (mode === 'cycling') barEl.appendChild(buildCyclingRow());
-    barEl.style.display = 'block';
+    barEl.innerHTML = "";
+    if (mode === "configure") barEl.appendChild(buildConfigureRow());
+    else if (mode === "generating") barEl.appendChild(buildGeneratingRow());
+    else if (mode === "cycling") barEl.appendChild(buildCyclingRow());
+    barEl.style.display = "block";
     positionBar();
     requestAnimationFrame(() => {
-      barEl.style.opacity = '1';
-      barEl.style.transform = 'translateY(0)';
+      barEl.style.opacity = "1";
+      barEl.style.transform = "translateY(0)";
     });
   }
 
   function hideBar() {
     if (!barEl) return;
-    barEl.style.opacity = '0';
-    barEl.style.transform = 'translateY(6px)';
-    setTimeout(() => { if (barEl) barEl.style.display = 'none'; }, 250);
+    barEl.style.opacity = "0";
+    barEl.style.transform = "translateY(6px)";
+    setTimeout(() => {
+      if (barEl) barEl.style.display = "none";
+    }, 250);
     hideActionPicker();
     closeTunePopover();
   }
 
   function updateBarContent(mode) {
-    if (!barEl || barEl.style.display === 'none') return;
-    barEl.innerHTML = '';
+    if (!barEl || barEl.style.display === "none") return;
+    barEl.innerHTML = "";
     // Reset bar styling to the theme-aware palette
     barEl.style.background = BP.surface;
-    barEl.style.border = '1px solid ' + BP.hairline;
-    if (mode === 'configure') barEl.appendChild(buildConfigureRow());
-    else if (mode === 'generating') barEl.appendChild(buildGeneratingRow());
-    else if (mode === 'cycling') barEl.appendChild(buildCyclingRow());
-    else if (mode === 'saving') barEl.appendChild(buildSavingRow());
-    else if (mode === 'confirmed') {
+    barEl.style.border = "1px solid " + BP.hairline;
+    if (mode === "configure") barEl.appendChild(buildConfigureRow());
+    else if (mode === "generating") barEl.appendChild(buildGeneratingRow());
+    else if (mode === "cycling") barEl.appendChild(buildCyclingRow());
+    else if (mode === "saving") barEl.appendChild(buildSavingRow());
+    else if (mode === "confirmed") {
       barEl.appendChild(buildConfirmedRow());
-      barEl.style.background = 'oklch(95% 0.05 145)';
-      barEl.style.border = '1px solid oklch(75% 0.12 145 / 0.4)';
+      barEl.style.background = "oklch(95% 0.05 145)";
+      barEl.style.border = "1px solid oklch(75% 0.12 145 / 0.4)";
     }
   }
 
   // --- Configure row ---
 
   function buildConfigureRow() {
-    const row = el('div', {
-      display: 'flex', alignItems: 'center', gap: '4px',
+    const row = el("div", {
+      display: "flex",
+      alignItems: "center",
+      gap: "4px",
     });
 
     // Action pill
-    const pill = el('button', {
-      display: 'inline-flex', alignItems: 'center', gap: '4px',
-      padding: '5px 10px', borderRadius: '6px',
-      background: BP.mark, color: BP.markText,
-      fontFamily: FONT, fontSize: '12px', fontWeight: '500',
-      border: 'none', cursor: 'pointer',
-      transition: 'background 0.12s ease, transform 0.1s ease',
-      whiteSpace: 'nowrap', flexShrink: '0',
+    const pill = el("button", {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "4px",
+      padding: "5px 10px",
+      borderRadius: "6px",
+      background: BP.mark,
+      color: BP.markText,
+      fontFamily: FONT,
+      fontSize: "12px",
+      fontWeight: "500",
+      border: "none",
+      cursor: "pointer",
+      transition: "background 0.12s ease, transform 0.1s ease",
+      whiteSpace: "nowrap",
+      flexShrink: "0",
     });
-    pill.textContent = actionLabel() + ' \u25BE';
-    pill.addEventListener('mouseenter', () => pill.style.background = BP.accent);
-    pill.addEventListener('mouseleave', () => pill.style.background = BP.mark);
-    pill.addEventListener('mousedown', () => pill.style.transform = 'scale(0.97)');
-    pill.addEventListener('mouseup', () => pill.style.transform = 'scale(1)');
-    pill.addEventListener('click', (e) => { e.stopPropagation(); toggleActionPicker(); });
+    pill.textContent = actionLabel() + " \u25BE";
+    pill.addEventListener("mouseenter", () => (pill.style.background = BP.accent));
+    pill.addEventListener("mouseleave", () => (pill.style.background = BP.mark));
+    pill.addEventListener("mousedown", () => (pill.style.transform = "scale(0.97)"));
+    pill.addEventListener("mouseup", () => (pill.style.transform = "scale(1)"));
+    pill.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleActionPicker();
+    });
     row.appendChild(pill);
 
     // Freeform input. Focus state shows an accent-colored border only —
@@ -956,75 +1090,112 @@
     // browser's default placeholder gray was unreadable. Placeholder color
     // is set explicitly via a one-shot stylesheet keyed off this input's id
     // so it picks up the bar's `textDim` token in both themes.
-    const input = document.createElement('input');
-    input.id = PREFIX + '-input';
-    input.type = 'text';
-    input.placeholder = selectedAction === 'impeccable' ? 'describe what you want...' : 'refine further (optional)...';
+    const input = document.createElement("input");
+    input.id = PREFIX + "-input";
+    input.type = "text";
+    input.placeholder = selectedAction === "impeccable" ? "describe what you want..." : "refine further (optional)...";
     Object.assign(input.style, {
-      flex: '1', minWidth: '0',
-      padding: '5px 8px', borderRadius: '6px',
-      border: '1px solid transparent', background: 'transparent',
-      fontFamily: FONT, fontSize: '12px', color: BP.text,
-      outline: 'none',
-      transition: 'border-color 0.15s ease',
+      flex: "1",
+      minWidth: "0",
+      padding: "5px 8px",
+      borderRadius: "6px",
+      border: "1px solid transparent",
+      background: "transparent",
+      fontFamily: FONT,
+      fontSize: "12px",
+      color: BP.text,
+      outline: "none",
+      transition: "border-color 0.15s ease",
     });
-    if (!document.getElementById(PREFIX + '-input-style')) {
-      const s = document.createElement('style');
-      s.id = PREFIX + '-input-style';
-      s.textContent =
-        '#' + PREFIX + '-input::placeholder { color: ' + BP.textDim + '; opacity: 1; }';
+    if (!document.getElementById(PREFIX + "-input-style")) {
+      const s = document.createElement("style");
+      s.id = PREFIX + "-input-style";
+      s.textContent = "#" + PREFIX + "-input::placeholder { color: " + BP.textDim + "; opacity: 1; }";
       document.head.appendChild(s);
     }
-    input.addEventListener('focus', () => {
+    input.addEventListener("focus", () => {
       input.style.borderColor = BP.accent;
     });
-    input.addEventListener('blur', () => {
-      input.style.borderColor = 'transparent';
+    input.addEventListener("blur", () => {
+      input.style.borderColor = "transparent";
     });
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.stopPropagation(); e.preventDefault(); handleGo(); return; }
-      if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); input.blur(); hideBar(); state = 'PICKING'; return; }
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.stopPropagation();
+        e.preventDefault();
+        handleGo();
+        return;
+      }
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        e.preventDefault();
+        input.blur();
+        hideBar();
+        state = "PICKING";
+        return;
+      }
       // Let arrow keys pass through to the element picker when the input is empty
-      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !input.value) return;
+      if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !input.value) return;
       e.stopPropagation();
     });
     row.appendChild(input);
 
     // Variant count toggle
-    const count = el('button', {
-      padding: '4px 6px', borderRadius: '5px',
-      border: '1px solid ' + BP.hairline, background: 'transparent',
-      fontFamily: MONO, fontSize: '11px', fontWeight: '600',
-      color: BP.textDim, cursor: 'pointer',
-      transition: 'color 0.12s ease, border-color 0.12s ease',
-      flexShrink: '0', whiteSpace: 'nowrap',
+    const count = el("button", {
+      padding: "4px 6px",
+      borderRadius: "5px",
+      border: "1px solid " + BP.hairline,
+      background: "transparent",
+      fontFamily: MONO,
+      fontSize: "11px",
+      fontWeight: "600",
+      color: BP.textDim,
+      cursor: "pointer",
+      transition: "color 0.12s ease, border-color 0.12s ease",
+      flexShrink: "0",
+      whiteSpace: "nowrap",
     });
-    count.textContent = '\u00D7' + selectedCount;
-    count.title = 'Variants: click to change';
-    count.addEventListener('mouseenter', () => { count.style.color = BP.text; count.style.borderColor = BP.text; });
-    count.addEventListener('mouseleave', () => { count.style.color = BP.textDim; count.style.borderColor = BP.hairline; });
-    count.addEventListener('click', (e) => {
+    count.textContent = "\u00D7" + selectedCount;
+    count.title = "Variants: click to change";
+    count.addEventListener("mouseenter", () => {
+      count.style.color = BP.text;
+      count.style.borderColor = BP.text;
+    });
+    count.addEventListener("mouseleave", () => {
+      count.style.color = BP.textDim;
+      count.style.borderColor = BP.hairline;
+    });
+    count.addEventListener("click", (e) => {
       e.stopPropagation();
       selectedCount = selectedCount >= 4 ? 2 : selectedCount + 1;
-      count.textContent = '\u00D7' + selectedCount;
+      count.textContent = "\u00D7" + selectedCount;
     });
     row.appendChild(count);
 
     // Go button
-    const go = el('button', {
-      padding: '5px 12px', borderRadius: '6px',
-      border: 'none', background: BP.accent, color: BP.mark,
-      fontFamily: FONT, fontSize: '12px', fontWeight: '600',
-      cursor: 'pointer',
-      transition: 'filter 0.12s ease, transform 0.1s ease',
-      flexShrink: '0', whiteSpace: 'nowrap',
+    const go = el("button", {
+      padding: "5px 12px",
+      borderRadius: "6px",
+      border: "none",
+      background: BP.accent,
+      color: BP.mark,
+      fontFamily: FONT,
+      fontSize: "12px",
+      fontWeight: "600",
+      cursor: "pointer",
+      transition: "filter 0.12s ease, transform 0.1s ease",
+      flexShrink: "0",
+      whiteSpace: "nowrap",
     });
-    go.textContent = 'Go \u2192';
-    go.addEventListener('mouseenter', () => go.style.filter = 'brightness(1.1)');
-    go.addEventListener('mouseleave', () => go.style.filter = 'none');
-    go.addEventListener('mousedown', () => go.style.transform = 'scale(0.97)');
-    go.addEventListener('mouseup', () => go.style.transform = 'scale(1)');
-    go.addEventListener('click', (e) => { e.stopPropagation(); handleGo(); });
+    go.textContent = "Go \u2192";
+    go.addEventListener("mouseenter", () => (go.style.filter = "brightness(1.1)"));
+    go.addEventListener("mouseleave", () => (go.style.filter = "none"));
+    go.addEventListener("mousedown", () => (go.style.transform = "scale(0.97)"));
+    go.addEventListener("mouseup", () => (go.style.transform = "scale(1)"));
+    go.addEventListener("click", (e) => {
+      e.stopPropagation();
+      handleGo();
+    });
     row.appendChild(go);
 
     // Auto-focus input after a beat
@@ -1035,15 +1206,20 @@
   // --- Generating row ---
 
   function buildGeneratingRow() {
-    const row = el('div', {
-      display: 'flex', alignItems: 'center', gap: '8px',
-      padding: '2px 4px',
+    const row = el("div", {
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+      padding: "2px 4px",
     });
 
     // Action label
-    const label = el('span', {
-      fontWeight: '600', fontSize: '12px', color: BP.text,
-      flexShrink: '0', whiteSpace: 'nowrap',
+    const label = el("span", {
+      fontWeight: "600",
+      fontSize: "12px",
+      color: BP.text,
+      flexShrink: "0",
+      whiteSpace: "nowrap",
     });
     label.textContent = actionLabel();
     row.appendChild(label);
@@ -1052,15 +1228,16 @@
     row.appendChild(buildDots(false));
 
     // Status
-    const status = el('span', {
-      fontSize: '11px', color: BP.textDim, whiteSpace: 'nowrap',
-      marginLeft: 'auto',
+    const status = el("span", {
+      fontSize: "11px",
+      color: BP.textDim,
+      whiteSpace: "nowrap",
+      marginLeft: "auto",
     });
     // Variants currently arrive atomically in a single file edit, so a
     // per-variant counter would lie. Say what's true.
-    status.textContent = arrivedVariants < expectedVariants
-      ? 'Generating ' + expectedVariants + ' variants...'
-      : 'Done';
+    status.textContent =
+      arrivedVariants < expectedVariants ? "Generating " + expectedVariants + " variants..." : "Done";
     row.appendChild(status);
 
     return row;
@@ -1068,114 +1245,167 @@
 
   // --- Cycling row ---
 
-  const TUNE_ICON_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="flex-shrink:0"><line x1="4" y1="8" x2="20" y2="8"/><circle cx="14" cy="8" r="2.4" fill="currentColor" stroke="none"/><line x1="4" y1="16" x2="20" y2="16"/><circle cx="10" cy="16" r="2.4" fill="currentColor" stroke="none"/></svg>';
+  const TUNE_ICON_SVG =
+    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="flex-shrink:0"><line x1="4" y1="8" x2="20" y2="8"/><circle cx="14" cy="8" r="2.4" fill="currentColor" stroke="none"/><line x1="4" y1="16" x2="20" y2="16"/><circle cx="10" cy="16" r="2.4" fill="currentColor" stroke="none"/></svg>';
 
   function buildCyclingRow() {
-    const row = el('div', {
-      display: 'flex', alignItems: 'center', gap: '6px',
-      padding: '1px 2px',
+    const row = el("div", {
+      display: "flex",
+      alignItems: "center",
+      gap: "6px",
+      padding: "1px 2px",
     });
 
     // Prev
-    const prev = navBtn('\u2190');
-    prev.addEventListener('click', (e) => { e.stopPropagation(); cycleVariant(-1); });
-    if (visibleVariant <= 1) prev.style.opacity = '0.3';
+    const prev = navBtn("\u2190");
+    prev.addEventListener("click", (e) => {
+      e.stopPropagation();
+      cycleVariant(-1);
+    });
+    if (visibleVariant <= 1) prev.style.opacity = "0.3";
     row.appendChild(prev);
 
     // Dots (clickable)
     row.appendChild(buildDots(true));
 
     // Counter
-    const counter = el('span', {
-      fontFamily: MONO, fontSize: '11px', fontWeight: '500',
-      color: BP.textDim, minWidth: '24px', textAlign: 'center',
+    const counter = el("span", {
+      fontFamily: MONO,
+      fontSize: "11px",
+      fontWeight: "500",
+      color: BP.textDim,
+      minWidth: "24px",
+      textAlign: "center",
     });
-    counter.textContent = visibleVariant + '/' + arrivedVariants;
+    counter.textContent = visibleVariant + "/" + arrivedVariants;
     row.appendChild(counter);
 
     // Next
-    const next = navBtn('\u2192');
-    next.addEventListener('click', (e) => { e.stopPropagation(); cycleVariant(1); });
-    if (visibleVariant >= arrivedVariants) next.style.opacity = '0.3';
+    const next = navBtn("\u2192");
+    next.addEventListener("click", (e) => {
+      e.stopPropagation();
+      cycleVariant(1);
+    });
+    if (visibleVariant >= arrivedVariants) next.style.opacity = "0.3";
     row.appendChild(next);
 
     // Tune chip — only when the visible variant exposes params
     const visParams = parseVariantParams(getVisibleVariantEl());
     const hasParams = visParams.length > 0;
     if (hasParams) {
-      const tune = el('button', {
-        display: 'inline-flex', alignItems: 'center', gap: '6px',
-        padding: '4px 10px', borderRadius: '5px',
-        border: '1px solid transparent',
-        background: tuneOpen ? BP.accentSoft : 'transparent',
+      const tune = el("button", {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "6px",
+        padding: "4px 10px",
+        borderRadius: "5px",
+        border: "1px solid transparent",
+        background: tuneOpen ? BP.accentSoft : "transparent",
         color: tuneOpen ? BP.accent : BP.text,
-        fontFamily: FONT, fontSize: '11px', fontWeight: '500',
-        cursor: 'pointer',
-        transition: 'color 0.12s ease, background 0.12s ease',
-        whiteSpace: 'nowrap',
+        fontFamily: FONT,
+        fontSize: "11px",
+        fontWeight: "500",
+        cursor: "pointer",
+        transition: "color 0.12s ease, background 0.12s ease",
+        whiteSpace: "nowrap",
       });
       tune.innerHTML = TUNE_ICON_SVG;
-      const tuneLabel = document.createElement('span');
-      tuneLabel.textContent = 'Tune';
+      const tuneLabel = document.createElement("span");
+      tuneLabel.textContent = "Tune";
       tune.appendChild(tuneLabel);
-      const tuneBadge = document.createElement('span');
+      const tuneBadge = document.createElement("span");
       Object.assign(tuneBadge.style, {
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        minWidth: '16px', height: '16px', padding: '0 4px',
-        borderRadius: '999px',
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minWidth: "16px",
+        height: "16px",
+        padding: "0 4px",
+        borderRadius: "999px",
         background: tuneOpen ? C.brand : BP.hairline,
-        color: tuneOpen ? 'oklch(98% 0 0)' : 'inherit',
-        fontFamily: MONO, fontSize: '9.5px', fontWeight: '600',
-        lineHeight: '1',
-        boxSizing: 'border-box',
+        color: tuneOpen ? "oklch(98% 0 0)" : "inherit",
+        fontFamily: MONO,
+        fontSize: "9.5px",
+        fontWeight: "600",
+        lineHeight: "1",
+        boxSizing: "border-box",
       });
       tuneBadge.textContent = String(visParams.length);
       tune.appendChild(tuneBadge);
-      tune.title = 'Tune this variant (' + visParams.length + ' knob' + (visParams.length === 1 ? '' : 's') + ')';
-      tune.addEventListener('mouseenter', () => {
+      tune.title = "Tune this variant (" + visParams.length + " knob" + (visParams.length === 1 ? "" : "s") + ")";
+      tune.addEventListener("mouseenter", () => {
         if (!tuneOpen) tune.style.background = BP.accentSoft;
       });
-      tune.addEventListener('mouseleave', () => {
-        if (!tuneOpen) tune.style.background = 'transparent';
+      tune.addEventListener("mouseleave", () => {
+        if (!tuneOpen) tune.style.background = "transparent";
       });
-      tune.addEventListener('click', (e) => { e.stopPropagation(); toggleTunePopover(); });
-      tune.dataset.iceqTune = '1';
+      tune.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleTunePopover();
+      });
+      tune.dataset.iceqTune = "1";
       row.appendChild(tune);
     }
 
     // Spacer
-    row.appendChild(el('div', { flex: '1' }));
+    row.appendChild(el("div", { flex: "1" }));
 
     // Accept — primary action, uses the site's saturated brand magenta
     // with paper-white text, not the theme-muted BP.accent.
-    const accept = el('button', {
-      padding: '5px 14px', borderRadius: '5px',
-      border: 'none', background: C.brand, color: 'oklch(98% 0 0)',
-      fontFamily: FONT, fontSize: '11px', fontWeight: '600',
-      cursor: 'pointer', transition: 'filter 0.12s ease, transform 0.1s ease',
-      whiteSpace: 'nowrap',
+    const accept = el("button", {
+      padding: "5px 14px",
+      borderRadius: "5px",
+      border: "none",
+      background: C.brand,
+      color: "oklch(98% 0 0)",
+      fontFamily: FONT,
+      fontSize: "11px",
+      fontWeight: "600",
+      cursor: "pointer",
+      transition: "filter 0.12s ease, transform 0.1s ease",
+      whiteSpace: "nowrap",
     });
-    accept.textContent = '\u2713 Accept';
-    accept.addEventListener('mouseenter', () => accept.style.filter = 'brightness(1.08)');
-    accept.addEventListener('mouseleave', () => accept.style.filter = 'none');
-    accept.addEventListener('mousedown', () => accept.style.transform = 'scale(0.97)');
-    accept.addEventListener('mouseup', () => accept.style.transform = 'scale(1)');
-    accept.addEventListener('click', (e) => { e.stopPropagation(); handleAccept(); });
-    if (arrivedVariants === 0) { accept.style.opacity = '0.3'; accept.style.pointerEvents = 'none'; }
+    accept.textContent = "\u2713 Accept";
+    accept.addEventListener("mouseenter", () => (accept.style.filter = "brightness(1.08)"));
+    accept.addEventListener("mouseleave", () => (accept.style.filter = "none"));
+    accept.addEventListener("mousedown", () => (accept.style.transform = "scale(0.97)"));
+    accept.addEventListener("mouseup", () => (accept.style.transform = "scale(1)"));
+    accept.addEventListener("click", (e) => {
+      e.stopPropagation();
+      handleAccept();
+    });
+    if (arrivedVariants === 0) {
+      accept.style.opacity = "0.3";
+      accept.style.pointerEvents = "none";
+    }
     row.appendChild(accept);
 
     // Discard
-    const discard = el('button', {
-      padding: '4px 6px', borderRadius: '5px',
-      border: '1px solid ' + BP.hairline, background: 'transparent',
-      fontFamily: FONT, fontSize: '11px', color: BP.textDim,
-      cursor: 'pointer', transition: 'color 0.12s ease, border-color 0.12s ease',
+    const discard = el("button", {
+      padding: "4px 6px",
+      borderRadius: "5px",
+      border: "1px solid " + BP.hairline,
+      background: "transparent",
+      fontFamily: FONT,
+      fontSize: "11px",
+      color: BP.textDim,
+      cursor: "pointer",
+      transition: "color 0.12s ease, border-color 0.12s ease",
     });
-    discard.textContent = '\u2715';
-    discard.title = 'Discard all variants';
-    discard.addEventListener('mouseenter', () => { discard.style.color = BP.text; discard.style.borderColor = BP.text; });
-    discard.addEventListener('mouseleave', () => { discard.style.color = BP.textDim; discard.style.borderColor = BP.hairline; });
-    discard.addEventListener('click', (e) => { e.stopPropagation(); handleDiscard(); });
+    discard.textContent = "\u2715";
+    discard.title = "Discard all variants";
+    discard.addEventListener("mouseenter", () => {
+      discard.style.color = BP.text;
+      discard.style.borderColor = BP.text;
+    });
+    discard.addEventListener("mouseleave", () => {
+      discard.style.color = BP.textDim;
+      discard.style.borderColor = BP.hairline;
+    });
+    discard.addEventListener("click", (e) => {
+      e.stopPropagation();
+      handleDiscard();
+    });
     row.appendChild(discard);
 
     return row;
@@ -1186,29 +1416,35 @@
   // --- Saving row (waiting for agent to process accept/discard) ---
 
   function buildSavingRow() {
-    const row = el('div', {
-      display: 'flex', alignItems: 'center', gap: '8px',
-      padding: '2px 8px',
+    const row = el("div", {
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+      padding: "2px 8px",
     });
-    const spinner = el('div', {
-      width: '14px', height: '14px', borderRadius: '50%',
-      border: '2px solid ' + BP.hairline,
+    const spinner = el("div", {
+      width: "14px",
+      height: "14px",
+      borderRadius: "50%",
+      border: "2px solid " + BP.hairline,
       borderTopColor: BP.accent,
-      animation: 'impeccable-spin 0.6s linear infinite',
-      flexShrink: '0',
+      animation: "impeccable-spin 0.6s linear infinite",
+      flexShrink: "0",
     });
     row.appendChild(spinner);
-    const label = el('span', {
-      fontSize: '12px', color: BP.textDim, fontWeight: '500',
+    const label = el("span", {
+      fontSize: "12px",
+      color: BP.textDim,
+      fontWeight: "500",
     });
-    label.textContent = 'Applying variant...';
+    label.textContent = "Applying variant...";
     row.appendChild(label);
 
     // Inject the keyframes if not already present
-    if (!document.getElementById(PREFIX + '-keyframes')) {
-      const style = document.createElement('style');
-      style.id = PREFIX + '-keyframes';
-      style.textContent = '@keyframes impeccable-spin { to { transform: rotate(360deg); } }';
+    if (!document.getElementById(PREFIX + "-keyframes")) {
+      const style = document.createElement("style");
+      style.id = PREFIX + "-keyframes";
+      style.textContent = "@keyframes impeccable-spin { to { transform: rotate(360deg); } }";
       document.head.appendChild(style);
     }
     return row;
@@ -1217,20 +1453,26 @@
   // --- Confirmed row (green success, auto-dismisses) ---
 
   function buildConfirmedRow() {
-    const row = el('div', {
-      display: 'flex', alignItems: 'center', gap: '8px',
-      padding: '2px 8px',
+    const row = el("div", {
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+      padding: "2px 8px",
     });
-    const check = el('span', {
-      fontSize: '15px', lineHeight: '1', flexShrink: '0',
-      color: 'oklch(45% 0.15 145)',
+    const check = el("span", {
+      fontSize: "15px",
+      lineHeight: "1",
+      flexShrink: "0",
+      color: "oklch(45% 0.15 145)",
     });
-    check.textContent = '\u2713';
+    check.textContent = "\u2713";
     row.appendChild(check);
-    const label = el('span', {
-      fontSize: '12px', color: 'oklch(35% 0.1 145)', fontWeight: '600',
+    const label = el("span", {
+      fontSize: "12px",
+      color: "oklch(35% 0.1 145)",
+      fontWeight: "600",
     });
-    label.textContent = 'Variant applied';
+    label.textContent = "Variant applied";
     row.appendChild(label);
     return row;
   }
@@ -1238,8 +1480,10 @@
   // --- Shared UI builders ---
 
   function buildDots(clickable) {
-    const container = el('div', {
-      display: 'flex', alignItems: 'center', gap: '4px',
+    const container = el("div", {
+      display: "flex",
+      alignItems: "center",
+      gap: "4px",
     });
     for (let i = 1; i <= expectedVariants; i++) {
       const arrived = i <= arrivedVariants;
@@ -1249,30 +1493,28 @@
       // dots — the previous "accent ring + ash fill" combo read as noisy
       // magenta chips, especially when all variants had arrived and every
       // dot wore an accent ring.
-      const dotBg = active ? C.brand
-        : arrived ? BP.textDim
-        : 'transparent';
-      const dotBorder = arrived ? 'none' : '1.5px solid ' + BP.hairline;
-      const dot = el('div', {
-        width: active ? '8px' : '6px',
-        height: active ? '8px' : '6px',
-        borderRadius: '50%',
+      const dotBg = active ? C.brand : arrived ? BP.textDim : "transparent";
+      const dotBorder = arrived ? "none" : "1.5px solid " + BP.hairline;
+      const dot = el("div", {
+        width: active ? "8px" : "6px",
+        height: active ? "8px" : "6px",
+        borderRadius: "50%",
         background: dotBg,
         border: dotBorder,
-        boxSizing: 'border-box',
-        transition: 'all 0.2s ' + EASE,
-        cursor: (clickable && arrived) ? 'pointer' : 'default',
-        transform: arrived ? 'scale(1)' : 'scale(0.85)',
-        opacity: arrived ? (active ? '1' : '0.6') : '0.4',
+        boxSizing: "border-box",
+        transition: "all 0.2s " + EASE,
+        cursor: clickable && arrived ? "pointer" : "default",
+        transform: arrived ? "scale(1)" : "scale(0.85)",
+        opacity: arrived ? (active ? "1" : "0.6") : "0.4",
       });
       if (clickable && arrived) {
         const idx = i;
-        dot.addEventListener('click', (e) => {
+        dot.addEventListener("click", (e) => {
           e.stopPropagation();
           visibleVariant = idx;
           showVariantInDOM(currentSessionId, idx);
           updateSelectedElement();
-          updateBarContent('cycling');
+          updateBarContent("cycling");
         });
       }
       container.appendChild(dot);
@@ -1281,23 +1523,36 @@
   }
 
   function navBtn(text) {
-    const b = el('button', {
-      width: '26px', height: '26px', borderRadius: '5px',
-      border: '1px solid ' + BP.hairline, background: 'transparent',
-      color: BP.text, fontFamily: FONT, fontSize: '13px',
-      cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      transition: 'border-color 0.12s ease, background 0.12s ease',
-      padding: '0', lineHeight: '1',
+    const b = el("button", {
+      width: "26px",
+      height: "26px",
+      borderRadius: "5px",
+      border: "1px solid " + BP.hairline,
+      background: "transparent",
+      color: BP.text,
+      fontFamily: FONT,
+      fontSize: "13px",
+      cursor: "pointer",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      transition: "border-color 0.12s ease, background 0.12s ease",
+      padding: "0",
+      lineHeight: "1",
     });
     b.textContent = text;
-    b.addEventListener('mouseenter', () => { b.style.borderColor = BP.text; });
-    b.addEventListener('mouseleave', () => { b.style.borderColor = BP.hairline; });
+    b.addEventListener("mouseenter", () => {
+      b.style.borderColor = BP.text;
+    });
+    b.addEventListener("mouseleave", () => {
+      b.style.borderColor = BP.hairline;
+    });
     return b;
   }
 
   function actionLabel() {
-    const a = ACTIONS.find(a => a.value === selectedAction);
-    return a ? a.label : 'Freeform';
+    const a = ACTIONS.find((a) => a.value === selectedAction);
+    return a ? a.label : "Freeform";
   }
 
   function el(tag, styles) {
@@ -1312,63 +1567,76 @@
 
   function initActionPicker() {
     const P = barPaletteForTheme(detectPageTheme());
-    pickerEl = document.createElement('div');
-    pickerEl.id = PREFIX + '-picker';
+    pickerEl = document.createElement("div");
+    pickerEl.id = PREFIX + "-picker";
     Object.assign(pickerEl.style, {
-      position: 'fixed', zIndex: Z.picker,
-      display: 'none', opacity: '0',
-      transform: 'scale(0.96) translateY(4px)',
-      transformOrigin: 'bottom left',
-      transition: 'opacity 0.18s ' + EASE + ', transform 0.2s ' + EASE,
+      position: "fixed",
+      zIndex: Z.picker,
+      display: "none",
+      opacity: "0",
+      transform: "scale(0.96) translateY(4px)",
+      transformOrigin: "bottom left",
+      transition: "opacity 0.18s " + EASE + ", transform 0.2s " + EASE,
       background: P.surface,
-      border: '1px solid ' + P.hairline,
-      borderRadius: '10px',
-      boxShadow: '0 8px 30px oklch(0% 0 0 / 0.10), 0 2px 6px oklch(0% 0 0 / 0.06)',
-      padding: '6px',
+      border: "1px solid " + P.hairline,
+      borderRadius: "10px",
+      boxShadow: "0 8px 30px oklch(0% 0 0 / 0.10), 0 2px 6px oklch(0% 0 0 / 0.06)",
+      padding: "6px",
       fontFamily: FONT,
-      backdropFilter: 'blur(10px)',
-      WebkitBackdropFilter: 'blur(10px)',
+      backdropFilter: "blur(10px)",
+      WebkitBackdropFilter: "blur(10px)",
     });
 
     // Build the chip grid
-    const grid = el('div', {
-      display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '3px',
+    const grid = el("div", {
+      display: "grid",
+      gridTemplateColumns: "repeat(4, 1fr)",
+      gap: "3px",
     });
 
-    ACTIONS.forEach(action => {
-      const chip = el('button', {
-        display: 'flex', flexDirection: 'column', alignItems: 'center',
-        gap: '4px',
-        padding: '8px 6px', borderRadius: '6px',
-        border: 'none',
-        background: action.value === selectedAction ? P.accentSoft : 'transparent',
+    ACTIONS.forEach((action) => {
+      const chip = el("button", {
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: "4px",
+        padding: "8px 6px",
+        borderRadius: "6px",
+        border: "none",
+        background: action.value === selectedAction ? P.accentSoft : "transparent",
         color: action.value === selectedAction ? P.accent : P.text,
-        fontFamily: FONT, fontSize: '11px', fontWeight: '500',
-        cursor: 'pointer',
-        transition: 'background 0.1s ease, color 0.1s ease',
-        textAlign: 'center', whiteSpace: 'nowrap',
+        fontFamily: FONT,
+        fontSize: "11px",
+        fontWeight: "500",
+        cursor: "pointer",
+        transition: "background 0.1s ease, color 0.1s ease",
+        textAlign: "center",
+        whiteSpace: "nowrap",
       });
-      const iconWrap = el('span', {
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        height: '20px', opacity: '0.9',
+      const iconWrap = el("span", {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        height: "20px",
+        opacity: "0.9",
       });
-      iconWrap.innerHTML = ICONS[action.value] || '';
-      const labelEl = el('span', { lineHeight: '1' });
+      iconWrap.innerHTML = ICONS[action.value] || "";
+      const labelEl = el("span", { lineHeight: "1" });
       labelEl.textContent = action.label;
       chip.appendChild(iconWrap);
       chip.appendChild(labelEl);
       chip.dataset.action = action.value;
-      chip.addEventListener('mouseenter', () => {
+      chip.addEventListener("mouseenter", () => {
         if (action.value !== selectedAction) chip.style.background = P.accentSoft;
       });
-      chip.addEventListener('mouseleave', () => {
-        chip.style.background = action.value === selectedAction ? P.accentSoft : 'transparent';
+      chip.addEventListener("mouseleave", () => {
+        chip.style.background = action.value === selectedAction ? P.accentSoft : "transparent";
       });
-      chip.addEventListener('click', (e) => {
+      chip.addEventListener("click", (e) => {
         e.stopPropagation();
         selectedAction = action.value;
         hideActionPicker();
-        updateBarContent('configure');
+        updateBarContent("configure");
       });
       grid.appendChild(chip);
     });
@@ -1383,12 +1651,15 @@
   }
 
   function toggleActionPicker() {
-    if (pickerEl.style.display !== 'none') { hideActionPicker(); return; }
+    if (pickerEl.style.display !== "none") {
+      hideActionPicker();
+      return;
+    }
     // Rebuild chips to reflect current selection
     const P = pickerEl.__iceq_palette || barPaletteForTheme(detectPageTheme());
-    pickerEl.querySelectorAll('button').forEach(chip => {
+    pickerEl.querySelectorAll("button").forEach((chip) => {
       const isActive = chip.dataset.action === selectedAction;
-      chip.style.background = isActive ? P.accentSoft : 'transparent';
+      chip.style.background = isActive ? P.accentSoft : "transparent";
       chip.style.color = isActive ? P.accent : P.text;
     });
     // Position above the bar
@@ -1397,20 +1668,23 @@
     let top = barRect.top - pickerH - 6;
     if (top < 8) top = barRect.bottom + 6;
     Object.assign(pickerEl.style, {
-      top: top + 'px', left: barRect.left + 'px',
-      display: 'block',
+      top: top + "px",
+      left: barRect.left + "px",
+      display: "block",
     });
     requestAnimationFrame(() => {
-      pickerEl.style.opacity = '1';
-      pickerEl.style.transform = 'scale(1) translateY(0)';
+      pickerEl.style.opacity = "1";
+      pickerEl.style.transform = "scale(1) translateY(0)";
     });
   }
 
   function hideActionPicker() {
     if (!pickerEl) return;
-    pickerEl.style.opacity = '0';
-    pickerEl.style.transform = 'scale(0.96) translateY(4px)';
-    setTimeout(() => { if (pickerEl) pickerEl.style.display = 'none'; }, 180);
+    pickerEl.style.opacity = "0";
+    pickerEl.style.transform = "scale(0.96) translateY(4px)";
+    setTimeout(() => {
+      if (pickerEl) pickerEl.style.display = "none";
+    }, 180);
   }
 
   // ---------------------------------------------------------------------------
@@ -1434,11 +1708,11 @@
   // can bake them into the source-file write.
   // ---------------------------------------------------------------------------
 
-  let paramsPanelEl = null;     // outer wrapper (overflow:hidden, clips the slide)
-  let paramsPanelInner = null;  // translating content (carries bg, padding, knobs)
-  let paramsPanelBody = null;   // grid holding the knob cells
+  let paramsPanelEl = null; // outer wrapper (overflow:hidden, clips the slide)
+  let paramsPanelInner = null; // translating content (carries bg, padding, knobs)
+  let paramsPanelBody = null; // grid holding the knob cells
   let paramsCurrentValues = {}; // {paramId: value} — mirror of the visible variant's live values
-  let tuneOpen = false;         // whether the Tune popover is open right now
+  let tuneOpen = false; // whether the Tune popover is open right now
 
   // Theme-aware Tune popover. Appears as a drawer that slides out from the
   // contextual bar's bar-facing edge (below if the bar sits below the
@@ -1456,35 +1730,39 @@
     // display toggle, no opacity toggle, no transform trickery. The mask
     // hides everything initially; as it grows, content is revealed from
     // the bar edge outward.
-    paramsPanelEl = document.createElement('div');
-    paramsPanelEl.id = PREFIX + '-params-panel';
+    paramsPanelEl = document.createElement("div");
+    paramsPanelEl.id = PREFIX + "-params-panel";
     Object.assign(paramsPanelEl.style, {
-      position: 'fixed', zIndex: String(Z.bar - 1),
+      position: "fixed",
+      zIndex: String(Z.bar - 1),
       background: P.surfaceDeep,
       color: P.text,
       fontFamily: FONT,
-      padding: '14px 18px',
-      boxSizing: 'border-box',
-      borderRadius: '0 0 10px 10px',
-      pointerEvents: 'none',
-      backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+      padding: "14px 18px",
+      boxSizing: "border-box",
+      borderRadius: "0 0 10px 10px",
+      pointerEvents: "none",
+      backdropFilter: "blur(16px)",
+      WebkitBackdropFilter: "blur(16px)",
 
       // clip-path is the same conceptual reveal as mask but with rock-solid
       // transition support across engines. Closed state clips from the far
       // edge; open = inset(0) shows everything.
-      clipPath: 'inset(0 0 100% 0)',
-      transition: 'clip-path 0.44s ' + EASE,
+      clipPath: "inset(0 0 100% 0)",
+      transition: "clip-path 0.44s " + EASE,
 
       // Park off-screen until positionParamsPanel places it. These are NOT
       // in the transition list, so they snap instantly — no fly-in from the
       // top-left when first shown.
-      top: '-9999px', left: '-9999px', width: '0',
+      top: "-9999px",
+      left: "-9999px",
+      width: "0",
     });
 
-    paramsPanelBody = el('div', {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
-      gap: '12px 16px',
+    paramsPanelBody = el("div", {
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+      gap: "12px 16px",
     });
 
     paramsPanelEl.appendChild(paramsPanelBody);
@@ -1505,28 +1783,28 @@
 
   function parseVariantParams(variantEl) {
     if (!variantEl) return [];
-    const raw = variantEl.getAttribute('data-impeccable-params');
+    const raw = variantEl.getAttribute("data-impeccable-params");
     if (!raw) return [];
     try {
       const parsed = JSON.parse(raw);
       return Array.isArray(parsed) ? parsed : [];
     } catch (err) {
-      console.warn('[impeccable] Invalid data-impeccable-params JSON:', err.message);
+      console.warn("[impeccable] Invalid data-impeccable-params JSON:", err.message);
       return [];
     }
   }
 
   function applyParamValue(variantEl, param, value) {
     if (!variantEl) return;
-    const attr = 'data-p-' + param.id;
-    if (param.kind === 'range') {
-      variantEl.style.setProperty('--p-' + param.id, String(value));
-    } else if (param.kind === 'toggle') {
+    const attr = "data-p-" + param.id;
+    if (param.kind === "range") {
+      variantEl.style.setProperty("--p-" + param.id, String(value));
+    } else if (param.kind === "toggle") {
       const on = !!value;
-      variantEl.style.setProperty('--p-' + param.id, on ? '1' : '0');
-      if (on) variantEl.setAttribute(attr, 'on');
+      variantEl.style.setProperty("--p-" + param.id, on ? "1" : "0");
+      if (on) variantEl.setAttribute(attr, "on");
       else variantEl.removeAttribute(attr);
-    } else if (param.kind === 'steps') {
+    } else if (param.kind === "steps") {
       variantEl.setAttribute(attr, String(value));
     }
   }
@@ -1540,46 +1818,54 @@
   }
 
   function formatRangeValue(input) {
-    const max = parseFloat(input.max), min = parseFloat(input.min);
+    const max = parseFloat(input.max),
+      min = parseFloat(input.min);
     const v = parseFloat(input.value);
     if (!isFinite(v)) return input.value;
-    return (max - min) <= 2 ? v.toFixed(2) : String(Math.round(v));
+    return max - min <= 2 ? v.toFixed(2) : String(Math.round(v));
   }
 
   function buildParamsPanel(variantEl, params) {
     const P = paramsPanelPalette || barPaletteForTheme(detectPageTheme());
-    paramsPanelBody.innerHTML = '';
+    paramsPanelBody.innerHTML = "";
     for (const p of params) {
-      const row = el('div', { display: 'flex', flexDirection: 'column', gap: '6px' });
-      const labelRow = el('div', {
-        display: 'flex', justifyContent: 'space-between',
-        alignItems: 'baseline', gap: '8px',
+      const row = el("div", { display: "flex", flexDirection: "column", gap: "6px" });
+      const labelRow = el("div", {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+        gap: "8px",
       });
-      const lbl = el('span', {
-        fontSize: '10.5px', fontWeight: '600', color: P.text,
-        letterSpacing: '0.03em',
+      const lbl = el("span", {
+        fontSize: "10.5px",
+        fontWeight: "600",
+        color: P.text,
+        letterSpacing: "0.03em",
       });
       lbl.textContent = p.label || p.id;
       labelRow.appendChild(lbl);
-      const readout = el('span', {
-        fontSize: '10.5px', color: P.textDim,
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      const readout = el("span", {
+        fontSize: "10.5px",
+        color: P.textDim,
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
       });
       labelRow.appendChild(readout);
       row.appendChild(labelRow);
 
-      if (p.kind === 'range') {
-        const input = document.createElement('input');
-        input.type = 'range';
+      if (p.kind === "range") {
+        const input = document.createElement("input");
+        input.type = "range";
         input.min = String(p.min != null ? p.min : 0);
         input.max = String(p.max != null ? p.max : 1);
         input.step = String(p.step != null ? p.step : 0.05);
         input.value = String(p.default);
         Object.assign(input.style, {
-          width: '100%', accentColor: C.brand, cursor: 'pointer',
+          width: "100%",
+          accentColor: C.brand,
+          cursor: "pointer",
         });
         readout.textContent = formatRangeValue(input);
-        input.addEventListener('input', (e) => {
+        input.addEventListener("input", (e) => {
           e.stopPropagation();
           const v = parseFloat(input.value);
           paramsCurrentValues[p.id] = v;
@@ -1587,68 +1873,80 @@
           applyParamValue(variantEl, p, v);
         });
         row.appendChild(input);
-      } else if (p.kind === 'toggle') {
+      } else if (p.kind === "toggle") {
         const initial = !!p.default;
-        readout.textContent = initial ? 'On' : 'Off';
-        const track = el('button', {
-          position: 'relative', width: '36px', height: '20px',
-          borderRadius: '10px', border: 'none', padding: '0',
-          cursor: 'pointer',
+        readout.textContent = initial ? "On" : "Off";
+        const track = el("button", {
+          position: "relative",
+          width: "36px",
+          height: "20px",
+          borderRadius: "10px",
+          border: "none",
+          padding: "0",
+          cursor: "pointer",
           background: initial ? C.brand : P.hairline,
-          transition: 'background 0.15s ease',
-          alignSelf: 'flex-start',
+          transition: "background 0.15s ease",
+          alignSelf: "flex-start",
         });
-        const knob = el('span', {
-          position: 'absolute', top: '2px',
-          left: initial ? '18px' : '2px',
-          width: '16px', height: '16px', borderRadius: '50%',
-          background: 'oklch(98% 0 0)',
-          transition: 'left 0.18s ' + EASE,
-          boxShadow: '0 1px 2px oklch(0% 0 0 / 0.2)',
+        const knob = el("span", {
+          position: "absolute",
+          top: "2px",
+          left: initial ? "18px" : "2px",
+          width: "16px",
+          height: "16px",
+          borderRadius: "50%",
+          background: "oklch(98% 0 0)",
+          transition: "left 0.18s " + EASE,
+          boxShadow: "0 1px 2px oklch(0% 0 0 / 0.2)",
         });
         track.appendChild(knob);
-        track.addEventListener('click', (e) => {
+        track.addEventListener("click", (e) => {
           e.stopPropagation();
           const next = !paramsCurrentValues[p.id];
           paramsCurrentValues[p.id] = next;
           track.style.background = next ? C.brand : P.hairline;
-          knob.style.left = next ? '18px' : '2px';
-          readout.textContent = next ? 'On' : 'Off';
+          knob.style.left = next ? "18px" : "2px";
+          readout.textContent = next ? "On" : "Off";
           applyParamValue(variantEl, p, next);
         });
         row.appendChild(track);
-      } else if (p.kind === 'steps') {
-        const opts = (p.options || []).map(o =>
-          typeof o === 'string' ? { value: o, label: o } : o
-        );
-        const activeOpt = opts.find(o => o.value === p.default) || opts[0];
+      } else if (p.kind === "steps") {
+        const opts = (p.options || []).map((o) => (typeof o === "string" ? { value: o, label: o } : o));
+        const activeOpt = opts.find((o) => o.value === p.default) || opts[0];
         readout.textContent = activeOpt ? activeOpt.label : String(p.default);
-        const segRow = el('div', {
-          display: 'grid',
-          gridTemplateColumns: 'repeat(' + opts.length + ', 1fr)',
-          gap: '1px', padding: '2px',
-          background: P.hairline, borderRadius: '5px',
+        const segRow = el("div", {
+          display: "grid",
+          gridTemplateColumns: "repeat(" + opts.length + ", 1fr)",
+          gap: "1px",
+          padding: "2px",
+          background: P.hairline,
+          borderRadius: "5px",
         });
         const segBtns = [];
-        opts.forEach(o => {
+        opts.forEach((o) => {
           const active = o.value === p.default;
-          const b = el('button', {
-            padding: '5px 4px', border: 'none', borderRadius: '3px',
-            background: active ? C.brand : 'transparent',
-            color: active ? 'oklch(98% 0 0)' : P.text,
-            fontFamily: FONT, fontSize: '10.5px', fontWeight: '500',
-            cursor: 'pointer', whiteSpace: 'nowrap',
-            transition: 'background 0.1s ease, color 0.1s ease',
+          const b = el("button", {
+            padding: "5px 4px",
+            border: "none",
+            borderRadius: "3px",
+            background: active ? C.brand : "transparent",
+            color: active ? "oklch(98% 0 0)" : P.text,
+            fontFamily: FONT,
+            fontSize: "10.5px",
+            fontWeight: "500",
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+            transition: "background 0.1s ease, color 0.1s ease",
           });
           b.textContent = o.label;
-          b.addEventListener('click', (e) => {
+          b.addEventListener("click", (e) => {
             e.stopPropagation();
             paramsCurrentValues[p.id] = o.value;
             readout.textContent = o.label;
             segBtns.forEach(({ btn, val }) => {
               const on = val === o.value;
-              btn.style.background = on ? C.brand : 'transparent';
-              btn.style.color = on ? 'oklch(98% 0 0)' : P.text;
+              btn.style.background = on ? C.brand : "transparent";
+              btn.style.color = on ? "oklch(98% 0 0)" : P.text;
             });
             applyParamValue(variantEl, p, o.value);
           });
@@ -1666,10 +1964,10 @@
   // bar landed below the element, popover slides DOWN from the bar's bottom.
   // If the bar landed above, popover slides UP from the bar's top.
   function popoverDirection() {
-    if (!barEl || !selectedElement) return 'below';
+    if (!barEl || !selectedElement) return "below";
     const br = barEl.getBoundingClientRect();
     const er = selectedElement.getBoundingClientRect();
-    return br.top >= er.bottom - 4 ? 'below' : 'above';
+    return br.top >= er.bottom - 4 ? "below" : "above";
   }
 
   // The popover overlaps the bar by OVERLAP px on the bar-facing side. With
@@ -1682,12 +1980,12 @@
   // (bottom) edge so the reveal grows downward from the bar; for 'above'
   // clip from the top edge so the reveal grows upward from the bar.
   function closedClipPath(direction) {
-    return direction === 'below' ? 'inset(0 0 100% 0)' : 'inset(100% 0 0 0)';
+    return direction === "below" ? "inset(0 0 100% 0)" : "inset(100% 0 0 0)";
   }
 
   function setClipPath(value, withTransition) {
     const saved = paramsPanelEl.style.transition;
-    if (!withTransition) paramsPanelEl.style.transition = 'none';
+    if (!withTransition) paramsPanelEl.style.transition = "none";
     paramsPanelEl.style.clipPath = value;
     if (!withTransition) {
       void paramsPanelEl.offsetHeight;
@@ -1696,26 +1994,26 @@
   }
 
   function positionParamsPanel() {
-    if (!paramsPanelEl || !barEl || barEl.style.display === 'none') return;
+    if (!paramsPanelEl || !barEl || barEl.style.display === "none") return;
     const br = barEl.getBoundingClientRect();
     const direction = popoverDirection();
     const prevDirection = paramsPanelEl.dataset.tuneDirection;
 
     // top/left/width are NOT in the transition list, so they snap instantly.
-    paramsPanelEl.style.left = br.left + 'px';
-    paramsPanelEl.style.width = br.width + 'px';
+    paramsPanelEl.style.left = br.left + "px";
+    paramsPanelEl.style.width = br.width + "px";
 
-    if (direction === 'below') {
-      paramsPanelEl.style.top = (br.bottom - TUNE_OVERLAP) + 'px';
-      paramsPanelEl.style.borderRadius = '0 0 10px 10px';
-      paramsPanelEl.style.paddingTop = (14 + TUNE_OVERLAP) + 'px';
-      paramsPanelEl.style.paddingBottom = '14px';
+    if (direction === "below") {
+      paramsPanelEl.style.top = br.bottom - TUNE_OVERLAP + "px";
+      paramsPanelEl.style.borderRadius = "0 0 10px 10px";
+      paramsPanelEl.style.paddingTop = 14 + TUNE_OVERLAP + "px";
+      paramsPanelEl.style.paddingBottom = "14px";
     } else {
       const ih = paramsPanelEl.offsetHeight || 80;
-      paramsPanelEl.style.top = (br.top - ih + TUNE_OVERLAP) + 'px';
-      paramsPanelEl.style.borderRadius = '10px 10px 0 0';
-      paramsPanelEl.style.paddingTop = '14px';
-      paramsPanelEl.style.paddingBottom = (14 + TUNE_OVERLAP) + 'px';
+      paramsPanelEl.style.top = br.top - ih + TUNE_OVERLAP + "px";
+      paramsPanelEl.style.borderRadius = "10px 10px 0 0";
+      paramsPanelEl.style.paddingTop = "14px";
+      paramsPanelEl.style.paddingBottom = 14 + TUNE_OVERLAP + "px";
     }
     paramsPanelEl.dataset.tuneDirection = direction;
 
@@ -1730,17 +2028,17 @@
   function showParamsPanel() {
     if (!paramsPanelEl) return;
     positionParamsPanel();
-    paramsPanelEl.style.pointerEvents = 'auto';
+    paramsPanelEl.style.pointerEvents = "auto";
     // rAF so the positioning paint commits before the transition fires.
     requestAnimationFrame(() => {
-      setClipPath('inset(0 0 0 0)', true);
+      setClipPath("inset(0 0 0 0)", true);
     });
   }
 
   function hideParamsPanel() {
     if (!paramsPanelEl) return;
-    paramsPanelEl.style.pointerEvents = 'none';
-    const direction = paramsPanelEl.dataset.tuneDirection || 'below';
+    paramsPanelEl.style.pointerEvents = "none";
+    const direction = paramsPanelEl.dataset.tuneDirection || "below";
     setClipPath(closedClipPath(direction), true);
   }
 
@@ -1748,7 +2046,7 @@
   // its defaults to the variant wrapper (so scoped CSS responds even before
   // the user opens the popover). Visibility is governed by tuneOpen.
   function refreshParamsPanel() {
-    if (state !== 'CYCLING') {
+    if (state !== "CYCLING") {
       paramsCurrentValues = {};
       tuneOpen = false;
       hideParamsPanel();
@@ -1767,8 +2065,7 @@
     if (tuneOpen) {
       // If already visible (variant cycled while open), refresh in place
       // instead of re-running the clip-path animation.
-      const alreadyVisible = paramsPanelEl.style.display === 'block'
-        && paramsPanelEl.style.opacity === '1';
+      const alreadyVisible = paramsPanelEl.style.display === "block" && paramsPanelEl.style.opacity === "1";
       if (alreadyVisible) positionParamsPanel();
       else showParamsPanel();
     } else {
@@ -1777,12 +2074,15 @@
   }
 
   function toggleTunePopover() {
-    if (tuneOpen) { closeTunePopover(); return; }
+    if (tuneOpen) {
+      closeTunePopover();
+      return;
+    }
     openTunePopover();
   }
 
   function openTunePopover() {
-    if (state !== 'CYCLING') return;
+    if (state !== "CYCLING") return;
     const variantEl = getVisibleVariantEl();
     const params = parseVariantParams(variantEl);
     if (!variantEl || params.length === 0) return;
@@ -1794,19 +2094,19 @@
     // Kill the bar's shadow on the popover-facing side so the dark popover
     // doesn't pick up a bright glow line.
     if (barEl) {
-      const direction = paramsPanelEl?.dataset.tuneDirection || 'below';
-      barEl.style.boxShadow = direction === 'below' ? BAR_SHADOW_UP : BAR_SHADOW_DOWN;
+      const direction = paramsPanelEl?.dataset.tuneDirection || "below";
+      barEl.style.boxShadow = direction === "below" ? BAR_SHADOW_UP : BAR_SHADOW_DOWN;
     }
     // Re-render the bar so the Tune chip picks up the active styling.
-    updateBarContent('cycling');
+    updateBarContent("cycling");
   }
 
   function closeTunePopover() {
     tuneOpen = false;
     hideParamsPanel();
     if (barEl) barEl.style.boxShadow = BAR_SHADOW_DEFAULT;
-    if (barEl && barEl.style.display !== 'none' && state === 'CYCLING') {
-      updateBarContent('cycling');
+    if (barEl && barEl.style.display !== "none" && state === "CYCLING") {
+      updateBarContent("cycling");
     }
   }
 
@@ -1820,7 +2120,7 @@
     for (const child of wrapper.children) {
       const v = child.dataset ? child.dataset.impeccableVariant : null;
       if (!v) continue;
-      child.style.display = (v === String(num)) ? '' : 'none';
+      child.style.display = v === String(num) ? "" : "none";
     }
     // Unconditional refresh — covers first-reveal (no-op if state isn't
     // CYCLING yet, the subsequent CYCLING transition triggers its own
@@ -1834,16 +2134,19 @@
    * This works even when the dev server caches HTML (Bun, static servers).
    */
   function injectVariantsFromSource(filePath, sessionId) {
-    const url = 'http://localhost:' + PORT + '/source?token=' + TOKEN + '&path=' + encodeURIComponent(filePath);
+    const url = "http://localhost:" + PORT + "/source?token=" + TOKEN + "&path=" + encodeURIComponent(filePath);
     fetch(url)
-      .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
-      .then(html => {
+      .then((r) => {
+        if (!r.ok) throw new Error(r.status);
+        return r.text();
+      })
+      .then((html) => {
         // Parse the raw source HTML
         const parser = new DOMParser();
-        const doc = parser.parseFromString(html, 'text/html');
+        const doc = parser.parseFromString(html, "text/html");
         const srcWrapper = doc.querySelector('[data-impeccable-variants="' + sessionId + '"]');
         if (!srcWrapper) {
-          console.error('[impeccable] Variant wrapper not found in source file.');
+          console.error("[impeccable] Variant wrapper not found in source file.");
           return;
         }
 
@@ -1861,14 +2164,17 @@
           liveEl = document.getElementById(origContent.id);
         } else if (cls) {
           // Find by tag + exact class match
-          const candidates = document.querySelectorAll(tag + '.' + cls.split(' ')[0]);
+          const candidates = document.querySelectorAll(tag + "." + cls.split(" ")[0]);
           for (const c of candidates) {
-            if (c.className === cls && !own(c)) { liveEl = c; break; }
+            if (c.className === cls && !own(c)) {
+              liveEl = c;
+              break;
+            }
           }
         }
 
         if (!liveEl) {
-          console.error('[impeccable] Could not find original element in live DOM.');
+          console.error("[impeccable] Could not find original element in live DOM.");
           return;
         }
 
@@ -1877,7 +2183,9 @@
         liveEl.parentElement.replaceChild(wrapper, liveEl);
 
         // Update state: count variants, show the first one
-        const variants = wrapper.querySelectorAll('[data-impeccable-variant]:not([data-impeccable-variant="original"])');
+        const variants = wrapper.querySelectorAll(
+          '[data-impeccable-variant]:not([data-impeccable-variant="original"])',
+        );
         arrivedVariants = variants.length;
         expectedVariants = parseInt(wrapper.dataset.impeccableVariantCount || arrivedVariants);
         visibleVariant = 1;
@@ -1886,16 +2194,16 @@
         // Update selectedElement to the visible variant's content
         selectedElement = pickVariantContent(wrapper, 1) || wrapper.parentElement;
 
-        state = 'CYCLING';
+        state = "CYCLING";
         hideShaderOverlay();
-        updateBarContent('cycling');
+        updateBarContent("cycling");
         refreshParamsPanel();
         saveSession();
-        console.log('[impeccable] Injected ' + arrivedVariants + ' variants from source file.');
+        console.log("[impeccable] Injected " + arrivedVariants + " variants from source file.");
       })
-      .catch(err => {
-        console.error('[impeccable] Failed to fetch source:', err);
-        showToast('Could not load variants. Try refreshing the page.', 5000);
+      .catch((err) => {
+        console.error("[impeccable] Failed to fetch source:", err);
+        showToast("Could not load variants. Try refreshing the page.", 5000);
       });
   }
 
@@ -1905,7 +2213,7 @@
     visibleVariant = next;
     showVariantInDOM(currentSessionId, next); // calls refreshParamsPanel itself
     updateSelectedElement();
-    updateBarContent('cycling');
+    updateBarContent("cycling");
     saveSession();
   }
 
@@ -1927,7 +2235,7 @@
     if (!wrapper) return null;
     const variantDiv = wrapper.querySelector('[data-impeccable-variant="' + index + '"]');
     if (!variantDiv) return null;
-    const NON_VISUAL = new Set(['STYLE', 'SCRIPT', 'LINK', 'META', 'TEMPLATE']);
+    const NON_VISUAL = new Set(["STYLE", "SCRIPT", "LINK", "META", "TEMPLATE"]);
     const visual = [];
     for (const child of variantDiv.children) {
       if (!NON_VISUAL.has(child.tagName)) visual.push(child);
@@ -1940,17 +2248,23 @@
   // session's wrapper (HMR patches, variant inserts, cycle swaps).
   function startScrollLock(sessionId, initialTargetY) {
     stopScrollLock();
-    scrollLockTargetY = typeof initialTargetY === 'number' && isFinite(initialTargetY)
-      ? initialTargetY
-      : window.scrollY;
-    console.log('[impeccable.scroll] startScrollLock', { sessionId, scrollY: window.scrollY, targetY: scrollLockTargetY, initialOverride: initialTargetY });
+    scrollLockTargetY =
+      typeof initialTargetY === "number" && isFinite(initialTargetY) ? initialTargetY : window.scrollY;
+    console.log("[impeccable.scroll] startScrollLock", {
+      sessionId,
+      scrollY: window.scrollY,
+      targetY: scrollLockTargetY,
+      initialOverride: initialTargetY,
+    });
 
-    try { history.scrollRestoration = 'manual'; } catch {}
+    try {
+      history.scrollRestoration = "manual";
+    } catch {}
 
     const prevHtmlAnchor = document.documentElement.style.overflowAnchor;
     const prevBodyAnchor = document.body.style.overflowAnchor;
-    document.documentElement.style.overflowAnchor = 'none';
-    document.body.style.overflowAnchor = 'none';
+    document.documentElement.style.overflowAnchor = "none";
+    document.body.style.overflowAnchor = "none";
 
     const correct = (why) => {
       scrollLockRaf = null;
@@ -1958,11 +2272,17 @@
       const before = window.scrollY;
       const delta = before - scrollLockTargetY;
       if (Math.abs(delta) < 0.5) {
-        console.log('[impeccable.scroll] correct noop', { why, scrollY: before, targetY: scrollLockTargetY });
+        console.log("[impeccable.scroll] correct noop", { why, scrollY: before, targetY: scrollLockTargetY });
         return;
       }
-      window.scrollTo({ top: scrollLockTargetY, left: window.scrollX, behavior: 'instant' });
-      console.log('[impeccable.scroll] corrected', { why, from: before, to: scrollLockTargetY, delta, nowAt: window.scrollY });
+      window.scrollTo({ top: scrollLockTargetY, left: window.scrollX, behavior: "instant" });
+      console.log("[impeccable.scroll] corrected", {
+        why,
+        from: before,
+        to: scrollLockTargetY,
+        delta,
+        nowAt: window.scrollY,
+      });
     };
     const schedule = (why) => {
       if (scrollLockRaf != null) return;
@@ -1972,15 +2292,35 @@
     scrollLockObserver = new MutationObserver((mutations) => {
       for (const m of mutations) {
         if (m.target?.closest?.('[data-impeccable-variants="' + sessionId + '"]')) {
-          const childAdds = Array.from(m.addedNodes).map(n => n.nodeType === 1 ? (n.tagName + (n.dataset?.impeccableVariant ? ('[variant=' + n.dataset.impeccableVariant + ']') : '')) : n.nodeType).join(',');
-          console.log('[impeccable.scroll] mutation inside wrapper', { type: m.type, target: m.target?.tagName, adds: childAdds, scrollYBefore: window.scrollY, targetY: scrollLockTargetY });
-          schedule('mutation-in-wrapper');
+          const childAdds = Array.from(m.addedNodes)
+            .map((n) =>
+              n.nodeType === 1
+                ? n.tagName + (n.dataset?.impeccableVariant ? "[variant=" + n.dataset.impeccableVariant + "]" : "")
+                : n.nodeType,
+            )
+            .join(",");
+          console.log("[impeccable.scroll] mutation inside wrapper", {
+            type: m.type,
+            target: m.target?.tagName,
+            adds: childAdds,
+            scrollYBefore: window.scrollY,
+            targetY: scrollLockTargetY,
+          });
+          schedule("mutation-in-wrapper");
           return;
         }
         for (const n of m.addedNodes) {
-          if (n.nodeType === 1 && (n.matches?.('[data-impeccable-variants="' + sessionId + '"]') || n.querySelector?.('[data-impeccable-variants="' + sessionId + '"]'))) {
-            console.log('[impeccable.scroll] wrapper node added', { tag: n.tagName, scrollYBefore: window.scrollY, targetY: scrollLockTargetY });
-            schedule('wrapper-added');
+          if (
+            n.nodeType === 1 &&
+            (n.matches?.('[data-impeccable-variants="' + sessionId + '"]') ||
+              n.querySelector?.('[data-impeccable-variants="' + sessionId + '"]'))
+          ) {
+            console.log("[impeccable.scroll] wrapper node added", {
+              tag: n.tagName,
+              scrollYBefore: window.scrollY,
+              targetY: scrollLockTargetY,
+            });
+            schedule("wrapper-added");
             return;
           }
         }
@@ -1989,10 +2329,14 @@
     scrollLockObserver.observe(document.body, { childList: true, subtree: true });
 
     scrollLockAbort = new AbortController();
-    scrollLockAbort.signal.addEventListener('abort', () => {
-      document.documentElement.style.overflowAnchor = prevHtmlAnchor;
-      document.body.style.overflowAnchor = prevBodyAnchor;
-    }, { once: true });
+    scrollLockAbort.signal.addEventListener(
+      "abort",
+      () => {
+        document.documentElement.style.overflowAnchor = prevHtmlAnchor;
+        document.body.style.overflowAnchor = prevBodyAnchor;
+      },
+      { once: true },
+    );
     const sig = { signal: scrollLockAbort.signal };
     // Track whether the most recent scroll came from a user gesture. We
     // gate user-scroll re-anchoring on this flag so programmatic smooth
@@ -2002,53 +2346,78 @@
     const USER_GESTURE_WINDOW_MS = 250;
 
     const reanchor = (why) => {
-      if (scrollLockRaf != null) { cancelAnimationFrame(scrollLockRaf); scrollLockRaf = null; }
+      if (scrollLockRaf != null) {
+        cancelAnimationFrame(scrollLockRaf);
+        scrollLockRaf = null;
+      }
       const prevTarget = scrollLockTargetY;
       scrollLockTargetY = window.scrollY;
       writeScrollY(scrollLockTargetY);
-      console.log('[impeccable.scroll] reanchor', { why, prevTarget, newTarget: scrollLockTargetY });
+      console.log("[impeccable.scroll] reanchor", { why, prevTarget, newTarget: scrollLockTargetY });
     };
     const markGesture = (why) => {
       userGestureAt = performance.now();
       reanchor(why);
     };
-    window.addEventListener('wheel', () => markGesture('wheel'), { passive: true, ...sig });
-    window.addEventListener('touchstart', () => markGesture('touchstart'), { passive: true, ...sig });
-    window.addEventListener('touchmove', () => markGesture('touchmove'), { passive: true, ...sig });
-    window.addEventListener('keydown', (e) => {
-      if (['PageDown', 'PageUp', ' ', 'End', 'Home', 'ArrowDown', 'ArrowUp'].includes(e.key)) markGesture('key:' + e.key);
-    }, sig);
+    window.addEventListener("wheel", () => markGesture("wheel"), { passive: true, ...sig });
+    window.addEventListener("touchstart", () => markGesture("touchstart"), { passive: true, ...sig });
+    window.addEventListener("touchmove", () => markGesture("touchmove"), { passive: true, ...sig });
+    window.addEventListener(
+      "keydown",
+      (e) => {
+        if (["PageDown", "PageUp", " ", "End", "Home", "ArrowDown", "ArrowUp"].includes(e.key))
+          markGesture("key:" + e.key);
+      },
+      sig,
+    );
 
     // Correct on EVERY scroll event: whether it's the browser's
     // post-reload animated restore or some other script calling
     // scrollIntoView, we want to snap back immediately. Only skip if a
     // user gesture fired in the last 250ms.
     let lastLoggedScrollY = window.scrollY;
-    window.addEventListener('scroll', () => {
-      const now = window.scrollY;
-      if (Math.abs(now - lastLoggedScrollY) > 5) {
-        console.log('[impeccable.scroll] scroll event', { from: lastLoggedScrollY, to: now, targetY: scrollLockTargetY });
-        lastLoggedScrollY = now;
-      }
-      if (scrollLockTargetY == null) return;
-      if (performance.now() - userGestureAt < USER_GESTURE_WINDOW_MS) return;
-      if (Math.abs(now - scrollLockTargetY) < 0.5) return;
-      console.log('[impeccable.scroll] scroll-event snap', { from: now, to: scrollLockTargetY });
-      window.scrollTo({ top: scrollLockTargetY, left: window.scrollX, behavior: 'instant' });
-    }, { passive: true, ...sig });
+    window.addEventListener(
+      "scroll",
+      () => {
+        const now = window.scrollY;
+        if (Math.abs(now - lastLoggedScrollY) > 5) {
+          console.log("[impeccable.scroll] scroll event", {
+            from: lastLoggedScrollY,
+            to: now,
+            targetY: scrollLockTargetY,
+          });
+          lastLoggedScrollY = now;
+        }
+        if (scrollLockTargetY == null) return;
+        if (performance.now() - userGestureAt < USER_GESTURE_WINDOW_MS) return;
+        if (Math.abs(now - scrollLockTargetY) < 0.5) return;
+        console.log("[impeccable.scroll] scroll-event snap", { from: now, to: scrollLockTargetY });
+        window.scrollTo({ top: scrollLockTargetY, left: window.scrollX, behavior: "instant" });
+      },
+      { passive: true, ...sig },
+    );
 
     // Apply target synchronously, not via rAF — racing the browser's
     // restore or a smooth-scroll animation means we want to win now.
     if (Math.abs(window.scrollY - scrollLockTargetY) > 0.5) {
-      window.scrollTo({ top: scrollLockTargetY, left: window.scrollX, behavior: 'instant' });
-      console.log('[impeccable.scroll] startScrollLock initial apply', { to: scrollLockTargetY });
+      window.scrollTo({ top: scrollLockTargetY, left: window.scrollX, behavior: "instant" });
+      console.log("[impeccable.scroll] startScrollLock initial apply", { to: scrollLockTargetY });
     }
   }
 
   function stopScrollLock() {
-    if (scrollLockObserver) { scrollLockObserver.disconnect(); scrollLockObserver = null; }
-    if (scrollLockRaf != null) { cancelAnimationFrame(scrollLockRaf); scrollLockRaf = null; }
-    if (scrollLockAbort) { scrollLockAbort.abort(); scrollLockAbort = null; }
+    if (scrollLockObserver) {
+      scrollLockObserver.disconnect();
+      scrollLockObserver = null;
+    }
+    if (scrollLockRaf != null) {
+      cancelAnimationFrame(scrollLockRaf);
+      scrollLockRaf = null;
+    }
+    if (scrollLockAbort) {
+      scrollLockAbort.abort();
+      scrollLockAbort = null;
+    }
     scrollLockTargetY = null;
     // NOTE: do NOT clear the persistent scroll key here. startScrollLock
     // calls us as a reset, and clearing the key would nuke the Go-time
@@ -2069,19 +2438,24 @@
       // or mutations inside the variant wrapper. Ignore our own bar/UI changes.
       let dominated = false;
       for (const m of mutations) {
-        if (m.target.closest?.('[data-impeccable-variants]')) { dominated = true; break; }
+        if (m.target.closest?.("[data-impeccable-variants]")) {
+          dominated = true;
+          break;
+        }
         for (const n of m.addedNodes) {
           if (n.nodeType !== 1) continue;
           // Direct hit: the added node itself is the wrapper or a variant.
           if (n.dataset?.impeccableVariants || n.dataset?.impeccableVariant) {
-            dominated = true; break;
+            dominated = true;
+            break;
           }
           // Subtree hit: framework HMR (notably SvelteKit) sometimes replaces
           // a whole subtree where the wrapper is a descendant of the added
           // node. Without this check, the observer ignores those mutations
           // and the session stays in GENERATING forever.
-          if (n.querySelector?.('[data-impeccable-variants],[data-impeccable-variant]')) {
-            dominated = true; break;
+          if (n.querySelector?.("[data-impeccable-variants],[data-impeccable-variant]")) {
+            dominated = true;
+            break;
           }
         }
         if (dominated) break;
@@ -2095,7 +2469,7 @@
       // Without this, the shader / highlight / bar track a zero-rect phantom
       // and the overlay appears frozen.
       if (selectedElement && !document.body.contains(selectedElement)) {
-        selectedElement = pickVariantContent(wrapper, 'original') || wrapper;
+        selectedElement = pickVariantContent(wrapper, "original") || wrapper;
       }
 
       const variants = wrapper.querySelectorAll('[data-impeccable-variant]:not([data-impeccable-variant="original"])');
@@ -2116,16 +2490,16 @@
         if (visEl) selectedElement = visEl;
       }
 
-      const expected = parseInt(wrapper.dataset.impeccableVariantCount || '0');
+      const expected = parseInt(wrapper.dataset.impeccableVariantCount || "0");
       if (expected > 0) expectedVariants = expected;
 
       if (arrivedVariants >= expectedVariants && expectedVariants > 0) {
-        state = 'CYCLING';
+        state = "CYCLING";
         hideShaderOverlay();
-        updateBarContent('cycling');
+        updateBarContent("cycling");
         refreshParamsPanel();
-      } else if (state === 'GENERATING') {
-        updateBarContent('generating');
+      } else if (state === "GENERATING") {
+        updateBarContent("generating");
       }
       saveSession();
       updating = false;
@@ -2141,7 +2515,7 @@
 
   function startScrollTracking() {
     function tick() {
-      if (state === 'CONFIGURING' || state === 'GENERATING' || state === 'CYCLING') {
+      if (state === "CONFIGURING" || state === "GENERATING" || state === "CYCLING") {
         positionBar();
         showHighlight(selectedElement);
         if (tuneOpen) positionParamsPanel();
@@ -2156,7 +2530,10 @@
   }
 
   function stopScrollTracking() {
-    if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = null; }
+    if (scrollRaf) {
+      cancelAnimationFrame(scrollRaf);
+      scrollRaf = null;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -2166,10 +2543,10 @@
 
   let evtSource = null;
   let sseRetries = 0;
-  const SSE_MAX_RETRIES = 20;  // generous: heartbeats keep the connection alive, so retries mean real trouble
+  const SSE_MAX_RETRIES = 20; // generous: heartbeats keep the connection alive, so retries mean real trouble
 
   function connectSSE() {
-    evtSource = new EventSource('http://localhost:' + PORT + '/events?token=' + TOKEN);
+    evtSource = new EventSource("http://localhost:" + PORT + "/events?token=" + TOKEN);
 
     evtSource.onopen = () => {
       sseRetries = 0; // reset on successful (re)connect
@@ -2177,20 +2554,29 @@
 
     evtSource.onmessage = (e) => {
       sseRetries = 0; // reset on any successful message
-      let msg; try { msg = JSON.parse(e.data); } catch { return; }
+      let msg;
+      try {
+        msg = JSON.parse(e.data);
+      } catch {
+        return;
+      }
       switch (msg.type) {
-        case 'connected':
+        case "connected":
           hasProjectContext = !!msg.hasProjectContext;
-          if (!hasProjectContext) showToast('No PRODUCT.md found. Variants will be brand-agnostic. Run /impeccable teach to generate one.', 7000);
-          console.log('[impeccable] Live mode connected.');
-          if (state === 'IDLE') state = 'PICKING';
+          if (!hasProjectContext)
+            showToast(
+              "No PRODUCT.md found. Variants will be brand-agnostic. Run /impeccable teach to generate one.",
+              7000,
+            );
+          console.log("[impeccable] Live mode connected.");
+          if (state === "IDLE") state = "PICKING";
           break;
-        case 'done':
+        case "done":
           // Variants already arrived via HMR → normal transition.
           if (arrivedVariants >= expectedVariants && expectedVariants > 0) {
-            if (state === 'GENERATING') {
-              state = 'CYCLING';
-              updateBarContent('cycling');
+            if (state === "GENERATING") {
+              state = "CYCLING";
+              updateBarContent("cycling");
               refreshParamsPanel();
             }
             break;
@@ -2204,18 +2590,18 @@
           // which reset framework state and left the session stuck.
           setTimeout(() => {
             if (arrivedVariants >= expectedVariants && expectedVariants > 0) return;
-            if (state !== 'GENERATING') return;
+            if (state !== "GENERATING") return;
             showToast(
               "Variants ready. If the picked element isn't visible, retrace the path that revealed it — they'll appear automatically.",
               15000,
             );
           }, 2000);
           break;
-        case 'error':
-          console.error('[impeccable] Error:', msg.message);
-          showToast('Error: ' + msg.message, 5000);
+        case "error":
+          console.error("[impeccable] Error:", msg.message);
+          showToast("Error: " + msg.message, 5000);
           hideBar();
-          state = 'PICKING';
+          state = "PICKING";
           break;
       }
     };
@@ -2223,11 +2609,11 @@
     evtSource.onerror = () => {
       sseRetries++;
       if (sseRetries <= SSE_MAX_RETRIES) {
-        console.log('[impeccable] SSE connection lost. Retry ' + sseRetries + '/' + SSE_MAX_RETRIES + '...');
+        console.log("[impeccable] SSE connection lost. Retry " + sseRetries + "/" + SSE_MAX_RETRIES + "...");
         return; // EventSource auto-reconnects
       }
       // Server is gone. Clean up gracefully.
-      console.log('[impeccable] Live server unreachable. Cleaning up UI.');
+      console.log("[impeccable] Live server unreachable. Cleaning up UI.");
       evtSource.close();
       evtSource = null;
       handleServerLost();
@@ -2236,31 +2622,34 @@
 
   /** Server died or became unreachable. Reset UI to a clean state. */
   function handleServerLost() {
-    if (state === 'GENERATING' || state === 'CYCLING' || state === 'SAVING') {
-      showToast('Live server disconnected. Session ended.', 5000);
+    if (state === "GENERATING" || state === "CYCLING" || state === "SAVING") {
+      showToast("Live server disconnected. Session ended.", 5000);
     }
     hideBar();
     hideHighlight();
     hideShaderOverlay();
     hideAnnotOverlay();
     stopScrollTracking();
-    if (variantObserver) { variantObserver.disconnect(); variantObserver = null; }
+    if (variantObserver) {
+      variantObserver.disconnect();
+      variantObserver = null;
+    }
     stopScrollLock();
     clearScrollY();
     clearSession();
     selectedElement = null;
     currentSessionId = null;
-    selectedAction = 'impeccable';
-    state = 'IDLE';
+    selectedAction = "impeccable";
+    state = "IDLE";
   }
 
   function sendEvent(msg) {
     msg.token = TOKEN;
-    fetch('http://localhost:' + PORT + '/events', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    fetch("http://localhost:" + PORT + "/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(msg),
-    }).catch(err => console.error('[impeccable] Failed to send event:', err));
+    }).catch((err) => console.error("[impeccable] Failed to send event:", err));
   }
 
   // ---------------------------------------------------------------------------
@@ -2268,7 +2657,7 @@
   // ---------------------------------------------------------------------------
 
   function handleMouseMove(e) {
-    if (state !== 'PICKING' || !pickActive) return;
+    if (state !== "PICKING" || !pickActive) return;
     const target = document.elementFromPoint(e.clientX, e.clientY);
     if (!target || !pickable(target) || target === hoveredElement) return;
     hoveredElement = target;
@@ -2277,7 +2666,7 @@
 
   function handleClick(e) {
     // Close action picker on any outside click
-    if (pickerEl?.style.display !== 'none' && !own(e.target)) {
+    if (pickerEl?.style.display !== "none" && !own(e.target)) {
       hideActionPicker();
     }
     // Close Tune popover on outside click (anything outside panel + bar)
@@ -2285,27 +2674,27 @@
       closeTunePopover();
     }
     // In CONFIGURING: click outside the bar and selected element returns to PICKING
-    if (state === 'CONFIGURING' && !own(e.target) && selectedElement && !selectedElement.contains(e.target)) {
+    if (state === "CONFIGURING" && !own(e.target) && selectedElement && !selectedElement.contains(e.target)) {
       hideBar();
       stopScrollTracking();
       hideAnnotOverlay();
       clearAnnotations();
-      state = 'PICKING';
+      state = "PICKING";
       hoveredElement = null;
       hideHighlight();
       return;
     }
-    if (state !== 'PICKING' || !pickActive) return;
+    if (state !== "PICKING" || !pickActive) return;
     if (own(e.target)) return;
     if (!hoveredElement || !pickable(hoveredElement)) return;
     e.preventDefault();
     e.stopPropagation();
     selectedElement = hoveredElement;
-    state = 'CONFIGURING';
+    state = "CONFIGURING";
     showHighlight(selectedElement);
     clearAnnotations();
     showAnnotOverlay(selectedElement);
-    showBar('configure');
+    showBar("configure");
     startScrollTracking();
     maybePrefetchPage();
     maybeWarnConditionalAncestor(selectedElement);
@@ -2328,25 +2717,33 @@
     let depth = 0;
     while (node && depth < 12) {
       // 1. Active dialog / modal
-      if (node.getAttribute && node.getAttribute('role') === 'dialog'
-          && node.getAttribute('aria-modal') === 'true') {
-        showToast('Heads up: this element lives inside a dialog. If state resets during generation, you may need to re-open it.', 6000);
+      if (node.getAttribute && node.getAttribute("role") === "dialog" && node.getAttribute("aria-modal") === "true") {
+        showToast(
+          "Heads up: this element lives inside a dialog. If state resets during generation, you may need to re-open it.",
+          6000,
+        );
         return;
       }
       // 2. Common Radix / shadcn / headless-ui open-state attribute
-      if (node.dataset && node.dataset.state === 'open') {
-        showToast('Heads up: this element lives inside an open panel. If state resets during generation, you may need to re-open it.', 6000);
+      if (node.dataset && node.dataset.state === "open") {
+        showToast(
+          "Heads up: this element lives inside an open panel. If state resets during generation, you may need to re-open it.",
+          6000,
+        );
         return;
       }
       // 3. Tab panel — only meaningful when the page also shows ANOTHER
       // tab as selected. A single tabpanel with no tablist is just a static
       // section in disguise and isn't conditional.
-      if (node.getAttribute && node.getAttribute('role') === 'tabpanel') {
+      if (node.getAttribute && node.getAttribute("role") === "tabpanel") {
         const list = document.querySelector('[role="tablist"]');
         if (list) {
           const tabs = list.querySelectorAll('[role="tab"]');
           if (tabs.length > 1) {
-            showToast('Heads up: this element lives in a tab panel. If state resets during generation, switch back to this tab.', 6000);
+            showToast(
+              "Heads up: this element lives in a tab panel. If state resets during generation, switch back to this tab.",
+              6000,
+            );
             return;
           }
         }
@@ -2355,7 +2752,10 @@
       if (node.id) {
         const trigger = document.querySelector(`[aria-controls="${CSS.escape(node.id)}"][aria-expanded="true"]`);
         if (trigger) {
-          showToast('Heads up: this element lives inside an expandable section. If state resets during generation, re-expand it.', 6000);
+          showToast(
+            "Heads up: this element lives inside an expandable section. If state resets during generation, re-expand it.",
+            6000,
+          );
           return;
         }
       }
@@ -2382,83 +2782,108 @@
     const path = location.pathname;
     if (prefetchedPaths.has(path)) return;
     prefetchedPaths.add(path);
-    sendEvent({ type: 'prefetch', pageUrl: path });
+    sendEvent({ type: "prefetch", pageUrl: path });
   }
 
   function handleKeyDown(e) {
     // When the annotation input is focused, let it handle its own keys.
     if (annotEditing && annotEditing.input && e.target === annotEditing.input) return;
-    if (e.key === 'Escape') {
+    if (e.key === "Escape") {
       e.preventDefault();
-      if (pickerEl?.style.display !== 'none') { hideActionPicker(); return; }
-      if (state === 'CONFIGURING') { hideBar(); stopScrollTracking(); hideAnnotOverlay(); clearAnnotations(); state = 'PICKING'; return; }
-      if (state === 'CYCLING') { handleDiscard(); return; }
-      if (state === 'SAVING' || state === 'CONFIRMED') return; // don't interrupt
-      if (state === 'PICKING') {
+      if (pickerEl?.style.display !== "none") {
+        hideActionPicker();
+        return;
+      }
+      if (state === "CONFIGURING") {
+        hideBar();
+        stopScrollTracking();
+        hideAnnotOverlay();
+        clearAnnotations();
+        state = "PICKING";
+        return;
+      }
+      if (state === "CYCLING") {
+        handleDiscard();
+        return;
+      }
+      if (state === "SAVING" || state === "CONFIRMED") return; // don't interrupt
+      if (state === "PICKING") {
         // Use togglePick so the "Pick" button in the global bar also flips
         // off, otherwise the bar stays lit while nothing else is active.
         if (pickActive) togglePick();
-        else { hideHighlight(); state = 'IDLE'; }
+        else {
+          hideHighlight();
+          state = "IDLE";
+        }
         return;
       }
     }
 
     // Arrow/Enter nav works in PICKING (hover) and CONFIGURING (selected, input empty)
-    var navEl = (state === 'PICKING') ? hoveredElement : (state === 'CONFIGURING') ? selectedElement : null;
-    if (navEl && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || (e.key === 'Enter' && state === 'PICKING'))) {
+    var navEl = state === "PICKING" ? hoveredElement : state === "CONFIGURING" ? selectedElement : null;
+    if (navEl && (e.key === "ArrowUp" || e.key === "ArrowDown" || (e.key === "Enter" && state === "PICKING"))) {
       let next = null;
-      if (e.key === 'ArrowDown' && !e.shiftKey) {
+      if (e.key === "ArrowDown" && !e.shiftKey) {
         next = navEl.nextElementSibling;
         while (next && !pickable(next)) next = next.nextElementSibling;
-      } else if (e.key === 'ArrowUp' && !e.shiftKey) {
+      } else if (e.key === "ArrowUp" && !e.shiftKey) {
         next = navEl.previousElementSibling;
         while (next && !pickable(next)) next = next.previousElementSibling;
-      } else if (e.key === 'ArrowUp' && e.shiftKey) {
+      } else if (e.key === "ArrowUp" && e.shiftKey) {
         next = navEl.parentElement;
         if (next && !pickable(next)) next = null;
-      } else if (e.key === 'ArrowDown' && e.shiftKey) {
+      } else if (e.key === "ArrowDown" && e.shiftKey) {
         next = navEl.firstElementChild;
         while (next && !pickable(next)) next = next.nextElementSibling;
-      } else if (e.key === 'Enter') {
+      } else if (e.key === "Enter") {
         e.preventDefault();
         selectedElement = hoveredElement;
-        state = 'CONFIGURING';
+        state = "CONFIGURING";
         showHighlight(selectedElement);
         clearAnnotations();
         showAnnotOverlay(selectedElement);
-        showBar('configure');
+        showBar("configure");
         startScrollTracking();
         return;
       }
       if (next) {
         e.preventDefault();
-        if (state === 'PICKING') {
+        if (state === "PICKING") {
           hoveredElement = next;
         } else {
           // CONFIGURING: re-select the new element and refresh the bar
           selectedElement = next;
           clearAnnotations();
           showAnnotOverlay(next);
-          showBar('configure');
+          showBar("configure");
           startScrollTracking();
         }
         showHighlight(next);
-        next.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        next.scrollIntoView({ block: "nearest", behavior: "smooth" });
       }
       return;
     }
 
-    if (state === 'CYCLING') {
-      if (e.key === 'ArrowLeft') { e.preventDefault(); cycleVariant(-1); }
-      if (e.key === 'ArrowRight') { e.preventDefault(); cycleVariant(1); }
-      if (e.key === 'Enter') { e.preventDefault(); handleAccept(); }
+    if (state === "CYCLING") {
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        cycleVariant(-1);
+      }
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        cycleVariant(1);
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        handleAccept();
+      }
     }
   }
 
   function handleGo() {
-    if (!selectedElement || state !== 'CONFIGURING') return;
-    const input = document.getElementById(PREFIX + '-input');
-    const prompt = input ? input.value.trim() : '';
+    if (!selectedElement || state !== "CONFIGURING") return;
+    const input = document.getElementById(PREFIX + "-input");
+    const prompt = input ? input.value.trim() : "";
 
     // Commit any pending pin edit BEFORE we snapshot annotations.
     if (annotEditing) finalizeEditingPin();
@@ -2475,11 +2900,12 @@
     const elForCapture = selectedElement;
     const captureRect = elForCapture.getBoundingClientRect();
     const snapshot = {
-      comments: annotState.comments.map(c => ({ x: c.x, y: c.y, text: c.text })),
-      strokes: annotState.strokes.map(s => ({ points: s.points.map(p => [p[0], p[1]]) })),
+      comments: annotState.comments.map((c) => ({ x: c.x, y: c.y, text: c.text })),
+      strokes: annotState.strokes.map((s) => ({ points: s.points.map((p) => [p[0], p[1]]) })),
     };
     const basePayload = {
-      type: 'generate', id: currentSessionId,
+      type: "generate",
+      id: currentSessionId,
       action: selectedAction,
       freeformPrompt: prompt || undefined,
       count: selectedCount,
@@ -2493,13 +2919,13 @@
     hideAnnotOverlay();
     clearAnnotations();
 
-    state = 'GENERATING';
-    showBar('generating');
+    state = "GENERATING";
+    showBar("generating");
     saveSession();
     writeScrollY(window.scrollY);
     if (variantObserver) variantObserver.disconnect();
     variantObserver = startVariantObserver(currentSessionId);
-    console.log('[impeccable.scroll] Go pressed', { scrollY: window.scrollY, sessionId: currentSessionId });
+    console.log("[impeccable.scroll] Go pressed", { scrollY: window.scrollY, sessionId: currentSessionId });
     startScrollLock(currentSessionId);
 
     captureAndEmit(elForCapture, basePayload, snapshot, captureRect);
@@ -2514,10 +2940,13 @@
     if (window.modernScreenshot) return Promise.resolve(window.modernScreenshot);
     if (msLoadPromise) return msLoadPromise;
     msLoadPromise = new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = 'http://localhost:' + PORT + '/modern-screenshot.js';
+      const s = document.createElement("script");
+      s.src = "http://localhost:" + PORT + "/modern-screenshot.js";
       s.onload = () => resolve(window.modernScreenshot);
-      s.onerror = () => { msLoadPromise = null; reject(new Error('modern-screenshot failed to load')); };
+      s.onerror = () => {
+        msLoadPromise = null;
+        reject(new Error("modern-screenshot failed to load"));
+      };
       document.head.appendChild(s);
     });
     return msLoadPromise;
@@ -2534,11 +2963,15 @@
   // to modern-screenshot as font.cssText.
   const FONT_EXT_RE = /\.(woff2?|ttf|otf|eot)(\?.*)?$/i;
   const FONT_MIME = {
-    woff2: 'font/woff2', woff: 'font/woff', ttf: 'font/ttf', otf: 'font/otf', eot: 'application/vnd.ms-fontobject',
+    woff2: "font/woff2",
+    woff: "font/woff",
+    ttf: "font/ttf",
+    otf: "font/otf",
+    eot: "application/vnd.ms-fontobject",
   };
   function bufferToBase64(buf) {
     const bytes = new Uint8Array(buf);
-    let binary = '';
+    let binary = "";
     const CHUNK = 0x8000;
     for (let i = 0; i < bytes.length; i += CHUNK) {
       binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
@@ -2553,19 +2986,23 @@
       if (FONT_EXT_RE.test(m[2])) urls.add(m[2]);
     }
     const map = new Map();
-    await Promise.all([...urls].map(async (url) => {
-      try {
-        const res = await fetch(url);
-        if (!res.ok) return;
-        const buf = await res.arrayBuffer();
-        const ext = url.toLowerCase().match(FONT_EXT_RE)?.[1] || 'woff2';
-        const mime = FONT_MIME[ext] || 'application/octet-stream';
-        map.set(url, 'data:' + mime + ';base64,' + bufferToBase64(buf));
-      } catch { /* skip; fall through to URL */ }
-    }));
+    await Promise.all(
+      [...urls].map(async (url) => {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) return;
+          const buf = await res.arrayBuffer();
+          const ext = url.toLowerCase().match(FONT_EXT_RE)?.[1] || "woff2";
+          const mime = FONT_MIME[ext] || "application/octet-stream";
+          map.set(url, "data:" + mime + ";base64," + bufferToBase64(buf));
+        } catch {
+          /* skip; fall through to URL */
+        }
+      }),
+    );
     return cssText.replace(urlRe, (orig, q, url) => {
       const data = map.get(url);
-      return data ? 'url(' + q + data + q + ')' : orig;
+      return data ? "url(" + q + data + q + ")" : orig;
     });
   }
   async function collectFontCssText() {
@@ -2575,7 +3012,7 @@
       try {
         const rules = sheet.cssRules;
         for (const rule of rules) {
-          if (rule.constructor.name === 'CSSFontFaceRule' || rule.cssText?.startsWith('@font-face')) {
+          if (rule.constructor.name === "CSSFontFaceRule" || rule.cssText?.startsWith("@font-face")) {
             chunks.push(rule.cssText);
           }
         }
@@ -2587,21 +3024,23 @@
           const text = await res.text();
           let m2;
           while ((m2 = fontFaceRe.exec(text))) chunks.push(m2[0]);
-        } catch { /* ignore; capture is best-effort */ }
+        } catch {
+          /* ignore; capture is best-effort */
+        }
       }
     }
-    if (chunks.length === 0) return '';
-    return inlineFontUrls(chunks.join('\n'));
+    if (chunks.length === 0) return "";
+    return inlineFontUrls(chunks.join("\n"));
   }
 
   // True if `s` is a computed color string that renders as nothing
   // (explicit `transparent`, or `rgba(...)` with alpha 0).
   function isTransparentColor(s) {
     if (!s) return true;
-    if (s === 'transparent') return true;
+    if (s === "transparent") return true;
     const m = /rgba?\(([^)]+)\)/.exec(s);
     if (!m) return false;
-    const parts = m[1].split(',').map((p) => p.trim());
+    const parts = m[1].split(",").map((p) => p.trim());
     if (parts.length === 4) return parseFloat(parts[3]) === 0;
     return false;
   }
@@ -2615,7 +3054,7 @@
   function resolveCanvasBackground(el) {
     const own = getComputedStyle(el);
     if (!isTransparentColor(own.backgroundColor)) return null;
-    if (own.backgroundImage && own.backgroundImage !== 'none') return null;
+    if (own.backgroundImage && own.backgroundImage !== "none") return null;
     let node = el.parentElement;
     while (node) {
       const cs = getComputedStyle(node);
@@ -2630,22 +3069,24 @@
     // transparent-black — modern-screenshot then renders the capture on a
     // black canvas and the shader overlay flashes solid black during load.
     // The browser canvas defaults to white, so we do too.
-    return '#ffffff';
+    return "#ffffff";
   }
 
   // Capture the element (with current annotations baked in) and return a PNG
   // Blob. Shared between the Go flow (uploads it to the server) and the
   // debug toggle (displays it as an overlay for side-by-side comparison).
   async function captureElementToBlob(el, snapshot, rect) {
-    try { if (document.fonts?.ready) await document.fonts.ready; } catch {}
+    try {
+      if (document.fonts?.ready) await document.fonts.ready;
+    } catch {}
     const hasAnnotations = snapshot && (snapshot.comments.length > 0 || snapshot.strokes.length > 0);
     let annotNode = null;
     let savedPosition = null;
     if (hasAnnotations) {
       const pos = getComputedStyle(el).position;
-      if (pos === 'static') {
+      if (pos === "static") {
         savedPosition = el.style.position;
-        el.style.position = 'relative';
+        el.style.position = "relative";
       }
       annotNode = buildAnnotationsForCapture(rect, snapshot);
       el.appendChild(annotNode);
@@ -2671,11 +3112,11 @@
     try {
       blob = await captureElementToBlob(el, snapshot, rect);
     } catch (err) {
-      console.warn('[impeccable] capture failed, proceeding without screenshot:', err);
+      console.warn("[impeccable] capture failed, proceeding without screenshot:", err);
     }
     // Light up the shader overlay the moment capture is ready — no reason to
     // wait for the upload to complete before the user sees something alive.
-    if (blob && state === 'GENERATING') {
+    if (blob && state === "GENERATING") {
       showShaderOverlay(el, blob, rect);
     }
     // Only upload + forward the screenshot when annotations (comments/strokes)
@@ -2686,18 +3127,22 @@
     if (blob && hasAnnotations) {
       try {
         const uploadRes = await fetch(
-          'http://localhost:' + PORT + '/annotation?token=' + encodeURIComponent(TOKEN) +
-          '&eventId=' + encodeURIComponent(basePayload.id),
-          { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: blob },
+          "http://localhost:" +
+            PORT +
+            "/annotation?token=" +
+            encodeURIComponent(TOKEN) +
+            "&eventId=" +
+            encodeURIComponent(basePayload.id),
+          { method: "POST", headers: { "Content-Type": "image/png" }, body: blob },
         );
         if (uploadRes.ok) {
           const { path: p } = await uploadRes.json();
           screenshotPath = p;
         } else {
-          console.warn('[impeccable] annotation upload failed:', uploadRes.status);
+          console.warn("[impeccable] annotation upload failed:", uploadRes.status);
         }
       } catch (err) {
-        console.warn('[impeccable] annotation upload failed:', err);
+        console.warn("[impeccable] annotation upload failed:", err);
       }
     }
     sendEvent(screenshotPath ? { ...basePayload, screenshotPath } : basePayload);
@@ -2775,7 +3220,7 @@ void main() {
     if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
       const info = gl.getShaderInfoLog(sh);
       gl.deleteShader(sh);
-      throw new Error('shader compile failed: ' + info);
+      throw new Error("shader compile failed: " + info);
     }
     return sh;
   }
@@ -2784,8 +3229,10 @@ void main() {
     if (!shaderState || !selectedElement) return;
     const r = selectedElement.getBoundingClientRect();
     Object.assign(shaderState.canvas.style, {
-      top: r.top + 'px', left: r.left + 'px',
-      width: r.width + 'px', height: r.height + 'px',
+      top: r.top + "px",
+      left: r.left + "px",
+      width: r.width + "px",
+      height: r.height + "px",
     });
   }
 
@@ -2793,44 +3240,49 @@ void main() {
     if (!shaderState) return;
     if (shaderState.rafId) cancelAnimationFrame(shaderState.rafId);
     if (shaderState.canvas) shaderState.canvas.remove();
-    const lose = shaderState.gl?.getExtension?.('WEBGL_lose_context');
-    try { lose?.loseContext(); } catch {}
+    const lose = shaderState.gl?.getExtension?.("WEBGL_lose_context");
+    try {
+      lose?.loseContext();
+    } catch {}
     shaderState = null;
   }
 
   async function showShaderOverlay(el, blob, rect) {
     hideShaderOverlay();
     if (!blob || !el) return;
-    const canvas = document.createElement('canvas');
-    canvas.id = PREFIX + '-shader';
+    const canvas = document.createElement("canvas");
+    canvas.id = PREFIX + "-shader";
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.max(1, Math.floor(rect.width * dpr));
     canvas.height = Math.max(1, Math.floor(rect.height * dpr));
     Object.assign(canvas.style, {
-      position: 'fixed',
-      top: rect.top + 'px', left: rect.left + 'px',
-      width: rect.width + 'px', height: rect.height + 'px',
-      pointerEvents: 'none',
+      position: "fixed",
+      top: rect.top + "px",
+      left: rect.left + "px",
+      width: rect.width + "px",
+      height: rect.height + "px",
+      pointerEvents: "none",
       zIndex: Z.bar - 1,
     });
     document.body.appendChild(canvas);
 
-    const gl = canvas.getContext('webgl', { premultipliedAlpha: false, preserveDrawingBuffer: false })
-            || canvas.getContext('experimental-webgl');
+    const gl =
+      canvas.getContext("webgl", { premultipliedAlpha: false, preserveDrawingBuffer: false }) ||
+      canvas.getContext("experimental-webgl");
     if (!gl) {
       // WebGL unavailable — fall back to a plain <img> overlay so the user
       // still sees something meaningful during generation.
       canvas.remove();
-      const img = document.createElement('img');
+      const img = document.createElement("img");
       img.src = URL.createObjectURL(blob);
-      img.id = PREFIX + '-shader';
+      img.id = PREFIX + "-shader";
       // Copy positioning via cssText. Object.assign across CSSStyleDeclaration
       // throws in modern Chromium because the source's indexed properties
       // (style[0], [1], ...) are read-only and the engine forbids writing
       // them on the destination.
       img.style.cssText = canvas.style.cssText;
-      img.style.outline = '2px dashed ' + C.brand;
-      img.style.outlineOffset = '-2px';
+      img.style.outline = "2px dashed " + C.brand;
+      img.style.outlineOffset = "-2px";
       document.body.appendChild(img);
       shaderState = { canvas: img, gl: null, program: null, texture: null, rafId: 0, startTime: 0 };
       return;
@@ -2845,27 +3297,24 @@ void main() {
       gl.attachShader(program, fs);
       gl.linkProgram(program);
       if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-        throw new Error('program link failed: ' + gl.getProgramInfoLog(program));
+        throw new Error("program link failed: " + gl.getProgramInfoLog(program));
       }
       // Full-screen quad
       const buf = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-        -1, -1, 0, 1,
-         1, -1, 1, 1,
-        -1,  1, 0, 0,
-        -1,  1, 0, 0,
-         1, -1, 1, 1,
-         1,  1, 1, 0,
-      ]), gl.STATIC_DRAW);
-      const posLoc = gl.getAttribLocation(program, 'a_position');
-      const uvLoc = gl.getAttribLocation(program, 'a_uv');
+      gl.bufferData(
+        gl.ARRAY_BUFFER,
+        new Float32Array([-1, -1, 0, 1, 1, -1, 1, 1, -1, 1, 0, 0, -1, 1, 0, 0, 1, -1, 1, 1, 1, 1, 1, 0]),
+        gl.STATIC_DRAW,
+      );
+      const posLoc = gl.getAttribLocation(program, "a_position");
+      const uvLoc = gl.getAttribLocation(program, "a_uv");
       gl.enableVertexAttribArray(posLoc);
       gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 16, 0);
       gl.enableVertexAttribArray(uvLoc);
       gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, 16, 8);
     } catch (err) {
-      console.warn('[impeccable] shader setup failed:', err);
+      console.warn("[impeccable] shader setup failed:", err);
       canvas.remove();
       return;
     }
@@ -2879,7 +3328,10 @@ void main() {
       const imgUrl = URL.createObjectURL(blob);
       const img = new Image();
       img.src = imgUrl;
-      await new Promise((r, rej) => { img.onload = r; img.onerror = rej; });
+      await new Promise((r, rej) => {
+        img.onload = r;
+        img.onerror = rej;
+      });
       bitmap = img;
       URL.revokeObjectURL(imgUrl);
     }
@@ -2893,11 +3345,11 @@ void main() {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bitmap);
     if (bitmap.close) bitmap.close();
 
-    const uTime = gl.getUniformLocation(program, 'u_time');
-    const uRes = gl.getUniformLocation(program, 'u_resolution');
-    const uAccent = gl.getUniformLocation(program, 'u_accent');
-    const uTex = gl.getUniformLocation(program, 'u_texture');
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const uTime = gl.getUniformLocation(program, "u_time");
+    const uRes = gl.getUniformLocation(program, "u_resolution");
+    const uAccent = gl.getUniformLocation(program, "u_accent");
+    const uTex = gl.getUniformLocation(program, "u_texture");
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     shaderState = { canvas, gl, program, texture, rafId: 0, startTime: performance.now(), reduced };
     function frame() {
@@ -2920,7 +3372,7 @@ void main() {
 
   function handleAccept() {
     if (!currentSessionId || arrivedVariants === 0) return;
-    const acceptPayload = { type: 'accept', id: currentSessionId, variantId: String(visibleVariant) };
+    const acceptPayload = { type: "accept", id: currentSessionId, variantId: String(visibleVariant) };
     if (Object.keys(paramsCurrentValues).length > 0) {
       acceptPayload.paramValues = { ...paramsCurrentValues };
     }
@@ -2936,20 +3388,23 @@ void main() {
     const acceptedSessionId = currentSessionId;
     const acceptedVariant = visibleVariant;
 
-    state = 'CONFIRMED';
-    updateBarContent('confirmed');
-    setTimeout(function() {
+    state = "CONFIRMED";
+    updateBarContent("confirmed");
+    setTimeout(function () {
       hideBar();
       hideHighlight();
       stopScrollTracking();
-      if (variantObserver) { variantObserver.disconnect(); variantObserver = null; }
+      if (variantObserver) {
+        variantObserver.disconnect();
+        variantObserver = null;
+      }
       stopScrollLock();
       clearScrollY();
       clearSession();
       selectedElement = null;
       currentSessionId = null;
-      selectedAction = 'impeccable';
-      state = 'PICKING';
+      selectedAction = "impeccable";
+      state = "PICKING";
     }, 1800);
 
     // Static-server / no-HMR fallback: if the wrapper is still around 2s after
@@ -2957,14 +3412,14 @@ void main() {
     // on or the app isn't React at all. Preserve the `data-impeccable-variant="N"`
     // div (with display:contents) so @scope rules anchored to the variant
     // attribute keep matching until reload replaces it with the carbonize block.
-    setTimeout(function() {
+    setTimeout(function () {
       const wrapper = document.querySelector('[data-impeccable-variants="' + acceptedSessionId + '"]');
       if (!wrapper) return;
       const accepted = wrapper.querySelector('[data-impeccable-variant="' + acceptedVariant + '"]');
       if (accepted && accepted.firstElementChild) {
         const parent = wrapper.parentElement;
         if (!parent) return;
-        accepted.style.display = 'contents';
+        accepted.style.display = "contents";
         parent.replaceChild(accepted, wrapper);
       }
     }, 2000);
@@ -2972,7 +3427,7 @@ void main() {
 
   function handleDiscard() {
     if (!currentSessionId) return;
-    sendEvent({ type: 'discard', id: currentSessionId });
+    sendEvent({ type: "discard", id: currentSessionId });
     markSessionHandled();
     // Instant DOM restore + fire-and-forget (script handles file cleanup)
     cleanup();
@@ -2983,34 +3438,43 @@ void main() {
   // ---------------------------------------------------------------------------
   // Survives page reloads, browser close/reopen, HMR, and accidental refreshes.
 
-  const LS_KEY = PREFIX + '-session';
+  const LS_KEY = PREFIX + "-session";
 
   function saveSession() {
     if (!currentSessionId) return;
     // NOTE: scrollY is stored under a separate key (writeScrollY). Storing
     // it here would overwrite the Go-time value every time state changes.
     try {
-      localStorage.setItem(LS_KEY, JSON.stringify({
-        id: currentSessionId,
-        state: state,
-        action: selectedAction,
-        count: selectedCount,
-        expected: expectedVariants,
-        arrived: arrivedVariants,
-        visible: visibleVariant,
-      }));
-    } catch { /* quota exceeded or private mode */ }
+      localStorage.setItem(
+        LS_KEY,
+        JSON.stringify({
+          id: currentSessionId,
+          state: state,
+          action: selectedAction,
+          count: selectedCount,
+          expected: expectedVariants,
+          arrived: arrivedVariants,
+          visible: visibleVariant,
+        }),
+      );
+    } catch {
+      /* quota exceeded or private mode */
+    }
   }
 
   function loadSession() {
     try {
       const raw = localStorage.getItem(LS_KEY);
       return raw ? JSON.parse(raw) : null;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
 
   function clearSession() {
-    try { localStorage.removeItem(LS_KEY); } catch {}
+    try {
+      localStorage.removeItem(LS_KEY);
+    } catch {}
   }
 
   /** Mark session as handled (accepted/discarded). The agent will clean up
@@ -3019,18 +3483,22 @@ void main() {
   function markSessionHandled() {
     if (!currentSessionId) return;
     try {
-      localStorage.setItem(LS_KEY + '-handled', currentSessionId);
+      localStorage.setItem(LS_KEY + "-handled", currentSessionId);
     } catch {}
   }
 
   function isSessionHandled(id) {
     try {
-      return localStorage.getItem(LS_KEY + '-handled') === id;
-    } catch { return false; }
+      return localStorage.getItem(LS_KEY + "-handled") === id;
+    } catch {
+      return false;
+    }
   }
 
   function clearHandled() {
-    try { localStorage.removeItem(LS_KEY + '-handled'); } catch {}
+    try {
+      localStorage.removeItem(LS_KEY + "-handled");
+    } catch {}
   }
 
   function cleanup() {
@@ -3043,9 +3511,9 @@ void main() {
     const cleanupSessionId = currentSessionId;
     if (cleanupSessionId) {
       const wrapper = document.querySelector('[data-impeccable-variants="' + cleanupSessionId + '"]');
-      if (wrapper) wrapper.style.display = 'none';
+      if (wrapper) wrapper.style.display = "none";
     }
-    setTimeout(function() {
+    setTimeout(function () {
       if (!cleanupSessionId) return;
       const wrapper = document.querySelector('[data-impeccable-variants="' + cleanupSessionId + '"]');
       if (!wrapper) return;
@@ -3062,14 +3530,17 @@ void main() {
     hideBar();
     hideHighlight();
     stopScrollTracking();
-    if (variantObserver) { variantObserver.disconnect(); variantObserver = null; }
+    if (variantObserver) {
+      variantObserver.disconnect();
+      variantObserver = null;
+    }
     stopScrollLock();
     clearScrollY();
     clearSession();
     selectedElement = null;
     currentSessionId = null;
-    selectedAction = 'impeccable';
-    state = 'PICKING';
+    selectedAction = "impeccable";
+    state = "PICKING";
   }
 
   // ---------------------------------------------------------------------------
@@ -3083,31 +3554,42 @@ void main() {
     // with hover-expanded labels — and fall back to a sensible default
     // when the bar isn't mounted yet.
     const barRect = globalBarEl?.getBoundingClientRect();
-    const barTopFromBottom = barRect && barRect.height > 0
-      ? Math.max(16, window.innerHeight - barRect.top + 12)
-      : 16;
-    toastEl = el('div', {
-      position: 'fixed', bottom: barTopFromBottom + 'px', left: '50%',
-      transform: 'translateX(-50%) translateY(8px)',
-      background: C.ink, color: C.white,
-      fontFamily: FONT, fontSize: '12px',
-      padding: '8px 16px', borderRadius: '8px',
-      zIndex: Z.toast, opacity: '0',
-      transition: 'opacity 0.25s ' + EASE + ', transform 0.25s ' + EASE,
-      pointerEvents: 'none', maxWidth: '420px', textAlign: 'center',
+    const barTopFromBottom = barRect && barRect.height > 0 ? Math.max(16, window.innerHeight - barRect.top + 12) : 16;
+    toastEl = el("div", {
+      position: "fixed",
+      bottom: barTopFromBottom + "px",
+      left: "50%",
+      transform: "translateX(-50%) translateY(8px)",
+      background: C.ink,
+      color: C.white,
+      fontFamily: FONT,
+      fontSize: "12px",
+      padding: "8px 16px",
+      borderRadius: "8px",
+      zIndex: Z.toast,
+      opacity: "0",
+      transition: "opacity 0.25s " + EASE + ", transform 0.25s " + EASE,
+      pointerEvents: "none",
+      maxWidth: "420px",
+      textAlign: "center",
     });
-    toastEl.id = PREFIX + '-toast';
+    toastEl.id = PREFIX + "-toast";
     toastEl.textContent = message;
     document.body.appendChild(toastEl);
     requestAnimationFrame(() => {
-      toastEl.style.opacity = '1';
-      toastEl.style.transform = 'translateX(-50%) translateY(0)';
+      toastEl.style.opacity = "1";
+      toastEl.style.transform = "translateX(-50%) translateY(0)";
     });
     setTimeout(() => {
       if (toastEl) {
-        toastEl.style.opacity = '0';
-        toastEl.style.transform = 'translateX(-50%) translateY(8px)';
-        setTimeout(() => { if (toastEl) { toastEl.remove(); toastEl = null; } }, 250);
+        toastEl.style.opacity = "0";
+        toastEl.style.transform = "translateX(-50%) translateY(8px)";
+        setTimeout(() => {
+          if (toastEl) {
+            toastEl.remove();
+            toastEl = null;
+          }
+        }, 250);
       }
     }, duration);
   }
@@ -3120,8 +3602,12 @@ void main() {
   // If a [data-impeccable-variants] wrapper exists in the DOM, the agent wrote
   // variants before HMR fired. Pick up where we left off.
   function resumeSession() {
-    const wrapper = document.querySelector('[data-impeccable-variants]');
-    if (!wrapper) { clearSession(); clearHandled(); return false; }
+    const wrapper = document.querySelector("[data-impeccable-variants]");
+    if (!wrapper) {
+      clearSession();
+      clearHandled();
+      return false;
+    }
 
     const sessionId = wrapper.dataset.impeccableVariants;
 
@@ -3129,14 +3615,15 @@ void main() {
     if (isSessionHandled(sessionId)) return false;
 
     currentSessionId = sessionId;
-    expectedVariants = parseInt(wrapper.dataset.impeccableVariantCount || '0');
+    expectedVariants = parseInt(wrapper.dataset.impeccableVariantCount || "0");
     const variants = wrapper.querySelectorAll('[data-impeccable-variant]:not([data-impeccable-variant="original"])');
     arrivedVariants = variants.length;
 
     // Restore state from localStorage if available
     const saved = loadSession();
     if (saved && saved.id === sessionId) {
-      visibleVariant = (saved.visible > 0 && saved.visible <= arrivedVariants) ? saved.visible : (arrivedVariants > 0 ? 1 : 0);
+      visibleVariant =
+        saved.visible > 0 && saved.visible <= arrivedVariants ? saved.visible : arrivedVariants > 0 ? 1 : 0;
       if (saved.action) selectedAction = saved.action;
       if (saved.count) selectedCount = saved.count;
     } else {
@@ -3146,20 +3633,20 @@ void main() {
     // Find the visible variant's content element for highlight positioning.
     // Try the visible variant first, fall back to the original's content.
     const visEl = visibleVariant > 0 ? pickVariantContent(wrapper, visibleVariant) : null;
-    const origEl = pickVariantContent(wrapper, 'original');
+    const origEl = pickVariantContent(wrapper, "original");
     selectedElement = visEl || origEl || wrapper.parentElement;
 
     // Set display state BEFORE starting observer (avoid triggering it)
     if (visibleVariant > 0) showVariantInDOM(currentSessionId, visibleVariant);
 
-    state = arrivedVariants >= expectedVariants ? 'CYCLING' : 'GENERATING';
-    showBar(state === 'CYCLING' ? 'cycling' : 'generating');
+    state = arrivedVariants >= expectedVariants ? "CYCLING" : "GENERATING";
+    showBar(state === "CYCLING" ? "cycling" : "generating");
     startScrollTracking();
     // Build the params panel for the restored visible variant. Previously
     // this was missed on page-reload resume: showVariantInDOM above fires
     // refreshParamsPanel, but state was still IDLE at that moment so it
     // hid. Now that state is CYCLING, re-fire.
-    if (state === 'CYCLING') refreshParamsPanel();
+    if (state === "CYCLING") refreshParamsPanel();
     saveSession();
 
     // Start observing for more variants AFTER initial setup
@@ -3173,17 +3660,17 @@ void main() {
     // If we reloaded mid-generation (Bun's HTML HMR destroys the shader
     // canvas), re-capture the original's content and restart the shader so
     // the wait doesn't go dead.
-    if (state === 'GENERATING' && origEl) {
+    if (state === "GENERATING" && origEl) {
       (async () => {
         try {
           const rect = origEl.getBoundingClientRect();
           if (rect.width === 0 || rect.height === 0) return;
           const blob = await captureElementToBlob(origEl, null, rect);
-          if (blob && state === 'GENERATING') {
+          if (blob && state === "GENERATING") {
             showShaderOverlay(origEl, blob, rect);
           }
         } catch (err) {
-          console.warn('[impeccable] shader resume failed:', err);
+          console.warn("[impeccable] shader resume failed:", err);
         }
       })();
     }
@@ -3208,8 +3695,8 @@ void main() {
       // Dev override: set localStorage 'impeccable-dev-theme' to 'light' or
       // 'dark' to preview the opposite palette without actually changing the
       // page bg. Used for screenshots and theme QA.
-      const override = localStorage.getItem('impeccable-dev-theme');
-      if (override === 'light' || override === 'dark') return override;
+      const override = localStorage.getItem("impeccable-dev-theme");
+      if (override === "light" || override === "dark") return override;
 
       // Walk body → html, taking the first opaque background. The browser's
       // default body / html background is `rgba(0, 0, 0, 0)`, which a naive
@@ -3232,44 +3719,46 @@ void main() {
       // via `color-scheme: dark` on <html>, and `prefers-color-scheme` lets
       // us catch that case.
       if (!rgb) {
-        return matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        return matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
       }
       const [r, g, b] = rgb;
       // Perceptual luminance (Rec. 709)
       const L = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-      return L > 0.55 ? 'light' : 'dark';
-    } catch { return 'light'; }
+      return L > 0.55 ? "light" : "dark";
+    } catch {
+      return "light";
+    }
   }
 
   function barPaletteForTheme(theme) {
-    if (theme === 'dark') {
+    if (theme === "dark") {
       // Light bar on dark page
       return {
-        surface: 'oklch(98% 0 0 / 0.92)',
-        surfaceDeep: 'oklch(92% 0.005 60 / 0.96)', // slightly deeper, faint warm
-        hairline: 'oklch(70% 0 0 / 0.35)',
-        text: 'oklch(15% 0 0)',
-        textDim: 'oklch(45% 0 0)',
-        accent: 'oklch(60% 0.25 350)',
-        accentSoft: 'oklch(60% 0.25 350 / 0.18)',
-        mark: 'oklch(98% 0 0)',      // logo mark fill
-        markText: 'oklch(15% 0 0)',  // logo "/" color
-        exitHover: 'oklch(85% 0 0 / 0.5)',
+        surface: "oklch(98% 0 0 / 0.92)",
+        surfaceDeep: "oklch(92% 0.005 60 / 0.96)", // slightly deeper, faint warm
+        hairline: "oklch(70% 0 0 / 0.35)",
+        text: "oklch(15% 0 0)",
+        textDim: "oklch(45% 0 0)",
+        accent: "oklch(60% 0.25 350)",
+        accentSoft: "oklch(60% 0.25 350 / 0.18)",
+        mark: "oklch(98% 0 0)", // logo mark fill
+        markText: "oklch(15% 0 0)", // logo "/" color
+        exitHover: "oklch(85% 0 0 / 0.5)",
       };
     }
     // Dark bar on light page. Bar is a warm charcoal, logo slab is much
     // deeper so the rounded-right shape reads as a clear sculpted mark.
     return {
-      surface: 'oklch(26% 0 0 / 0.94)',
-      surfaceDeep: 'oklch(18% 0 0 / 0.96)', // darker sand for Tune popover
-      hairline: 'oklch(42% 0 0 / 0.5)',
-      text: 'oklch(96% 0 0)',
-      textDim: 'oklch(72% 0 0)',
-      accent: 'oklch(72% 0.22 350)',
-      accentSoft: 'oklch(72% 0.22 350 / 0.22)',
-      mark: 'oklch(8% 0 0)',
-      markText: 'oklch(96% 0 0)',
-      exitHover: 'oklch(36% 0 0 / 0.6)',
+      surface: "oklch(26% 0 0 / 0.94)",
+      surfaceDeep: "oklch(18% 0 0 / 0.96)", // darker sand for Tune popover
+      hairline: "oklch(42% 0 0 / 0.5)",
+      text: "oklch(96% 0 0)",
+      textDim: "oklch(72% 0 0)",
+      accent: "oklch(72% 0.22 350)",
+      accentSoft: "oklch(72% 0.22 350 / 0.22)",
+      mark: "oklch(8% 0 0)",
+      markText: "oklch(96% 0 0)",
+      exitHover: "oklch(36% 0 0 / 0.6)",
     };
   }
 
@@ -3288,96 +3777,132 @@ void main() {
     // Custom focus-visible for bar buttons. Browser default is a heavy
     // blue ring that looks jarring on the dark capsule. Replace with a
     // soft accent-tinted inner ring that respects the bar's palette.
-    if (!document.getElementById(PREFIX + '-bar-focus-style')) {
-      const s = document.createElement('style');
-      s.id = PREFIX + '-bar-focus-style';
+    if (!document.getElementById(PREFIX + "-bar-focus-style")) {
+      const s = document.createElement("style");
+      s.id = PREFIX + "-bar-focus-style";
       s.textContent =
-        '#' + PREFIX + '-global-bar button:focus { outline: none; }' +
-        '#' + PREFIX + '-global-bar button:focus-visible {' +
-        '  outline: none;' +
-        '  box-shadow: 0 0 0 2px ' + P.accentSoft + ', 0 0 0 3px ' + P.accent + ';' +
-        '}';
+        "#" +
+        PREFIX +
+        "-global-bar button:focus { outline: none; }" +
+        "#" +
+        PREFIX +
+        "-global-bar button:focus-visible {" +
+        "  outline: none;" +
+        "  box-shadow: 0 0 0 2px " +
+        P.accentSoft +
+        ", 0 0 0 3px " +
+        P.accent +
+        ";" +
+        "}";
       document.head.appendChild(s);
     }
 
-    globalBarEl = el('div', {
-      position: 'fixed', bottom: '14px', left: '50%',
-      transform: 'translateX(-50%) translateY(20px)',
+    globalBarEl = el("div", {
+      position: "fixed",
+      bottom: "14px",
+      left: "50%",
+      transform: "translateX(-50%) translateY(20px)",
       zIndex: Z.bar + 5,
-      display: 'flex', alignItems: 'stretch',
-      gap: '2px',
+      display: "flex",
+      alignItems: "stretch",
+      gap: "2px",
       background: P.surface,
-      backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
-      border: '1px solid ' + P.hairline,
-      borderRadius: '10px',
-      boxShadow: '0 4px 20px oklch(0% 0 0 / 0.12), 0 1px 3px oklch(0% 0 0 / 0.08)',
-      fontFamily: FONT, fontSize: '12px', lineHeight: '1',
-      opacity: '0',
-      overflow: 'hidden',          // clip the full-bleed brand mark to the bar radius
-      transition: 'opacity 0.3s ' + EASE + ', transform 0.3s ' + EASE,
+      backdropFilter: "blur(16px)",
+      WebkitBackdropFilter: "blur(16px)",
+      border: "1px solid " + P.hairline,
+      borderRadius: "10px",
+      boxShadow: "0 4px 20px oklch(0% 0 0 / 0.12), 0 1px 3px oklch(0% 0 0 / 0.08)",
+      fontFamily: FONT,
+      fontSize: "12px",
+      lineHeight: "1",
+      opacity: "0",
+      overflow: "hidden", // clip the full-bleed brand mark to the bar radius
+      transition: "opacity 0.3s " + EASE + ", transform 0.3s " + EASE,
     });
-    globalBarEl.id = PREFIX + '-global-bar';
+    globalBarEl.id = PREFIX + "-global-bar";
     globalBarEl.dataset.theme = theme;
 
     // Brand mark — fills bar height on the left. Left side inherits the bar's
     // rounded corner via overflow:hidden; right side is a clean hard edge since
     // the near-black/charcoal contrast does the shape-defining work.
-    const brand = el('span', {
-      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      alignSelf: 'stretch',
-      padding: '0 12px 0 14px',
+    const brand = el("span", {
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      alignSelf: "stretch",
+      padding: "0 12px 0 14px",
       background: P.mark,
       color: P.markText,
-      fontFamily: 'system-ui, -apple-system, sans-serif',
-      fontWeight: '500',
-      fontSize: '18px', lineHeight: '1',
+      fontFamily: "system-ui, -apple-system, sans-serif",
+      fontWeight: "500",
+      fontSize: "18px",
+      lineHeight: "1",
     });
-    brand.textContent = '/';
-    brand.title = 'Impeccable';
+    brand.textContent = "/";
+    brand.title = "Impeccable";
     globalBarEl.appendChild(brand);
 
     // Inner wrapper: holds the toggles with normal bar padding.
-    const inner = el('div', {
-      display: 'flex', alignItems: 'center',
-      padding: '4px 5px', gap: '2px',
+    const inner = el("div", {
+      display: "flex",
+      alignItems: "center",
+      padding: "4px 5px",
+      gap: "2px",
     });
-    inner.id = PREFIX + '-global-bar-inner';
+    inner.id = PREFIX + "-global-bar-inner";
     globalBarEl.appendChild(inner);
 
     // --- button factory: icon-only at rest, label slides in on hover/active ---
     function makeIconBtn({ id, svg, label, ariaLabel, labelFont, onClick }) {
-      const b = el('button', {
-        position: 'relative',
-        display: 'inline-flex', alignItems: 'center',
-        padding: '6px 8px', borderRadius: '7px',
-        border: 'none', background: 'transparent',
-        color: P.textDim, fontFamily: FONT, fontSize: '11.5px', fontWeight: '500',
-        cursor: 'pointer',
-        transition: 'background 0.15s ease, color 0.15s ease',
-        whiteSpace: 'nowrap', overflow: 'hidden',
+      const b = el("button", {
+        position: "relative",
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "6px 8px",
+        borderRadius: "7px",
+        border: "none",
+        background: "transparent",
+        color: P.textDim,
+        fontFamily: FONT,
+        fontSize: "11.5px",
+        fontWeight: "500",
+        cursor: "pointer",
+        transition: "background 0.15s ease, color 0.15s ease",
+        whiteSpace: "nowrap",
+        overflow: "hidden",
       });
       b.id = id;
-      b.title = ariaLabel || label || '';
-      b.setAttribute('aria-label', ariaLabel || label || '');
-      b.innerHTML = svg + (label
-        ? `<span class="icon-btn-label" style="display:inline-block;max-width:0;opacity:0;margin-left:0;overflow:hidden;font-family:${labelFont || FONT};transition:max-width 0.25s ${EASE}, opacity 0.2s ease, margin-left 0.25s ${EASE};">${label}</span>`
-        : '');
-      const labelEl = b.querySelector('.icon-btn-label');
+      b.title = ariaLabel || label || "";
+      b.setAttribute("aria-label", ariaLabel || label || "");
+      b.innerHTML =
+        svg +
+        (label
+          ? `<span class="icon-btn-label" style="display:inline-block;max-width:0;opacity:0;margin-left:0;overflow:hidden;font-family:${labelFont || FONT};transition:max-width 0.25s ${EASE}, opacity 0.2s ease, margin-left 0.25s ${EASE};">${label}</span>`
+          : "");
+      const labelEl = b.querySelector(".icon-btn-label");
       const expand = () => {
         if (!labelEl) return;
-        labelEl.style.maxWidth = '120px'; labelEl.style.opacity = '1'; labelEl.style.marginLeft = '6px';
+        labelEl.style.maxWidth = "120px";
+        labelEl.style.opacity = "1";
+        labelEl.style.marginLeft = "6px";
       };
       const collapse = () => {
-        if (!labelEl || b.dataset.active === 'true') return;
-        labelEl.style.maxWidth = '0'; labelEl.style.opacity = '0'; labelEl.style.marginLeft = '0';
+        if (!labelEl || b.dataset.active === "true") return;
+        labelEl.style.maxWidth = "0";
+        labelEl.style.opacity = "0";
+        labelEl.style.marginLeft = "0";
       };
       // Per-button hover only changes color (no layout). The label expand/
       // collapse is driven by the bar-level mouseenter/mouseleave so moving
       // the mouse between adjacent buttons doesn't trigger per-button width
       // thrashing — the whole bar grows once and shrinks once.
-      b.addEventListener('mouseenter', () => { if (b.dataset.active !== 'true') b.style.color = P.text; });
-      b.addEventListener('mouseleave', () => { if (b.dataset.active !== 'true') b.style.color = P.textDim; });
-      b.addEventListener('click', onClick);
+      b.addEventListener("mouseenter", () => {
+        if (b.dataset.active !== "true") b.style.color = P.text;
+      });
+      b.addEventListener("mouseleave", () => {
+        if (b.dataset.active !== "true") b.style.color = P.textDim;
+      });
+      b.addEventListener("click", onClick);
       b._expandLabel = expand;
       b._collapseLabel = collapse;
       return b;
@@ -3385,57 +3910,64 @@ void main() {
 
     // Pick toggle — starts active (primary intent when entering live mode).
     const pickBtn = makeIconBtn({
-      id: PREFIX + '-pick-toggle',
+      id: PREFIX + "-pick-toggle",
       svg: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>',
-      label: 'Pick',
-      ariaLabel: 'Pick element',
+      label: "Pick",
+      ariaLabel: "Pick element",
       onClick: () => togglePick(),
     });
     pickBtn.style.background = P.accentSoft;
     pickBtn.style.color = P.accent;
-    pickBtn.dataset.active = 'true';
+    pickBtn.dataset.active = "true";
     pickBtn._expandLabel();
     inner.appendChild(pickBtn);
 
     // Detect toggle
     const detectBtn = makeIconBtn({
-      id: PREFIX + '-detect-toggle',
+      id: PREFIX + "-detect-toggle",
       svg: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
-      label: 'Detect',
-      ariaLabel: 'Detect anti-patterns',
+      label: "Detect",
+      ariaLabel: "Detect anti-patterns",
       onClick: () => toggleDetect(),
     });
-    const detectBadge = el('span', {
-      fontSize: '10px', fontWeight: '600',
-      padding: '0px 5px', borderRadius: '7px', lineHeight: '16px',
-      background: P.accent, color: P.surface.includes('18%') ? 'oklch(18% 0 0)' : 'oklch(98% 0 0)',
-      display: 'none', fontFamily: MONO, marginLeft: '4px',
+    const detectBadge = el("span", {
+      fontSize: "10px",
+      fontWeight: "600",
+      padding: "0px 5px",
+      borderRadius: "7px",
+      lineHeight: "16px",
+      background: P.accent,
+      color: P.surface.includes("18%") ? "oklch(18% 0 0)" : "oklch(98% 0 0)",
+      display: "none",
+      fontFamily: MONO,
+      marginLeft: "4px",
     });
-    detectBadge.id = PREFIX + '-detect-badge';
+    detectBadge.id = PREFIX + "-detect-badge";
     detectBtn.appendChild(detectBadge);
     inner.appendChild(detectBtn);
 
     // DESIGN.md panel toggle — quartet of color squares as the mark.
     const designBtn = makeIconBtn({
-      id: PREFIX + '-design-toggle',
+      id: PREFIX + "-design-toggle",
       svg: `<span style="display:inline-grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;width:14px;height:14px;border-radius:3px;overflow:hidden;box-shadow:inset 0 0 0 1px ${P.hairline};flex-shrink:0">
         <span style="background:oklch(60% 0.25 350)"></span>
         <span style="background:oklch(60% 0.15 45)"></span>
         <span style="background:oklch(55% 0.12 250)"></span>
         <span style="background:oklch(30% 0 0)"></span>
       </span>`,
-      label: 'DESIGN.md',
-      ariaLabel: 'Toggle DESIGN.md panel',
+      label: "DESIGN.md",
+      ariaLabel: "Toggle DESIGN.md panel",
       labelFont: MONO,
       onClick: () => toggleDesignPanel(),
     });
     inner.appendChild(designBtn);
 
     // Thin divider before the exit button
-    const divider = el('span', {
-      width: '1px', height: '18px',
+    const divider = el("span", {
+      width: "1px",
+      height: "18px",
       background: P.hairline,
-      margin: '0 4px 0 2px',
+      margin: "0 4px 0 2px",
     });
     inner.appendChild(divider);
 
@@ -3448,28 +3980,48 @@ void main() {
     // of the visible bar — the X stays invisible even though the styles in
     // DevTools look fine. Every other chrome button sets padding inline;
     // this one needed it too.
-    const exitBtn = el('button', {
-      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      padding: '0', boxSizing: 'border-box',
-      width: '24px', height: '24px', borderRadius: '6px',
-      border: 'none', background: 'transparent',
-      color: P.textDim, fontFamily: FONT, fontSize: '0', lineHeight: '0',
-      cursor: 'pointer', transition: 'color 0.12s ease, background 0.12s ease',
+    const exitBtn = el("button", {
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: "0",
+      boxSizing: "border-box",
+      width: "24px",
+      height: "24px",
+      borderRadius: "6px",
+      border: "none",
+      background: "transparent",
+      color: P.textDim,
+      fontFamily: FONT,
+      fontSize: "0",
+      lineHeight: "0",
+      cursor: "pointer",
+      transition: "color 0.12s ease, background 0.12s ease",
     });
-    exitBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="3" y1="3" x2="11" y2="11"/><line x1="11" y1="3" x2="3" y2="11"/></svg>';
-    exitBtn.title = 'Exit live mode';
-    exitBtn.addEventListener('mouseenter', () => { exitBtn.style.color = P.text; exitBtn.style.background = P.exitHover; });
-    exitBtn.addEventListener('mouseleave', () => { exitBtn.style.color = P.textDim; exitBtn.style.background = 'transparent'; });
-    exitBtn.addEventListener('click', () => { sendEvent({ type: 'exit' }); teardown(); });
+    exitBtn.innerHTML =
+      '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="3" y1="3" x2="11" y2="11"/><line x1="11" y1="3" x2="3" y2="11"/></svg>';
+    exitBtn.title = "Exit live mode";
+    exitBtn.addEventListener("mouseenter", () => {
+      exitBtn.style.color = P.text;
+      exitBtn.style.background = P.exitHover;
+    });
+    exitBtn.addEventListener("mouseleave", () => {
+      exitBtn.style.color = P.textDim;
+      exitBtn.style.background = "transparent";
+    });
+    exitBtn.addEventListener("click", () => {
+      sendEvent({ type: "exit" });
+      teardown();
+    });
     inner.appendChild(exitBtn);
 
     // Bar-level hover: expand every toggle's label at once; collapse on leave.
     // Buttons with dataset.active="true" ignore collapse (their label stays).
     const toggles = [pickBtn, detectBtn, designBtn];
-    globalBarEl.addEventListener('mouseenter', () => {
+    globalBarEl.addEventListener("mouseenter", () => {
       toggles.forEach((t) => t._expandLabel && t._expandLabel());
     });
-    globalBarEl.addEventListener('mouseleave', () => {
+    globalBarEl.addEventListener("mouseleave", () => {
       toggles.forEach((t) => t._collapseLabel && t._collapseLabel());
     });
 
@@ -3477,28 +4029,28 @@ void main() {
     defangOutsideHandlers(globalBarEl);
 
     requestAnimationFrame(() => {
-      globalBarEl.style.opacity = '1';
-      globalBarEl.style.transform = 'translateX(-50%) translateY(0)';
+      globalBarEl.style.opacity = "1";
+      globalBarEl.style.transform = "translateX(-50%) translateY(0)";
     });
 
     // Listen for detection results AND ready signal
-    window.addEventListener('message', onDetectMessage);
+    window.addEventListener("message", onDetectMessage);
   }
 
   function updateGlobalBarState() {
-    const detectToggle = document.getElementById(PREFIX + '-detect-toggle');
-    const detectBadge = document.getElementById(PREFIX + '-detect-badge');
-    const pickToggle = document.getElementById(PREFIX + '-pick-toggle');
-    const designToggle = document.getElementById(PREFIX + '-design-toggle');
-    const theme = globalBarEl?.dataset.theme || 'light';
+    const detectToggle = document.getElementById(PREFIX + "-detect-toggle");
+    const detectBadge = document.getElementById(PREFIX + "-detect-badge");
+    const pickToggle = document.getElementById(PREFIX + "-pick-toggle");
+    const designToggle = document.getElementById(PREFIX + "-design-toggle");
+    const theme = globalBarEl?.dataset.theme || "light";
     const P = barPaletteForTheme(theme);
 
     // Sync one toggle's active state, colors, and slide-label visibility.
     function sync(btn, active) {
       if (!btn) return;
-      btn.style.background = active ? P.accentSoft : 'transparent';
+      btn.style.background = active ? P.accentSoft : "transparent";
       btn.style.color = active ? P.accent : P.textDim;
-      btn.dataset.active = active ? 'true' : 'false';
+      btn.dataset.active = active ? "true" : "false";
       if (active && btn._expandLabel) btn._expandLabel();
       else if (!active && btn._collapseLabel) btn._collapseLabel();
     }
@@ -3509,18 +4061,18 @@ void main() {
     // If the bar is currently under the cursor, keep all labels expanded —
     // otherwise clicking a toggle that deactivates (e.g. closing DESIGN.md)
     // would collapse its label while the user's mouse is still on the bar.
-    if (globalBarEl && globalBarEl.matches(':hover')) {
+    if (globalBarEl && globalBarEl.matches(":hover")) {
       [pickToggle, detectToggle, designToggle].forEach((t) => t?._expandLabel?.());
     }
 
     if (detectBadge) {
-      detectBadge.style.display = (detectActive && detectCount > 0) ? 'inline' : 'none';
+      detectBadge.style.display = detectActive && detectCount > 0 ? "inline" : "none";
       detectBadge.textContent = detectCount;
     }
 
     // When pick is active, make detect overlays click-through so the picker works
-    document.querySelectorAll('.impeccable-overlay').forEach(o => {
-      o.style.pointerEvents = pickActive ? 'none' : '';
+    document.querySelectorAll(".impeccable-overlay").forEach((o) => {
+      o.style.pointerEvents = pickActive ? "none" : "";
     });
   }
 
@@ -3536,12 +4088,12 @@ void main() {
         detectPendingScan = true;
         loadDetectScript();
       } else if (detectReady) {
-        window.postMessage({ source: 'impeccable-command', action: 'scan' }, '*');
+        window.postMessage({ source: "impeccable-command", action: "scan" }, "*");
       } else {
         detectPendingScan = true;
       }
     } else {
-      window.postMessage({ source: 'impeccable-command', action: 'remove' }, '*');
+      window.postMessage({ source: "impeccable-command", action: "remove" }, "*");
       detectCount = 0;
       updateGlobalBarState();
     }
@@ -3559,33 +4111,33 @@ void main() {
       hideBar();
       hideActionPicker();
       selectedElement = null;
-      if (state === 'PICKING' || state === 'CONFIGURING') state = 'IDLE';
+      if (state === "PICKING" || state === "CONFIGURING") state = "IDLE";
     } else {
-      if (state === 'IDLE') state = 'PICKING';
+      if (state === "IDLE") state = "PICKING";
     }
   }
 
   function loadDetectScript() {
     if (detectScriptLoaded) return;
     detectScriptLoaded = true;
-    const s = document.createElement('script');
-    s.src = 'http://localhost:' + PORT + '/detect.js';
-    s.dataset.impeccableExtension = 'true';
+    const s = document.createElement("script");
+    s.src = "http://localhost:" + PORT + "/detect.js";
+    s.dataset.impeccableExtension = "true";
     document.head.appendChild(s);
   }
 
   function onDetectMessage(e) {
-    if (!e.data || typeof e.data.source !== 'string') return;
+    if (!e.data || typeof e.data.source !== "string") return;
     // Detection script is loaded and ready
-    if (e.data.source === 'impeccable-ready') {
+    if (e.data.source === "impeccable-ready") {
       detectReady = true;
       if (detectPendingScan && detectActive) {
         detectPendingScan = false;
-        window.postMessage({ source: 'impeccable-command', action: 'scan' }, '*');
+        window.postMessage({ source: "impeccable-command", action: "scan" }, "*");
       }
     }
     // Scan results arrived
-    if (e.data.source === 'impeccable-results') {
+    if (e.data.source === "impeccable-results") {
       detectCount = e.data.count || 0;
       updateGlobalBarState();
     }
@@ -3596,49 +4148,75 @@ void main() {
     cleanup();
     hideBar();
     if (globalBarEl) {
-      globalBarEl.style.transform = 'translateY(100%)';
-      setTimeout(() => { if (globalBarEl) globalBarEl.remove(); globalBarEl = null; }, 300);
+      globalBarEl.style.transform = "translateY(100%)";
+      setTimeout(() => {
+        if (globalBarEl) globalBarEl.remove();
+        globalBarEl = null;
+      }, 300);
     }
-    if (highlightEl) { highlightEl.remove(); highlightEl = null; }
-    if (tooltipEl) { tooltipEl.remove(); tooltipEl = null; }
-    if (barEl) { barEl.remove(); barEl = null; }
-    if (pickerEl) { pickerEl.remove(); pickerEl = null; }
-    if (paramsPanelEl) { paramsPanelEl.remove(); paramsPanelEl = null; paramsPanelInner = null; paramsPanelBody = null; }
-    if (evtSource) { evtSource.close(); evtSource = null; }
-    document.removeEventListener('mousemove', handleMouseMove, true);
-    document.removeEventListener('click', handleClick, true);
-    document.removeEventListener('keydown', handleKeyDown, true);
-    window.removeEventListener('message', onDetectMessage);
+    if (highlightEl) {
+      highlightEl.remove();
+      highlightEl = null;
+    }
+    if (tooltipEl) {
+      tooltipEl.remove();
+      tooltipEl = null;
+    }
+    if (barEl) {
+      barEl.remove();
+      barEl = null;
+    }
+    if (pickerEl) {
+      pickerEl.remove();
+      pickerEl = null;
+    }
+    if (paramsPanelEl) {
+      paramsPanelEl.remove();
+      paramsPanelEl = null;
+      paramsPanelInner = null;
+      paramsPanelBody = null;
+    }
+    if (evtSource) {
+      evtSource.close();
+      evtSource = null;
+    }
+    document.removeEventListener("mousemove", handleMouseMove, true);
+    document.removeEventListener("click", handleClick, true);
+    document.removeEventListener("keydown", handleKeyDown, true);
+    window.removeEventListener("message", onDetectMessage);
     // Remove detection overlays
-    window.postMessage({ source: 'impeccable-command', action: 'remove' }, '*');
-    state = 'IDLE';
+    window.postMessage({ source: "impeccable-command", action: "remove" }, "*");
+    state = "IDLE";
     window.__IMPECCABLE_LIVE_INIT__ = false;
-    console.log('[impeccable] Live mode exited.');
+    console.log("[impeccable] Live mode exited.");
   }
 
   // ---------------------------------------------------------------------------
   // Design System Panel — visualizes the project's DESIGN.json sidecar
   // ---------------------------------------------------------------------------
 
-  const DESIGN_PREFS_KEY = 'impeccable-live-design-panel';
+  const DESIGN_PREFS_KEY = "impeccable-live-design-panel";
   const DESIGN_PANEL_WIDTH = 440;
 
   let designHost = null;
   let designShadow = null;
   let designState = {
     open: false,
-    tab: 'visual',          // 'visual' | 'raw'
-    parsed: null,           // parseDesignMd output (frontmatter + body sections)
-    sidecar: null,          // DESIGN.json v2 payload (extensions + components + narrative)
+    tab: "visual", // 'visual' | 'raw'
+    parsed: null, // parseDesignMd output (frontmatter + body sections)
+    sidecar: null, // DESIGN.json v2 payload (extensions + components + narrative)
     hasMd: false,
     hasSidecar: false,
-    present: null,          // true/false once fetch resolves
-    raw: null,              // raw DESIGN.md for the raw tab
+    present: null, // true/false once fetch resolves
+    raw: null, // raw DESIGN.md for the raw tab
     mdNewerThanJson: false, // stale-hint flag
     loading: false,
     error: null,
-    collapsed: {            // narrative-section accordion state
-      rules: true, dosdonts: true, overview: true,
+    collapsed: {
+      // narrative-section accordion state
+      rules: true,
+      dosdonts: true,
+      overview: true,
     },
   };
 
@@ -3649,41 +4227,51 @@ void main() {
       const raw = localStorage.getItem(DESIGN_PREFS_KEY);
       if (!raw) return;
       const prefs = JSON.parse(raw);
-      if (prefs.tab === 'visual' || prefs.tab === 'raw') designState.tab = prefs.tab;
-      if (prefs.collapsed && typeof prefs.collapsed === 'object') {
+      if (prefs.tab === "visual" || prefs.tab === "raw") designState.tab = prefs.tab;
+      if (prefs.collapsed && typeof prefs.collapsed === "object") {
         Object.assign(designState.collapsed, prefs.collapsed);
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   function saveDesignPrefs() {
     try {
-      localStorage.setItem(DESIGN_PREFS_KEY, JSON.stringify({
-        tab: designState.tab,
-        collapsed: designState.collapsed,
-      }));
-    } catch { /* ignore */ }
+      localStorage.setItem(
+        DESIGN_PREFS_KEY,
+        JSON.stringify({
+          tab: designState.tab,
+          collapsed: designState.collapsed,
+        }),
+      );
+    } catch {
+      /* ignore */
+    }
   }
 
   function initDesignPanel() {
-    designHost = document.createElement('div');
-    designHost.id = PREFIX + '-design-host';
+    designHost = document.createElement("div");
+    designHost.id = PREFIX + "-design-host";
     Object.assign(designHost.style, {
-      position: 'fixed', top: '0', left: '0',
-      width: '0', height: '0',
+      position: "fixed",
+      top: "0",
+      left: "0",
+      width: "0",
+      height: "0",
       zIndex: String(Z.bar + 10),
-      pointerEvents: 'none',
+      pointerEvents: "none",
     });
-    designShadow = designHost.attachShadow({ mode: 'open' });
+    designShadow = designHost.attachShadow({ mode: "open" });
 
-    const style = document.createElement('style');
+    const style = document.createElement("style");
     // Theme-match the bar: dark chrome on light pages, light chrome on dark pages.
     const theme = detectPageTheme();
     style.textContent = designPanelCss(barPaletteForTheme(theme));
     designShadow.appendChild(style);
 
-    const root = document.createElement('div');
-    root.className = 'root';
+    const root = document.createElement("div");
+    root.className = "root";
     designShadow.appendChild(root);
 
     document.body.appendChild(designHost);
@@ -3703,16 +4291,16 @@ void main() {
   // Neutral panel palette — deliberately NOT Impeccable-branded. The panel is
   // a viewer of the project's design system, not an Impeccable surface.
   const DP = {
-    canvas:   'oklch(94% 0 0)',            // panel background
-    tile:     'oklch(98.5% 0 0)',          // card-on-canvas
-    tileAlt:  'oklch(96% 0 0)',            // subtler tile for inner surfaces
-    ink:      'oklch(15% 0 0)',
-    ink2:     'oklch(35% 0 0)',
-    meta:     'oklch(55% 0 0)',
-    hairline: 'oklch(88% 0 0)',
-    hairlineSoft: 'oklch(92% 0 0)',
-    amber:    'oklch(70% 0.13 65)',         // stale-hint accent
-    amberBg:  'oklch(95% 0.05 80)',
+    canvas: "oklch(94% 0 0)", // panel background
+    tile: "oklch(98.5% 0 0)", // card-on-canvas
+    tileAlt: "oklch(96% 0 0)", // subtler tile for inner surfaces
+    ink: "oklch(15% 0 0)",
+    ink2: "oklch(35% 0 0)",
+    meta: "oklch(55% 0 0)",
+    hairline: "oklch(88% 0 0)",
+    hairlineSoft: "oklch(92% 0 0)",
+    amber: "oklch(70% 0.13 65)", // stale-hint accent
+    amberBg: "oklch(95% 0.05 80)",
   };
 
   function designPanelCss(BP) {
@@ -3992,18 +4580,18 @@ void main() {
   }
 
   function renderDesignChrome() {
-    const root = designShadow.querySelector('.root');
-    root.innerHTML = '';
+    const root = designShadow.querySelector(".root");
+    root.innerHTML = "";
 
     // (Panel toggle lives in the global bar — no floating FAB.)
     // Panel
-    const panel = document.createElement('aside');
-    panel.className = 'panel';
-    panel.setAttribute('data-open', designState.open ? 'true' : 'false');
+    const panel = document.createElement("aside");
+    panel.className = "panel";
+    panel.setAttribute("data-open", designState.open ? "true" : "false");
     panel.appendChild(buildDesignHeader());
-    const body = document.createElement('div');
-    body.className = 'panel-body';
-    body.id = 'panel-body';
+    const body = document.createElement("div");
+    body.className = "panel-body";
+    body.id = "panel-body";
     panel.appendChild(body);
     root.appendChild(panel);
 
@@ -4011,27 +4599,30 @@ void main() {
   }
 
   function buildDesignHeader() {
-    const header = document.createElement('div');
-    header.className = 'panel-header';
+    const header = document.createElement("div");
+    header.className = "panel-header";
 
-    const title = document.createElement('div');
-    title.className = 'panel-title';
-    title.textContent = 'DESIGN.md';
+    const title = document.createElement("div");
+    title.className = "panel-title";
+    title.textContent = "DESIGN.md";
     header.appendChild(title);
 
-    const tabs = document.createElement('div');
-    tabs.className = 'tabs';
-    for (const t of [['visual', 'Visual'], ['raw', 'Raw']]) {
-      const btn = document.createElement('button');
-      btn.className = 'tab';
+    const tabs = document.createElement("div");
+    tabs.className = "tabs";
+    for (const t of [
+      ["visual", "Visual"],
+      ["raw", "Raw"],
+    ]) {
+      const btn = document.createElement("button");
+      btn.className = "tab";
       btn.textContent = t[1];
-      btn.setAttribute('data-active', designState.tab === t[0] ? 'true' : 'false');
-      btn.addEventListener('click', () => {
+      btn.setAttribute("data-active", designState.tab === t[0] ? "true" : "false");
+      btn.addEventListener("click", () => {
         if (designState.tab === t[0]) return;
         designState.tab = t[0];
         saveDesignPrefs();
         renderDesignChrome();
-        if (t[0] === 'raw' && designState.raw === null && !designState.loading) {
+        if (t[0] === "raw" && designState.raw === null && !designState.loading) {
           fetchDesignSystem(); // raw is part of the same fetch pair
         }
       });
@@ -4039,11 +4630,11 @@ void main() {
     }
     header.appendChild(tabs);
 
-    const close = document.createElement('button');
-    close.className = 'panel-close';
-    close.innerHTML = '&#x2715;';
-    close.setAttribute('aria-label', 'Close panel');
-    close.addEventListener('click', toggleDesignPanel);
+    const close = document.createElement("button");
+    close.className = "panel-close";
+    close.innerHTML = "&#x2715;";
+    close.setAttribute("aria-label", "Close panel");
+    close.addEventListener("click", toggleDesignPanel);
     header.appendChild(close);
 
     return header;
@@ -4064,8 +4655,8 @@ void main() {
     renderDesignBody();
     try {
       const [jsonRes, rawRes] = await Promise.all([
-        fetch(`http://localhost:${PORT}/design-system.json?token=${TOKEN}`, { cache: 'no-store' }),
-        fetch(`http://localhost:${PORT}/design-system/raw?token=${TOKEN}`, { cache: 'no-store' }),
+        fetch(`http://localhost:${PORT}/design-system.json?token=${TOKEN}`, { cache: "no-store" }),
+        fetch(`http://localhost:${PORT}/design-system/raw?token=${TOKEN}`, { cache: "no-store" }),
       ]);
       const jsonData = await jsonRes.json();
       designState.present = jsonData.present === true;
@@ -4077,7 +4668,7 @@ void main() {
       designState.raw = designState.present && rawRes.ok ? await rawRes.text() : null;
       designState.error = jsonData.parseError || jsonData.sidecarError || null;
     } catch (err) {
-      designState.error = err?.message || 'Failed to load design system.';
+      designState.error = err?.message || "Failed to load design system.";
     } finally {
       designState.loading = false;
       renderDesignChrome(); // refresh title from data
@@ -4085,28 +4676,28 @@ void main() {
   }
 
   function renderDesignBody() {
-    const body = designShadow.querySelector('#panel-body');
+    const body = designShadow.querySelector("#panel-body");
     if (!body) return;
-    body.innerHTML = '';
+    body.innerHTML = "";
 
     if (designState.loading) {
-      body.appendChild(msgDiv('loading', 'Loading design system…'));
+      body.appendChild(msgDiv("loading", "Loading design system…"));
       return;
     }
     if (designState.error) {
-      body.appendChild(msgDiv('error', designState.error));
+      body.appendChild(msgDiv("error", designState.error));
       return;
     }
     if (designState.present === false) {
-      const empty = document.createElement('div');
-      empty.className = 'empty';
+      const empty = document.createElement("div");
+      empty.className = "empty";
       empty.innerHTML = `<strong>No DESIGN.md yet</strong>Create one by running <code>/impeccable document</code> in your terminal, then re-open this panel.`;
       body.appendChild(empty);
       return;
     }
 
-    if (designState.tab === 'raw') {
-      renderRawTab(body, designState.raw || '');
+    if (designState.tab === "raw") {
+      renderRawTab(body, designState.raw || "");
       return;
     }
 
@@ -4119,15 +4710,15 @@ void main() {
   }
 
   function msgDiv(cls, text) {
-    const d = document.createElement('div');
+    const d = document.createElement("div");
     d.className = cls;
     d.textContent = text;
     return d;
   }
 
   function renderStaleHint() {
-    const box = document.createElement('div');
-    box.className = 'stale';
+    const box = document.createElement("div");
+    box.className = "stale";
     box.innerHTML = `
       <span class="stale-dot"></span>
       <span class="stale-text"><strong>DESIGN.md is newer than DESIGN.json.</strong> Run <code>/impeccable document</code> to refresh the sidecar.</span>
@@ -4136,8 +4727,8 @@ void main() {
   }
 
   function renderParsedMdCta() {
-    const box = document.createElement('div');
-    box.className = 'parsed-md-cta';
+    const box = document.createElement("div");
+    box.className = "parsed-md-cta";
     box.innerHTML = `<strong>Basic view</strong>This panel reads the tokens in your <code>DESIGN.md</code> frontmatter. Running <code>/impeccable document</code> also generates a <code>DESIGN.json</code> sidecar with your project's actual component snippets (button, input, nav) and tonal ramps, rendered live below the tokens.`;
     return box;
   }
@@ -4167,13 +4758,13 @@ void main() {
     // synthesize from prose sections.
     const narrative = sidecar?.narrative || synthesizeNarrative(parsed);
     if (narrative.rules?.length) body.appendChild(renderRulesCollapsible(narrative.rules));
-    if ((narrative.dos?.length || narrative.donts?.length)) body.appendChild(renderDosDontsCollapsible(narrative));
+    if (narrative.dos?.length || narrative.donts?.length) body.appendChild(renderDosDontsCollapsible(narrative));
     if (narrative.overview || narrative.northStar || narrative.keyCharacteristics?.length) {
       body.appendChild(renderOverviewCollapsible(narrative));
     }
 
     if (body.childElementCount === 0) {
-      body.appendChild(msgDiv('empty', 'No design system data available.'));
+      body.appendChild(msgDiv("empty", "No design system data available."));
     }
   }
 
@@ -4210,9 +4801,9 @@ void main() {
         weight: spec?.fontWeight ?? 400,
         // fontStyle isn't in Stitch's frontmatter schema; the sidecar carries
         // it when a role is rendered in italic (e.g. display italic).
-        style: m.style || 'normal',
-        sampleSize: spec?.fontSize || '1rem',
-        lineHeight: spec?.lineHeight != null ? String(spec.lineHeight) : '',
+        style: m.style || "normal",
+        sampleSize: spec?.fontSize || "1rem",
+        lineHeight: spec?.lineHeight != null ? String(spec.lineHeight) : "",
         letterSpacing: spec?.letterSpacing,
         purpose: m.purpose,
       };
@@ -4225,13 +4816,15 @@ void main() {
   }
 
   function splitFontFamily(stack) {
-    if (!stack || typeof stack !== 'string') return { family: '', fallback: '' };
-    const parts = stack.split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, ''));
-    return { family: parts[0] || '', fallback: parts.slice(1).join(', ') };
+    if (!stack || typeof stack !== "string") return { family: "", fallback: "" };
+    const parts = stack.split(",").map((s) => s.trim().replace(/^['"]|['"]$/g, ""));
+    return { family: parts[0] || "", fallback: parts.slice(1).join(", ") };
   }
 
   function humanizeKey(k) {
-    return String(k || '').replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    return String(k || "")
+      .replace(/[-_]+/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
   }
 
   function findProseDescription(proseColors, key, displayName) {
@@ -4239,7 +4832,7 @@ void main() {
     const needles = [key, displayName].filter(Boolean).map((s) => s.toLowerCase());
     for (const g of proseColors.groups) {
       for (const c of g.colors || []) {
-        const hay = String(c.name || '').toLowerCase();
+        const hay = String(c.name || "").toLowerCase();
         if (hay && needles.some((n) => hay.includes(n) || n.includes(hay))) {
           return c.description || null;
         }
@@ -4253,12 +4846,12 @@ void main() {
     const md = parsed;
     return {
       northStar: md.overview?.creativeNorthStar,
-      overview: (md.overview?.philosophy || []).join(' '),
+      overview: (md.overview?.philosophy || []).join(" "),
       keyCharacteristics: md.overview?.keyCharacteristics || [],
       rules: [
-        ...(md.colors?.rules || []).map((r) => ({ ...r, section: 'colors' })),
-        ...(md.typography?.rules || []).map((r) => ({ ...r, section: 'typography' })),
-        ...(md.elevation?.rules || []).map((r) => ({ ...r, section: 'elevation' })),
+        ...(md.colors?.rules || []).map((r) => ({ ...r, section: "colors" })),
+        ...(md.typography?.rules || []).map((r) => ({ ...r, section: "typography" })),
+        ...(md.elevation?.rules || []).map((r) => ({ ...r, section: "elevation" })),
       ],
       dos: md.dosDonts?.dos || [],
       donts: md.dosDonts?.donts || [],
@@ -4267,32 +4860,32 @@ void main() {
 
   function renderColorTiles(body, colors) {
     for (const c of colors) {
-      const tile = document.createElement('div');
-      tile.className = 'tile c-tile';
-      tile.title = 'Click to copy';
-      tile.addEventListener('click', () => copyToClipboard(c.value));
+      const tile = document.createElement("div");
+      tile.className = "tile c-tile";
+      tile.title = "Click to copy";
+      tile.addEventListener("click", () => copyToClipboard(c.value));
 
-      const meta = document.createElement('div');
-      meta.className = 'tile-meta';
-      meta.innerHTML = `<span class="name">${escapeHtml(c.name || c.role || 'Color')}</span><span>${escapeHtml(c.value || '')}</span>`;
+      const meta = document.createElement("div");
+      meta.className = "tile-meta";
+      meta.innerHTML = `<span class="name">${escapeHtml(c.name || c.role || "Color")}</span><span>${escapeHtml(c.value || "")}</span>`;
       tile.appendChild(meta);
 
-      const hero = document.createElement('div');
-      hero.className = 'c-hero';
+      const hero = document.createElement("div");
+      hero.className = "c-hero";
       hero.style.background = c.value;
       tile.appendChild(hero);
 
       const ramp = synthesizeRamp(c);
       if (ramp.length) {
-        const r = document.createElement('div');
-        r.className = 'c-ramp';
-        r.innerHTML = ramp.map((v) => `<span style="background:${cssSafe(v)}"></span>`).join('');
+        const r = document.createElement("div");
+        r.className = "c-ramp";
+        r.innerHTML = ramp.map((v) => `<span style="background:${cssSafe(v)}"></span>`).join("");
         tile.appendChild(r);
       }
 
       if (c.description) {
-        const d = document.createElement('div');
-        d.className = 'c-desc';
+        const d = document.createElement("div");
+        d.className = "c-desc";
         d.textContent = c.description;
         tile.appendChild(d);
       }
@@ -4303,7 +4896,9 @@ void main() {
   function synthesizeRamp(c) {
     if (c.tonalRamp?.length) return c.tonalRamp;
     // If base value is OKLCH, synthesize an 8-step ramp across lightness.
-    const m = typeof c.value === 'string' && c.value.match(/^oklch\(\s*([\d.]+)%\s+([\d.]+)\s+([\d.]+)\s*(?:\/\s*([\d.]+))?\s*\)$/i);
+    const m =
+      typeof c.value === "string" &&
+      c.value.match(/^oklch\(\s*([\d.]+)%\s+([\d.]+)\s+([\d.]+)\s*(?:\/\s*([\d.]+))?\s*\)$/i);
     if (!m) return [];
     const [, , chroma, hue] = m;
     const steps = [20, 32, 44, 56, 68, 80, 90, 96];
@@ -4312,41 +4907,41 @@ void main() {
 
   function renderTypeTiles(body, types) {
     for (const t of types) {
-      const tile = document.createElement('div');
-      tile.className = 'tile t-tile';
+      const tile = document.createElement("div");
+      tile.className = "tile t-tile";
 
-      const meta = document.createElement('div');
-      meta.className = 'tile-meta';
-      meta.innerHTML = `<span>${escapeHtml(t.role || '')}</span><span>${escapeHtml(t.weight || '')} ${escapeHtml(t.style === 'italic' ? 'italic' : '')}</span>`;
+      const meta = document.createElement("div");
+      meta.className = "tile-meta";
+      meta.innerHTML = `<span>${escapeHtml(t.role || "")}</span><span>${escapeHtml(t.weight || "")} ${escapeHtml(t.style === "italic" ? "italic" : "")}</span>`;
       tile.appendChild(meta);
 
-      const specimen = document.createElement('div');
-      specimen.className = 't-specimen';
-      specimen.textContent = 'Aa';
+      const specimen = document.createElement("div");
+      specimen.className = "t-specimen";
+      specimen.textContent = "Aa";
       specimen.style.fontFamily = fontStack(t);
       specimen.style.fontWeight = String(t.weight || 400);
-      specimen.style.fontStyle = t.style || 'normal';
-      specimen.style.fontSize = '56px';  // Fixed specimen size — compare faces, not scales.
-      specimen.style.letterSpacing = 'normal';
-      specimen.style.textTransform = 'none';
+      specimen.style.fontStyle = t.style || "normal";
+      specimen.style.fontSize = "56px"; // Fixed specimen size — compare faces, not scales.
+      specimen.style.letterSpacing = "normal";
+      specimen.style.textTransform = "none";
       tile.appendChild(specimen);
 
       // The system's actual sample size for this role, shown as small mono meta below.
       if (t.sampleSize) {
-        const scale = document.createElement('div');
-        scale.style.cssText = 'font-family:' + MONO + '; font-size: 10px; color:' + DP.meta + '; margin-top: 2px;';
+        const scale = document.createElement("div");
+        scale.style.cssText = "font-family:" + MONO + "; font-size: 10px; color:" + DP.meta + "; margin-top: 2px;";
         scale.textContent = t.sampleSize;
         tile.appendChild(scale);
       }
 
-      const family = document.createElement('div');
-      family.className = 't-family';
-      family.textContent = t.family || t.name || '';
+      const family = document.createElement("div");
+      family.className = "t-family";
+      family.textContent = t.family || t.name || "";
       tile.appendChild(family);
 
       if (t.purpose) {
-        const p = document.createElement('div');
-        p.className = 't-purpose';
+        const p = document.createElement("div");
+        p.className = "t-purpose";
         p.textContent = t.purpose;
         tile.appendChild(p);
       }
@@ -4355,38 +4950,38 @@ void main() {
   }
 
   function fontStack(t) {
-    const fam = t.family || '';
-    const fb = t.fallback || '';
+    const fam = t.family || "";
+    const fb = t.fallback || "";
     if (fam && /[,\s]/.test(fam) && !fam.includes("'") && !fam.includes('"')) {
       return `"${fam}", ${fb}`;
     }
-    return fam && fb ? `"${fam}", ${fb}` : (fam || fb);
+    return fam && fb ? `"${fam}", ${fb}` : fam || fb;
   }
 
   function renderRadiiTile(body, radii) {
-    const tile = document.createElement('div');
-    tile.className = 'tile';
-    const meta = document.createElement('div');
-    meta.className = 'tile-meta';
+    const tile = document.createElement("div");
+    tile.className = "tile";
+    const meta = document.createElement("div");
+    meta.className = "tile-meta";
     meta.innerHTML = `<span class="name">Corner Radii</span><span>${radii.length}</span>`;
     tile.appendChild(meta);
 
-    const strip = document.createElement('div');
-    strip.className = 'r-strip';
+    const strip = document.createElement("div");
+    strip.className = "r-strip";
     for (const r of radii) {
-      const item = document.createElement('div');
-      item.className = 'r-item';
-      const s = document.createElement('div');
-      s.className = 'r-sample';
-      s.style.borderRadius = r.value || '0';
+      const item = document.createElement("div");
+      item.className = "r-item";
+      const s = document.createElement("div");
+      s.className = "r-sample";
+      s.style.borderRadius = r.value || "0";
       item.appendChild(s);
-      const lbl = document.createElement('div');
-      lbl.className = 'r-label';
-      lbl.textContent = r.name || '';
+      const lbl = document.createElement("div");
+      lbl.className = "r-label";
+      lbl.textContent = r.name || "";
       item.appendChild(lbl);
-      const val = document.createElement('div');
-      val.className = 'r-val';
-      val.textContent = r.value || '';
+      const val = document.createElement("div");
+      val.className = "r-val";
+      val.textContent = r.value || "";
       item.appendChild(val);
       strip.appendChild(item);
     }
@@ -4396,27 +4991,27 @@ void main() {
 
   function renderShadowTiles(body, shadows) {
     for (const sh of shadows) {
-      const tile = document.createElement('div');
-      tile.className = 'tile s-tile';
+      const tile = document.createElement("div");
+      tile.className = "tile s-tile";
 
-      const meta = document.createElement('div');
-      meta.className = 'tile-meta';
-      meta.innerHTML = `<span class="name">${escapeHtml(sh.name || 'Shadow')}</span><span>Elevation</span>`;
+      const meta = document.createElement("div");
+      meta.className = "tile-meta";
+      meta.innerHTML = `<span class="name">${escapeHtml(sh.name || "Shadow")}</span><span>Elevation</span>`;
       tile.appendChild(meta);
 
-      const surface = document.createElement('div');
-      surface.className = 's-surface';
-      surface.style.boxShadow = sh.value || 'none';
+      const surface = document.createElement("div");
+      surface.className = "s-surface";
+      surface.style.boxShadow = sh.value || "none";
       tile.appendChild(surface);
 
-      const val = document.createElement('div');
-      val.className = 's-value';
-      val.textContent = sh.value || '';
+      const val = document.createElement("div");
+      val.className = "s-value";
+      val.textContent = sh.value || "";
       tile.appendChild(val);
 
       if (sh.purpose) {
-        const p = document.createElement('div');
-        p.className = 's-purpose';
+        const p = document.createElement("div");
+        p.className = "s-purpose";
         p.textContent = sh.purpose;
         tile.appendChild(p);
       }
@@ -4431,29 +5026,28 @@ void main() {
     const groups = groupByKind(components);
 
     for (const group of groups) {
-      const tile = document.createElement('div');
-      tile.className = 'tile cmp-tile';
+      const tile = document.createElement("div");
+      tile.className = "tile cmp-tile";
 
-      const meta = document.createElement('div');
-      meta.className = 'tile-meta';
-      const groupTitle = group.length === 1
-        ? (group[0].name || group[0].kind || 'Component')
-        : titleForKind(group[0].kind, group.length);
-      meta.innerHTML = `<span class="name">${escapeHtml(groupTitle)}</span><span class="cmp-kind">${escapeHtml(group[0].kind || '')}</span>`;
+      const meta = document.createElement("div");
+      meta.className = "tile-meta";
+      const groupTitle =
+        group.length === 1 ? group[0].name || group[0].kind || "Component" : titleForKind(group[0].kind, group.length);
+      meta.innerHTML = `<span class="name">${escapeHtml(groupTitle)}</span><span class="cmp-kind">${escapeHtml(group[0].kind || "")}</span>`;
       tile.appendChild(meta);
 
       for (const c of group) {
-        const stage = document.createElement('div');
-        stage.className = 'cmp-stage';
+        const stage = document.createElement("div");
+        stage.className = "cmp-stage";
 
         // Render the component in its own shadow root so its CSS can't bleed.
-        const host = document.createElement('div');
-        const sub = host.attachShadow({ mode: 'open' });
-        const style = document.createElement('style');
-        style.textContent = c.css || '';
+        const host = document.createElement("div");
+        const sub = host.attachShadow({ mode: "open" });
+        const style = document.createElement("style");
+        style.textContent = c.css || "";
         sub.appendChild(style);
-        const container = document.createElement('div');
-        container.innerHTML = c.html || '';
+        const container = document.createElement("div");
+        container.innerHTML = c.html || "";
         sub.appendChild(container);
         stage.appendChild(host);
 
@@ -4461,9 +5055,9 @@ void main() {
         // or when the component's display name differs from its kind.
         const showSublabel = group.length > 1;
         if (showSublabel) {
-          const lbl = document.createElement('div');
-          lbl.className = 'cmp-sublabel';
-          lbl.textContent = c.name || '';
+          const lbl = document.createElement("div");
+          lbl.className = "cmp-sublabel";
+          lbl.textContent = c.name || "";
           stage.appendChild(lbl);
         }
         tile.appendChild(stage);
@@ -4472,8 +5066,8 @@ void main() {
       // Single shared description if all items carry the same one; otherwise
       // skip — per-item descriptions clutter a grouped tile.
       if (group.length === 1 && group[0].description) {
-        const d = document.createElement('div');
-        d.className = 'c-desc';
+        const d = document.createElement("div");
+        d.className = "c-desc";
         d.textContent = group[0].description;
         tile.appendChild(d);
       }
@@ -4496,55 +5090,55 @@ void main() {
 
   function titleForKind(kind, count) {
     const labels = {
-      button: 'Buttons',
-      input: 'Inputs',
-      nav: 'Navigation',
-      chip: 'Chips',
-      card: 'Cards',
-      custom: 'Components',
+      button: "Buttons",
+      input: "Inputs",
+      nav: "Navigation",
+      chip: "Chips",
+      card: "Cards",
+      custom: "Components",
     };
-    return labels[kind] || (kind ? kind.charAt(0).toUpperCase() + kind.slice(1) + 's' : 'Components');
+    return labels[kind] || (kind ? kind.charAt(0).toUpperCase() + kind.slice(1) + "s" : "Components");
   }
 
   // --- Collapsibles ---------------------------------------------------------
 
   function buildCollapsible(key, label, count) {
-    const wrap = document.createElement('div');
-    wrap.className = 'coll';
-    wrap.setAttribute('data-open', designState.collapsed[key] ? 'false' : 'true');
+    const wrap = document.createElement("div");
+    wrap.className = "coll";
+    wrap.setAttribute("data-open", designState.collapsed[key] ? "false" : "true");
 
-    const head = document.createElement('button');
-    head.className = 'coll-head';
+    const head = document.createElement("button");
+    head.className = "coll-head";
     head.innerHTML = `
       <svg class="coll-chev" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5L8 6 4 9.5"/></svg>
       <span>${escapeHtml(label)}</span>
-      ${count != null ? `<span class="coll-count">${escapeHtml(String(count))}</span>` : ''}
+      ${count != null ? `<span class="coll-count">${escapeHtml(String(count))}</span>` : ""}
     `;
-    head.addEventListener('click', () => {
+    head.addEventListener("click", () => {
       designState.collapsed[key] = !designState.collapsed[key];
       saveDesignPrefs();
       renderDesignBody();
     });
     wrap.appendChild(head);
 
-    const body = document.createElement('div');
-    body.className = 'coll-body';
+    const body = document.createElement("div");
+    body.className = "coll-body";
     wrap.appendChild(body);
     return { wrap, body };
   }
 
   function renderRulesCollapsible(rules) {
-    const { wrap, body } = buildCollapsible('rules', 'Named Rules', rules.length);
+    const { wrap, body } = buildCollapsible("rules", "Named Rules", rules.length);
     for (const r of rules) {
-      const card = document.createElement('div');
-      card.className = 'rule-card';
-      const name = document.createElement('div');
-      name.className = 'name';
-      name.innerHTML = `${escapeHtml(r.name)}${r.section ? `<span class="section">${escapeHtml(r.section)}</span>` : ''}`;
+      const card = document.createElement("div");
+      card.className = "rule-card";
+      const name = document.createElement("div");
+      name.className = "name";
+      name.innerHTML = `${escapeHtml(r.name)}${r.section ? `<span class="section">${escapeHtml(r.section)}</span>` : ""}`;
       card.appendChild(name);
-      const b = document.createElement('div');
-      b.className = 'body';
-      b.textContent = r.body || '';
+      const b = document.createElement("div");
+      b.className = "body";
+      b.textContent = r.body || "";
       card.appendChild(b);
       body.appendChild(card);
     }
@@ -4553,18 +5147,18 @@ void main() {
 
   function renderDosDontsCollapsible(n) {
     const total = (n.dos?.length || 0) + (n.donts?.length || 0);
-    const { wrap, body } = buildCollapsible('dosdonts', "Do's and Don'ts", total);
-    const grid = document.createElement('div');
-    grid.className = 'dos';
+    const { wrap, body } = buildCollapsible("dosdonts", "Do's and Don'ts", total);
+    const grid = document.createElement("div");
+    grid.className = "dos";
     for (const d of n.dos || []) {
-      const el = document.createElement('div');
-      el.className = 'do';
+      const el = document.createElement("div");
+      el.className = "do";
       el.innerHTML = inlineMd(d);
       grid.appendChild(el);
     }
     for (const d of n.donts || []) {
-      const el = document.createElement('div');
-      el.className = 'dont';
+      const el = document.createElement("div");
+      el.className = "dont";
       el.innerHTML = inlineMd(d);
       grid.appendChild(el);
     }
@@ -4573,23 +5167,23 @@ void main() {
   }
 
   function renderOverviewCollapsible(n) {
-    const { wrap, body } = buildCollapsible('overview', 'Overview', null);
-    const ov = document.createElement('div');
-    ov.className = 'overview-body';
+    const { wrap, body } = buildCollapsible("overview", "Overview", null);
+    const ov = document.createElement("div");
+    ov.className = "overview-body";
     if (n.northStar) {
-      const star = document.createElement('span');
-      star.className = 'north-star';
-      star.textContent = '“' + n.northStar + '”';
+      const star = document.createElement("span");
+      star.className = "north-star";
+      star.textContent = "“" + n.northStar + "”";
       ov.appendChild(star);
     }
     if (n.overview) {
-      const p = document.createElement('p');
+      const p = document.createElement("p");
       p.innerHTML = inlineMd(n.overview);
       ov.appendChild(p);
     }
     if (n.keyCharacteristics?.length) {
-      const ul = document.createElement('ul');
-      ul.innerHTML = n.keyCharacteristics.map((k) => `<li>${inlineMd(k)}</li>`).join('');
+      const ul = document.createElement("ul");
+      ul.innerHTML = n.keyCharacteristics.map((k) => `<li>${inlineMd(k)}</li>`).join("");
       ov.appendChild(ul);
     }
     body.appendChild(ov);
@@ -4599,14 +5193,14 @@ void main() {
   function cssSafe(v) {
     // Strip anything outside valid CSS value chars to prevent injection via
     // DESIGN.json values rendered into inline style strings.
-    return String(v).replace(/[<>"'`\n]/g, '');
+    return String(v).replace(/[<>"'`\n]/g, "");
   }
 
   // --- Raw tab: minimal markdown renderer (subset) --------------------------
 
   function renderRawTab(body, md) {
-    const wrap = document.createElement('div');
-    wrap.className = 'md';
+    const wrap = document.createElement("div");
+    wrap.className = "md";
     wrap.innerHTML = renderMarkdown(md);
     body.appendChild(wrap);
   }
@@ -4618,12 +5212,12 @@ void main() {
     let inCode = false;
     let codeBuf = [];
     let paraBuf = [];
-    let listBuf = [];  // array of { indent, html }
+    let listBuf = []; // array of { indent, html }
     let listType = null; // 'ul' | 'ol'
 
     const flushPara = () => {
       if (paraBuf.length) {
-        out.push(`<p>${inlineMd(paraBuf.join(' '))}</p>`);
+        out.push(`<p>${inlineMd(paraBuf.join(" "))}</p>`);
         paraBuf = [];
       }
     };
@@ -4634,7 +5228,10 @@ void main() {
         listType = null;
       }
     };
-    const flushAll = () => { flushPara(); flushList(); };
+    const flushAll = () => {
+      flushPara();
+      flushList();
+    };
 
     for (; i < lines.length; i++) {
       const line = lines[i];
@@ -4642,19 +5239,32 @@ void main() {
       // Code fence
       const fence = line.match(/^```(\w*)\s*$/);
       if (fence) {
-        if (!inCode) { flushAll(); inCode = true; codeBuf = []; }
-        else {
-          out.push(`<pre><code>${escapeHtml(codeBuf.join('\n'))}</code></pre>`);
+        if (!inCode) {
+          flushAll();
+          inCode = true;
+          codeBuf = [];
+        } else {
+          out.push(`<pre><code>${escapeHtml(codeBuf.join("\n"))}</code></pre>`);
           inCode = false;
         }
         continue;
       }
-      if (inCode) { codeBuf.push(line); continue; }
+      if (inCode) {
+        codeBuf.push(line);
+        continue;
+      }
 
-      if (line.trim() === '') { flushAll(); continue; }
+      if (line.trim() === "") {
+        flushAll();
+        continue;
+      }
 
       const hr = line.match(/^\s*(?:---+|\*\*\*+)\s*$/);
-      if (hr) { flushAll(); out.push('<hr />'); continue; }
+      if (hr) {
+        flushAll();
+        out.push("<hr />");
+        continue;
+      }
 
       const heading = line.match(/^(#{1,4})\s+(.+)$/);
       if (heading) {
@@ -4670,7 +5280,7 @@ void main() {
         flushPara();
         const m = bullet || ordered;
         const indent = Math.floor(m[1].length / 2);
-        const t = bullet ? 'ul' : 'ol';
+        const t = bullet ? "ul" : "ol";
         if (listType && listType !== t) flushList();
         listType = t;
         listBuf.push({ indent, html: inlineMd(m[3]) });
@@ -4681,9 +5291,9 @@ void main() {
     }
     flushAll();
     if (inCode && codeBuf.length) {
-      out.push(`<pre><code>${escapeHtml(codeBuf.join('\n'))}</code></pre>`);
+      out.push(`<pre><code>${escapeHtml(codeBuf.join("\n"))}</code></pre>`);
     }
-    return out.join('\n');
+    return out.join("\n");
   }
 
   function buildListHtml(items, type) {
@@ -4706,11 +5316,14 @@ void main() {
     // Code spans
     s = s.replace(/`([^`]+)`/g, (_, code) => `<code>${code}</code>`);
     // Links [text](url)
-    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, t, u) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${t}</a>`);
+    s = s.replace(
+      /\[([^\]]+)\]\(([^)]+)\)/g,
+      (_, t, u) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${t}</a>`,
+    );
     // Bold
-    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
     // Italic (only single *…*, skip if inside bold already handled)
-    s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+    s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
     return s;
   }
 
@@ -4720,19 +5333,21 @@ void main() {
 
   function escapeHtml(s) {
     return String(s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   function copyToClipboard(text) {
     if (!text) return;
     try {
       navigator.clipboard.writeText(text);
-      showToast('Copied: ' + text);
-    } catch { /* ignore */ }
+      showToast("Copied: " + text);
+    } catch {
+      /* ignore */
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -4740,7 +5355,9 @@ void main() {
   // ---------------------------------------------------------------------------
 
   function init() {
-    try { history.scrollRestoration = 'manual'; } catch {}
+    try {
+      history.scrollRestoration = "manual";
+    } catch {}
     initHighlight();
     initAnnotOverlay();
     initBar();
@@ -4748,33 +5365,41 @@ void main() {
     initParamsPanel();
     initGlobalBar();
     initDesignPanel();
-    document.addEventListener('mousemove', handleMouseMove, true);
-    document.addEventListener('click', handleClick, true);
-    document.addEventListener('keydown', handleKeyDown, true);
+    document.addEventListener("mousemove", handleMouseMove, true);
+    document.addEventListener("click", handleClick, true);
+    document.addEventListener("keydown", handleKeyDown, true);
     connectSSE();
 
     // Check for an active session to resume (variant wrapper already in DOM after HMR)
     if (!resumeSession()) {
-      console.log('[impeccable] Live variant mode ready. Hover over elements to pick one.');
+      console.log("[impeccable] Live variant mode ready. Hover over elements to pick one.");
       // SvelteKit (and any framework that hydrates after HTML parse) may add
       // the variant wrapper AFTER init runs. Watch for it and retry resume
       // once it appears. Disconnect on first hit.
       const scout = new MutationObserver(() => {
-        const wrapper = document.querySelector('[data-impeccable-variants]');
+        const wrapper = document.querySelector("[data-impeccable-variants]");
         if (!wrapper) return;
         scout.disconnect();
         if (resumeSession()) {
-          console.log('[impeccable] Resumed deferred session ' + currentSessionId + ' (post-hydration).');
+          console.log("[impeccable] Resumed deferred session " + currentSessionId + " (post-hydration).");
         }
       });
       scout.observe(document.body, { childList: true, subtree: true });
     } else {
-      console.log('[impeccable] Resumed active variant session ' + currentSessionId + ' (' + arrivedVariants + '/' + expectedVariants + ' variants).');
+      console.log(
+        "[impeccable] Resumed active variant session " +
+          currentSessionId +
+          " (" +
+          arrivedVariants +
+          "/" +
+          expectedVariants +
+          " variants).",
+      );
     }
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
   } else {
     init();
   }

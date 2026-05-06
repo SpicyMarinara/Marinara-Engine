@@ -1,5 +1,6 @@
 node_modules
 packages/*/node_modules
+.pnpm-store
 .git
 **/*.tsbuildinfo
 packages/*/dist

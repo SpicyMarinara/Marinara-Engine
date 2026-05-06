@@ -3,7 +3,9 @@
 //   - Drop old choice_blocks (section-bound)
 //   - Create new choice_blocks with preset_id, variable_name, question
 // ──────────────────────────────────────────────
-const { createClient } = require(require("path").join(__dirname, "packages", "server", "node_modules", "@libsql", "client"));
+const { createClient } = require(
+  require("path").join(__dirname, "packages", "server", "node_modules", "@libsql", "client"),
+);
 const path = require("path");
 
 const DB_PATH = path.join(__dirname, "packages", "server", "data", "marinara-engine.db");

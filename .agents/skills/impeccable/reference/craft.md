@@ -47,6 +47,7 @@ Based on the design brief's "Recommended References" section, consult the releva
 - [typography.md](typography.md) for type hierarchy
 
 Then add references based on the brief's needs:
+
 - Complex interactions or forms? Consult [interaction-design.md](interaction-design.md)
 - Animation or transitions? Consult [motion-design.md](motion-design.md)
 - Color-heavy or themed? Consult [color-and-contrast.md](color-and-contrast.md)
@@ -183,6 +184,7 @@ The exit bar is not "it works." It is: the rendered result looks intentional at 
 ## Step 7: Present
 
 Present the result to the user:
+
 - Show the feature in its primary state
 - Summarize the browser/viewports checked and the most important fixes made after inspection
 - Walk through the key states (empty, error, responsive)

@@ -10,8 +10,10 @@
 // ──────────────────────────────────────────────
 import { useState, useEffect, useCallback, useMemo, useRef, type DragEvent as ReactDragEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   useLorebook,
+  useLorebooks,
   useUpdateLorebook,
   useLorebookEntries,
   useCreateLorebookEntry,
@@ -21,6 +23,7 @@ import {
   useCreateLorebookFolder,
   useUpdateLorebookEntry,
   useReorderLorebookFolders,
+  useTransferLorebookEntries,
   lorebookKeys,
 } from "../../hooks/use-lorebooks";
 import { useCharacters, usePersonas } from "../../hooks/use-characters";
@@ -48,6 +51,9 @@ import {
   Sparkles,
   Loader2,
   Check,
+  CheckSquare2,
+  Copy,
+  MoveRight,
   Tag,
   Wand2,
   FolderPlus,
@@ -121,6 +127,7 @@ export function LorebookEditor() {
   const lorebookId = useUIStore((s) => s.lorebookDetailId);
   const closeDetail = useUIStore((s) => s.closeLorebookDetail);
   const { data: rawLorebook, isLoading } = useLorebook(lorebookId);
+  const { data: rawLorebooks } = useLorebooks();
   const { data: rawEntries } = useLorebookEntries(lorebookId);
   const { data: rawFolders } = useLorebookFolders(lorebookId);
   const { data: rawCharacters } = useCharacters();
@@ -132,8 +139,10 @@ export function LorebookEditor() {
   const reorderEntries = useReorderLorebookEntries();
   const createFolder = useCreateLorebookFolder();
   const reorderFolders = useReorderLorebookFolders();
+  const transferEntries = useTransferLorebookEntries();
 
   const lorebook = rawLorebook as Lorebook | undefined;
+  const lorebooks = useMemo(() => (rawLorebooks ?? []) as Lorebook[], [rawLorebooks]);
   const entries = useMemo(() => (rawEntries ?? []) as LorebookEntry[], [rawEntries]);
   const folders = useMemo(() => (rawFolders ?? []) as LorebookFolder[], [rawFolders]);
   const characters = useMemo(() => {
@@ -176,6 +185,9 @@ export function LorebookEditor() {
   const [draggingEntryIdx, setDraggingEntryIdx] = useState<number | null>(null);
   const [entryDragReadyIdx, setEntryDragReadyIdx] = useState<number | null>(null);
   const [entryDropIdx, setEntryDropIdx] = useState<number | null>(null);
+  const [entrySelectionMode, setEntrySelectionMode] = useState(false);
+  const [selectedEntryIds, setSelectedEntryIds] = useState<Set<string>>(new Set());
+  const [entryTransferTargetId, setEntryTransferTargetId] = useState("");
 
   // ── Folder UI state ──
   // Collapse state: persisted in localStorage, keyed per-lorebook. Loaded
@@ -185,6 +197,8 @@ export function LorebookEditor() {
   // When the user opens a different lorebook, reload its collapse state.
   useEffect(() => {
     setCollapsedFolderIds(readCollapsedFolderIds(lorebookId));
+    setEntrySelectionMode(false);
+    setSelectedEntryIds(new Set());
   }, [lorebookId]);
   const toggleFolderCollapsed = useCallback(
     (folderId: string) => {
@@ -284,6 +298,27 @@ export function LorebookEditor() {
   // no search — any other state would put entries out of their containers
   // (e.g. "Name A→Z" interleaves entries from different folders).
   const showFolderGrouping = entrySort === "order" && entrySearch.trim().length === 0;
+  const transferTargetLorebooks = useMemo(
+    () => lorebooks.filter((book) => book.id !== lorebookId).sort((a, b) => a.name.localeCompare(b.name)),
+    [lorebooks, lorebookId],
+  );
+  const visibleEntryIds = useMemo(
+    () => (showFolderGrouping ? entries : filteredEntries).map((entry) => entry.id),
+    [entries, filteredEntries, showFolderGrouping],
+  );
+
+  useEffect(() => {
+    if (entryTransferTargetId && transferTargetLorebooks.some((book) => book.id === entryTransferTargetId)) return;
+    setEntryTransferTargetId(transferTargetLorebooks[0]?.id ?? "");
+  }, [entryTransferTargetId, transferTargetLorebooks]);
+
+  useEffect(() => {
+    const validEntryIds = new Set(entries.map((entry) => entry.id));
+    setSelectedEntryIds((current) => {
+      const next = new Set(Array.from(current).filter((id) => validEntryIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [entries]);
 
   /** Entries for a given container (null = root, string = folder.id), sorted by Order. */
   const entriesByContainer = useMemo(() => {
@@ -306,6 +341,62 @@ export function LorebookEditor() {
 
   // ── Handlers ──
   const markLorebookDirty = useCallback(() => setLorebookDirty(true), []);
+
+  const exitEntrySelectionMode = useCallback(() => {
+    setEntrySelectionMode(false);
+    setSelectedEntryIds(new Set());
+  }, []);
+
+  const toggleEntrySelection = useCallback((entryId: string) => {
+    setSelectedEntryIds((current) => {
+      const next = new Set(current);
+      if (next.has(entryId)) next.delete(entryId);
+      else next.add(entryId);
+      return next;
+    });
+  }, []);
+
+  const handleTransferEntries = useCallback(
+    async (operation: "copy" | "move") => {
+      if (!lorebookId || !entryTransferTargetId || selectedEntryIds.size === 0) return;
+      const targetLorebookName =
+        transferTargetLorebooks.find((book) => book.id === entryTransferTargetId)?.name ?? "the selected lorebook";
+
+      if (
+        operation === "move" &&
+        !(await showConfirmDialog({
+          title: "Move Lorebook Entries",
+          message: `Move ${selectedEntryIds.size} selected ${selectedEntryIds.size === 1 ? "entry" : "entries"} to "${targetLorebookName}"? They will be removed from this lorebook.`,
+          confirmLabel: "Move",
+        }))
+      ) {
+        return;
+      }
+
+      try {
+        const result = await transferEntries.mutateAsync({
+          sourceLorebookId: lorebookId,
+          targetLorebookId: entryTransferTargetId,
+          entryIds: Array.from(selectedEntryIds),
+          operation,
+        });
+        toast.success(
+          `${operation === "move" ? "Moved" : "Copied"} ${result.transferred} ${result.transferred === 1 ? "entry" : "entries"} to "${targetLorebookName}".`,
+        );
+        exitEntrySelectionMode();
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : `Failed to ${operation} entries.`);
+      }
+    },
+    [
+      entryTransferTargetId,
+      exitEntrySelectionMode,
+      lorebookId,
+      selectedEntryIds,
+      transferEntries,
+      transferTargetLorebooks,
+    ],
+  );
 
   // Toggle the inline drawer for an entry. Single-expand keeps the page
   // tidy; users can collapse the open one and click another to jump.
@@ -865,7 +956,7 @@ export function LorebookEditor() {
                 <div>
                   <label className="mb-1.5 flex items-center gap-1 text-xs font-medium">
                     Linked Character{" "}
-                    <HelpTooltip text="When linked to a character, this lorebook will only activate in chats that include that character." />
+                    <HelpTooltip text="When linked to a character, this lorebook auto-activates in any chat that includes that character. For multi-character or chat-specific scope, leave this empty and attach the lorebook per-chat via the chat settings drawer's Lorebooks section instead." />
                   </label>
                   <div className="flex items-center gap-2">
                     <select
@@ -904,7 +995,7 @@ export function LorebookEditor() {
                 <div>
                   <label className="mb-1.5 flex items-center gap-1 text-xs font-medium">
                     Linked Persona{" "}
-                    <HelpTooltip text="When linked to a persona, this lorebook will only activate in chats that use that persona." />
+                    <HelpTooltip text="When linked to a persona, this lorebook auto-activates in any chat that uses that persona. For chat-specific scope, leave this empty and attach the lorebook per-chat via the chat settings drawer's Lorebooks section instead." />
                   </label>
                   <div className="flex items-center gap-2">
                     <select
@@ -1077,6 +1168,22 @@ export function LorebookEditor() {
                     </select>
                   </div>
                   <button
+                    onClick={() => {
+                      if (entrySelectionMode) exitEntrySelectionMode();
+                      else setEntrySelectionMode(true);
+                    }}
+                    className={cn(
+                      "flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-medium ring-1 transition-colors",
+                      entrySelectionMode
+                        ? "bg-amber-400/15 text-amber-400 ring-amber-400/30"
+                        : "bg-[var(--secondary)] ring-[var(--border)] hover:bg-[var(--accent)]",
+                    )}
+                    title="Select entries to copy or move"
+                  >
+                    <CheckSquare2 size="0.8125rem" />
+                    Select
+                  </button>
+                  <button
                     onClick={handleAddFolder}
                     className="flex shrink-0 items-center gap-1.5 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-xs font-medium ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--accent)]"
                     title="Create a new folder to group entries"
@@ -1092,6 +1199,74 @@ export function LorebookEditor() {
                     Add Entry
                   </button>
                 </div>
+
+                {entrySelectionMode && (
+                  <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--secondary)]/60 px-3 py-2">
+                    <span className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">
+                      {selectedEntryIds.size} selected
+                    </span>
+                    <button
+                      onClick={() => setSelectedEntryIds(new Set(visibleEntryIds))}
+                      disabled={visibleEntryIds.length === 0}
+                      className="rounded-lg px-2.5 py-1 text-[0.625rem] font-medium text-amber-400 transition-colors hover:bg-[var(--accent)] disabled:opacity-40"
+                    >
+                      Select all
+                    </button>
+                    <button
+                      onClick={() => setSelectedEntryIds(new Set())}
+                      disabled={selectedEntryIds.size === 0}
+                      className="rounded-lg px-2.5 py-1 text-[0.625rem] font-medium text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] disabled:opacity-40"
+                    >
+                      Clear
+                    </button>
+                    <select
+                      value={entryTransferTargetId}
+                      onChange={(e) => setEntryTransferTargetId(e.target.value)}
+                      disabled={transferTargetLorebooks.length === 0}
+                      className="min-h-8 min-w-[12rem] flex-1 rounded-lg bg-[var(--secondary)] px-2.5 py-1.5 text-xs ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)] disabled:opacity-50"
+                    >
+                      {transferTargetLorebooks.length === 0 ? (
+                        <option value="">Create another lorebook first</option>
+                      ) : (
+                        transferTargetLorebooks.map((book) => (
+                          <option key={book.id} value={book.id}>
+                            {book.name}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                    <button
+                      onClick={() => void handleTransferEntries("copy")}
+                      disabled={selectedEntryIds.size === 0 || !entryTransferTargetId || transferEntries.isPending}
+                      className="inline-flex items-center gap-1 rounded-lg bg-amber-500 px-2.5 py-1.5 text-[0.625rem] font-medium text-white transition-all hover:opacity-90 disabled:opacity-40"
+                    >
+                      {transferEntries.isPending ? (
+                        <Loader2 size="0.6875rem" className="animate-spin" />
+                      ) : (
+                        <Copy size="0.6875rem" />
+                      )}
+                      Copy
+                    </button>
+                    <button
+                      onClick={() => void handleTransferEntries("move")}
+                      disabled={selectedEntryIds.size === 0 || !entryTransferTargetId || transferEntries.isPending}
+                      className="inline-flex items-center gap-1 rounded-lg bg-[var(--destructive)]/12 px-2.5 py-1.5 text-[0.625rem] font-medium text-[var(--destructive)] transition-all hover:bg-[var(--destructive)]/20 disabled:opacity-40"
+                    >
+                      {transferEntries.isPending ? (
+                        <Loader2 size="0.6875rem" className="animate-spin" />
+                      ) : (
+                        <MoveRight size="0.6875rem" />
+                      )}
+                      Move
+                    </button>
+                    <button
+                      onClick={exitEntrySelectionMode}
+                      className="rounded-lg px-2.5 py-1.5 text-[0.625rem] font-medium text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+                    >
+                      Done
+                    </button>
+                  </div>
+                )}
 
                 {/* Total tokens summary */}
                 {entries.length > 0 && (
@@ -1257,6 +1432,9 @@ export function LorebookEditor() {
                                             commitEntryDrop(e);
                                           }}
                                           onDragEnd={resetEntryDragState}
+                                          selectionMode={entrySelectionMode}
+                                          isSelected={selectedEntryIds.has(entry.id)}
+                                          onToggleSelected={() => toggleEntrySelection(entry.id)}
                                         />
                                         {showDropAfter && <div className="mx-2 mt-1 h-0.5 rounded-full bg-amber-400" />}
                                       </div>
@@ -1356,6 +1534,9 @@ export function LorebookEditor() {
                                 commitEntryDrop(e);
                               }}
                               onDragEnd={resetEntryDragState}
+                              selectionMode={entrySelectionMode}
+                              isSelected={selectedEntryIds.has(entry.id)}
+                              onToggleSelected={() => toggleEntrySelection(entry.id)}
                             />
                             {showDropAfter && <div className="mx-2 mt-1 h-0.5 rounded-full bg-amber-400" />}
                           </div>
@@ -1387,6 +1568,9 @@ export function LorebookEditor() {
                         onDragOver={() => undefined}
                         onDrop={() => undefined}
                         onDragEnd={() => undefined}
+                        selectionMode={entrySelectionMode}
+                        isSelected={selectedEntryIds.has(entry.id)}
+                        onToggleSelected={() => toggleEntrySelection(entry.id)}
                       />
                     ))}
                   </div>

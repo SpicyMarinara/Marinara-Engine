@@ -24,7 +24,7 @@ When you start a new Conversation chat, a Discord-style **quick-setup modal** ap
 The quick setup has these controls:
 
 - **Connection** (required) — which LLM provider/model the chat sends messages to.
-- **Persona** (optional) — the character *you* play, if you want to be more than a generic user.
+- **Persona** (optional) — the character _you_ play, if you want to be more than a generic user.
 - **Character(s)** — tap to add one or more characters from your library. One = 1:1 chat. More than one = group chat. The chat name auto-generates from the picked characters' names unless you've renamed it.
 - **Autonomous messages toggle** — defaults to ON. When enabled, characters can message you on their own when you're idle (see [Autonomous messages](#autonomous-messages) below).
 - **Generate schedules toggle** — defaults to OFF. When enabled and you click Start chatting, the engine runs the Schedule Planner agent to generate weekly availability grids for each character.
@@ -55,6 +55,20 @@ A single toggle in the chat settings drawer.
 ### Character exchanges
 
 A toggle in the chat settings drawer (visible only when you have multiple characters) that lets characters chat with **each other** rather than only with you. With this on, the response orchestrator can decide a character should address another character. With it off, all responses are directed at you.
+
+## Impersonating your persona
+
+Use `/impersonate [direction]` when you want Marinara to draft a message as **you** instead of as a character. The model reads your selected persona, recent chat context, and the optional direction text, then writes a user-side reply you can keep, edit, or swipe like other generated text.
+
+The chat settings drawer has an **Impersonate** section with global defaults for this workflow:
+
+- **Prompt Template** — overrides the built-in impersonation instruction. Leave it empty to use the chat-specific prompt, or the built-in default if the chat has none.
+- **Preset** — optionally route roleplay-style impersonation through a specific prompt preset. Conversation Mode falls back to the chat default because it does not use prompt presets.
+- **Connection** — optionally send impersonation calls to a different model, such as a cheaper or faster connection.
+- **Quick button** — shows a one-click impersonate button in the input bar.
+- **Skip agents** — when enabled, skips agents during impersonation so drafting stays fast and does not mutate trackers or world state.
+
+For per-chat prompt tuning, use `/impersonate_prompt "your prompt"` or `/impersonate_prompt reset`.
 
 ## Conversation-specific features
 

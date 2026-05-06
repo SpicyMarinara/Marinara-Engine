@@ -31,7 +31,7 @@ COPY packages/server/package.json packages/server/
 COPY packages/client/package.json packages/client/
 
 # Install all dependencies (including dev for building)
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+RUN --mount=type=cache,target=/app/.pnpm-store \
     pnpm install --frozen-lockfile
 
 # Copy source code
@@ -63,7 +63,7 @@ COPY packages/server/package.json packages/server/
 COPY packages/client/package.json packages/client/
 
 # Install production deps only, then strip non-core native modules.
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+RUN --mount=type=cache,target=/app/.pnpm-store \
     pnpm install --frozen-lockfile --prod && \
     # ── Remove onnxruntime (native + WASM) ──
     rm -rf /app/node_modules/.pnpm/onnxruntime-node@* \
@@ -109,6 +109,7 @@ COPY packages/client/package.json packages/client/
 COPY --from=builder /app/packages/shared/dist packages/shared/dist
 COPY --from=builder /app/packages/server/dist packages/server/dist
 COPY --from=builder /app/packages/client/dist packages/client/dist
+COPY scripts/docker-entrypoint.mjs /usr/local/bin/marinara-docker-entrypoint.mjs
 
 # Ensure data directory exists
 RUN mkdir -p /app/data && \
@@ -120,10 +121,13 @@ ENV DATA_DIR=/app/data
 ENV PORT=7860
 ENV HOST=0.0.0.0
 ENV NODE_ENV=production
+ENV MARINARA_DOCKER_USER=nonroot
+ENV MARINARA_DOCKER_GROUP=nonroot
 
 VOLUME /app/data
 EXPOSE 7860
 
-USER nonroot
+USER root
 
+ENTRYPOINT ["node", "/usr/local/bin/marinara-docker-entrypoint.mjs"]
 CMD ["node", "packages/server/dist/index.js"]

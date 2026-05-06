@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { LOCAL_SIDECAR_CONNECTION_ID, resolveMacros } from "@marinara-engine/shared";
+import { findKnownModel, LOCAL_SIDECAR_CONNECTION_ID, resolveMacros, type APIProvider } from "@marinara-engine/shared";
 import { randomUUID } from "crypto";
 import { createChatsStorage } from "../../services/storage/chats.storage.js";
 import { createConnectionsStorage } from "../../services/storage/connections.storage.js";
@@ -23,12 +23,15 @@ import { wrapContent } from "../../services/prompt/format-engine.js";
 import { fitMessagesToContext, type BaseLLMProvider, type ChatMessage } from "../../services/llm/base-provider.js";
 import { sendSseEvent, startSseReply } from "./sse.js";
 import {
+  appendReadableAttachmentsToContent,
+  extractImageAttachmentDataUrls,
   findLastIndex,
   isMessageHiddenFromAI,
   mergeCustomParameters,
   parseExtra,
   parseStoredGenerationParameters,
   resolveBaseUrl,
+  type PromptAttachment,
 } from "../generate/generate-route-utils.js";
 import { gameStateSnapshots as gameStateSnapshotsTable } from "../../db/schema/index.js";
 import { and, desc, eq } from "drizzle-orm";
@@ -540,14 +543,17 @@ export async function registerDryRunRoute(app: FastifyInstance) {
 
     // Extensions sometimes send presetId as a number or `{id}`; accept these to avoid
     // silently falling back to the chat's default preset.
-    const presetIdOverride = asNonEmptyString(body.presetId);
+    const presetIdOverride =
+      (impersonate ? asNonEmptyString(body.impersonatePresetId) : null) || asNonEmptyString(body.presetId);
     const skipPreset = body.skipPreset === true;
     const presetText = typeof body.presetText === "string" ? body.presetText : "";
 
     // Resolve connection (allow override; otherwise use chat connection)
     // Extensions may send connectionId like presetId (number or `{id}`); accept it.
-    let connId = asNonEmptyString(body.connectionId);
-    if (!connId) connId = (chat.connectionId as string | null) ?? null;
+    const impersonateConnectionOverride =
+      impersonate ? asNonEmptyString(body.impersonateConnectionId) : null;
+    const fallbackConnectionId = asNonEmptyString(body.connectionId) || ((chat.connectionId as string | null) ?? null);
+    let connId = impersonateConnectionOverride || fallbackConnectionId;
 
     if (connId === "random") {
       const pool = await connections.listRandomPool();
@@ -557,7 +563,21 @@ export async function registerDryRunRoute(app: FastifyInstance) {
     }
 
     if (!connId) return reply.status(400).send({ error: "No API connection configured for this chat" });
-    const conn = await connections.getWithKey(connId);
+    let conn = await connections.getWithKey(connId);
+    if (!conn && impersonateConnectionOverride && connId === impersonateConnectionOverride && fallbackConnectionId) {
+      logger.warn(
+        "[dryRun] Impersonate connection override %s was not found; falling back to chat/request connection",
+        impersonateConnectionOverride,
+      );
+      connId = fallbackConnectionId;
+      if (connId === "random") {
+        const pool = await connections.listRandomPool();
+        if (!pool.length) return reply.status(400).send({ error: "No connections are marked for the random pool" });
+        const picked = pool[Math.floor(Math.random() * pool.length)];
+        connId = picked.id;
+      }
+      conn = connId ? await connections.getWithKey(connId) : null;
+    }
     if (!conn) return reply.status(400).send({ error: "API connection not found" });
 
     const baseUrl = resolveBaseUrl(conn);
@@ -565,6 +585,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
 
     const chatMeta = parseExtra(chat.metadata) as Record<string, unknown>;
     const connectionMaxContext = normalizeMaxContext(conn.maxContext);
+    const knownModelContext = normalizeMaxContext(findKnownModel(conn.provider as APIProvider, conn.model)?.context);
 
     // Minimal, safe parameter defaults (still allow chat-level overrides)
     let temperature = 1;
@@ -578,7 +599,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
     let verbosity: "low" | "medium" | "high" | null = null;
     let assistantPrefill = "";
     let customParameters: Record<string, unknown> = {};
-    let effectiveMaxContext: number | undefined = undefined;
+    let effectiveMaxContext = minContextLimit(connectionMaxContext, knownModelContext);
 
     const connectionParams = parseStoredGenerationParameters(conn.defaultParameters);
     const chatParams = parseStoredGenerationParameters(chatMeta.chatParameters);
@@ -596,7 +617,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
       if (typeof params.assistantPrefill === "string") assistantPrefill = params.assistantPrefill;
       customParameters = mergeCustomParameters(customParameters, params.customParameters);
 
-      const paramsMaxContext = params.useMaxContext ? connectionMaxContext : normalizeMaxContext(params.maxContext);
+      const paramsMaxContext = params.useMaxContext ? knownModelContext : normalizeMaxContext(params.maxContext);
       effectiveMaxContext = minContextLimit(effectiveMaxContext, paramsMaxContext);
     };
 
@@ -652,15 +673,15 @@ export async function registerDryRunRoute(app: FastifyInstance) {
     const isGoogleProvider = conn.provider === "google";
     let mappedMessages = chatMessages.map((m: any) => {
       const extra = parseExtra(m.extra);
-      const attachments = extra.attachments as Array<{ type: string; data: string; filename?: string }> | undefined;
-      const images = attachments?.filter((a) => a.type.startsWith("image/")).map((a) => a.data);
+      const attachments = extra.attachments as PromptAttachment[] | undefined;
+      const images = extractImageAttachmentDataUrls(attachments);
       const geminiParts =
         isGoogleProvider && m.role === "assistant" && extra.geminiParts
           ? { providerMetadata: { geminiParts: extra.geminiParts } }
           : {};
       return {
         role: m.role === "narrator" ? ("system" as const) : (m.role as "user" | "assistant" | "system"),
-        content: (m.content as string) ?? "",
+        content: appendReadableAttachmentsToContent((m.content as string) ?? "", attachments),
         ...(images?.length ? { images } : {}),
         ...geminiParts,
       };
@@ -1201,7 +1222,9 @@ export async function registerDryRunRoute(app: FastifyInstance) {
         assistantPrefill = assembled.parameters.assistantPrefill ?? "";
         customParameters = mergeCustomParameters(customParameters, assembled.parameters.customParameters);
 
-        const presetMaxContext = assembled.parameters.useMaxContext ? normalizeMaxContext(conn.maxContext) : undefined;
+        const presetMaxContext = assembled.parameters.useMaxContext
+          ? knownModelContext
+          : normalizeMaxContext(assembled.parameters.maxContext);
         effectiveMaxContext = minContextLimit(effectiveMaxContext, presetMaxContext);
       }
     }
@@ -1300,7 +1323,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
     // ── Impersonate: same instruction block as POST /api/generate (no DB writes) ──
     if (impersonate) {
       const impersonateInstruction = buildImpersonateInstruction({
-        customPrompt: chatMeta.impersonatePrompt,
+        customPrompt: body.impersonatePromptTemplate ?? chatMeta.impersonatePrompt,
         direction: userMessage,
         personaName,
         personaDescription,

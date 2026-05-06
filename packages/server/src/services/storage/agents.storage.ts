@@ -375,6 +375,50 @@ export function createAgentsStorage(db: DB) {
       }
     },
 
+    async setMemories(agentConfigId: string, chatId: string, values: Record<string, unknown>) {
+      const resolvedAgentConfigId = await resolveAgentConfigId(agentConfigId);
+      const entries = Object.entries(values)
+        .filter((entry): entry is [string, unknown] => entry[1] !== undefined)
+        .map(([key, value]) => ({
+          key,
+          value: typeof value === "string" ? value : JSON.stringify(value),
+        }));
+      if (entries.length === 0) return;
+
+      await db.transaction(async (tx) => {
+        const existingRows = await tx
+          .select()
+          .from(agentMemory)
+          .where(and(eq(agentMemory.agentConfigId, resolvedAgentConfigId), eq(agentMemory.chatId, chatId)));
+        const existingByKey = new Map(existingRows.map((row) => [row.key, row]));
+        const timestamp = now();
+        const inserts: (typeof agentMemory.$inferInsert)[] = [];
+
+        for (const entry of entries) {
+          const existing = existingByKey.get(entry.key);
+          if (existing) {
+            await tx
+              .update(agentMemory)
+              .set({ value: entry.value, updatedAt: timestamp })
+              .where(eq(agentMemory.id, existing.id));
+          } else {
+            inserts.push({
+              id: newId(),
+              agentConfigId: resolvedAgentConfigId,
+              chatId,
+              key: entry.key,
+              value: entry.value,
+              updatedAt: timestamp,
+            });
+          }
+        }
+
+        if (inserts.length > 0) {
+          await tx.insert(agentMemory).values(inserts);
+        }
+      });
+    },
+
     /** Delete echo chamber message runs for a specific chat. */
     async clearEchoMessages(chatId: string) {
       await db.delete(agentRuns).where(and(eq(agentRuns.chatId, chatId), eq(agentRuns.resultType, "echo_message")));

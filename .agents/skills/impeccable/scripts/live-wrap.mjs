@@ -11,16 +11,16 @@
  * This replaces 3-4 agent tool calls (grep + read + edit) with a single CLI call.
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
-import { isGeneratedFile } from './is-generated.mjs';
+import fs from "node:fs";
+import path from "node:path";
+import { isGeneratedFile } from "./is-generated.mjs";
 
-const EXTENSIONS = ['.html', '.jsx', '.tsx', '.vue', '.svelte', '.astro'];
+const EXTENSIONS = [".html", ".jsx", ".tsx", ".vue", ".svelte", ".astro"];
 
 export async function wrapCli() {
   const args = process.argv.slice(2);
 
-  if (args.includes('--help') || args.includes('-h')) {
+  if (args.includes("--help") || args.includes("-h")) {
     console.log(`Usage: impeccable wrap [options]
 
 Find an element in source and wrap it in a variant container.
@@ -50,18 +50,21 @@ The agent should insert variant HTML at insertLine.`);
     process.exit(0);
   }
 
-  const id = argVal(args, '--id');
-  const count = parseInt(argVal(args, '--count') || '3');
-  const elementId = argVal(args, '--element-id');
-  const classes = argVal(args, '--classes');
-  const tag = argVal(args, '--tag');
-  const query = argVal(args, '--query');
-  const filePath = argVal(args, '--file');
-  const text = argVal(args, '--text');
+  const id = argVal(args, "--id");
+  const count = parseInt(argVal(args, "--count") || "3");
+  const elementId = argVal(args, "--element-id");
+  const classes = argVal(args, "--classes");
+  const tag = argVal(args, "--tag");
+  const query = argVal(args, "--query");
+  const filePath = argVal(args, "--file");
+  const text = argVal(args, "--text");
 
-  if (!id) { console.error('Missing --id'); process.exit(1); }
+  if (!id) {
+    console.error("Missing --id");
+    process.exit(1);
+  }
   if (!elementId && !classes && !query) {
-    console.error('Need at least one of: --element-id, --classes, --query');
+    console.error("Need at least one of: --element-id, --classes, --query");
     process.exit(1);
   }
 
@@ -77,7 +80,10 @@ The agent should insert variant HTML at insertLine.`);
   if (!targetFile) {
     for (const q of queries) {
       targetFile = findFileWithQuery(q, process.cwd(), genOpts);
-      if (targetFile) { matchedQuery = q; break; }
+      if (targetFile) {
+        matchedQuery = q;
+        break;
+      }
     }
     if (!targetFile) {
       // Nothing in source. Did the element show up in a generated file? That
@@ -89,36 +95,42 @@ The agent should insert variant HTML at insertLine.`);
         if (generatedHit) break;
       }
       if (generatedHit) {
-        console.error(JSON.stringify({
-          error: 'element_not_in_source',
-          fallback: 'agent-driven',
-          generatedMatch: path.relative(process.cwd(), generatedHit),
-          hint: 'Element found only in a generated file. See "Handle fallback" in live.md.',
-        }));
+        console.error(
+          JSON.stringify({
+            error: "element_not_in_source",
+            fallback: "agent-driven",
+            generatedMatch: path.relative(process.cwd(), generatedHit),
+            hint: 'Element found only in a generated file. See "Handle fallback" in live.md.',
+          }),
+        );
       } else {
-        console.error(JSON.stringify({
-          error: 'element_not_found',
-          fallback: 'agent-driven',
-          hint: 'Element not found in any project file. It may be runtime-injected (JS component, etc.). See "Handle fallback" in live.md.',
-        }));
+        console.error(
+          JSON.stringify({
+            error: "element_not_found",
+            fallback: "agent-driven",
+            hint: 'Element not found in any project file. It may be runtime-injected (JS component, etc.). See "Handle fallback" in live.md.',
+          }),
+        );
       }
       process.exit(1);
     }
   } else {
     if (isGeneratedFile(targetFile, genOpts)) {
-      console.error(JSON.stringify({
-        error: 'file_is_generated',
-        fallback: 'agent-driven',
-        file: path.relative(process.cwd(), path.resolve(process.cwd(), targetFile)),
-        hint: 'Explicit --file points at a generated file. Writing here gets wiped by the next build. See "Handle fallback" in live.md.',
-      }));
+      console.error(
+        JSON.stringify({
+          error: "file_is_generated",
+          fallback: "agent-driven",
+          file: path.relative(process.cwd(), path.resolve(process.cwd(), targetFile)),
+          hint: 'Explicit --file points at a generated file. Writing here gets wiped by the next build. See "Handle fallback" in live.md.',
+        }),
+      );
       process.exit(1);
     }
     matchedQuery = queries[0];
   }
 
-  const content = fs.readFileSync(targetFile, 'utf-8');
-  const lines = content.split('\n');
+  const content = fs.readFileSync(targetFile, "utf-8");
+  const lines = content.split("\n");
 
   // Find the element, trying each query in priority order. When `--text` is
   // supplied, collect every candidate the queries surface and disambiguate
@@ -140,7 +152,11 @@ The agent should insert variant HTML at insertLine.`);
       if (candidates.length === 1) break;
     }
     if (candidates.length === 0) {
-      console.error(JSON.stringify({ error: 'Found file but could not locate element in ' + targetFile + '. Searched for: ' + queries.join(', ') }));
+      console.error(
+        JSON.stringify({
+          error: "Found file but could not locate element in " + targetFile + ". Searched for: " + queries.join(", "),
+        }),
+      );
       process.exit(1);
     }
     if (candidates.length === 1) {
@@ -159,16 +175,18 @@ The agent should insert variant HTML at insertLine.`);
         // Multiple candidates ALSO match the text. Truly ambiguous — refuse
         // rather than pick wrong, and hand the agent the candidate locations
         // so it can disambiguate by reading the file.
-        console.error(JSON.stringify({
-          error: 'element_ambiguous',
-          fallback: 'agent-driven',
-          file: path.relative(process.cwd(), targetFile),
-          candidates: filtered.map((c) => ({
-            startLine: c.startLine + 1,
-            endLine: c.endLine + 1,
-          })),
-          hint: 'Multiple source elements match both classes/tag and textContent. Pass --element-id, a more specific --text, or write the wrapper manually. See "Handle fallback" in live.md.',
-        }));
+        console.error(
+          JSON.stringify({
+            error: "element_ambiguous",
+            fallback: "agent-driven",
+            file: path.relative(process.cwd(), targetFile),
+            candidates: filtered.map((c) => ({
+              startLine: c.startLine + 1,
+              endLine: c.endLine + 1,
+            })),
+            hint: 'Multiple source elements match both classes/tag and textContent. Pass --element-id, a more specific --text, or write the wrapper manually. See "Handle fallback" in live.md.',
+          }),
+        );
         process.exit(1);
       }
     }
@@ -178,14 +196,18 @@ The agent should insert variant HTML at insertLine.`);
       if (match) break;
     }
     if (!match) {
-      console.error(JSON.stringify({ error: 'Found file but could not locate element in ' + targetFile + '. Searched for: ' + queries.join(', ') }));
+      console.error(
+        JSON.stringify({
+          error: "Found file but could not locate element in " + targetFile + ". Searched for: " + queries.join(", "),
+        }),
+      );
       process.exit(1);
     }
   }
 
   const { startLine, endLine } = match;
   const commentSyntax = detectCommentSyntax(targetFile);
-  const isJsx = commentSyntax.open === '{/*';
+  const isJsx = commentSyntax.open === "{/*";
   const indent = lines[startLine].match(/^(\s*)/)[1];
 
   // Extract the original element. Reindent under the wrapper while preserving
@@ -197,10 +219,9 @@ The agent should insert variant HTML at insertLine.`);
   // `deindentContent` on the accept side already mirrors this convention.
   const originalLines = lines.slice(startLine, endLine + 1);
   const originalBaseIndent = minLeadingSpaces(originalLines);
-  const reindentOriginal = (extra) => originalLines
-    .map((l) => (l.trim() === '' ? '' : indent + extra + l.slice(originalBaseIndent)))
-    .join('\n');
-  const originalIndented = reindentOriginal('    ');
+  const reindentOriginal = (extra) =>
+    originalLines.map((l) => (l.trim() === "" ? "" : indent + extra + l.slice(originalBaseIndent))).join("\n");
+  const originalIndented = reindentOriginal("    ");
 
   // Wrapper attributes differ by syntax. HTML allows plain string attrs;
   // JSX requires object-literal style and parses string attrs as HTML (which
@@ -219,35 +240,47 @@ The agent should insert variant HTML at insertLine.`);
   // tuck both marker comments INSIDE it. accept/discard then expands its
   // replacement range to include the wrapper's `<div>` open / close lines
   // so the entire scaffold gets removed cleanly.
-  const wrapperLines = isJsx ? [
-    indent + '<div data-impeccable-variants="' + id + '" data-impeccable-variant-count="' + count + '" ' + styleContents + '>',
-    indent + '  ' + commentSyntax.open + ' impeccable-variants-start ' + id + ' ' + commentSyntax.close,
-    indent + '  ' + commentSyntax.open + ' Original ' + commentSyntax.close,
-    indent + '  <div data-impeccable-variant="original">',
-    reindentOriginal('    '),
-    indent + '  </div>',
-    indent + '  ' + commentSyntax.open + ' Variants: insert below this line ' + commentSyntax.close,
-    indent + '  ' + commentSyntax.open + ' impeccable-variants-end ' + id + ' ' + commentSyntax.close,
-    indent + '</div>',
-  ] : [
-    indent + commentSyntax.open + ' impeccable-variants-start ' + id + ' ' + commentSyntax.close,
-    indent + '<div data-impeccable-variants="' + id + '" data-impeccable-variant-count="' + count + '" ' + styleContents + '>',
-    indent + '  ' + commentSyntax.open + ' Original ' + commentSyntax.close,
-    indent + '  <div data-impeccable-variant="original">',
-    originalIndented,
-    indent + '  </div>',
-    indent + '  ' + commentSyntax.open + ' Variants: insert below this line ' + commentSyntax.close,
-    indent + '</div>',
-    indent + commentSyntax.open + ' impeccable-variants-end ' + id + ' ' + commentSyntax.close,
-  ];
+  const wrapperLines = isJsx
+    ? [
+        indent +
+          '<div data-impeccable-variants="' +
+          id +
+          '" data-impeccable-variant-count="' +
+          count +
+          '" ' +
+          styleContents +
+          ">",
+        indent + "  " + commentSyntax.open + " impeccable-variants-start " + id + " " + commentSyntax.close,
+        indent + "  " + commentSyntax.open + " Original " + commentSyntax.close,
+        indent + '  <div data-impeccable-variant="original">',
+        reindentOriginal("    "),
+        indent + "  </div>",
+        indent + "  " + commentSyntax.open + " Variants: insert below this line " + commentSyntax.close,
+        indent + "  " + commentSyntax.open + " impeccable-variants-end " + id + " " + commentSyntax.close,
+        indent + "</div>",
+      ]
+    : [
+        indent + commentSyntax.open + " impeccable-variants-start " + id + " " + commentSyntax.close,
+        indent +
+          '<div data-impeccable-variants="' +
+          id +
+          '" data-impeccable-variant-count="' +
+          count +
+          '" ' +
+          styleContents +
+          ">",
+        indent + "  " + commentSyntax.open + " Original " + commentSyntax.close,
+        indent + '  <div data-impeccable-variant="original">',
+        originalIndented,
+        indent + "  </div>",
+        indent + "  " + commentSyntax.open + " Variants: insert below this line " + commentSyntax.close,
+        indent + "</div>",
+        indent + commentSyntax.open + " impeccable-variants-end " + id + " " + commentSyntax.close,
+      ];
 
   // Replace the original element with the wrapper
-  const newLines = [
-    ...lines.slice(0, startLine),
-    ...wrapperLines,
-    ...lines.slice(endLine + 1),
-  ];
-  fs.writeFileSync(targetFile, newLines.join('\n'), 'utf-8');
+  const newLines = [...lines.slice(0, startLine), ...wrapperLines, ...lines.slice(endLine + 1)];
+  fs.writeFileSync(targetFile, newLines.join("\n"), "utf-8");
 
   // Calculate insert line (the "insert below this line" comment).
   // 0-indexed file position. Both HTML and JSX wrappers have 6 lines above
@@ -258,19 +291,21 @@ The agent should insert variant HTML at insertLine.`);
   // extra line count.
   const insertLine = startLine + 6 + (originalLines.length - 1);
 
-  console.log(JSON.stringify({
-    file: path.relative(process.cwd(), targetFile),
-    startLine: startLine + 1,       // 1-indexed for the agent
-    // wrapperLines is an array but one element (the original-content slot)
-    // is a `\n`-joined multi-line string, so the actual file-row count is
-    // wrapperLines.length + (originalLines.length - 1). Without the offset,
-    // endLine pointed inside the wrapper for any picked element that
-    // spanned more than one source line.
-    endLine: startLine + wrapperLines.length + (originalLines.length - 1), // 1-indexed
-    insertLine: insertLine + 1,     // 1-indexed: where variants go
-    commentSyntax: commentSyntax,
-    originalLineCount: originalLines.length,
-  }));
+  console.log(
+    JSON.stringify({
+      file: path.relative(process.cwd(), targetFile),
+      startLine: startLine + 1, // 1-indexed for the agent
+      // wrapperLines is an array but one element (the original-content slot)
+      // is a `\n`-joined multi-line string, so the actual file-row count is
+      // wrapperLines.length + (originalLines.length - 1). Without the offset,
+      // endLine pointed inside the wrapper for any picked element that
+      // spanned more than one source line.
+      endLine: startLine + wrapperLines.length + (originalLines.length - 1), // 1-indexed
+      insertLine: insertLine + 1, // 1-indexed: where variants go
+      commentSyntax: commentSyntax,
+      originalLineCount: originalLines.length,
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -298,9 +333,12 @@ function buildSearchQueries(elementId, classes, tag, query) {
   // Emit both class="..." (HTML) and className="..." (React/JSX) so whichever
   // convention the file uses will match.
   if (classes) {
-    const classList = classes.split(',').map(c => c.trim()).filter(Boolean);
+    const classList = classes
+      .split(",")
+      .map((c) => c.trim())
+      .filter(Boolean);
     if (classList.length > 1) {
-      const joined = classList.join(' ');
+      const joined = classList.join(" ");
       const sorted = [...classList].sort((a, b) => b.length - a.length);
       queries.push('class="' + joined + '"');
       queries.push('className="' + joined + '"');
@@ -313,9 +351,9 @@ function buildSearchQueries(elementId, classes, tag, query) {
   // 3. Tag + class combo (e.g., <section class="hero">).
   // Same dual-emit for JSX compatibility.
   if (tag && classes) {
-    const firstClass = classes.split(',')[0].trim();
-    queries.push('<' + tag + ' class="' + firstClass);
-    queries.push('<' + tag + ' className="' + firstClass);
+    const firstClass = classes.split(",")[0].trim();
+    queries.push("<" + tag + ' class="' + firstClass);
+    queries.push("<" + tag + ' className="' + firstClass);
   }
 
   // 4. Raw fallback query
@@ -328,11 +366,11 @@ function buildSearchQueries(elementId, classes, tag, query) {
 
 function detectCommentSyntax(filePath) {
   const ext = path.extname(filePath).toLowerCase();
-  if (ext === '.jsx' || ext === '.tsx') {
-    return { open: '{/*', close: '*/}' };
+  if (ext === ".jsx" || ext === ".tsx") {
+    return { open: "{/*", close: "*/}" };
   }
   // HTML, Vue, Svelte, Astro all use HTML comments
-  return { open: '<!--', close: '-->' };
+  return { open: "<!--", close: "-->" };
 }
 
 /**
@@ -340,7 +378,7 @@ function detectCommentSyntax(filePath) {
  * Returns the first matching file path, or null.
  */
 function findFileWithQuery(query, cwd, genOpts = {}) {
-  const searchDirs = ['src', 'app', 'pages', 'components', 'public', 'views', 'templates', '.'];
+  const searchDirs = ["src", "app", "pages", "components", "public", "views", "templates", "."];
   const seen = new Set();
 
   for (const dir of searchDirs) {
@@ -359,8 +397,11 @@ function searchDir(dir, query, seen, depth, genOpts) {
   seen.add(realDir);
 
   let entries;
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
-  catch { return null; }
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
 
   // Check files first
   for (const entry of entries) {
@@ -371,9 +412,11 @@ function searchDir(dir, query, seen, depth, genOpts) {
     const filePath = path.join(dir, entry.name);
     if (!genOpts.includeGenerated && isGeneratedFile(filePath, genOpts)) continue;
     try {
-      const content = fs.readFileSync(filePath, 'utf-8');
+      const content = fs.readFileSync(filePath, "utf-8");
       if (content.includes(query)) return filePath;
-    } catch { /* skip unreadable files */ }
+    } catch {
+      /* skip unreadable files */
+    }
   }
 
   // Then recurse into directories. Always skip node_modules and .git (never
@@ -382,7 +425,7 @@ function searchDir(dir, query, seen, depth, genOpts) {
   // report `generatedMatch`.
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    if (entry.name === 'node_modules' || entry.name === '.git') continue;
+    if (entry.name === "node_modules" || entry.name === ".git") continue;
     const result = searchDir(path.join(dir, entry.name), query, seen, depth + 1, genOpts);
     if (result) return result;
   }
@@ -416,7 +459,7 @@ const OPENER_RE = /<([A-Za-z][A-Za-z0-9]*)(?=[\s/>]|$)/;
 function minLeadingSpaces(lines) {
   let min = Infinity;
   for (const l of lines) {
-    if (l.trim() === '') continue;
+    if (l.trim() === "") continue;
     const m = l.match(/^(\s*)/);
     if (m && m[1].length < min) min = m[1].length;
   }
@@ -429,9 +472,9 @@ function findElement(lines, query, tag = null) {
     if (!lines[i].includes(query)) continue;
 
     const stripped = lines[i].trim();
-    if (stripped.startsWith('<!--') || stripped.startsWith('{/*') || stripped.startsWith('//')) continue;
+    if (stripped.startsWith("<!--") || stripped.startsWith("{/*") || stripped.startsWith("//")) continue;
     // Skip lines already inside a variant wrapper
-    if (lines[i].includes('data-impeccable-variant')) continue;
+    if (lines[i].includes("data-impeccable-variant")) continue;
 
     const openerLine = findOpenerLine(lines, i, tag);
     if (openerLine === -1) continue;
@@ -456,8 +499,8 @@ function findAllElements(lines, query, tag = null) {
   for (let i = 0; i < lines.length; i++) {
     if (!lines[i].includes(query)) continue;
     const stripped = lines[i].trim();
-    if (stripped.startsWith('<!--') || stripped.startsWith('{/*') || stripped.startsWith('//')) continue;
-    if (lines[i].includes('data-impeccable-variant')) continue;
+    if (stripped.startsWith("<!--") || stripped.startsWith("{/*") || stripped.startsWith("//")) continue;
+    if (lines[i].includes("data-impeccable-variant")) continue;
     const openerLine = findOpenerLine(lines, i, tag);
     if (openerLine === -1) continue;
     if (seen.has(openerLine)) continue; // multiple matches inside the same element
@@ -484,7 +527,7 @@ function findAllElements(lines, query, tag = null) {
  * back to first-match.
  */
 function filterByText(candidates, lines, text) {
-  const trimmed = text.replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 80);
+  const trimmed = text.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 80);
   // Too short to disambiguate. Return [] so the caller's `filtered.length
   // === 0` branch fires (fall back to first-match) — the previous
   // `candidates.slice()` return forced `filtered.length > 1` and surfaced
@@ -492,16 +535,16 @@ function filterByText(candidates, lines, text) {
   // with multiple candidates.
   if (trimmed.length < 8) return [];
   const targetSpaced = trimmed;
-  const targetCompact = trimmed.replace(/\s+/g, '');
+  const targetCompact = trimmed.replace(/\s+/g, "");
 
   return candidates.filter((c) => {
-    const body = lines.slice(c.startLine, c.endLine + 1).join(' ');
+    const body = lines.slice(c.startLine, c.endLine + 1).join(" ");
     const inner = body
-      .replace(/<[^>]*>/g, ' ')   // strip HTML/JSX tags
-      .replace(/\{[^}]*\}/g, ' ')  // strip JSX expressions
+      .replace(/<[^>]*>/g, " ") // strip HTML/JSX tags
+      .replace(/\{[^}]*\}/g, " ") // strip JSX expressions
       .toLowerCase();
-    const sourceSpaced = inner.replace(/\s+/g, ' ').trim();
-    const sourceCompact = inner.replace(/\s+/g, '');
+    const sourceSpaced = inner.replace(/\s+/g, " ").trim();
+    const sourceCompact = inner.replace(/\s+/g, "");
     return sourceSpaced.includes(targetSpaced) || sourceCompact.includes(targetCompact);
   });
 }
@@ -542,9 +585,9 @@ function findClosingLine(lines, start) {
 
   const tagName = openMatch[1];
   let depth = 0;
-  const openRe = new RegExp('<' + tagName + '(?=[\\s/>]|$)', 'g');
-  const selfCloseRe = new RegExp('<' + tagName + '[^>]*/>', 'g');
-  const closeRe = new RegExp('</' + tagName + '\\s*>', 'g');
+  const openRe = new RegExp("<" + tagName + "(?=[\\s/>]|$)", "g");
+  const selfCloseRe = new RegExp("<" + tagName + "[^>]*/>", "g");
+  const closeRe = new RegExp("</" + tagName + "\\s*>", "g");
 
   for (let i = start; i < lines.length; i++) {
     const line = lines[i];
@@ -563,7 +606,7 @@ function findClosingLine(lines, start) {
 
 // Auto-execute when run directly (node live-wrap.mjs ...)
 const _running = process.argv[1];
-if (_running?.endsWith('live-wrap.mjs') || _running?.endsWith('live-wrap.mjs/')) {
+if (_running?.endsWith("live-wrap.mjs") || _running?.endsWith("live-wrap.mjs/")) {
   wrapCli();
 }
 

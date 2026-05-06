@@ -50,6 +50,7 @@ Work through these dimensions methodically:
 - **Grid adherence**: Elements snap to baseline grid
 
 **Check**:
+
 - Enable grid overlay and verify alignment
 - Check spacing with browser inspector
 - Test at multiple viewport sizes
@@ -57,7 +58,7 @@ Work through these dimensions methodically:
 
 ### Information Architecture & Flow
 
-Visual polish on a misshapen flow is wasted work. Match the *shape* of the experience to the system, not just the surface.
+Visual polish on a misshapen flow is wasted work. Match the _shape_ of the experience to the system, not just the surface.
 
 - **Progressive disclosure**: Match how much is revealed when, compared to neighboring features. A settings page exposing 40 fields when the rest of the app reveals 5 at a time is drift, even if every field is perfectly styled.
 - **Established user flows**: Multi-step actions follow the same shape as comparable flows elsewhere: modal vs full-page, inline edit vs separate route, save-on-blur vs explicit submit, optimistic vs pessimistic updates.
@@ -201,6 +202,7 @@ Go through systematically:
 Sweat the details. Zoom in until the alignment is right and the spacing reads as deliberate. Then ship.
 
 **NEVER**:
+
 - Polish before it's functionally complete
 - Polish without aligning to the design system; that's decoration on drift
 - Guess at design system principles instead of asking when something is ambiguous

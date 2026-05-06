@@ -2,7 +2,7 @@
 // Chat: Input — mode-aware styling
 // ──────────────────────────────────────────────
 import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react";
-import { Send, Paperclip, StopCircle, X, Smile, Users, Languages, Loader2 } from "lucide-react";
+import { Send, Paperclip, StopCircle, X, Smile, Users, UserCheck, Languages, Loader2, FileText } from "lucide-react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
@@ -10,7 +10,7 @@ import { useChatStore } from "../../stores/chat.store";
 import { useUIStore } from "../../stores/ui.store";
 import { useGenerate } from "../../hooks/use-generate";
 import { useApplyRegex } from "../../hooks/use-apply-regex";
-import { useCreateMessage, chatKeys } from "../../hooks/use-chats";
+import { useCreateMessage, useUpdateMessageExtra, chatKeys } from "../../hooks/use-chats";
 import { characterKeys } from "../../hooks/use-characters";
 import type { Message } from "@marinara-engine/shared";
 import {
@@ -35,6 +35,60 @@ interface Attachment {
   type: string; // MIME type
   data: string; // base64 data URL
   name: string;
+}
+
+const TEXT_ATTACHMENT_EXTENSIONS = new Set([
+  "csv",
+  "json",
+  "jsonl",
+  "log",
+  "markdown",
+  "md",
+  "txt",
+  "xml",
+  "yaml",
+  "yml",
+]);
+
+function getFileExtension(fileName: string): string {
+  const match = fileName.toLowerCase().match(/\.([a-z0-9]+)$/);
+  return match?.[1] ?? "";
+}
+
+function inferAttachmentType(file: File): string {
+  if (file.type) return file.type;
+  const extension = getFileExtension(file.name);
+  if (extension === "json" || extension === "jsonl") return "application/json";
+  if (extension === "csv") return "text/csv";
+  if (extension === "md" || extension === "markdown") return "text/markdown";
+  if (extension === "xml") return "application/xml";
+  if (extension === "yaml" || extension === "yml") return "application/yaml";
+  if (extension === "txt" || extension === "log") return "text/plain";
+  return "application/octet-stream";
+}
+
+function isSupportedChatAttachment(file: File): boolean {
+  if (file.type.startsWith("image/")) return true;
+  if (file.type.startsWith("text/")) return true;
+  const type = inferAttachmentType(file);
+  if (
+    type === "application/json" ||
+    type === "application/xml" ||
+    type === "application/yaml" ||
+    type === "application/x-yaml"
+  ) {
+    return true;
+  }
+  return TEXT_ATTACHMENT_EXTENSIONS.has(getFileExtension(file.name));
+}
+
+function readFileAsDataUrl(file: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
 }
 
 // Normalize curly/smart quotes to straight quotes (hoisted to avoid recreation)
@@ -65,6 +119,7 @@ export const ChatInput = memo(function ChatInput({
   const [selectedCompletion, setSelectedCompletion] = useState(0);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [pendingAttachmentReads, setPendingAttachmentReads] = useState(0);
   const [isTranslatingDraft, setIsTranslatingDraft] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -88,8 +143,10 @@ export const ChatInput = memo(function ChatInput({
   const { applyToUserInput } = useApplyRegex();
   const enterToSend = useUIStore((s) => s.enterToSendRP);
   const guideGenerations = useUIStore((s) => s.guideGenerations);
+  const impersonateShowQuickButton = useUIStore((s) => s.impersonateShowQuickButton);
   const speechToTextEnabled = useUIStore((s) => s.speechToTextEnabled);
   const createMessage = useCreateMessage(activeChatId);
+  const updateMessageExtra = useUpdateMessageExtra(activeChatId);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const resizeRafRef = useRef<number>(0);
   const qc = useQueryClient();
@@ -174,37 +231,33 @@ export const ChatInput = memo(function ChatInput({
 
   const canRetry = !isStreaming && lastMessageRole === "user";
   const canContinue = !isStreaming && mode === "roleplay" && lastMessageRole === "assistant";
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files?.length || !activeChatId) return;
-
-    for (const file of Array.from(files)) {
-      if (file.size > 20 * 1024 * 1024) {
-        toast.error(`${file.name} is too large (max 20 MB)`);
-        continue;
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = reader.result as string;
-        setAttachments((prev) => [...prev, { type: file.type, data: dataUrl, name: file.name }]);
-      };
-      reader.onerror = () => toast.error(`Failed to read ${file.name}`);
-      reader.readAsDataURL(file);
-    }
-    e.target.value = "";
-  };
+  const isReadingAttachments = pendingAttachmentReads > 0;
+  const hasPendingAttachments = isReadingAttachments || attachments.length > 0;
 
   const removeAttachment = (idx: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== idx));
   };
 
   const addFiles = useCallback(async (files: FileList | File[]) => {
-    for (const file of Array.from(files)) {
+    const acceptedFiles = Array.from(files).filter((file) => {
       if (file.size > 20 * 1024 * 1024) {
         toast.error(`${file.name} is too large (max 20 MB)`);
-        continue;
+        return false;
       }
+      if (!isSupportedChatAttachment(file)) {
+        toast.error(
+          `${file.name || "That file"} is not supported in chat. Attach images or text files like JSON, TXT, Markdown, or CSV.`,
+        );
+        return false;
+      }
+      return true;
+    });
+
+    if (acceptedFiles.length === 0) return;
+    setPendingAttachmentReads((count) => count + acceptedFiles.length);
+
+    for (const file of acceptedFiles) {
+      const displayName = file.name || "pasted-file";
       // Convert GIFs to PNG (Gemini and some providers don't support image/gif)
       if (file.type === "image/gif") {
         try {
@@ -213,42 +266,52 @@ export const ChatInput = memo(function ChatInput({
           const ctx = canvas.getContext("2d")!;
           ctx.drawImage(bitmap, 0, 0);
           const pngBlob = await canvas.convertToBlob({ type: "image/png" });
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            setAttachments((prev) => [
-              ...prev,
-              { type: "image/png", data: reader.result as string, name: file.name.replace(/\.gif$/i, ".png") },
-            ]);
-          };
-          reader.readAsDataURL(pngBlob);
+          const data = await readFileAsDataUrl(pngBlob);
+          setAttachments((prev) => [
+            ...prev,
+            { type: "image/png", data, name: displayName.replace(/\.gif$/i, ".png") },
+          ]);
         } catch {
-          toast.error(`Failed to convert ${file.name}`);
+          toast.error(`Failed to convert ${displayName}`);
+        } finally {
+          setPendingAttachmentReads((count) => Math.max(0, count - 1));
         }
         continue;
       }
-      const reader = new FileReader();
-      reader.onload = () => {
-        setAttachments((prev) => [...prev, { type: file.type, data: reader.result as string, name: file.name }]);
-      };
-      reader.onerror = () => toast.error(`Failed to read ${file.name}`);
-      reader.readAsDataURL(file);
+
+      try {
+        const data = await readFileAsDataUrl(file);
+        setAttachments((prev) => [...prev, { type: inferAttachmentType(file), data, name: displayName }]);
+      } catch {
+        toast.error(`Failed to read ${displayName}`);
+      } finally {
+        setPendingAttachmentReads((count) => Math.max(0, count - 1));
+      }
     }
   }, []);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files?.length || !activeChatId) return;
+
+    void addFiles(files);
+    e.target.value = "";
+  };
 
   const handlePaste = useCallback(
     (e: React.ClipboardEvent) => {
       const items = e.clipboardData?.items;
       if (!items || !activeChatId) return;
-      const imageFiles: File[] = [];
+      const files: File[] = [];
       for (const item of Array.from(items)) {
-        if (item.kind === "file" && item.type.startsWith("image/")) {
+        if (item.kind === "file") {
           const file = item.getAsFile();
-          if (file) imageFiles.push(file);
+          if (file) files.push(file);
         }
       }
-      if (imageFiles.length > 0) {
+      if (files.length > 0) {
         e.preventDefault();
-        addFiles(imageFiles);
+        void addFiles(files);
       }
     },
     [activeChatId, addFiles],
@@ -259,8 +322,8 @@ export const ChatInput = memo(function ChatInput({
       e.preventDefault();
       setIsDragging(false);
       if (!activeChatId) return;
-      const imageFiles = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
-      if (imageFiles.length > 0) addFiles(imageFiles);
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length > 0) void addFiles(files);
     },
     [activeChatId, addFiles],
   );
@@ -293,6 +356,10 @@ export const ChatInput = memo(function ChatInput({
   const handleSend = useCallback(async () => {
     const raw = getValue();
     if (!activeChatId || isStreaming) return;
+    if (isReadingAttachments) {
+      toast.info("Still reading attached files. Send will be ready in a moment.");
+      return;
+    }
     // Cancel pending draft debounce so clearInputDraft isn't overwritten
     if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
 
@@ -392,18 +459,24 @@ export const ChatInput = memo(function ChatInput({
     }
     syncInputState("");
     setCompletions([]);
-    const pendingAttachments = attachments.map((a) => ({ type: a.type, data: a.data }));
+    const pendingAttachments = attachments.map((a) => ({ type: a.type, data: a.data, filename: a.name, name: a.name }));
     setAttachments([]);
     clearInputDraft(activeChatId);
 
     // Manual mode: only create the user message, no auto-generation
     if (groupResponseOrder === "manual") {
       try {
-        await createMessage.mutateAsync({
+        const created = await createMessage.mutateAsync({
           role: "user",
           content: message,
           characterId: null,
         });
+        if (pendingAttachments.length) {
+          await updateMessageExtra.mutateAsync({
+            messageId: created.id,
+            extra: { attachments: pendingAttachments },
+          });
+        }
       } catch (error) {
         const msg = error instanceof Error ? error.message : "Failed to send message";
         toast.error(msg);
@@ -432,12 +505,59 @@ export const ChatInput = memo(function ChatInput({
     qc,
     clearInputDraft,
     attachments,
+    isReadingAttachments,
     mode,
     groupResponseOrder,
     createMessage,
+    updateMessageExtra,
     syncInputState,
     onPeekPrompt,
   ]);
+
+  const handleImpersonateQuickButton = useCallback(async () => {
+    if (!activeChatId || isStreaming) return;
+    if (hasPendingAttachments) {
+      toast.info("Clear or send attachments before using quick impersonate.");
+      return;
+    }
+    const submittingChatId = activeChatId;
+    const submittingInput = textareaRef.current?.value ?? "";
+    const text = submittingInput.trim();
+    if (!text) return;
+    const { impersonatePresetId, impersonateConnectionId, impersonateBlockAgents, impersonatePromptTemplate } =
+      useUIStore.getState();
+    const trimmedPromptTemplate = impersonatePromptTemplate.trim();
+    try {
+      const generated = await generate({
+        chatId: submittingChatId,
+        connectionId: null,
+        impersonate: true,
+        userMessage: text,
+        ...(impersonatePresetId ? { impersonatePresetId } : {}),
+        ...(impersonateConnectionId ? { impersonateConnectionId } : {}),
+        ...(impersonateBlockAgents ? { impersonateBlockAgents: true } : {}),
+        ...(trimmedPromptTemplate ? { impersonatePromptTemplate: trimmedPromptTemplate } : {}),
+      });
+      if (generated) {
+        const isSameDraft =
+          useChatStore.getState().activeChatId === submittingChatId && textareaRef.current?.value === submittingInput;
+        if (!isSameDraft) return;
+        if (draftTimerRef.current) {
+          clearTimeout(draftTimerRef.current);
+          draftTimerRef.current = null;
+        }
+        if (textareaRef.current) {
+          textareaRef.current.value = "";
+          textareaRef.current.style.height = "auto";
+        }
+        syncInputState("");
+        clearInputDraft(submittingChatId);
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Impersonate failed";
+      toast.error(msg);
+    }
+  }, [activeChatId, isStreaming, hasPendingAttachments, generate, syncInputState, clearInputDraft]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Autocomplete navigation
@@ -696,7 +816,7 @@ export const ChatInput = memo(function ChatInput({
       {feedback && <SlashCommandFeedback feedback={feedback} onDismiss={() => setFeedback(null)} className="mb-2" />}
 
       {/* Attachment previews */}
-      {attachments.length > 0 && (
+      {(attachments.length > 0 || isReadingAttachments) && (
         <div className="mb-2 flex flex-wrap gap-2">
           {attachments.map((att, i) => (
             <div
@@ -705,7 +825,9 @@ export const ChatInput = memo(function ChatInput({
             >
               {att.type.startsWith("image/") ? (
                 <img src={att.data} alt={att.name} className="h-8 w-8 rounded object-cover" />
-              ) : null}
+              ) : (
+                <FileText size="1rem" className="shrink-0 text-foreground/50" />
+              )}
               <span className="max-w-[7.5rem] truncate">{att.name}</span>
               <button
                 onClick={() => removeAttachment(i)}
@@ -715,6 +837,12 @@ export const ChatInput = memo(function ChatInput({
               </button>
             </div>
           ))}
+          {isReadingAttachments && (
+            <div className="flex items-center gap-1.5 rounded-lg bg-foreground/10 px-2 py-1 text-xs text-foreground/60">
+              <Loader2 size="0.875rem" className="animate-spin" />
+              Reading file...
+            </div>
+          )}
         </div>
       )}
 
@@ -742,7 +870,7 @@ export const ChatInput = memo(function ChatInput({
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*,video/*,audio/*,.pdf,.txt,.md,.json,.csv"
+          accept="image/*,.txt,.md,.markdown,.json,.jsonl,.csv,.log,.xml,.yaml,.yml"
           multiple
           className="hidden"
           onChange={handleFileUpload}
@@ -833,6 +961,23 @@ export const ChatInput = memo(function ChatInput({
           </button>
         )}
 
+        {/* Impersonate quick button */}
+        {impersonateShowQuickButton && (
+          <button
+            onClick={handleImpersonateQuickButton}
+            disabled={!hasInput || isStreaming || !activeChatId || hasPendingAttachments}
+            className={cn(
+              "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+              hasInput && activeChatId && !isStreaming && !hasPendingAttachments
+                ? "text-[var(--primary)] hover:bg-[var(--primary)]/15"
+                : "text-foreground/20",
+            )}
+            title="Generate as {{user}} using this text as direction"
+          >
+            <UserCheck size="1rem" />
+          </button>
+        )}
+
         {showDraftTranslateButton && (
           <button
             type="button"
@@ -863,12 +1008,16 @@ export const ChatInput = memo(function ChatInput({
 
         <button
           onClick={isStreaming ? () => useChatStore.getState().stopGeneration() : handleSend}
-          disabled={(!hasInput && !attachments.length && !isStreaming && !canRetry && !canContinue) || !activeChatId}
+          disabled={
+            (!isStreaming && isReadingAttachments) ||
+            (!hasInput && !attachments.length && !isStreaming && !canRetry && !canContinue) ||
+            !activeChatId
+          }
           className={cn(
             "mari-chat-send-btn flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-200",
             isStreaming
               ? "text-foreground hover:opacity-80"
-              : (hasInput || attachments.length || canRetry || canContinue) && activeChatId
+              : (hasInput || attachments.length || canRetry || canContinue) && activeChatId && !isReadingAttachments
                 ? "text-foreground hover:text-foreground/80 active:scale-90"
                 : "text-foreground/20",
           )}

@@ -29,6 +29,13 @@ interface STChatMessage {
   };
 }
 
+interface ParsedSTChatMessageInput {
+  role: "system" | "user" | "assistant" | "narrator";
+  characterId: string | null;
+  content: string;
+  parsedCreatedAt: string | null;
+}
+
 export interface ImportSTChatOptions {
   /** Link chat to this character ID */
   characterId?: string | null;
@@ -44,6 +51,51 @@ export interface ImportSTChatOptions {
   groupId?: string | null;
   /** Source file timestamps to preserve when trustworthy */
   timestampOverrides?: TimestampOverrides | null;
+}
+
+function normalizeTranscriptTimestamps(
+  inputs: ParsedSTChatMessageInput[],
+  fallbackStart?: TimestampOverrides | null,
+): Array<ParsedSTChatMessageInput & { createdAt: string }> {
+  // ST exports may contain identical or even backward send_date values.
+  // Marinara sorts messages by createdAt, so make the imported transcript
+  // strictly monotonic while preserving the source file's line order.
+  const fallback = normalizeTimestampOverrides(fallbackStart);
+  const firstParsedIndex = inputs.findIndex((input) => input.parsedCreatedAt);
+  const firstParsedMs =
+    firstParsedIndex >= 0 ? Date.parse(inputs[firstParsedIndex]!.parsedCreatedAt as string) : Number.NaN;
+  const fallbackMs = Date.parse(fallback?.createdAt ?? fallback?.updatedAt ?? "");
+  const nowMs = Date.now();
+
+  let lastMs: number | null = null;
+
+  return inputs.map((input, index) => {
+    const parsedMs = input.parsedCreatedAt ? Date.parse(input.parsedCreatedAt) : Number.NaN;
+    let candidateMs: number;
+
+    if (Number.isFinite(parsedMs)) {
+      candidateMs = parsedMs;
+    } else if (lastMs !== null) {
+      candidateMs = lastMs + 1;
+    } else if (Number.isFinite(firstParsedMs)) {
+      candidateMs = firstParsedMs - (firstParsedIndex - index);
+    } else if (Number.isFinite(fallbackMs)) {
+      candidateMs = fallbackMs + index;
+    } else {
+      candidateMs = nowMs + index;
+    }
+
+    if (lastMs !== null && candidateMs <= lastMs) {
+      candidateMs = lastMs + 1;
+    }
+
+    lastMs = candidateMs;
+
+    return {
+      ...input,
+      createdAt: new Date(candidateMs).toISOString(),
+    };
+  });
 }
 
 /**
@@ -77,12 +129,7 @@ export async function importSTChat(jsonlContent: string, db: DB, opts?: ImportST
   }
 
   const messageTimestamps: string[] = [];
-  const msgInputs: {
-    role: "system" | "user" | "assistant" | "narrator";
-    characterId: string | null;
-    content: string;
-    createdAt?: string;
-  }[] = [];
+  const parsedMsgInputs: ParsedSTChatMessageInput[] = [];
 
   for (let i = 1; i < lines.length; i++) {
     try {
@@ -106,18 +153,24 @@ export async function importSTChat(jsonlContent: string, db: DB, opts?: ImportST
       }
 
       const createdAt = parseTrustedTimestamp(stMsg.send_date);
-      if (createdAt) messageTimestamps.push(createdAt);
 
-      msgInputs.push({
+      parsedMsgInputs.push({
         role,
         characterId: messageCharacterId,
         content,
-        ...(createdAt ? { createdAt } : {}),
+        parsedCreatedAt: createdAt,
       });
     } catch {
       // Skip malformed lines
     }
   }
+
+  const msgInputs = normalizeTranscriptTimestamps(parsedMsgInputs, opts?.timestampOverrides).map(
+    ({ parsedCreatedAt, ...input }) => {
+      messageTimestamps.push(input.createdAt);
+      return input;
+    },
+  );
 
   const latestMessageTimestamp = latestTrustedTimestamp(messageTimestamps);
   const chatTimestamps = normalizeTimestampOverrides({

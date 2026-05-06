@@ -2,6 +2,40 @@
 
 This file is the release-notes source of truth for Marinara Engine. Reuse these entries when publishing GitHub Releases for tags in the `vX.Y.Z` format.
 
+## [1.5.8]
+
+### Added
+
+- Special edition of Game mode Lorebook Keeper.
+- Guides for all modes.
+- QoL improvements to Lorebooks handling.
+- Optional intuitive swipe navigation lets Conversation and Roleplay users move through rerolls with arrow keys or touch swipes, with an opt-in reroll-at-the-end shortcut.
+- Roleplay chats can now optionally let characters create direct-message Conversation chats with hidden `[dm: ...]` commands.
+- Lorebook entries can now be selected in bulk and copied or moved to another lorebook.
+
+### Fixed
+
+- Various issues caused by the security tightening were fixed.
+- Sidecar issues fixed.
+- Improves the selfie regex, catching malformed commands.
+- Fixed context trimming.
+- MLX sidecar runtime installs the upstream `mlx-lm` source build so curated Gemma 4 MLX models can load on Apple Silicon.
+- Dry-run prompt preview now trims against manually configured preset Max Context Window values instead of only connection/model limits.
+- Script custom tools now show their disabled state in the editor and fail safely when `CUSTOM_TOOL_SCRIPT_ENABLED` is off instead of silently disappearing from agent tool pickers.
+- Browser extensions now load under CSP through Blob module execution instead of eval, keeping extension support without adding `unsafe-eval`.
+- Local sidecar runtime installation now works when the matching Admin Access secret is entered, even if `SIDECAR_RUNTIME_INSTALL_ENABLED` remains off.
+- Agent traffic now warns when the default agent connection may bill a provider. Agents explicitly set to Local Model are skipped with a visible warning when the sidecar is unavailable instead of silently falling back to a paid API connection.
+- Chat attachments now wait for file reads, preserve files in manual group mode, and expose supported text files like JSON/Markdown/CSV to the model instead of silently dropping them.
+- Fixed rolling in Game mode.
+- Lorebook Keeper updates now receive existing entry content, and append structured new facts instead of replacing user-written lorebook text.
+- Docker images now repair `/app/data` volume ownership before dropping to the non-root runtime user, preventing `EACCES` startup failures during file-storage migration.
+- OpenAI-compatible local streams now accept stricter and looser SSE `data:` formatting, Conversation mode visibly streams text again, and live reasoning chunks appear while a reply is still generating.
+- Expression agent sprite updates now repair stale character IDs from the current character name before dropping the expression, so existing characters keep their expressions mid-session.
+- Stability AI image connections now test against Stability's account endpoint, fetch legacy v1 engines when needed, and generate through the correct v2beta Stable Image task endpoints instead of probing `/models`.
+- Game mode party changes made from Chat Settings now sync to game metadata and carry into future sessions.
+- NanoGPT GPT Image 2 requests now normalize image size to a supported pixel budget instead of forwarding too-small canvases.
+- Conversation manual generations now share the autonomous in-progress guard, preventing async catch-up replies from duplicating the same user turn.
+
 ## [1.5.7]
 
 ### Added
@@ -64,6 +98,7 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 
 ### Fixed
 
+- Custom OpenAI-compatible endpoints like Venice no longer receive provider-specific request fields just because a fetched model ID matches an OpenAI, xAI, OpenRouter, or Z.AI naming pattern.
 - Addressed various security concerns.
 - Game mode dark screen error addressed.
 - Removed the persistent SQLite database as the default live storage path, reducing release-to-release migration failures.

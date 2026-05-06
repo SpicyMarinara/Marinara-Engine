@@ -2,7 +2,9 @@
 // Migration: Add prompt_groups, choice_blocks tables
 //            Add columns to prompt_presets & prompt_sections
 // ──────────────────────────────────────────────
-const { createClient } = require(require("path").join(__dirname, "packages", "server", "node_modules", "@libsql", "client"));
+const { createClient } = require(
+  require("path").join(__dirname, "packages", "server", "node_modules", "@libsql", "client"),
+);
 const path = require("path");
 
 const DB_PATH = path.join(__dirname, "packages", "server", "data", "marinara-engine.db");

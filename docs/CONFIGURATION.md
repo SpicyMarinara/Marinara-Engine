@@ -6,6 +6,8 @@ Marinara Engine is configured through environment variables. Copy `.env.example`
 cp .env.example .env
 ```
 
+The example file uses safe, active `KEY=value` defaults. To change a setting, edit the value after `=`; lines that start with `#` are explanatory comments and are ignored by the launchers.
+
 ## Environment Variables
 
 | Variable                                    | Default                                                  | Description                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -42,7 +44,7 @@ cp .env.example .env
 | `DEEPLX_LOCAL_URLS_ENABLED`                 | `false`                                                  | Allows DeepLX URLs to call local/private addresses.                                                                                                                                                                                                                                                                                                                                                                                |
 | `WEBHOOK_LOCAL_URLS_ENABLED`                | `false`                                                  | Allows custom tool webhooks to call local/private addresses.                                                                                                                                                                                                                                                                                                                                                                       |
 | `CUSTOM_TOOL_SCRIPT_ENABLED`                | `false`                                                  | Enables custom script tool execution. Script tools are stored but disabled by default because they execute local code.                                                                                                                                                                                                                                                                                                             |
-| `SIDECAR_RUNTIME_INSTALL_ENABLED`           | `false`                                                  | Enables sidecar runtime installation/reinstallation from the API. Sidecar model downloads and deletion require `ADMIN_SECRET`.                                                                                                                                                                                                                                                                                                     |
+| `SIDECAR_RUNTIME_INSTALL_ENABLED`           | `false`                                                  | Enables sidecar runtime installation/reinstallation from the API without requiring an explicit Admin Access header on loopback. You can also leave this disabled and enter the matching `ADMIN_SECRET` in Settings -> Advanced -> Admin Access before installing the runtime. Sidecar model downloads and deletion require `ADMIN_SECRET`.                                                                                         |
 | `HAPTICS_ALLOW_REMOTE`                      | `false`                                                  | Allows haptic privileged actions from non-loopback clients when paired with auth and `ADMIN_SECRET`.                                                                                                                                                                                                                                                                                                                               |
 | `IMPORT_ALLOWED_ROOTS`                      | _(empty)_                                                | Comma-separated filesystem roots that bulk import may use without a picker-issued folder token.                                                                                                                                                                                                                                                                                                                                    |
 | `GIPHY_API_KEY`                             | _(empty)_                                                | Optional Giphy API key. GIF search is unavailable when unset.                                                                                                                                                                                                                                                                                                                                                                      |
@@ -84,23 +86,28 @@ LOG_LEVEL=debug pnpm start
 
 Marinara Engine ships with layered access-control mechanisms designed for users who expose the server beyond their local machine.
 
+> Looking for a step-by-step walkthrough rather than a reference? See [Remote Access — Setting Up Basic Auth or an IP Allowlist](REMOTE_ACCESS.md).
+
+> **Hot reload:** changes to access-control variables (`BASIC_AUTH_*`, `IP_ALLOWLIST`, `IP_ALLOWLIST_ENABLED`, `ALLOW_UNAUTHENTICATED_*`, `TRUSTED_PRIVATE_NETWORKS`, `ADMIN_SECRET`, `CSRF_TRUSTED_ORIGINS`) take effect within a couple of seconds of saving `.env` — no restart required. The server logs an `[env-watcher]` line for each change. A short list of low-level variables (`PORT`, `HOST`, `SSL_CERT`/`SSL_KEY`, `CORS_ORIGINS`, storage paths, `ENCRYPTION_KEY`, `TZ`) still need a restart; see [Remote Access § When a restart is required](REMOTE_ACCESS.md#when-a-restart-is-required).
+
 ### Safe-by-default lockdown
 
-By default, when no Basic Auth credentials are configured, the server **refuses connections from every non-loopback IP**. Local browser access continues to work without any configuration:
+By default, when no Basic Auth credentials are configured, the server only accepts connections from a small set of trusted sources:
 
 - Loopback (`127.0.0.1`, `::1`) — always allowed.
 - Anything in `IP_ALLOWLIST` — allowed.
+- Tailscale (`100.64.0.0/10`) and Docker bridge (`172.16.0.0/12`) — allowed by default; see [Trusted-interface bypass](#trusted-interface-bypass-tailscale--docker) to disable.
 
-LAN, Docker bridge, Kubernetes pod, and Tailscale-style private-network callers now require Basic Auth unless you set `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK=true`. This is the compatibility escape hatch for trusted private networks.
+Everything else — your home LAN's regular `192.168.x.x` / `10.x.x.x` addresses, public-internet callers, Kubernetes pod networks, ULA — requires Basic Auth or `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK=true`.
 
-Non-loopback callers in the locked-down state receive a `403 Forbidden` with a message describing the ways out:
+Locked-out callers receive a `403 Forbidden` with a message describing the ways out:
 
 1. Set `BASIC_AUTH_USER` and `BASIC_AUTH_PASS` (recommended for internet-facing servers).
 2. Add the public IP / network to `IP_ALLOWLIST`.
 3. Set `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK=true` to opt back into legacy unauthenticated private-network access.
 4. Set `ALLOW_UNAUTHENTICATED_REMOTE=true` only when unauthenticated public access is intentional.
 
-> Note: the private-network exemption applies only to the lockdown. Once you set Basic Auth credentials, the password is required from every IP except loopback and explicit `IP_ALLOWLIST` matches — including from your LAN. This matches the principle of least surprise: if you set a password, you mean it.
+> Note: even with Basic Auth credentials configured, traffic from the loopback, `IP_ALLOWLIST`, Tailscale, and Docker bridge sources above is still exempt — they're all treated as "already trusted." Set `BYPASS_AUTH_TAILSCALE=false` and/or `BYPASS_AUTH_DOCKER=false` if you want the password from those clients too. Public-internet and ordinary LAN callers always have to authenticate.
 
 #### Customising the private-network list
 
@@ -143,11 +150,36 @@ The following requests are **exempt** from Basic Auth so you cannot lock yoursel
 
 - Loopback (`127.0.0.1`, `::1`) — if you're on the box itself, no password is needed.
 - Any IP listed in `IP_ALLOWLIST` — if you've already vouched for a network at the IP layer, no second factor is required.
+- Tailscale or Docker traffic when their bypass flag is on — see [Trusted-interface bypass](#trusted-interface-bypass-tailscale--docker) below.
 - The `/api/health` endpoint — so external uptime monitors and load balancers can probe the server without credentials.
 
 > **Always pair Basic Auth with HTTPS** when exposing the server to the public internet — Basic Auth credentials are only base64-encoded, not encrypted. Set `SSL_CERT` and `SSL_KEY`, or front Marinara with a TLS-terminating reverse proxy (nginx, Caddy, Traefik, Cloudflare Tunnel).
 
 For sensitive deployments, also consider Tailscale or Cloudflare Access — they avoid exposing the port to the open internet entirely.
+
+### Trusted-interface bypass (Tailscale / Docker)
+
+Two flags trust traffic from a specific virtual interface, skipping both the IP allowlist and Basic Auth the same way loopback does. **Both default to `true`** — a fresh install with no `.env` file is reachable over Tailscale and from Docker containers on the same host without any setup.
+
+```
+BYPASS_AUTH_TAILSCALE=true   # trusts 100.64.0.0/10 (Tailscale CGNAT range)
+BYPASS_AUTH_DOCKER=true      # trusts 172.16.0.0/12 (Docker bridge networks)
+```
+
+These are safe defaults because:
+
+- A peer in your tailnet already authenticated via your Tailscale account to be there. That's a stronger trust signal than "this packet came from your LAN."
+- Docker bridge IPs are unreachable from outside the host. External traffic NATs through the bridge gateway and arrives with a different source, so a request with `172.16.x.x` / `172.17.x.x` actually came from a container on this host.
+
+Combines cleanly with `BASIC_AUTH_*`: Tailscale and Docker traffic skips the prompt, everything else (LAN, public internet) still has to authenticate. The server logs an `[auth-bypass]` line the first time a request actually exercises one of these flags.
+
+**Set to `false` if:**
+
+- Your server's public uplink is itself behind a CGNAT'd ISP that uses `100.64.0.0/10`. An internet client could appear with a Tailscale-shaped source IP and the bypass would let them in. Set `BYPASS_AUTH_TAILSCALE=false`, or bind `HOST` to your `tailscale0` IP so the public NIC never sees the connection.
+- Your non-Docker LAN uses `172.16.x.x` / `172.20.x.x` addresses. Set `BYPASS_AUTH_DOCKER=false` so non-Docker hosts in that range still hit the auth gate.
+- You want a password from your Tailnet / Docker containers too.
+
+For the broader "trust every private network" toggle (RFC 1918 + CGNAT + ULA + link-local), see `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK` under [Safe-by-default lockdown](#safe-by-default-lockdown). That one is *off* by default and stays off — it's much broader than these interface-scoped flags.
 
 ### Privileged APIs
 

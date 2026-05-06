@@ -19,6 +19,18 @@ function showError(msg: string) {
   toast.error(msg, { duration: 15000 });
 }
 
+const shownAgentWarnings = new Set<string>();
+
+function showAgentWarning(raw: unknown) {
+  const data = raw && typeof raw === "object" ? (raw as { code?: unknown; message?: unknown }) : null;
+  const message = typeof data?.message === "string" ? data.message : "Agent warning";
+  const warningKey = `${typeof data?.code === "string" ? data.code : "agent_warning"}:${message}`;
+  console.warn("[Agent warning]", raw);
+  if (shownAgentWarnings.has(warningKey)) return;
+  shownAgentWarnings.add(warningKey);
+  toast.warning(message, { duration: 20000 });
+}
+
 const editableCharacterCardFieldSet = new Set<string>(EDITABLE_CHARACTER_CARD_FIELDS);
 /**
  * Validate one entry in the Card Evolution Auditor's `updates` array and coerce
@@ -54,6 +66,60 @@ function parseCharacterRowData(raw: unknown): Record<string, unknown> | null {
   }
   if (raw && typeof raw === "object") return raw as Record<string, unknown>;
   return null;
+}
+
+type CachedCharacterRow = {
+  id?: string;
+  data?: unknown;
+  avatarPath?: string | null;
+  name?: string;
+};
+
+function resolveCachedCharacterIdentity(
+  qc: QueryClient,
+  characterId: string | null | undefined,
+  fallbackName: string | null | undefined = "Character",
+): {
+  name: string | null;
+  avatarUrl: string | null;
+  avatarCrop?: { zoom: number; offsetX: number; offsetY: number } | null;
+} {
+  if (!characterId) return { name: fallbackName, avatarUrl: null };
+
+  const detail = qc.getQueryData<CachedCharacterRow>(characterKeys.detail(characterId));
+  const list = qc.getQueryData<CachedCharacterRow[]>(characterKeys.list());
+  const row = detail ?? list?.find((character) => character.id === characterId);
+  const parsed = parseCharacterRowData(row?.data);
+  const name =
+    (parsed && typeof parsed.name === "string" && parsed.name.trim()) ||
+    (typeof row?.name === "string" && row.name.trim()) ||
+    fallbackName ||
+    "Character";
+  const avatarCrop =
+    parsed &&
+    typeof parsed.extensions === "object" &&
+    parsed.extensions &&
+    "avatarCrop" in parsed.extensions
+      ? ((parsed.extensions as { avatarCrop?: { zoom: number; offsetX: number; offsetY: number } | null }).avatarCrop ??
+        null)
+      : null;
+
+  return {
+    name,
+    avatarUrl: row?.avatarPath ?? null,
+    avatarCrop,
+  };
+}
+
+function latestAssistantMessage(messages: Iterable<Message>): Message | null {
+  let latest: Message | null = null;
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    if (!latest || new Date(message.createdAt).getTime() >= new Date(latest.createdAt).getTime()) {
+      latest = message;
+    }
+  }
+  return latest;
 }
 
 /**
@@ -353,6 +419,8 @@ export function useGenerate() {
   const setMariPhase = useChatStore((s) => s.setMariPhase);
   const setStreamBuffer = useChatStore((s) => s.setStreamBuffer);
   const clearStreamBuffer = useChatStore((s) => s.clearStreamBuffer);
+  const appendThinkingBuffer = useChatStore((s) => s.appendThinkingBuffer);
+  const clearThinkingBuffer = useChatStore((s) => s.clearThinkingBuffer);
   const setRegenerateMessageId = useChatStore((s) => s.setRegenerateMessageId);
   const setStreamingCharacterId = useChatStore((s) => s.setStreamingCharacterId);
   const setTypingCharacterName = useChatStore((s) => s.setTypingCharacterName);
@@ -378,10 +446,14 @@ export function useGenerate() {
       userMessage?: string;
       regenerateMessageId?: string;
       impersonate?: boolean;
-      attachments?: Array<{ type: string; data: string }>;
+      attachments?: Array<{ type: string; data: string; filename?: string; name?: string }>;
       mentionedCharacterNames?: string[];
       forCharacterId?: string;
       generationGuide?: string;
+      impersonatePresetId?: string;
+      impersonateConnectionId?: string;
+      impersonateBlockAgents?: boolean;
+      impersonatePromptTemplate?: string;
     }) => {
       // Prevent concurrent generations for the same chat. Different chats may
       // keep generating in the background while the user navigates elsewhere.
@@ -399,6 +471,7 @@ export function useGenerate() {
       // Create an AbortController so the stop button can cancel this generation
       const abortController = new AbortController();
       useChatStore.getState().setAbortController(params.chatId, abortController);
+      useChatStore.getState().clearThinkingBuffer(params.chatId);
 
       // Helper: returns true when this generation's chat is the one the user is viewing.
       // Used to guard global UI state updates (typing indicator, delayed info, stream
@@ -490,14 +563,12 @@ export function useGenerate() {
       // immediately, we feed them character-by-character from a queue
       // at a controlled rate so the text "types out" smoothly.
       // Speed is controlled by the user's streamingSpeed setting (1–100).
-      // Conversation mode still renders complete messages, but the transport
-      // should follow the user's streaming preference.
-      const isConversationMode = useChatStore.getState().activeChat?.mode === "conversation";
       const transportStreaming = useUIStore.getState().enableStreaming;
-      const streamingEnabled = isConversationMode ? false : transportStreaming;
+      const streamingEnabled = transportStreaming;
       let fullBuffer = ""; // What the user sees (or accumulates silently when streaming is off)
       let pendingText = ""; // Tokens waiting to be typed out
       let receivedContent = false; // Whether any actual message content was received
+      let receivedThinking = false; // Whether provider-native thinking chunks were received
       let typingActive = false;
       let typewriterDone: (() => void) | null = null;
       let rafId = 0;
@@ -513,8 +584,7 @@ export function useGenerate() {
       // States: "detect" (start of response, looking for opening tag),
       //         "inside" (inside a think block, suppressing tokens),
       //         "done" (think block closed or no think tag found — passthrough).
-      // Think-tag filtering disabled — skip straight to passthrough
-      let thinkState: string = "done";
+      let thinkState: string = streamingEnabled ? "detect" : "done";
       let thinkBuf = ""; // Raw token accumulator during detect/inside phases
       let thinkCloseTag = "</think>";
       const THINK_OPEN_RE = /^(\s*)(<(think(?:ing)?)>|<\|channel>thought\b)/i;
@@ -662,10 +732,18 @@ export function useGenerate() {
                 const closeIdx = thinkBuf.toLowerCase().indexOf(thinkCloseTag.toLowerCase());
                 if (closeIdx !== -1) {
                   // Found closing tag — everything after it is visible content
+                  const thinkingChunk = thinkBuf.slice(0, closeIdx);
+                  if (thinkingChunk) appendThinkingBuffer(thinkingChunk, params.chatId);
                   thinkState = "done";
                   chunk = thinkBuf.slice(closeIdx + thinkCloseTag.length).trimStart();
                   thinkBuf = "";
                 } else {
+                  const holdback = Math.max(0, thinkCloseTag.length - 1);
+                  const emitLength = Math.max(0, thinkBuf.length - holdback);
+                  if (emitLength > 0) {
+                    appendThinkingBuffer(thinkBuf.slice(0, emitLength), params.chatId);
+                    thinkBuf = thinkBuf.slice(emitLength);
+                  }
                   chunk = ""; // still inside — suppress
                 }
               }
@@ -684,6 +762,11 @@ export function useGenerate() {
 
             case "agent_start": {
               if (isActiveChat()) setProcessing(true);
+              break;
+            }
+
+            case "agent_warning": {
+              showAgentWarning(event.data);
               break;
             }
 
@@ -864,8 +947,22 @@ export function useGenerate() {
             }
 
             case "thinking": {
-              // Thinking chunks are streamed from the server but persisted in message extra
-              // — the UI picks them up after query invalidation on "done". Nothing to buffer here.
+              const chunk = event.data as string;
+              if (!chunk) break;
+              const isFirstThinking = !receivedThinking;
+              receivedThinking = true;
+              appendThinkingBuffer(chunk, params.chatId);
+              if (isFirstThinking && isActiveChat()) {
+                setTypingCharacterName(null);
+                setDelayedCharacterInfo(null);
+                useChatStore.getState().setGenerationPhase(null);
+                setMariPhase(params.chatId, "thinking");
+                window.dispatchEvent(
+                  new CustomEvent("marinara:mari-phase", {
+                    detail: { chatId: params.chatId, phase: "thinking" },
+                  }),
+                );
+              }
               break;
             }
 
@@ -885,25 +982,23 @@ export function useGenerate() {
                     startTypewriter();
                   });
                 }
+                const previousGroupMessage = latestAssistantMessage(persistedMessages.values());
+
                 // Pick up the just-saved message from the previous character
                 await refreshMessagesAuthoritatively(qc, params.chatId, persistedMessages.values());
                 // Increment unread if user navigated away during group generation
                 const activeNow = useChatStore.getState().activeChatId;
                 if (activeNow !== params.chatId) {
                   useChatStore.getState().incrementUnread(params.chatId);
-                  // Show floating avatar notification bubble
-                  const charDetail = qc.getQueryData<{ avatarPath?: string | null }>(
-                    characterKeys.detail(turn.characterId),
+                  const identity = resolveCachedCharacterIdentity(
+                    qc,
+                    previousGroupMessage?.characterId ?? null,
+                    (previousGroupMessage as (Message & { characterName?: string | null }) | null)?.characterName ??
+                      null,
                   );
-                  // Detail cache may be empty — fall back to list cache
-                  let avatarPath = charDetail?.avatarPath ?? null;
-                  if (!avatarPath) {
-                    const charList = qc.getQueryData<Array<{ id: string; avatarPath?: string | null }>>(
-                      characterKeys.list(),
-                    );
-                    avatarPath = charList?.find((c) => c.id === turn.characterId)?.avatarPath ?? null;
-                  }
-                  useChatStore.getState().addNotification(params.chatId, turn.characterName, avatarPath);
+                  useChatStore
+                    .getState()
+                    .addNotification(params.chatId, identity.name ?? "Character", identity.avatarUrl, identity.avatarCrop);
                   const chatList = qc.getQueryData<Chat[]>(chatKeys.list());
                   const thisChat = chatList?.find((c) => c.id === params.chatId);
                   const isRpMode = thisChat?.mode === "roleplay" || thisChat?.mode === "visual_novel";
@@ -917,10 +1012,11 @@ export function useGenerate() {
                 // Reset the stream buffer for the new character
                 fullBuffer = "";
                 pendingText = "";
-                thinkState = "done";
+                thinkState = streamingEnabled ? "detect" : "done";
                 thinkBuf = "";
                 thinkCloseTag = "</think>";
                 setStreamBuffer("", params.chatId);
+                clearThinkingBuffer(params.chatId);
               }
 
               if (isActiveChat()) setStreamingCharacterId(turn.characterId);
@@ -1321,32 +1417,13 @@ export function useGenerate() {
               : Array.isArray(rawIds)
                 ? rawIds
                 : [];
-          const firstCharId = parsedIds[0];
-          if (firstCharId) {
-            const charDetail = qc.getQueryData<{ data?: { name?: string } | string; avatarPath?: string | null }>(
-              characterKeys.detail(firstCharId),
-            );
-            // Detail cache may be empty — fall back to the always-populated list cache
-            let charAvatar = charDetail?.avatarPath ?? null;
-            let charName = "Character";
-            if (charDetail) {
-              const parsed = typeof charDetail.data === "string" ? JSON.parse(charDetail.data) : charDetail.data;
-              charName = parsed?.name ?? "Character";
-            }
-            if (!charAvatar || charName === "Character") {
-              const charList = qc.getQueryData<
-                Array<{ id: string; data?: string | { name?: string }; avatarPath?: string | null }>
-              >(characterKeys.list());
-              const fromList = charList?.find((c) => c.id === firstCharId);
-              if (fromList) {
-                if (!charAvatar) charAvatar = fromList.avatarPath ?? null;
-                if (charName === "Character") {
-                  const p = typeof fromList.data === "string" ? JSON.parse(fromList.data) : fromList.data;
-                  charName = p?.name ?? "Character";
-                }
-              }
-            }
-            useChatStore.getState().addNotification(params.chatId, charName, charAvatar);
+          const notifiedMessage = latestAssistantMessage(persistedMessages.values());
+          const notifiedCharacterId = notifiedMessage?.characterId ?? parsedIds[0] ?? null;
+          if (notifiedCharacterId) {
+            const identity = resolveCachedCharacterIdentity(qc, notifiedCharacterId);
+            useChatStore
+              .getState()
+              .addNotification(params.chatId, identity.name ?? "Character", identity.avatarUrl, identity.avatarCrop);
           }
           const isRp = chat?.mode === "roleplay" || chat?.mode === "visual_novel";
           const soundEnabled = isRp
@@ -1455,6 +1532,8 @@ export function useGenerate() {
       setMariPhase,
       setStreamBuffer,
       clearStreamBuffer,
+      appendThinkingBuffer,
+      clearThinkingBuffer,
       setRegenerateMessageId,
       setStreamingCharacterId,
       setTypingCharacterName,
@@ -1474,7 +1553,15 @@ export function useGenerate() {
   );
 
   const retryAgents = useCallback(
-    async (chatId: string, agentTypes: string[], options?: { lorebookKeeperBackfill?: boolean }) => {
+    async (
+      chatId: string,
+      agentTypes: string[],
+      options?: {
+        lorebookKeeperBackfill?: boolean;
+        forMessageId?: string;
+        secretPlotRerollMode?: "full" | "turn_only";
+      },
+    ) => {
       const isActiveChat = () => useChatStore.getState().activeChatId === chatId;
       const abortController = new AbortController();
       useChatStore.getState().setAbortController(chatId, abortController);
@@ -1491,10 +1578,17 @@ export function useGenerate() {
             agentTypes,
             streaming: useUIStore.getState().enableStreaming,
             lorebookKeeperBackfill: options?.lorebookKeeperBackfill === true,
+            ...(options?.forMessageId ? { forMessageId: options.forMessageId } : {}),
+            ...(options?.secretPlotRerollMode ? { secretPlotRerollMode: options.secretPlotRerollMode } : {}),
           },
           abortController.signal,
         )) {
           switch (event.type) {
+            case "agent_warning": {
+              showAgentWarning(event.data);
+              break;
+            }
+
             case "agent_result": {
               const result = event.data as {
                 agentType: string;

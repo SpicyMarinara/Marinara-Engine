@@ -76,6 +76,17 @@ export function useUpdateAgent() {
   });
 }
 
+export function useUpdateAgentByType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ agentType, ...data }: { agentType: string } & Record<string, unknown>) =>
+      api.patch(`/agents/type/${agentType}`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: agentKeys.all });
+    },
+  });
+}
+
 export function useCreateAgent() {
   const qc = useQueryClient();
   return useMutation({

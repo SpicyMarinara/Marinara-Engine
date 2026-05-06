@@ -17,6 +17,11 @@ import {
 
 const CHAT_MODES: ChatMode[] = ["conversation", "roleplay", "visual_novel"];
 const EXCLUDED_METADATA_SET = new Set(CHAT_PRESET_EXCLUDED_METADATA_KEYS);
+const SCENE_POINTER_METADATA_KEYS = new Set(["activeSceneChatId", "sceneBusyCharIds"]);
+
+function isPresetExcludedMetadataKey(key: string) {
+  return EXCLUDED_METADATA_SET.has(key) || SCENE_POINTER_METADATA_KEYS.has(key) || key.startsWith("scene");
+}
 
 interface ChatPresetRow {
   id: string;
@@ -53,7 +58,7 @@ export function sanitizePresetMetadata(metadata: Record<string, unknown> | undef
   if (!metadata || typeof metadata !== "object") return {};
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(metadata)) {
-    if (EXCLUDED_METADATA_SET.has(key)) continue;
+    if (isPresetExcludedMetadataKey(key)) continue;
     out[key] = value;
   }
   return out;
@@ -239,8 +244,8 @@ export function createChatPresetsStorage(db: DB) {
 
       // Preserve only chat-specific (non-preset) metadata keys.
       const preserved: Record<string, unknown> = {};
-      for (const key of CHAT_PRESET_EXCLUDED_METADATA_KEYS) {
-        if (key in currentMetadata) preserved[key] = currentMetadata[key];
+      for (const [key, value] of Object.entries(currentMetadata)) {
+        if (isPresetExcludedMetadataKey(key)) preserved[key] = value;
       }
 
       const baseDefaults: Record<string, unknown> = {

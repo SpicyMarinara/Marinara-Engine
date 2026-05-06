@@ -321,12 +321,6 @@ function parseSkillCheckTagBody(body: string): SkillCheckTag | null {
     return tag;
   }
 
-  const rolls = rollsValue
-    .split(/[|,]/)
-    .map((entry) => Number.parseInt(entry.trim(), 10))
-    .filter((entry) => Number.isFinite(entry));
-  if (rolls.length === 0) return tag;
-
   const normalizedMode: SkillCheckResult["rollMode"] =
     modeValue === "advantage" || tag.advantage
       ? "advantage"
@@ -336,6 +330,9 @@ function parseSkillCheckTagBody(body: string): SkillCheckTag | null {
 
   const explicitUsedRoll = Number.parseInt(values.get("used") ?? "", 10);
   const inferredRollFromTotal = total - modifier;
+  const rolls = parseSkillCheckRolls(rollsValue, inferredRollFromTotal);
+  if (rolls.length === 0) return tag;
+
   const usedRoll = Number.isFinite(explicitUsedRoll)
     ? explicitUsedRoll
     : rolls.includes(inferredRollFromTotal)
@@ -365,6 +362,25 @@ function parseSkillCheckTagBody(body: string): SkillCheckTag | null {
   };
 
   return tag;
+}
+
+function parseSkillCheckRolls(rollsValue: string, inferredRollFromTotal: number): number[] {
+  const diceNotationMatch = rollsValue.trim().match(/^(?:(\d+)?d(\d+))(?:[+-]\d+)?$/i);
+  if (diceNotationMatch) {
+    const count = Number.parseInt(diceNotationMatch[1] ?? "1", 10);
+    const sides = Number.parseInt(diceNotationMatch[2] ?? "", 10);
+    if (count === 1 && inferredRollFromTotal >= 1 && inferredRollFromTotal <= sides) {
+      return [inferredRollFromTotal];
+    }
+    return [];
+  }
+
+  return rollsValue
+    .split(/[|,]/)
+    .map((entry) => entry.trim())
+    .filter((entry) => /^-?\d+$/.test(entry))
+    .map((entry) => Number.parseInt(entry, 10))
+    .filter((entry) => Number.isFinite(entry));
 }
 
 function splitQuotedParams(text: string): string[] {

@@ -137,6 +137,12 @@ function isCombatResultMessage(message: NarrationMessage): boolean {
   return message.role === "user" && /\[combat_result\]/i.test(message.content || "");
 }
 
+const SYNTHETIC_GAME_START_MESSAGE_RE = /^\s*\[start(?:\s+the)?\s+game\]\s*$/i;
+
+function isSyntheticGameStartMessage(message: Pick<NarrationMessage, "role" | "content">): boolean {
+  return message.role === "user" && SYNTHETIC_GAME_START_MESSAGE_RE.test(message.content || "");
+}
+
 interface GameVoiceAudioJob {
   cacheKey: string;
   textCacheKey: string;
@@ -849,6 +855,7 @@ export function GameNarration({
       if (msg.role === "system") continue;
       if (msg.role === "user") {
         if (!msg.content?.trim()) continue;
+        if (isSyntheticGameStartMessage(msg)) continue;
         const playerName = personaInfo?.name || "You";
         const color = personaInfo?.dialogueColor || personaInfo?.nameColor || "#a5b4fc";
         out.push({
@@ -928,6 +935,7 @@ export function GameNarration({
     for (let i = assistantIdx - 1; i >= 0; i--) {
       const msg = messages[i]!;
       if (isCombatResultMessage(msg)) continue;
+      if (isSyntheticGameStartMessage(msg)) continue;
       if (msg.role === "user") return msg;
       if (msg.role === "assistant" || msg.role === "narrator") break;
     }
@@ -1502,6 +1510,7 @@ export function GameNarration({
 
       // Include user messages as player dialogue in logs
       if (showUserMessages && msg.role === "user" && msg.content.trim()) {
+        if (isSyntheticGameStartMessage(msg)) continue;
         const playerName = personaInfo?.name || "You";
         const color = personaInfo?.dialogueColor || personaInfo?.nameColor || "#a5b4fc";
         entries.push({
@@ -1553,8 +1562,9 @@ export function GameNarration({
           }
         }
         // Find the active segment by ID in the unfiltered list so side/extra offsets don't skew the slice
-        const activeSegId = segments[activeIndex]?.id;
-        let readUpTo = allSegs.length; // fallback: show all
+        const activeSeg = segments[activeIndex];
+        const activeSegId = activeSeg?.id;
+        let readUpTo = activeSeg?.sourceRole === "user" ? 0 : allSegs.length; // fallback: show all unless active is player action
         if (activeSegId) {
           const idx = allSegs.findIndex((s) => s.id === activeSegId);
           if (idx >= 0) {

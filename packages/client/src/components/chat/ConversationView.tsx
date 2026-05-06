@@ -102,6 +102,15 @@ function hasNamePrefixFormat(msg: Message, characterMap: CharacterMap, chatChara
   return false;
 }
 
+function isHiddenFromUser(message: Message) {
+  try {
+    const extra = typeof message.extra === "string" ? JSON.parse(message.extra) : (message.extra ?? {});
+    return extra.hiddenFromUser === true;
+  } catch {
+    return false;
+  }
+}
+
 // Module-level set that remembers which message keys have been "seen" across
 // component remounts. This prevents stagger animations and notification sounds
 // from replaying when the user navigates away from a chat and comes back.
@@ -148,6 +157,7 @@ export function ConversationView({
   const streamingChatId = useChatStore((s) => s.streamingChatId);
   const isStreaming = useChatStore((s) => s.isStreaming) && streamingChatId === chatId;
   const streamBuffer = useChatStore((s) => s.streamBuffer);
+  const thinkingBuffer = useChatStore((s) => s.thinkingBuffer);
   const regenerateMessageId = useChatStore((s) => s.regenerateMessageId);
   const streamingCharacterId = useChatStore((s) => s.streamingCharacterId);
   const typingCharacterName = useChatStore((s) => s.typingCharacterName);
@@ -245,7 +255,7 @@ export function ConversationView({
     if (isOptimistic || (isNearBottomRef.current && !userScrolledAwayRef.current)) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [newestMsgId, streamBuffer, isStreaming, delayedCharacterInfo, typingCharacterName, isOptimistic]);
+  }, [newestMsgId, streamBuffer, thinkingBuffer, isStreaming, delayedCharacterInfo, typingCharacterName, isOptimistic]);
 
   // Preserve scroll on load-more
   useLayoutEffect(() => {
@@ -286,6 +296,7 @@ export function ConversationView({
     let lastDay = "";
     for (let i = 0; i < messages.length; i++) {
       const msg = messages[i]!;
+      if (isHiddenFromUser(msg)) continue;
       const day = getDayKey(msg.createdAt);
       if (day !== lastDay) {
         items.push({ type: "separator", key: `sep-${day}`, label: formatDaySeparator(msg.createdAt) });
@@ -753,6 +764,7 @@ export function ConversationView({
                   isStreaming={isStreaming}
                   regenerateMessageId={regenerateMessageId}
                   streamBuffer={streamBuffer}
+                  thinkingBuffer={thinkingBuffer}
                   lastAssistantMessageId={lastAssistantMessageId}
                   characterMap={characterMap}
                   personaInfo={personaInfo}
@@ -774,13 +786,17 @@ export function ConversationView({
             // During regeneration, don't pass isStreaming until content arrives — the
             // "X is typing..." indicator at the bottom provides visual feedback instead
             // of showing bouncing dots inside the message bubble.
-            const hasStreamContent = isRegenerating && !!streamBuffer;
+            const hasStreamContent = isRegenerating && (!!streamBuffer || !!thinkingBuffer);
             // Strip old-swipe attachments during regeneration so a previous
             // illustration doesn't linger while new text is streaming in.
             const displayMsg = isRegenerating
               ? (() => {
                   const parsed = typeof msg.extra === "string" ? JSON.parse(msg.extra) : (msg.extra ?? {});
-                  return { ...msg, content: streamBuffer || msg.content, extra: { ...parsed, attachments: null } };
+                  return {
+                    ...msg,
+                    content: streamBuffer || (thinkingBuffer ? "Thinking..." : msg.content),
+                    extra: { ...parsed, attachments: null, thinking: thinkingBuffer || parsed.thinking },
+                  };
                 })()
               : msg;
             elements.push(
@@ -811,7 +827,7 @@ export function ConversationView({
         })()}
 
         {/* Delayed indicator (DND/idle — waiting for character to become available) */}
-        {delayedCharacterInfo && isStreaming && !streamBuffer && (
+        {delayedCharacterInfo && isStreaming && !streamBuffer && !thinkingBuffer && (
           <div className="flex items-center gap-2 px-4 py-1.5 text-[0.8125rem] text-[var(--text-secondary)]">
             <span className="italic">
               {delayedCharacterInfo.status === "dnd"
@@ -822,7 +838,7 @@ export function ConversationView({
         )}
 
         {/* Typing indicator — shown when generation is actively running */}
-        {isStreaming && !streamBuffer && typingCharacterName && (
+        {isStreaming && !streamBuffer && !thinkingBuffer && typingCharacterName && (
           <div className="flex items-center gap-2 px-4 py-1.5 text-[0.8125rem] text-[var(--text-secondary)]">
             <span className="flex gap-0.5">
               <span
@@ -843,20 +859,21 @@ export function ConversationView({
         )}
 
         {/* Streaming message — only shown once actual content starts arriving */}
-        {isStreaming && !regenerateMessageId && streamBuffer && (
+        {isStreaming && !regenerateMessageId && (streamBuffer || thinkingBuffer) && (
           <ConversationMessage
             message={{
               id: "__streaming__",
               chatId,
               role: "assistant",
               characterId: streamingCharacterId ?? chatCharIds[0] ?? null,
-              content: streamBuffer,
+              content: streamBuffer || "Thinking...",
               activeSwipeIndex: 0,
               extra: {
                 displayText: null,
                 isGenerated: true,
                 tokenCount: 0,
                 generationInfo: null,
+                thinking: thinkingBuffer || null,
               },
               createdAt: new Date().toISOString(),
             }}
@@ -938,6 +955,7 @@ function SplitMessageGroup({
   isStreaming,
   regenerateMessageId,
   streamBuffer,
+  thinkingBuffer,
   lastAssistantMessageId,
   characterMap,
   chatCharacterIds,
@@ -952,6 +970,7 @@ function SplitMessageGroup({
   isStreaming: boolean;
   regenerateMessageId: string | null;
   streamBuffer: string;
+  thinkingBuffer: string;
   lastAssistantMessageId: string | undefined | null;
   characterMap: CharacterMap;
   chatCharacterIds: string[];
@@ -1062,7 +1081,7 @@ function SplitMessageGroup({
         if (isRegen) {
           // While waiting for content, don't render — the "X is typing..." indicator
           // at the bottom of the message list provides the visual feedback.
-          if (!streamBuffer) {
+          if (!streamBuffer && !thinkingBuffer) {
             return (
               <ConversationMessage
                 key={firstItem.key}
@@ -1083,7 +1102,11 @@ function SplitMessageGroup({
               />
             );
           }
-          const dMsg = { ...firstItem.msg, content: streamBuffer, extra: regenExtra };
+          const dMsg = {
+            ...firstItem.msg,
+            content: streamBuffer || "Thinking...",
+            extra: { ...regenExtra, thinking: thinkingBuffer || regenExtra?.thinking },
+          };
           return (
             <ConversationMessage
               key={firstItem.key}
