@@ -24,6 +24,7 @@ function localUrlPolicyForProvider(provider: string, imageSource: string) {
         ? true
         : isProviderLocalUrlsEnabled(),
     allowLoopback: true,
+    allowMdns: provider !== "image_generation" || isLocalImageBackend || isImageLocalUrlsEnabled(),
     allowedProtocols: ["https:", "http:"],
   };
 }
@@ -360,6 +361,7 @@ export async function connectionsRoutes(app: FastifyInstance) {
           policy: {
             allowLocal: isProviderLocalUrlsEnabled(),
             allowLoopback: true,
+            allowMdns: true,
             allowedProtocols: ["https:", "http:"],
           },
           maxResponseBytes: 5 * 1024 * 1024,
@@ -393,6 +395,7 @@ export async function connectionsRoutes(app: FastifyInstance) {
         policy: {
           allowLocal: isProviderLocalUrlsEnabled(),
           allowLoopback: true,
+          allowMdns: true,
           allowedProtocols: ["https:", "http:"],
         },
         maxResponseBytes: 5 * 1024 * 1024,

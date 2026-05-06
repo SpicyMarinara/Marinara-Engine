@@ -89,6 +89,30 @@ test("validateOutboundUrl allows loopback-only provider mode", async () => {
   await assert.rejects(() => validateOutboundUrl("http://example.localhost:8188", policy));
 });
 
+test("validateOutboundUrl allows explicit mDNS provider mode", async () => {
+  const originalLookup = dns.lookup;
+  dns.lookup = (async (hostname: string) => {
+    if (hostname === "name.local") return [{ address: "192.168.1.50", family: 4 }];
+    return originalLookup(hostname, { all: true, verbatim: true } as never) as never;
+  }) as typeof dns.lookup;
+
+  try {
+    const parsed = await validateOutboundUrl("http://name.local:5001/v1", {
+      allowLoopback: true,
+      allowMdns: true,
+      allowedProtocols: ["http:", "https:"],
+    });
+    assert.equal(parsed.hostname, "name.local");
+
+    await assert.rejects(
+      () => validateOutboundUrl("http://name.local:5001/v1", { allowedProtocols: ["http:", "https:"] }),
+      /local or reserved/,
+    );
+  } finally {
+    dns.lookup = originalLookup;
+  }
+});
+
 test("validateOutboundUrl allows public IPv4 destinations", async () => {
   const parsed = await validateOutboundUrl("https://8.8.8.8/dns-query");
   assert.equal(parsed.hostname, "8.8.8.8");
