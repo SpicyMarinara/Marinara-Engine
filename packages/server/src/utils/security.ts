@@ -257,7 +257,11 @@ async function validateResolvedAddresses(
 ): Promise<Array<{ address: string; family: 4 | 6 }>> {
   const addresses = await resolveHostname(hostname);
   if (policy.allowMdns && isMdnsHostname(hostname)) {
-    return preferIpv4Records(addresses);
+    const preferred = preferIpv4Records(addresses);
+    if (preferred.length === 0) {
+      throw new Error("mDNS resolution returned no addresses for hostname");
+    }
+    return preferred;
   }
   if (
     !policy.allowLocal &&

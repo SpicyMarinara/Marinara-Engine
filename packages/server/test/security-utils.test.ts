@@ -113,6 +113,28 @@ test("validateOutboundUrl allows explicit mDNS provider mode", async () => {
   }
 });
 
+test("validateOutboundUrl rejects empty mDNS resolution results", async () => {
+  const originalLookup = dns.lookup;
+  dns.lookup = (async (hostname: string) => {
+    if (hostname === "empty.local") return [];
+    return originalLookup(hostname, { all: true, verbatim: true } as never) as never;
+  }) as typeof dns.lookup;
+
+  try {
+    await assert.rejects(
+      () =>
+        validateOutboundUrl("http://empty.local:5001/v1", {
+          allowLoopback: true,
+          allowMdns: true,
+          allowedProtocols: ["http:", "https:"],
+        }),
+      /mDNS resolution returned no addresses/,
+    );
+  } finally {
+    dns.lookup = originalLookup;
+  }
+});
+
 test("validateOutboundUrl allows public IPv4 destinations", async () => {
   const parsed = await validateOutboundUrl("https://8.8.8.8/dns-query");
   assert.equal(parsed.hostname, "8.8.8.8");
