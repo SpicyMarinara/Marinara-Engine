@@ -17,7 +17,7 @@
     "evidence": [
       "scratch/issue-492-local-hostname-repro.ts",
       "scratch/issue-492-real-mdns-provider-check.ts",
-      "scratch/issue-492-live-mdns-browser-proof.png"
+      "scratch/issue-492-live-mdns-proof-page.png"
     ]
   },
   "verification": {
@@ -26,7 +26,7 @@
     "baselineCommand": "pnpm check",
     "baselineEvidence": "pnpm check passed after focused repros and security test",
     "edgeCases": [],
-    "visualProof": "scratch/issue-492-live-mdns-browser-proof.png"
+    "visualProof": "scratch/issue-492-live-mdns-proof-page.png"
   },
   "manualBlockers": [],
   "notes": []
