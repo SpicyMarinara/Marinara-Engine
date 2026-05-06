@@ -152,8 +152,10 @@ const GAME_ASSET_PREVIEW_TIMEOUT_MS = 180_000;
 const GAME_ASSET_PROMPT_REVIEW_TIMEOUT_MS = 180_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout?: () => void): Promise<T> {
+  const controller = new AbortController();
   return new Promise<T>((resolve, reject) => {
     const timeoutId = window.setTimeout(() => {
+      controller.abort();
       onTimeout?.();
       reject(new Error(`Operation timed out after ${ms / 1000} seconds`));
     }, ms);
@@ -3200,25 +3202,41 @@ export function GameSurface({
       };
 
       if (useUIStore.getState().reviewImagePromptsBeforeSend) {
-        const preview = await withTimeout(
-          api.post<{ items: GameImagePromptReviewItem[] }>("/game/generate-assets/preview", payload),
-          GAME_ASSET_PREVIEW_TIMEOUT_MS,
-          () => {
-            toast.error("Image prompt preview timed out. Continuing with the default prompts.");
-          },
-        );
-        if (preview.items.length > 0) {
-          const overrides = await withTimeout(
-            openImagePromptReview(preview.items),
-            GAME_ASSET_PROMPT_REVIEW_TIMEOUT_MS,
+        let preview: { items: GameImagePromptReviewItem[] } | undefined;
+        try {
+          preview = await withTimeout(
+            api.post<{ items: GameImagePromptReviewItem[] }>("/game/generate-assets/preview", payload),
+            GAME_ASSET_PREVIEW_TIMEOUT_MS,
             () => {
-              closeImagePromptReview(null);
-              toast.error("Image prompt review timed out. Continuing with the default prompts.");
+              toast.error("Image prompt preview timed out. Continuing with the default prompts.");
             },
           );
-          if (!overrides) return null;
-          setImagePromptReviewSubmitting(true);
-          payload.promptOverrides = overrides;
+        } catch {
+          // Timeout — treat as empty preview (proceed with default prompts)
+          preview = { items: [] };
+        }
+
+        if (preview.items.length > 0) {
+          let overrides: GameImagePromptOverride[] | null | undefined;
+          try {
+            overrides = await withTimeout(
+              openImagePromptReview(preview.items),
+              GAME_ASSET_PROMPT_REVIEW_TIMEOUT_MS,
+              () => {
+                closeImagePromptReview(null);
+                toast.error("Image prompt review timed out. Continuing with the default prompts.");
+              },
+            );
+          } catch {
+            // Timeout — treat as null (proceed with default prompts)
+            overrides = null;
+          }
+
+          if (overrides === undefined) return null; // User explicitly cancelled
+          if (overrides) {
+            setImagePromptReviewSubmitting(true);
+            payload.promptOverrides = overrides;
+          }
         }
       }
 
@@ -3234,11 +3252,10 @@ export function GameSurface({
   );
 
   const applyGeneratedAssets = useCallback(
-    (res: GameAssetGenerationResult) => {
+    async (res: GameAssetGenerationResult) => {
       if (res.generatedBackground) {
-        fetchManifest().then(() => {
-          useGameAssetStore.getState().setCurrentBackground(res.generatedBackground!);
-        });
+        await fetchManifest();
+        useGameAssetStore.getState().setCurrentBackground(res.generatedBackground!);
       }
       if (res.generatedIllustration) {
         installGeneratedIllustration(res.generatedIllustration);
@@ -3402,15 +3419,20 @@ export function GameSurface({
         setPendingAssetGeneration(assetPayload);
         setAssetGenerationFailed(false);
         runGameAssetGeneration(assetPayload)
-          .then((res) => {
-            if (res) applyGeneratedAssets(res);
+          .then(async (res) => {
+            if (res) {
+              await applyGeneratedAssets(res);
+              setPendingAssetGeneration(null);
+            } else {
+              setPendingAssetGeneration(null);
+            }
+            // Ungate narration after assets are installed
+            sceneReadyMsgIdRef.current = msg.id;
+            setSceneReadyTick((t) => t + 1);
           })
           .catch(() => {
             setAssetGenerationFailed(true);
-          })
-          .finally(() => {
-            setPendingAssetGeneration(null);
-            // Ungate narration after assets are ready or failed
+            // Keep pendingAssetGeneration so retry UI/button remain visible
             sceneReadyMsgIdRef.current = msg.id;
             setSceneReadyTick((t) => t + 1);
           });
