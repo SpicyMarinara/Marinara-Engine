@@ -147,6 +147,29 @@ function getConfiguredGameAssetImageSizes(): NonNullable<GameAssetGenerationPayl
   };
 }
 
+const GAME_ASSET_GENERATION_TIMEOUT_MS = 240_000;
+const GAME_ASSET_PREVIEW_TIMEOUT_MS = 180_000;
+const GAME_ASSET_PROMPT_REVIEW_TIMEOUT_MS = 180_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout?: () => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      onTimeout?.();
+      reject(new Error(`Operation timed out after ${ms / 1000} seconds`));
+    }, ms);
+
+    promise
+      .then((value) => {
+        window.clearTimeout(timeoutId);
+        resolve(value);
+      })
+      .catch((error) => {
+        window.clearTimeout(timeoutId);
+        reject(error);
+      });
+  });
+}
+
 type GameTimeMeta = {
   day?: number;
   hour?: number;
@@ -3177,19 +3200,35 @@ export function GameSurface({
       };
 
       if (useUIStore.getState().reviewImagePromptsBeforeSend) {
-        const preview = await api.post<{ items: GameImagePromptReviewItem[] }>(
-          "/game/generate-assets/preview",
-          payload,
+        const preview = await withTimeout(
+          api.post<{ items: GameImagePromptReviewItem[] }>("/game/generate-assets/preview", payload),
+          GAME_ASSET_PREVIEW_TIMEOUT_MS,
+          () => {
+            toast.error("Image prompt preview timed out. Continuing with the default prompts.");
+          },
         );
         if (preview.items.length > 0) {
-          const overrides = await openImagePromptReview(preview.items);
+          const overrides = await withTimeout(
+            openImagePromptReview(preview.items),
+            GAME_ASSET_PROMPT_REVIEW_TIMEOUT_MS,
+            () => {
+              closeImagePromptReview(null);
+              toast.error("Image prompt review timed out. Continuing with the default prompts.");
+            },
+          );
           if (!overrides) return null;
           setImagePromptReviewSubmitting(true);
           payload.promptOverrides = overrides;
         }
       }
 
-      return api.post<GameAssetGenerationResult>("/game/generate-assets", payload);
+      return await withTimeout(
+        api.post<GameAssetGenerationResult>("/game/generate-assets", payload),
+        GAME_ASSET_GENERATION_TIMEOUT_MS,
+        () => {
+          toast.error("Image generation timed out. The scene will continue without generated assets.");
+        },
+      );
     },
     [openImagePromptReview],
   );
