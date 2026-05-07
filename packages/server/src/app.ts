@@ -55,8 +55,10 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
   // CORS uses a per-request delegator so the trusted set is re-read each
   // request (CORS_ORIGINS hot-reloads in ~2s without a restart) AND so
   // same-origin requests (Origin matches the request's Host header) are
-  // auto-allowed regardless of configuration. See cors-config.ts.
-  await app.register(cors, corsDelegate);
+  // auto-allowed regardless of configuration. @fastify/cors expects the
+  // delegator to be returned from a factory function passed as the plugin
+  // options. See cors-config.ts.
+  await app.register(cors, () => corsDelegate);
 
   await app.register(multipart, {
     limits: {
