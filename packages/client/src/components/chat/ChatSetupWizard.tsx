@@ -110,6 +110,7 @@ type PersonaSetupOption = PersonaDisplayInfo & {
 type ConnectionSetupOption = {
   id: string;
   name: string;
+  provider?: string;
   defaultParameters?: unknown;
 };
 
@@ -337,6 +338,10 @@ function ConversationQuickSetup({ chat, onFinish }: ChatSetupWizardProps) {
     return typeof raw === "string" ? JSON.parse(raw) : (raw ?? {});
   }, [chat]);
   const connectionOptions = useMemo(() => ((connections ?? []) as ConnectionSetupOption[]) ?? [], [connections]);
+  const textConnectionOptions = useMemo(
+    () => connectionOptions.filter((connection) => connection.provider !== "image_generation"),
+    [connectionOptions],
+  );
   const selectedConnection = useMemo(
     () => connectionOptions.find((connection) => connection.id === chat.connectionId) ?? null,
     [connectionOptions, chat.connectionId],
@@ -545,13 +550,13 @@ function ConversationQuickSetup({ chat, onFinish }: ChatSetupWizardProps) {
               >
                 <option value="">None</option>
                 <option value="random">🎲 Random</option>
-                {connectionOptions.map((c) => (
+                {textConnectionOptions.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
                   </option>
                 ))}
               </select>
-              {connectionOptions.length === 0 && (
+              {textConnectionOptions.length === 0 && (
                 <button
                   onClick={() => {
                     openRightPanel("connections");
