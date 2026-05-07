@@ -1,17 +1,24 @@
 // ──────────────────────────────────────────────
-// CORS configuration with hot-reload support
+// CORS configuration with hot-reload + same-origin auto-allow
 // ──────────────────────────────────────────────
-// @fastify/cors registers once at boot, but its `origin` option accepts a
-// function that is invoked per request. We use that to re-read CORS_ORIGINS
-// on every request so the operator can edit .env and have the new value take
-// effect within the env-watcher's polling interval (~2s) without a restart.
+// We use @fastify/cors's delegator mode so the trusted origin set is
+// re-evaluated for every request. This buys us two things:
 //
-// Caveat: `credentials` is still a static option on the cors plugin. If the
-// operator switches between an explicit-origin list (credentials=true) and a
-// wildcard "*" (credentials=false), that specific transition still requires
-// a restart. Adding/removing origins within either mode is hot-reloadable.
+//  1. Adding / removing entries in CORS_ORIGINS takes effect within ~2s of
+//     saving .env (the env-watcher's polling interval), no restart required.
+//
+//  2. Same-origin requests are auto-allowed regardless of CORS_ORIGINS.
+//     If the browser's Origin header matches the URL the request actually
+//     reached (the Host header), it's by definition same-origin and CORS
+//     restrictions don't apply. This means a user who visits Marinara at
+//     http://localhost:7860 OR http://100.x.y.z:7860 (Tailscale) doesn't
+//     have to add either URL to CORS_ORIGINS — same-origin "just works."
+//     They only need CORS_ORIGINS for genuine cross-origin frontends (a
+//     dev Vite server on a different port, a separate hostname behind a
+//     reverse proxy that rewrites Host, etc.).
 
-import { getCorsConfig } from "./runtime-config.js";
+import type { FastifyRequest } from "fastify";
+import { getCorsConfig, getServerProtocol } from "./runtime-config.js";
 import { logger } from "../lib/logger.js";
 
 const announcedRejectedOrigins = new Set<string>();
@@ -20,10 +27,30 @@ function announceRejectedOrigin(origin: string) {
   if (announcedRejectedOrigins.has(origin)) return;
   announcedRejectedOrigins.add(origin);
   logger.warn(
-    `[cors] Rejected preflight from origin '${origin}' (not in CORS_ORIGINS). ` +
+    `[cors] Rejected cross-origin request from '${origin}' (not in CORS_ORIGINS, not same-origin). ` +
       `To allow this origin, add the following line to your .env (no restart needed): ` +
       `CORS_ORIGINS=${origin}`,
   );
+}
+
+function firstHeader(value: string | string[] | undefined): string | null {
+  if (!value) return null;
+  const raw = Array.isArray(value) ? value[0] : value;
+  return raw?.split(",")[0]?.trim() || null;
+}
+
+function selfOriginFromRequest(req: FastifyRequest): string | null {
+  const host = firstHeader(req.headers.host);
+  if (!host) return null;
+  // Honour the proxy-forwarded protocol when present, otherwise fall back
+  // to the protocol Marinara is actually serving on.
+  const forwardedProto = firstHeader(req.headers["x-forwarded-proto"]);
+  const protocol = forwardedProto === "https" || forwardedProto === "http" ? forwardedProto : getServerProtocol();
+  try {
+    return new URL(`${protocol}://${host}`).origin;
+  } catch {
+    return null;
+  }
 }
 
 function originIsAllowed(origin: string): boolean {
@@ -35,33 +62,37 @@ function originIsAllowed(origin: string): boolean {
   return false;
 }
 
-export type CorsCallback = (err: Error | null, allowed: boolean) => void;
+export type CorsDelegateCallback = (
+  err: Error | null,
+  options?: { origin: boolean | string; credentials?: boolean },
+) => void;
 
 /**
- * Per-request origin check passed to @fastify/cors. Returns true when the
- * incoming Origin matches the *current* CORS_ORIGINS configuration.
+ * Per-request CORS resolver. Order:
+ *   1. No Origin header → not a CORS request, no restrictions apply.
+ *   2. Origin matches the request's own host (same-origin) → always allowed.
+ *   3. Origin matches CORS_ORIGINS or "*" → allowed.
+ *   4. Otherwise → rejected, log a one-shot diagnostic for the operator.
  */
-export function checkCorsOrigin(origin: string | undefined, callback: CorsCallback) {
-  // Requests without an Origin header (curl, server-to-server, same-origin
-  // navigations) are not subject to CORS — let them through.
-  if (!origin) return callback(null, true);
+export function corsDelegate(req: FastifyRequest, callback: CorsDelegateCallback) {
+  const origin = firstHeader(req.headers.origin);
+  if (!origin) {
+    return callback(null, { origin: true });
+  }
 
-  if (originIsAllowed(origin)) return callback(null, true);
+  const selfOrigin = selfOriginFromRequest(req);
+  if (selfOrigin && origin === selfOrigin) {
+    return callback(null, { origin: true, credentials: getCorsConfig().credentials });
+  }
+
+  if (originIsAllowed(origin)) {
+    const config = getCorsConfig();
+    if (config.origin === "*") {
+      return callback(null, { origin: true, credentials: false });
+    }
+    return callback(null, { origin: true, credentials: config.credentials });
+  }
 
   announceRejectedOrigin(origin);
-  callback(null, false);
-}
-
-/**
- * Resolve the static @fastify/cors options. `origin` is a function so the
- * trusted set is re-read per request; `credentials` is bound at boot from
- * whatever mode (explicit list vs wildcard) was active when the server
- * started. See module docstring for the credentials-mode caveat.
- */
-export function buildCorsPluginOptions() {
-  const initial = getCorsConfig();
-  return {
-    origin: checkCorsOrigin,
-    credentials: initial.credentials,
-  };
+  callback(null, { origin: false });
 }

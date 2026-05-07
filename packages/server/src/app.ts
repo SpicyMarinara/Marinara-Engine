@@ -33,7 +33,7 @@ import {
   isFileStorageBackend,
   isAutoCreateDefaultConnectionDisabled,
 } from "./config/runtime-config.js";
-import { buildCorsPluginOptions } from "./config/cors-config.js";
+import { corsDelegate } from "./config/cors-config.js";
 import { sidecarProcessService } from "./services/sidecar/sidecar-process.service.js";
 
 const isLite = process.env.MARINARA_LITE === "true" || process.env.MARINARA_LITE === "1";
@@ -52,11 +52,11 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
   });
 
   // ── Plugins ──
-  // CORS uses a function-based origin so CORS_ORIGINS is re-read per request
-  // (see cors-config.ts). Adding/removing origins takes effect within ~2s of
-  // a .env save; switching between an explicit list and "*" still needs a
-  // restart for the credentials side of the response to flip.
-  await app.register(cors, buildCorsPluginOptions());
+  // CORS uses a per-request delegator so the trusted set is re-read each
+  // request (CORS_ORIGINS hot-reloads in ~2s without a restart) AND so
+  // same-origin requests (Origin matches the request's Host header) are
+  // auto-allowed regardless of configuration. See cors-config.ts.
+  await app.register(cors, corsDelegate);
 
   await app.register(multipart, {
     limits: {
