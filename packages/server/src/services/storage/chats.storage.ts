@@ -212,6 +212,24 @@ export function createChatsStorage(db: DB) {
       });
     },
 
+    async removeLorebookFromChatMetadata(lorebookId: string) {
+      const allChats = await this.list();
+      for (const chat of allChats) {
+        const metadata = parseMetadata(chat.metadata);
+        if (!Array.isArray(metadata.activeLorebookIds)) continue;
+
+        const nextActiveLorebookIds = metadata.activeLorebookIds.filter((id) => id !== lorebookId);
+        if (nextActiveLorebookIds.length === metadata.activeLorebookIds.length) continue;
+
+        await this.patchMetadata(chat.id, (current) => {
+          const currentLorebookIds = Array.isArray(current.activeLorebookIds) ? current.activeLorebookIds : [];
+          return {
+            activeLorebookIds: currentLorebookIds.filter((id) => id !== lorebookId),
+          };
+        });
+      }
+    },
+
     async remove(id: string) {
       // Clean up agent data referencing this chat
       await db.delete(agentRuns).where(eq(agentRuns.chatId, id));

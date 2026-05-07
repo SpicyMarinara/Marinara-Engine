@@ -308,7 +308,18 @@ export function ChatSettingsDrawer({
   const conversationSchedulesEnabled =
     metadata.conversationSchedulesEnabled === true ||
     (metadata.conversationSchedulesEnabled == null && hasGeneratedConversationSchedules);
-  const activeLorebookIds: string[] = metadata.activeLorebookIds ?? [];
+  const activeLorebookIds = useMemo<string[]>(
+    () => (Array.isArray(metadata.activeLorebookIds) ? metadata.activeLorebookIds : []),
+    [metadata.activeLorebookIds],
+  );
+  const existingActiveLorebooks = useMemo(() => {
+    const lorebookList = (lorebooks ?? []) as Array<{ id: string; name: string }>;
+    const lorebookById = new Map(lorebookList.map((lorebook) => [lorebook.id, lorebook]));
+    return activeLorebookIds.flatMap((lorebookId) => {
+      const lorebook = lorebookById.get(lorebookId);
+      return lorebook ? [lorebook] : [];
+    });
+  }, [activeLorebookIds, lorebooks]);
   const activeAgentIds = useMemo<string[]>(() => metadata.activeAgentIds ?? [], [metadata.activeAgentIds]);
   const activeToolIds: string[] = metadata.activeToolIds ?? [];
   const gameLorebookKeeperEnabled = metadata.gameLorebookKeeperEnabled === true;
@@ -2877,19 +2888,15 @@ export function ChatSettingsDrawer({
           <Section
             label="Lorebooks"
             icon={<BookOpen size="0.875rem" />}
-            count={activeLorebookIds.length}
+            count={existingActiveLorebooks.length}
             help="Lorebooks contain world info, character backstories, and lore that gets injected into the AI's context when relevant keywords appear."
           >
             {/* Active lorebooks */}
-            {activeLorebookIds.length === 0 ? (
+            {existingActiveLorebooks.length === 0 ? (
               <p className="text-[0.6875rem] text-[var(--muted-foreground)]">No lorebooks added to this chat.</p>
             ) : (
               <div className="flex flex-col gap-1">
-                {activeLorebookIds.map((lbId) => {
-                  const lb = (lorebooks ?? []).find((l: { id: string }) => l.id === lbId) as
-                    | { id: string; name: string }
-                    | undefined;
-                  if (!lb) return null;
+                {existingActiveLorebooks.map((lb) => {
                   return (
                     <div
                       key={lb.id}

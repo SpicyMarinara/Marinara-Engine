@@ -198,6 +198,8 @@ export async function lorebooksRoutes(app: FastifyInstance) {
   });
 
   app.delete<{ Params: { id: string } }>("/:id", async (req, reply) => {
+    const chatsStorage = createChatsStorage(app.db);
+    await chatsStorage.removeLorebookFromChatMetadata(req.params.id);
     await storage.remove(req.params.id);
     return reply.status(204).send();
   });
