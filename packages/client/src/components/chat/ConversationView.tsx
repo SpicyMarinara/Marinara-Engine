@@ -159,6 +159,7 @@ export function ConversationView({
   const streamBuffer = useChatStore((s) => s.streamBuffer);
   const thinkingBuffer = useChatStore((s) => s.thinkingBuffer);
   const regenerateMessageId = useChatStore((s) => s.regenerateMessageId);
+  const persistedStreamingMessageId = useChatStore((s) => s.persistedStreamingMessageIds.get(chatId) ?? null);
   const streamingCharacterId = useChatStore((s) => s.streamingCharacterId);
   const typingCharacterName = useChatStore((s) => s.typingCharacterName);
   const delayedCharacterInfo = useChatStore((s) => s.delayedCharacterInfo);
@@ -396,6 +397,10 @@ export function ConversationView({
     }
     return items;
   }, [messages, characterMap, chatCharIds, totalMessageCount]);
+  const isStreamingMessagePersisted = useMemo(
+    () => !!persistedStreamingMessageId && !!messages?.some((message) => message.id === persistedStreamingMessageId),
+    [messages, persistedStreamingMessageId],
+  );
 
   // ── Staggered reveal for split assistant lines ──
   // When a new multi-line assistant message arrives, show lines one by one
@@ -859,7 +864,7 @@ export function ConversationView({
         )}
 
         {/* Streaming message — only shown once actual content starts arriving */}
-        {isStreaming && !regenerateMessageId && (streamBuffer || thinkingBuffer) && (
+        {isStreaming && !isStreamingMessagePersisted && !regenerateMessageId && (streamBuffer || thinkingBuffer) && (
           <ConversationMessage
             message={{
               id: "__streaming__",

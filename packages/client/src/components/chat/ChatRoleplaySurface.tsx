@@ -759,6 +759,9 @@ export function ChatRoleplaySurface({
   const linkedChatName = chat?.connectedChatId ? allChats?.find((c) => c.id === chat.connectedChatId)?.name : undefined;
   const sidebarOpen = useUIStore((s) => s.sidebarOpen);
   const rightPanelOpen = useUIStore((s) => s.rightPanelOpen);
+  const persistedStreamingMessageId = useChatStore((s) => s.persistedStreamingMessageIds.get(activeChatId) ?? null);
+  const isStreamingMessagePersisted =
+    !!persistedStreamingMessageId && !!messages?.some((message) => message.id === persistedStreamingMessageId);
   const hideEchoChamberOnMobile =
     sidebarOpen || rightPanelOpen || settingsOpen || filesOpen || galleryOpen || wizardOpen;
 
@@ -1103,7 +1106,7 @@ export function ChatRoleplaySurface({
 
                 {!isStreaming && <CyoaChoices messages={messages} />}
 
-                {isStreaming && !regenerateMessageId && (
+                {isStreaming && !isStreamingMessagePersisted && !regenerateMessageId && (
                   <StreamingIndicator
                     activeChatId={activeChatId}
                     chatCharIds={chatCharIds}

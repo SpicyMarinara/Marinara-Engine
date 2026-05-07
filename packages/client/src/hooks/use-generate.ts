@@ -419,6 +419,7 @@ export function useGenerate() {
   const setMariPhase = useChatStore((s) => s.setMariPhase);
   const setStreamBuffer = useChatStore((s) => s.setStreamBuffer);
   const clearStreamBuffer = useChatStore((s) => s.clearStreamBuffer);
+  const setPersistedStreamingMessageId = useChatStore((s) => s.setPersistedStreamingMessageId);
   const appendThinkingBuffer = useChatStore((s) => s.appendThinkingBuffer);
   const clearThinkingBuffer = useChatStore((s) => s.clearThinkingBuffer);
   const setRegenerateMessageId = useChatStore((s) => s.setRegenerateMessageId);
@@ -1017,6 +1018,7 @@ export function useGenerate() {
                 thinkCloseTag = "</think>";
                 setStreamBuffer("", params.chatId);
                 clearThinkingBuffer(params.chatId);
+                setPersistedStreamingMessageId(params.chatId, null);
               }
 
               if (isActiveChat()) setStreamingCharacterId(turn.characterId);
@@ -1114,6 +1116,8 @@ export function useGenerate() {
               // duplicate message that vanishes on refresh.
               if (params.regenerateMessageId || !streamingEnabled) {
                 upsertPersistedMessages(qc, params.chatId, [savedMessage]);
+              } else {
+                setPersistedStreamingMessageId(params.chatId, savedMessage.id);
               }
               break;
             }
@@ -1445,10 +1449,9 @@ export function useGenerate() {
           if (useChatStore.getState().streamingChatId === params.chatId) {
             // Authoritative refresh BEFORE clearing streaming state. This
             // fetches the latest messages from DB (including illustrations and
-            // other post-processing attachments). React 19 batches the React
-            // Query cache update and the Zustand streaming state update into
-            // one commit since they happen in the same microtask after the
-            // await resolves — preventing both duplicate-flash and empty-flash.
+            // other post-processing attachments). The renderers hide the
+            // temporary stream bubble once this saved message appears, so the
+            // handoff cannot show both copies at once.
             await refreshMessagesAuthoritatively(qc, params.chatId, persistedMessages.values());
             setStreaming(false);
             clearStreamBuffer(params.chatId);
@@ -1532,6 +1535,7 @@ export function useGenerate() {
       setMariPhase,
       setStreamBuffer,
       clearStreamBuffer,
+      setPersistedStreamingMessageId,
       appendThinkingBuffer,
       clearThinkingBuffer,
       setRegenerateMessageId,

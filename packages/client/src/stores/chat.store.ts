@@ -55,6 +55,8 @@ interface ChatState {
   streamBuffer: string;
   /** Per-chat stream text for active generations, so switching chats does not lose in-flight UI state. */
   streamBuffers: Map<string, string>;
+  /** Per-chat saved message that is replacing the temporary streaming bubble. */
+  persistedStreamingMessageIds: Map<string, string>;
   thinkingBuffer: string;
   /** Per-chat live thinking text for active generations. */
   thinkingBuffers: Map<string, string>;
@@ -118,6 +120,7 @@ interface ChatState {
   appendStreamBuffer: (text: string, chatId?: string) => void;
   setStreamBuffer: (text: string, chatId?: string) => void;
   clearStreamBuffer: (chatId?: string) => void;
+  setPersistedStreamingMessageId: (chatId: string, messageId: string | null) => void;
   appendThinkingBuffer: (text: string, chatId?: string) => void;
   setThinkingBuffer: (text: string, chatId?: string) => void;
   clearThinkingBuffer: (chatId?: string) => void;
@@ -167,6 +170,7 @@ export const useChatStore = create<ChatState>()(
     mariPhaseByChatId: new Map(),
     streamBuffer: "",
     streamBuffers: new Map(),
+    persistedStreamingMessageIds: new Map(),
     thinkingBuffer: "",
     thinkingBuffers: new Map(),
     abortControllers: new Map(),
@@ -340,6 +344,13 @@ export const useChatStore = create<ChatState>()(
           ...(state.activeChatId === targetChatId ? { streamBuffer: "" } : {}),
         };
       }),
+    setPersistedStreamingMessageId: (chatId, messageId) =>
+      set((state) => {
+        const m = new Map(state.persistedStreamingMessageIds);
+        if (messageId) m.set(chatId, messageId);
+        else m.delete(chatId);
+        return { persistedStreamingMessageIds: m };
+      }),
     appendThinkingBuffer: (text, chatId) =>
       set((state) => {
         const targetChatId = chatId ?? state.streamingChatId ?? state.activeChatId ?? "";
@@ -411,13 +422,16 @@ export const useChatStore = create<ChatState>()(
         const t = new Map(state.perChatTyping);
         const d = new Map(state.perChatDelayed);
         const thoughts = new Map(state.thinkingBuffers);
+        const persistedStreaming = new Map(state.persistedStreamingMessageIds);
         t.delete(chatId);
         d.delete(chatId);
         thoughts.delete(chatId);
+        persistedStreaming.delete(chatId);
         return {
           perChatTyping: t,
           perChatDelayed: d,
           thinkingBuffers: thoughts,
+          persistedStreamingMessageIds: persistedStreaming,
           ...(state.activeChatId === chatId ? { thinkingBuffer: "" } : {}),
         };
       }),
@@ -514,6 +528,7 @@ export const useChatStore = create<ChatState>()(
         mariPhaseByChatId: new Map(),
         streamBuffer: "",
         streamBuffers: new Map(),
+        persistedStreamingMessageIds: new Map(),
         thinkingBuffer: "",
         thinkingBuffers: new Map(),
         abortControllers: new Map(),
