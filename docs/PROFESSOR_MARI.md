@@ -4,9 +4,9 @@
   <img src="../packages/client/public/sprites/mari/Mari_explaining.png" width="320" alt="Professor Mari explaining Marinara Engine" />
 </p>
 
-Professor Mari is Marinara Engine's built-in assistant character. She lives in your character library by default, cannot be deleted, and is meant to help new users set up Marinara, understand the app, and create or edit basic content without having to learn every panel first.
+Professor Mari is Marinara Engine's built-in assistant character. She lives in your character library by default, cannot be deleted, and helps you understand the app, set up core features, and create or edit basic content without learning every panel first.
 
-This guide explains what Mari can do today, what she cannot do yet, and how her app knowledge works.
+Think of Mari as an in-app guide who can also take a few safe content actions for you. She is best at explaining Marinara, helping you get unstuck, drafting new characters/personas/lorebooks from rough ideas, and making targeted edits after she has fetched the current item.
 
 ## What Mari Is For
 
@@ -21,11 +21,11 @@ Use Mari when you want help with:
 - Reviewing existing characters, personas, lorebooks, chats, or presets after she fetches them into context.
 - Explaining common Marinara concepts, such as lorebooks, presets, agents, sprites, selfies, Game Mode, and connected chats.
 
-Mari is a guide and helper, not a replacement for the full documentation. When something is version-specific or has changed recently, prefer the docs and release notes as the source of truth.
+Mari is a guide and helper, not a replacement for the full documentation. When something is version-specific, security-sensitive, or recently changed, prefer the docs and release notes as the source of truth.
 
 ## What Mari Can Do
 
-Mari has built-in assistant commands that the app processes after her message. The command text is hidden from you; you only see the result.
+Mari can talk through most parts of the app, and some requests can become hidden app actions after her message. The command text is hidden from you; you only see the result.
 
 Implemented actions include:
 
@@ -38,16 +38,31 @@ Implemented actions include:
 - Navigate to app panels and settings tabs.
 - Fetch existing characters, personas, lorebooks, chats, and presets so she can inspect their details before advising or editing.
 
-When Mari creates something, she should ask for the important details first. When she updates something, she should fetch the current item first and change only the requested fields.
+When Mari creates something, she should ask for the important details first if your request is vague. When she updates something, she should fetch the current item first and change only the fields you asked her to change.
+
+## How To Ask Mari
+
+You can speak to Mari naturally. For best results, include the thing you want changed, the level of detail you want, and whether she should ask follow-up questions before acting.
+
+Helpful request shapes:
+
+- "Explain what this setting does before I change it."
+- "Create a persona for a shy vampire librarian. Ask me for missing details first."
+- "Fetch my character Luna and make only her first message less generic."
+- "Make a lorebook from these world notes. Keep the entries short."
+- "Open the Connections panel and help me set up OpenRouter."
+
+For edits, name the item and the field or behavior you want changed. Requests like "rewrite this whole character" are riskier than "fetch Luna and tighten her greeting while keeping her personality the same."
 
 ## Important Safety Notes
 
-Creating new content is usually safe. Editing existing content deserves more care.
+Creating new content is usually safe because it does not overwrite anything. Editing existing content deserves more care.
 
 - Character edits keep a recoverable version snapshot that can be rolled back from the character history.
 - Persona edits overwrite the persona without a snapshot. Back up a persona first if you want to preserve the old version.
-- Mari should fetch an item before updating it so she can avoid overwriting unrelated fields.
-- Mari cannot reliably know what you meant if you ask for a broad rewrite with no constraints. Give her the specific field or behavior you want changed.
+- Mari should fetch an item before updating it so she can see the current values and avoid overwriting unrelated fields.
+- If Mari has not fetched the item yet, ask her to fetch it before making the edit.
+- Mari cannot reliably know what you meant if you ask for a broad rewrite with no constraints. Give her the specific field, tone, or behavior you want changed.
 
 ## What Mari Cannot Do Yet
 
@@ -61,6 +76,8 @@ These are not implemented as dedicated Mari workflows today:
 - Automatically ingest the latest GitHub docs into her own prompt.
 
 Mari can still talk you through those tasks. For Game Mode, for example, she can help choose the genre, tone, party, persona, GM style, model, and lorebooks, then guide you through the wizard. The wizard remains the source of truth for starting the game.
+
+If Mari says she completed one of these unsupported actions, treat that as guidance rather than confirmation. Use the relevant app panel or docs to finish the task.
 
 ## How Mari Knows About Marinara
 
@@ -76,7 +93,7 @@ Those knowledge-source features are general agent tools. They are not the same t
 
 ## Getting Better Answers From Mari
 
-For setup help, tell Mari what you are trying to do and what provider/model you are using.
+For setup help, tell Mari what you are trying to do and what provider/model you are using. For content help, tell her what you want to keep, what you want changed, and whether she should ask questions first.
 
 Good examples:
 
@@ -85,7 +102,14 @@ Good examples:
 - "Fetch my character Luna and help me make her first message less generic."
 - "Explain why my Roleplay HUD keeps showing the wrong time."
 
-If Mari gives an answer that does not match what you see in the app, check the docs and release notes, then report the mismatch in Discord or GitHub. The most useful report is specific: what Mari said, what the docs/app showed instead, and which Marinara version you are running.
+If Mari gives an answer that does not match what you see in the app, trust the app, docs, and release notes first. Then report the mismatch in Discord or GitHub.
+
+The most useful report includes:
+
+- What you asked Mari.
+- What Mari said or tried to do.
+- What the app or docs showed instead.
+- Which Marinara version you are running.
 
 ## Related Docs
 
