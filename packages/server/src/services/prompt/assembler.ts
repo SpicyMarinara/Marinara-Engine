@@ -307,7 +307,7 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
         messages.push(...section.messages);
         chatHistoryEndIdx = messages.length;
       } else {
-        messages.push(...section.messages);
+        messages.push(...section.messages.map((message) => ({ ...message, contextKind: "prompt" as const })));
       }
     }
   }
@@ -323,10 +323,11 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
         messages[firstSystemIdx] = {
           ...messages[firstSystemIdx]!,
           content: `${messages[firstSystemIdx]!.content}\n\n${wrapped}`,
+          contextKind: "prompt",
         };
       } else {
         // No system message at all — prepend one
-        messages.unshift({ role: "system", content: wrapped });
+        messages.unshift({ role: "system", content: wrapped, contextKind: "prompt" });
       }
     }
   }
@@ -490,7 +491,7 @@ async function resolveSection(
     id: section.id,
     groupId: section.groupId,
     role,
-    messages: [{ role, content: wrapped || content }],
+    messages: [{ role, content: wrapped || content, contextKind: "prompt" }],
     depth: section.injectionDepth,
   };
 }
@@ -517,7 +518,7 @@ function buildGroupMessages(
     const role = sections[0]!.role;
     const innerContent = sections.flatMap((s) => s.messages.map((m) => m.content)).join("\n\n");
     const wrapped = wrapGroup(innerContent, group.name, wrapFormat);
-    return [{ role, content: wrapped || innerContent }];
+    return [{ role, content: wrapped || innerContent, contextKind: "prompt" }];
   }
 
   // Mixed roles — group consecutive same-role sections and wrap each group
@@ -532,6 +533,7 @@ function buildGroupMessages(
       result.push({
         role: currentRole as "system" | "user" | "assistant",
         content: combined,
+        contextKind: "prompt",
       });
     }
     currentParts = [];

@@ -11,6 +11,7 @@ import type { ActivatedEntry } from "./keyword-scanner.js";
 export interface PromptMessage {
   role: "system" | "user" | "assistant";
   content: string;
+  contextKind?: "prompt" | "history" | "injection";
   /** Optional name for multi-character */
   name?: string;
 }
@@ -102,6 +103,7 @@ export function injectAtDepth(
     const toInsert: PromptMessage[] = entries.map((e) => ({
       role: e.role,
       content: e.content,
+      contextKind: "injection",
     }));
 
     result.splice(insertionIndex, 0, ...toInsert);

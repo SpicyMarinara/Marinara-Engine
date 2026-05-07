@@ -26,11 +26,17 @@ export function mergeAdjacentMessages(messages: ChatMLMessage[]): ChatMLMessage[
     return undefined;
   };
 
+  const canMerge = (a: ChatMLMessage, b: ChatMLMessage) => {
+    if (a.role !== b.role) return false;
+    if (!a.contextKind || !b.contextKind) return true;
+    return a.contextKind === b.contextKind;
+  };
+
   for (const msg of messages) {
     // Skip empty messages
     if (!msg.content.trim()) continue;
 
-    if (current && current.role === msg.role) {
+    if (current && canMerge(current, msg)) {
       // Same role — merge
       const mergedImages: string[] | undefined =
         current.images || msg.images ? [...(current.images ?? []), ...(msg.images ?? [])] : undefined;
