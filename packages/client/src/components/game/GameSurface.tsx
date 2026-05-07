@@ -3156,6 +3156,16 @@ export function GameSurface({
     resolve?.(overrides);
   }, []);
 
+  const imagePromptReviewModal = (
+    <GameImagePromptReviewModal
+      open={imagePromptReviewItems.length > 0}
+      items={imagePromptReviewItems}
+      isSubmitting={imagePromptReviewSubmitting}
+      onCancel={() => closeImagePromptReview(null)}
+      onConfirm={(overrides) => closeImagePromptReview(overrides)}
+    />
+  );
+
   const runGameAssetGeneration = useCallback(
     async (assetPayload: GameAssetGenerationPayload): Promise<GameAssetGenerationResult | null> => {
       const payload: GameAssetGenerationPayload = {
@@ -6051,126 +6061,129 @@ export function GameSurface({
     const SURFACE_BTN =
       "flex items-center gap-2 rounded-lg bg-[var(--muted)]/30 px-4 py-2 text-xs text-[var(--foreground)]/70 transition-colors hover:bg-[var(--muted)]/50 hover:text-[var(--foreground)] dark:bg-white/10 dark:text-white/70 dark:hover:bg-white/20 dark:hover:text-white";
     return (
-      <div className="flex h-full items-center justify-center overflow-hidden bg-[var(--background)] dark:bg-black/80 p-6">
-        <div className="flex max-h-full max-w-lg flex-col items-center gap-6 text-center">
-          {/* Genre / Setting tag */}
-          {setupConfig && (
-            <div className="flex flex-shrink-0 flex-wrap items-center justify-center gap-2 text-xs text-[var(--muted-foreground)] dark:text-white/40">
-              <span>{setupConfig.genre as string}</span>
-              <span className="text-[var(--muted-foreground)]/50 dark:text-white/20">|</span>
-              <span>{setupConfig.setting as string}</span>
-              <span className="text-[var(--muted-foreground)]/50 dark:text-white/20">|</span>
-              <span>{setupConfig.tone as string}</span>
-            </div>
-          )}
-
-          {/* World overview — only revealed via typewriter after pressing Start Game */}
-          {worldOverview && introPhase === "intro" && (
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <IntroTypewriter text={worldOverview} onComplete={() => setIntroTypewriterDone(true)} />
-            </div>
-          )}
-
-          {/* Start button or generating indicator */}
-          <div className="flex-shrink-0">
-            {introPhase === "intro" ? (
-              <div className="flex flex-col items-center gap-3">
-                {firstTurnFullyReady && introTypewriterDone ? (
-                  <button
-                    onClick={() => {
-                      setIntroPresented(true);
-                      try {
-                        localStorage.setItem(introPresentationStorageKey, "1");
-                      } catch {
-                        /* storage unavailable */
-                      }
-                      setIntroTypewriterDone(false);
-                      // Retry any autoplay-blocked audio now that we have a user gesture
-                      audioManager.retryPending();
-                    }}
-                    className="group flex items-center gap-2 rounded-xl bg-[var(--primary)] px-6 py-3 text-sm font-semibold text-white transition-all hover:scale-105 hover:shadow-lg hover:shadow-[var(--primary)]/30"
-                  >
-                    Continue
-                  </button>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-3 text-sm text-[var(--muted-foreground)] dark:text-white/60">
-                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--muted)]/40 border-t-[var(--foreground)]/70 dark:border-white/20 dark:border-t-white/70" />
-                      <span>
-                        {hasEverHadContent && !sceneProcessed
-                          ? "Preparing the scene..."
-                          : hasEverHadContent && pendingAssetGeneration
-                            ? "Generating images..."
-                            : hasEverHadContent && isStreaming
-                              ? "The GM is narrating..."
-                              : "The adventure begins..."}
-                      </span>
-                    </div>
-                    {/* Retry only when scene analysis actually failed */}
-                    {hasEverHadContent && !isStreaming && sceneAnalysisFailed && (
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => retrySceneAnalysis()} className={SURFACE_BTN}>
-                          <RefreshCw size={14} />
-                          Retry Scene Analysis
-                        </button>
-                        <button onClick={() => skipSceneAnalysis()} className={SURFACE_BTN}>
-                          Skip
-                        </button>
-                      </div>
-                    )}
-                    {/* Show skip only after stuck timeout — scene processing hung, not failed */}
-                    {hasEverHadContent &&
-                      !isStreaming &&
-                      !sceneProcessed &&
-                      sceneStuckVisible &&
-                      !sceneAnalysisFailed && (
-                        <button onClick={() => skipSceneAnalysis()} className={cn("mt-1", SURFACE_BTN)}>
-                          Skip
-                        </button>
-                      )}
-                  </>
-                )}
-                {/* Show retry when generation stopped but no content arrived. */}
-                {!isStreaming && !latestAssistantMsg?.content && !startGame.isPending && (
-                  <button onClick={generateInitialGameTurn} className={SURFACE_BTN}>
-                    <RefreshCw size={14} />
-                    Retry
-                  </button>
-                )}
+      <>
+        <div className="flex h-full items-center justify-center overflow-hidden bg-[var(--background)] dark:bg-black/80 p-6">
+          <div className="flex max-h-full max-w-lg flex-col items-center gap-6 text-center">
+            {/* Genre / Setting tag */}
+            {setupConfig && (
+              <div className="flex flex-shrink-0 flex-wrap items-center justify-center gap-2 text-xs text-[var(--muted-foreground)] dark:text-white/40">
+                <span>{setupConfig.genre as string}</span>
+                <span className="text-[var(--muted-foreground)]/50 dark:text-white/20">|</span>
+                <span>{setupConfig.setting as string}</span>
+                <span className="text-[var(--muted-foreground)]/50 dark:text-white/20">|</span>
+                <span>{setupConfig.tone as string}</span>
               </div>
-            ) : (
-              <button
-                onClick={() => {
-                  if (startGame.isPending || startGameRequested || startGameGuardRef.current) return;
-                  startGameGuardRef.current = true;
-                  setStartGameRequested(true);
-                  console.log("[GameSurface] Start Game clicked, chatId:", activeChatId);
-                  startGame.mutate(
-                    { chatId: activeChatId },
-                    {
-                      onSuccess: (res) => {
-                        console.log("[GameSurface] startGame succeeded:", res);
-                        generateInitialGameTurn();
-                        console.log("[GameSurface] initial game turn generation requested");
-                      },
-                      onError: (err) => {
-                        startGameGuardRef.current = false;
-                        setStartGameRequested(false);
-                        console.error("[GameSurface] startGame failed:", err);
-                      },
-                    },
-                  );
-                }}
-                disabled={startGame.isPending || startGameRequested}
-                className="group flex items-center gap-2 rounded-xl bg-[var(--primary)] px-6 py-3 text-sm font-semibold text-white transition-all hover:scale-105 hover:shadow-lg hover:shadow-[var(--primary)]/30 disabled:opacity-50 disabled:hover:scale-100"
-              >
-                <Play size={18} className="transition-transform group-hover:scale-110" />
-                Start Game
-              </button>
             )}
+
+            {/* World overview — only revealed via typewriter after pressing Start Game */}
+            {worldOverview && introPhase === "intro" && (
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <IntroTypewriter text={worldOverview} onComplete={() => setIntroTypewriterDone(true)} />
+              </div>
+            )}
+
+            {/* Start button or generating indicator */}
+            <div className="flex-shrink-0">
+              {introPhase === "intro" ? (
+                <div className="flex flex-col items-center gap-3">
+                  {firstTurnFullyReady && introTypewriterDone ? (
+                    <button
+                      onClick={() => {
+                        setIntroPresented(true);
+                        try {
+                          localStorage.setItem(introPresentationStorageKey, "1");
+                        } catch {
+                          /* storage unavailable */
+                        }
+                        setIntroTypewriterDone(false);
+                        // Retry any autoplay-blocked audio now that we have a user gesture
+                        audioManager.retryPending();
+                      }}
+                      className="group flex items-center gap-2 rounded-xl bg-[var(--primary)] px-6 py-3 text-sm font-semibold text-white transition-all hover:scale-105 hover:shadow-lg hover:shadow-[var(--primary)]/30"
+                    >
+                      Continue
+                    </button>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-3 text-sm text-[var(--muted-foreground)] dark:text-white/60">
+                        <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--muted)]/40 border-t-[var(--foreground)]/70 dark:border-white/20 dark:border-t-white/70" />
+                        <span>
+                          {hasEverHadContent && !sceneProcessed
+                            ? "Preparing the scene..."
+                            : hasEverHadContent && pendingAssetGeneration
+                              ? "Generating images..."
+                              : hasEverHadContent && isStreaming
+                                ? "The GM is narrating..."
+                                : "The adventure begins..."}
+                        </span>
+                      </div>
+                      {/* Retry only when scene analysis actually failed */}
+                      {hasEverHadContent && !isStreaming && sceneAnalysisFailed && (
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => retrySceneAnalysis()} className={SURFACE_BTN}>
+                            <RefreshCw size={14} />
+                            Retry Scene Analysis
+                          </button>
+                          <button onClick={() => skipSceneAnalysis()} className={SURFACE_BTN}>
+                            Skip
+                          </button>
+                        </div>
+                      )}
+                      {/* Show skip only after stuck timeout — scene processing hung, not failed */}
+                      {hasEverHadContent &&
+                        !isStreaming &&
+                        !sceneProcessed &&
+                        sceneStuckVisible &&
+                        !sceneAnalysisFailed && (
+                          <button onClick={() => skipSceneAnalysis()} className={cn("mt-1", SURFACE_BTN)}>
+                            Skip
+                          </button>
+                        )}
+                    </>
+                  )}
+                  {/* Show retry when generation stopped but no content arrived. */}
+                  {!isStreaming && !latestAssistantMsg?.content && !startGame.isPending && (
+                    <button onClick={generateInitialGameTurn} className={SURFACE_BTN}>
+                      <RefreshCw size={14} />
+                      Retry
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    if (startGame.isPending || startGameRequested || startGameGuardRef.current) return;
+                    startGameGuardRef.current = true;
+                    setStartGameRequested(true);
+                    console.log("[GameSurface] Start Game clicked, chatId:", activeChatId);
+                    startGame.mutate(
+                      { chatId: activeChatId },
+                      {
+                        onSuccess: (res) => {
+                          console.log("[GameSurface] startGame succeeded:", res);
+                          generateInitialGameTurn();
+                          console.log("[GameSurface] initial game turn generation requested");
+                        },
+                        onError: (err) => {
+                          startGameGuardRef.current = false;
+                          setStartGameRequested(false);
+                          console.error("[GameSurface] startGame failed:", err);
+                        },
+                      },
+                    );
+                  }}
+                  disabled={startGame.isPending || startGameRequested}
+                  className="group flex items-center gap-2 rounded-xl bg-[var(--primary)] px-6 py-3 text-sm font-semibold text-white transition-all hover:scale-105 hover:shadow-lg hover:shadow-[var(--primary)]/30 disabled:opacity-50 disabled:hover:scale-100"
+                >
+                  <Play size={18} className="transition-transform group-hover:scale-110" />
+                  Start Game
+                </button>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+        {imagePromptReviewModal}
+      </>
     );
   }
 
@@ -7173,13 +7186,7 @@ export function GameSurface({
         />
       )}
 
-      <GameImagePromptReviewModal
-        open={imagePromptReviewItems.length > 0}
-        items={imagePromptReviewItems}
-        isSubmitting={imagePromptReviewSubmitting}
-        onCancel={() => closeImagePromptReview(null)}
-        onConfirm={(overrides) => closeImagePromptReview(overrides)}
-      />
+      {imagePromptReviewModal}
 
       <Modal open={interruptModalOpen} onClose={closeInterruptModal} title="Attempt to Interrupt?" width="max-w-md">
         <div className="flex flex-col gap-4">
