@@ -8,11 +8,20 @@ const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const SAFE_FETCH_SITES = new Set(["same-origin", "same-site", "none"]);
 
 // Throttle "origin not trusted" log lines so a misbehaving client can't flood
-// the log. Each unique origin is announced once per process.
+// the log. Each unique origin is announced once. The cache is bounded so an
+// attacker streaming unique origins can't grow process memory without bound;
+// when the cap is reached we drop the oldest entry (Set preserves insertion
+// order), which means a fresh origin from a long-lived attacker may eventually
+// re-log once — acceptable trade-off for log volume vs. memory.
+const MAX_ANNOUNCED_REJECTED_ORIGINS = 2048;
 const announcedRejectedOrigins = new Set<string>();
 function announceRejectedOrigin(kind: "Origin" | "Referer", value: string, hint: string) {
   const key = `${kind}:${value}`;
   if (announcedRejectedOrigins.has(key)) return;
+  if (announcedRejectedOrigins.size >= MAX_ANNOUNCED_REJECTED_ORIGINS) {
+    const oldest = announcedRejectedOrigins.values().next().value;
+    if (oldest !== undefined) announcedRejectedOrigins.delete(oldest);
+  }
   announcedRejectedOrigins.add(key);
   logger.warn(`[csrf] Rejected request: ${kind} '${value}' is not in the trusted list. ${hint}`);
 }
@@ -189,9 +198,13 @@ export function csrfProtectionHook(request: FastifyRequest, reply: FastifyReply,
 
   if (!origin && referer && !originTrusted) {
     announceRejectedOrigin("Referer", referer, appendOriginHint(referer));
+    // Use the same `origin` key as the sibling branches even though this
+    // rejection was driven by the Referer header. Stable schema for clients
+    // parsing 403 bodies; the error string still names "Referer" so the
+    // operator knows which header carried the offending value.
     reply.status(403).send({
       error: `Referer '${referer}' is not in the trusted list (CSRF_TRUSTED_ORIGINS).`,
-      referer,
+      origin: referer,
       hint: appendOriginHint(referer),
     });
     return;

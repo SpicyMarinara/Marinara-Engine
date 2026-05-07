@@ -21,10 +21,19 @@ import type { FastifyRequest } from "fastify";
 import { getCorsConfig, getServerProtocol } from "./runtime-config.js";
 import { logger } from "../lib/logger.js";
 
+// Bounded log throttle: same pattern as csrf-protection.ts. Each unique
+// rejected origin is logged once. When the cap is reached we drop the oldest
+// entry (Set preserves insertion order) so a stream of attacker-controlled
+// origins can't grow process memory without bound.
+const MAX_ANNOUNCED_REJECTED_ORIGINS = 2048;
 const announcedRejectedOrigins = new Set<string>();
 
 function announceRejectedOrigin(origin: string) {
   if (announcedRejectedOrigins.has(origin)) return;
+  if (announcedRejectedOrigins.size >= MAX_ANNOUNCED_REJECTED_ORIGINS) {
+    const oldest = announcedRejectedOrigins.values().next().value;
+    if (oldest !== undefined) announcedRejectedOrigins.delete(oldest);
+  }
   announcedRejectedOrigins.add(origin);
   logger.warn(
     `[cors] Rejected cross-origin request from '${origin}' (not in CORS_ORIGINS, not same-origin). ` +
