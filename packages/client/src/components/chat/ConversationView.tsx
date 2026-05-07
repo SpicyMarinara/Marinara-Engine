@@ -187,6 +187,7 @@ export function ConversationView({
         /* non-critical */
       }
     };
+    void refreshStatus();
     const timer = setInterval(refreshStatus, 60_000);
     return () => clearInterval(timer);
   }, [chatId, qc]);
