@@ -648,6 +648,7 @@ export async function ttsRoutes(app: FastifyInstance) {
     } catch (err: unknown) {
       const msg =
         err instanceof Error && err.name === "TimeoutError" ? "TTS request timed out" : "TTS provider unreachable";
+      req.log.warn({ err }, "TTS provider request failed");
       return reply.status(502).send({ error: msg });
     }
 
