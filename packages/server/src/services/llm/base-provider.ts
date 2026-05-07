@@ -608,9 +608,23 @@ export abstract class BaseLLMProvider {
       const body = await res.text();
       throw new Error(`Embedding request failed (${res.status}): ${sanitizeApiError(body)}`);
     }
-    const json = (await res.json()) as { data: Array<{ embedding: number[] }> };
-    return json.data.map((d) => d.embedding);
+    const json = await res.json();
+    return parseEmbeddingResponse(json);
   }
+}
+
+export function parseEmbeddingResponse(json: unknown): number[][] {
+  const data = Array.isArray(json) ? json : isPlainRecord(json) ? json.data : undefined;
+  if (!Array.isArray(data)) {
+    throw new Error("Embedding response did not include an embedding array.");
+  }
+
+  return data.map((item) => {
+    if (!isPlainRecord(item) || !Array.isArray(item.embedding)) {
+      throw new Error("Embedding response contained an invalid embedding item.");
+    }
+    return item.embedding as number[];
+  });
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
