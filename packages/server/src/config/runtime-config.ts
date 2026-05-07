@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
 import { logger as sharedLogger } from "../lib/logger.js";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,10 +26,40 @@ export function getEnvFilePath() {
   return resolve(MONOREPO_ROOT, ".env");
 }
 
+const EMPTY_ENV_HEADER = `# Marinara Engine - runtime configuration.
+# This file is empty by design. Copy any setting you want to change from
+# .env.example (same folder) and edit the value here. Most changes take
+# effect within ~2 seconds without a restart.
+`;
+
+/**
+ * Create an empty .env at the repo root if one doesn't exist yet so users
+ * can find the file without having to copy .env.example first. The write
+ * is best-effort: read-only filesystems (some Docker images, locked-down
+ * installs) silently fall back to "no .env" mode, which dotenv handles
+ * the same as today.
+ */
+function ensureEnvFileExists(envPath: string) {
+  if (existsSync(envPath)) return;
+  try {
+    // 'wx' = exclusive create. Race-safe across concurrent startups: a second
+    // process that loses the race gets EEXIST, which we ignore.
+    writeFileSync(envPath, EMPTY_ENV_HEADER, { flag: "wx" });
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | null)?.code;
+    if (code === "EEXIST") return;
+    sharedLogger.warn(
+      { err, envPath },
+      "[runtime-config] Could not auto-create .env file; continuing without it",
+    );
+  }
+}
+
 export function loadRuntimeEnv() {
   if (envLoaded) return;
 
   const envPath = getEnvFilePath();
+  ensureEnvFileExists(envPath);
   if (existsSync(envPath)) {
     const result = dotenv.config({ path: envPath });
     if (result.parsed) {
