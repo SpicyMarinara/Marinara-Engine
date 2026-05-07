@@ -28,12 +28,12 @@ import { basename, join, resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { getBuildCommit, getBuildLabel } from "./config/build-info.js";
 import {
-  getCorsConfig,
   getLogLevel,
   getNodeEnv,
   isFileStorageBackend,
   isAutoCreateDefaultConnectionDisabled,
 } from "./config/runtime-config.js";
+import { buildCorsPluginOptions } from "./config/cors-config.js";
 import { sidecarProcessService } from "./services/sidecar/sidecar-process.service.js";
 
 const isLite = process.env.MARINARA_LITE === "true" || process.env.MARINARA_LITE === "1";
@@ -42,7 +42,6 @@ const NO_STORE_FILES = new Set(["manifest.json", "sw.js", "registerSW.js"]);
 const MAX_UPLOAD_BYTES = 256 * 1024 * 1024;
 
 export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
-  const corsConfig = getCorsConfig();
   const app = Fastify({
     logger: {
       level: getLogLevel(),
@@ -53,7 +52,11 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
   });
 
   // ── Plugins ──
-  await app.register(cors, corsConfig);
+  // CORS uses a function-based origin so CORS_ORIGINS is re-read per request
+  // (see cors-config.ts). Adding/removing origins takes effect within ~2s of
+  // a .env save; switching between an explicit list and "*" still needs a
+  // restart for the credentials side of the response to flip.
+  await app.register(cors, buildCorsPluginOptions());
 
   await app.register(multipart, {
     limits: {

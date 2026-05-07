@@ -31,6 +31,12 @@ export interface OutboundUrlPolicy {
   allowLoopback?: boolean;
   allowedProtocols?: string[];
   maxRedirects?: number;
+  /**
+   * Optional name of the env var that, when set to true, would allow this
+   * fetch. Surfaced verbatim in the rejection error so the user knows which
+   * flag to flip (e.g. PROVIDER_LOCAL_URLS_ENABLED, IMAGE_LOCAL_URLS_ENABLED).
+   */
+  flagName?: string;
 }
 
 export interface SafeFetchOptions extends Omit<RequestInit, "dispatcher"> {
@@ -242,33 +248,59 @@ function isBlockedResolvedAddress(address: string, policy: OutboundUrlPolicy): b
   return !(policy.allowLoopback && isLoopbackIp(address));
 }
 
+function flagHint(policy: OutboundUrlPolicy): string {
+  if (!policy.flagName) return "";
+  return ` Set ${policy.flagName}=true in your .env file to allow this (changes take effect within ~2s without a restart).`;
+}
+
+function describeBlockedAddresses(addresses: Array<{ address: string }>, policy: OutboundUrlPolicy): string {
+  const blocked = addresses.filter((record) => isBlockedResolvedAddress(record.address, policy)).map((record) => record.address);
+  if (blocked.length === 0) return "";
+  return ` (resolved to ${blocked.join(", ")})`;
+}
+
 async function validateResolvedAddresses(
   hostname: string,
   policy: OutboundUrlPolicy,
+  originalUrl?: string,
 ): Promise<Array<{ address: string; family: 4 | 6 }>> {
   const addresses = await resolveHostname(hostname);
+  if (!policy.allowLocal && addresses.length === 0) {
+    const target = originalUrl ?? hostname;
+    throw new Error(
+      `Refused to fetch ${target}: hostname '${hostname}' did not resolve to any address.${flagHint(policy)}`,
+    );
+  }
   if (
     !policy.allowLocal &&
-    (addresses.length === 0 || addresses.some((record) => isBlockedResolvedAddress(record.address, policy)))
+    addresses.some((record) => isBlockedResolvedAddress(record.address, policy))
   ) {
-    throw new Error("Outbound URL resolved to a private, loopback, metadata, or reserved address");
+    const target = originalUrl ?? hostname;
+    throw new Error(
+      `Refused to fetch ${target}: '${hostname}'${describeBlockedAddresses(addresses, policy)} is in a private, loopback, metadata, or reserved IP range.${flagHint(policy)}`,
+    );
   }
   return addresses;
 }
 
 export async function validateOutboundUrl(url: string | URL, policy: OutboundUrlPolicy = {}): Promise<URL> {
   const parsed = typeof url === "string" ? new URL(url) : new URL(url.toString());
+  const original = typeof url === "string" ? url : parsed.toString();
   const allowedProtocols = policy.allowedProtocols ?? ["https:"];
   if (!allowedProtocols.includes(parsed.protocol)) {
-    throw new Error(`Outbound URL protocol is not allowed: ${parsed.protocol}`);
+    throw new Error(
+      `Refused to fetch ${original}: protocol '${parsed.protocol.replace(/:$/, "")}' is not allowed (allowed: ${allowedProtocols.map((proto) => proto.replace(/:$/, "")).join(", ")}).${flagHint(policy)}`,
+    );
   }
 
   if (!policy.allowLocal) {
     if (isLocalHostname(parsed.hostname) && !(policy.allowLoopback && isLoopbackHostname(parsed.hostname))) {
-      throw new Error("Outbound URL hostname is local or reserved");
+      throw new Error(
+        `Refused to fetch ${original}: hostname '${parsed.hostname}' is local or reserved.${flagHint(policy)}`,
+      );
     }
 
-    await validateResolvedAddresses(parsed.hostname, policy);
+    await validateResolvedAddresses(parsed.hostname, policy, original);
   }
 
   return parsed;
@@ -282,7 +314,8 @@ async function validateOutboundUrlForFetch(
   const parsed = await validateOutboundUrl(url, policy);
   if (policy.allowLocal) return { url: parsed, dispatcher: agentOptions ? new Agent(agentOptions) : undefined };
 
-  const addresses = await validateResolvedAddresses(parsed.hostname, policy);
+  const original = typeof url === "string" ? url : parsed.toString();
+  const addresses = await validateResolvedAddresses(parsed.hostname, policy, original);
   let used = false;
   const dispatcher = new Agent({
     ...(agentOptions ?? {}),

@@ -118,6 +118,7 @@ async function translateWithDeepLX(input: z.infer<typeof translateSchema>) {
   await validateOutboundUrl(url, {
     allowLocal: isDeeplxLocalUrlsEnabled(),
     allowedProtocols: ["https:", "http:"],
+    flagName: "DEEPLX_LOCAL_URLS_ENABLED",
   }).catch((err) => {
     throw Object.assign(new Error(err instanceof Error ? err.message : "DeepLX URL is not allowed"), {
       statusCode: 400,
@@ -133,7 +134,11 @@ async function translateWithDeepLX(input: z.infer<typeof translateSchema>) {
       target_lang: input.targetLanguage.toUpperCase(),
     }),
     signal: AbortSignal.timeout(15_000),
-    policy: { allowLocal: isDeeplxLocalUrlsEnabled(), allowedProtocols: ["https:", "http:"] },
+    policy: {
+      allowLocal: isDeeplxLocalUrlsEnabled(),
+      allowedProtocols: ["https:", "http:"],
+      flagName: "DEEPLX_LOCAL_URLS_ENABLED",
+    },
     maxResponseBytes: 1024 * 1024,
   }).catch((err) => {
     if (err.name === "TimeoutError") throw Object.assign(new Error("DeepLX request timed out"), { statusCode: 502 });

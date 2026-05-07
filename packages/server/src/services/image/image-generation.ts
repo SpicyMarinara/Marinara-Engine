@@ -189,6 +189,7 @@ function imageFetch(url: string | URL, init?: RequestInit, options: { allowLocal
       allowLocal: options.allowLocal ?? isImageLocalUrlsEnabled(),
       allowLoopback: true,
       allowedProtocols: ["https:", "http:"],
+      flagName: "IMAGE_LOCAL_URLS_ENABLED",
     },
     maxResponseBytes: MAX_IMAGE_RESPONSE_BYTES,
   });

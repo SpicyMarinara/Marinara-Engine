@@ -164,6 +164,7 @@ async function executeCustomTool(tool: CustomToolDef, args: Record<string, unkno
           policy: {
             allowLocal,
             allowedProtocols: allowLocal ? ["https:", "http:"] : ["https:"],
+            flagName: "WEBHOOK_LOCAL_URLS_ENABLED",
           },
           maxResponseBytes: 512 * 1024,
         });

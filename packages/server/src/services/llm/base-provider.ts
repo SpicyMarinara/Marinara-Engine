@@ -21,7 +21,12 @@ export function llmFetch(url: string | URL, init?: RequestInit): Promise<Respons
   return safeFetch(url, {
     ...(init ?? {}),
     agentOptions: llmAgentOptions,
-    policy: { allowLocal: isProviderLocalUrlsEnabled(), allowLoopback: true, allowedProtocols: ["https:", "http:"] },
+    policy: {
+      allowLocal: isProviderLocalUrlsEnabled(),
+      allowLoopback: true,
+      allowedProtocols: ["https:", "http:"],
+      flagName: "PROVIDER_LOCAL_URLS_ENABLED",
+    },
     maxResponseBytes: 50 * 1024 * 1024,
     bufferResponse: false,
   });
