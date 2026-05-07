@@ -266,15 +266,16 @@ async function validateResolvedAddresses(
 ): Promise<Array<{ address: string; family: 4 | 6 }>> {
   const addresses = await resolveHostname(hostname);
   if (!policy.allowLocal && addresses.length === 0) {
+    // DNS failure (NXDOMAIN, SRV mismatch, etc.). Setting the local-URLs flag
+    // wouldn't help here, so don't tell the operator to flip it.
     const target = originalUrl ?? hostname;
-    throw new Error(
-      `Refused to fetch ${target}: hostname '${hostname}' did not resolve to any address.${flagHint(policy)}`,
-    );
+    throw new Error(`Refused to fetch ${target}: hostname '${hostname}' did not resolve to any address.`);
   }
   if (
     !policy.allowLocal &&
     addresses.some((record) => isBlockedResolvedAddress(record.address, policy))
   ) {
+    // Genuine policy.allowLocal-driven rejection — naming the flag is useful.
     const target = originalUrl ?? hostname;
     throw new Error(
       `Refused to fetch ${target}: '${hostname}'${describeBlockedAddresses(addresses, policy)} is in a private, loopback, metadata, or reserved IP range.${flagHint(policy)}`,
@@ -288,13 +289,17 @@ export async function validateOutboundUrl(url: string | URL, policy: OutboundUrl
   const original = typeof url === "string" ? url : parsed.toString();
   const allowedProtocols = policy.allowedProtocols ?? ["https:"];
   if (!allowedProtocols.includes(parsed.protocol)) {
+    // Protocol gate is independent of policy.allowLocal — flipping
+    // PROVIDER_LOCAL_URLS_ENABLED won't allow gopher://, ftp://, etc.
+    // Don't append the flag hint to this rejection.
     throw new Error(
-      `Refused to fetch ${original}: protocol '${parsed.protocol.replace(/:$/, "")}' is not allowed (allowed: ${allowedProtocols.map((proto) => proto.replace(/:$/, "")).join(", ")}).${flagHint(policy)}`,
+      `Refused to fetch ${original}: protocol '${parsed.protocol.replace(/:$/, "")}' is not allowed (allowed: ${allowedProtocols.map((proto) => proto.replace(/:$/, "")).join(", ")}).`,
     );
   }
 
   if (!policy.allowLocal) {
     if (isLocalHostname(parsed.hostname) && !(policy.allowLoopback && isLoopbackHostname(parsed.hostname))) {
+      // Genuine policy.allowLocal-driven rejection — naming the flag is useful.
       throw new Error(
         `Refused to fetch ${original}: hostname '${parsed.hostname}' is local or reserved.${flagHint(policy)}`,
       );

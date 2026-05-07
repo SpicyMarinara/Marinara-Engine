@@ -10,13 +10,11 @@ const SAFE_FETCH_SITES = new Set(["same-origin", "same-site", "none"]);
 // Throttle "origin not trusted" log lines so a misbehaving client can't flood
 // the log. Each unique origin is announced once per process.
 const announcedRejectedOrigins = new Set<string>();
-function announceRejectedOrigin(kind: "Origin" | "Referer", value: string, exampleLine: string) {
+function announceRejectedOrigin(kind: "Origin" | "Referer", value: string, hint: string) {
   const key = `${kind}:${value}`;
   if (announcedRejectedOrigins.has(key)) return;
   announcedRejectedOrigins.add(key);
-  logger.warn(
-    `[csrf] Rejected request: ${kind} '${value}' is not in the trusted list. To allow this, add the following to your .env (no restart needed): ${exampleLine}`,
-  );
+  logger.warn(`[csrf] Rejected request: ${kind} '${value}' is not in the trusted list. ${hint}`);
 }
 
 function firstHeader(value: string | string[] | undefined): string | null {
@@ -142,10 +140,15 @@ function canUseSameOriginCompatibility(
   return !!sourceOrigin && sourceOrigin === getRequestOrigin(request);
 }
 
-function originLine(origin: string): string {
-  // Suggest the exact .env line the operator should paste.
+function appendOriginHint(origin: string): string {
+  // Non-destructive instruction: tell the operator to APPEND the offending
+  // origin to CSRF_TRUSTED_ORIGINS rather than replace the variable, so a
+  // user who already trusts other origins doesn't accidentally clobber them.
   const normalized = normalizeOrigin(origin) ?? origin;
-  return `CSRF_TRUSTED_ORIGINS=${normalized}`;
+  return (
+    `Add '${normalized}' to CSRF_TRUSTED_ORIGINS in your .env — comma-separated if you already have entries, ` +
+    `e.g. CSRF_TRUSTED_ORIGINS=http://existing.example,${normalized}. No restart needed (takes effect within ~2s).`
+  );
 }
 
 export function csrfProtectionHook(request: FastifyRequest, reply: FastifyReply, done: () => void) {
@@ -163,33 +166,33 @@ export function csrfProtectionHook(request: FastifyRequest, reply: FastifyReply,
   const secFetchSite = firstHeader(request.headers["sec-fetch-site"]);
   if (secFetchSite && !SAFE_FETCH_SITES.has(secFetchSite.toLowerCase()) && !originTrusted) {
     const offender = origin ?? referer ?? "(unknown)";
-    if (origin || referer) announceRejectedOrigin(origin ? "Origin" : "Referer", offender, originLine(offender));
+    if (origin || referer) announceRejectedOrigin(origin ? "Origin" : "Referer", offender, appendOriginHint(offender));
     reply.status(403).send({
       error: "Cross-site unsafe requests are not allowed",
       origin: offender,
       hint: origin || referer
-        ? `To allow this origin, add to .env (no restart needed): ${originLine(offender)}`
+        ? appendOriginHint(offender)
         : "Browser did not send an Origin or Referer header — Marinara cannot verify this is a same-origin request.",
     });
     return;
   }
 
   if (origin && !originTrusted) {
-    announceRejectedOrigin("Origin", origin, originLine(origin));
+    announceRejectedOrigin("Origin", origin, appendOriginHint(origin));
     reply.status(403).send({
       error: `Origin '${origin}' is not in the trusted list (CSRF_TRUSTED_ORIGINS).`,
       origin,
-      hint: `Add to .env (no restart needed): ${originLine(origin)}`,
+      hint: appendOriginHint(origin),
     });
     return;
   }
 
   if (!origin && referer && !originTrusted) {
-    announceRejectedOrigin("Referer", referer, originLine(referer));
+    announceRejectedOrigin("Referer", referer, appendOriginHint(referer));
     reply.status(403).send({
       error: `Referer '${referer}' is not in the trusted list (CSRF_TRUSTED_ORIGINS).`,
       referer,
-      hint: `Add to .env (no restart needed): ${originLine(referer)}`,
+      hint: appendOriginHint(referer),
     });
     return;
   }

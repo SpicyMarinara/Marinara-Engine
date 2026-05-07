@@ -28,8 +28,8 @@ function announceRejectedOrigin(origin: string) {
   announcedRejectedOrigins.add(origin);
   logger.warn(
     `[cors] Rejected cross-origin request from '${origin}' (not in CORS_ORIGINS, not same-origin). ` +
-      `To allow this origin, add the following line to your .env (no restart needed): ` +
-      `CORS_ORIGINS=${origin}`,
+      `To allow it, add '${origin}' to CORS_ORIGINS in your .env — comma-separated if you already have entries, ` +
+      `e.g. CORS_ORIGINS=http://existing.example,${origin}. No restart needed (takes effect within ~2s).`,
   );
 }
 
