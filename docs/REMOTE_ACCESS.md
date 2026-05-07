@@ -152,7 +152,7 @@ For sensitive deployments, consider Tailscale or Cloudflare Access — they avoi
 
 The server watches `.env` for changes and applies most updates within a couple of seconds — no restart needed. That includes `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` / `BASIC_AUTH_REALM`, `IP_ALLOWLIST` / `IP_ALLOWLIST_ENABLED`, `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK`, `ALLOW_UNAUTHENTICATED_REMOTE`, `TRUSTED_PRIVATE_NETWORKS`, `ADMIN_SECRET`, `CSRF_TRUSTED_ORIGINS`, `LOG_LEVEL`, and the various `*_LOCAL_URLS_ENABLED` / privileged-feature flags.
 
-Changes to these still need a restart because they're bound at startup: `PORT`, `HOST`, `SSL_CERT`, `SSL_KEY`, `CORS_ORIGINS`, `DATA_DIR`, `STORAGE_BACKEND`, `FILE_STORAGE_DIR`, `DATABASE_URL`, `ENCRYPTION_KEY`, `TZ`, `AUTO_OPEN_BROWSER`, `AUTO_CREATE_DEFAULT_CONNECTION`. The server logs a warning when one of these changes so you don't wonder why it didn't take effect.
+Changes to these still need a restart because they're bound at startup: `PORT`, `HOST`, `SSL_CERT`, `SSL_KEY`, `DATA_DIR`, `STORAGE_BACKEND`, `FILE_STORAGE_DIR`, `DATABASE_URL`, `ENCRYPTION_KEY`, `TZ`, `AUTO_OPEN_BROWSER`, `AUTO_CREATE_DEFAULT_CONNECTION`. The server logs a warning when one of these changes so you don't wonder why it didn't take effect. (Note: `CORS_ORIGINS` *is* hot-reloadable for adding/removing origins; only switching between an explicit list and `*` still needs a restart.)
 
 ## Verifying it works
 
@@ -174,7 +174,9 @@ Different error than 403?
 
 - **Connection refused / timeout** — the server isn't bound to a reachable interface. Set `HOST=0.0.0.0` in `.env`.
 - **404 / wrong page** — you're hitting the wrong port. Default is `7860`; check `PORT` in `.env`.
-- **CORS error in the browser console** — set `CORS_ORIGINS` to include the URL you're connecting from (e.g. `http://192.168.1.10:7860`).
+- **CORS error in the browser console** — Marinara's server log will show a `[cors]` line with the rejected origin and the exact `CORS_ORIGINS=…` line to add to `.env`. Adding it takes effect within ~2s — no restart needed.
+- **`{"error": "Origin '…' is not in the trusted list (CSRF_TRUSTED_ORIGINS)."}`** — copy the offending origin into `CSRF_TRUSTED_ORIGINS` in `.env` (the error body's `hint` field has the exact line). No restart needed.
+- **`Refused to fetch http://… : '…' is in a private, loopback, metadata, or reserved IP range.`** — Marinara is refusing to call your local LLM provider for SSRF safety. The error message names the exact env var to set (`PROVIDER_LOCAL_URLS_ENABLED` for LLMs, `IMAGE_LOCAL_URLS_ENABLED` for image generation, etc.). Setting it takes effect on the next request.
 
 The full troubleshooting page is at [docs/TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 

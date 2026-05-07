@@ -26,6 +26,7 @@ export function llmFetch(url: string | URL, init?: RequestInit): Promise<Respons
       allowLoopback: true,
       allowMdns: true,
       allowedProtocols: ["https:", "http:"],
+      flagName: "PROVIDER_LOCAL_URLS_ENABLED",
     },
     maxResponseBytes: 50 * 1024 * 1024,
     bufferResponse: false,
@@ -335,7 +336,11 @@ export function fitMessagesToContext(
       : Math.max(1, Math.min(requestedMaxTokens, Math.max(1, usableWindow - reservedInputFloor)));
   let inputBudget = Math.max(0, usableWindow - (maxTokens ?? 0));
 
-  if (estimatedTokensBefore > inputBudget && maxTokens !== undefined) {
+  // If the requested output budget consumes nearly the whole context window,
+  // make room for the prompt before trimming. Otherwise, prefer trimming old
+  // history first so a large-but-valid response budget does not collapse to the
+  // 128-token floor just because the prompt is slightly over budget.
+  if (estimatedTokensBefore > inputBudget && maxTokens !== undefined && inputBudget <= reservedInputFloor) {
     const minimumOutputBudget = Math.min(MIN_OUTPUT_BUDGET_TOKENS, Math.max(1, usableWindow - 1));
     const headroom = Math.min(OUTPUT_BUDGET_REDUCTION_HEADROOM_TOKENS, Math.max(0, usableWindow - 1));
     const maxTokensThatFitPrompt = Math.max(1, usableWindow - estimatedTokensBefore - headroom);
@@ -361,14 +366,25 @@ export function fitMessagesToContext(
 
   const fittedMessages = cloneMessages(messages);
   let estimatedTokensAfter = estimateMessagesTokens(fittedMessages);
+  const hasAnnotatedHistory = fittedMessages.some((message) => message.contextKind === "history");
 
   while (estimatedTokensAfter > inputBudget && fittedMessages.length > 1) {
-    const block =
-      findOldestRemovableConversationBlock(fittedMessages, "history") ??
-      findOldestRemovableConversationBlock(fittedMessages);
+    const block = findOldestRemovableConversationBlock(fittedMessages, "history");
     if (!block) break;
     fittedMessages.splice(block.start, block.deleteCount);
     estimatedTokensAfter = estimateMessagesTokens(fittedMessages);
+  }
+
+  // Some legacy/manual prompt paths do not annotate chat turns. Only treat
+  // unmarked non-system messages as removable history when the whole prompt
+  // lacks history hints; otherwise those messages may be preset/setup blocks.
+  if (!hasAnnotatedHistory) {
+    while (estimatedTokensAfter > inputBudget && fittedMessages.length > 1) {
+      const block = findOldestRemovableConversationBlock(fittedMessages);
+      if (!block) break;
+      fittedMessages.splice(block.start, block.deleteCount);
+      estimatedTokensAfter = estimateMessagesTokens(fittedMessages);
+    }
   }
 
   if (estimatedTokensAfter > inputBudget && maxTokens !== undefined) {
@@ -379,6 +395,13 @@ export function fitMessagesToContext(
       maxTokens = reducedMaxTokens;
       inputBudget = Math.max(0, usableWindow - maxTokens);
     }
+  }
+
+  while (estimatedTokensAfter > inputBudget && fittedMessages.length > 1) {
+    const block = findOldestRemovableConversationBlock(fittedMessages);
+    if (!block) break;
+    fittedMessages.splice(block.start, block.deleteCount);
+    estimatedTokensAfter = estimateMessagesTokens(fittedMessages);
   }
 
   while (estimatedTokensAfter > inputBudget && fittedMessages.length > 1) {

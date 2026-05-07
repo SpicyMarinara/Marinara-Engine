@@ -32,6 +32,12 @@ export interface OutboundUrlPolicy {
   allowMdns?: boolean;
   allowedProtocols?: string[];
   maxRedirects?: number;
+  /**
+   * Optional name of the env var that, when set to true, would allow this
+   * fetch. Surfaced verbatim in the rejection error so the user knows which
+   * flag to flip (e.g. PROVIDER_LOCAL_URLS_ENABLED, IMAGE_LOCAL_URLS_ENABLED).
+   */
+  flagName?: string;
 }
 
 export interface SafeFetchOptions extends Omit<RequestInit, "dispatcher"> {
@@ -251,32 +257,62 @@ function preferIpv4Records(records: Array<{ address: string; family: 4 | 6 }>): 
   return [...records].sort((a, b) => a.family - b.family);
 }
 
+function flagHint(policy: OutboundUrlPolicy): string {
+  if (!policy.flagName) return "";
+  return ` Set ${policy.flagName}=true in your .env file to allow this (changes take effect within ~2s without a restart).`;
+}
+
+function describeBlockedAddresses(addresses: Array<{ address: string }>, policy: OutboundUrlPolicy): string {
+  const blocked = addresses.filter((record) => isBlockedResolvedAddress(record.address, policy)).map((record) => record.address);
+  if (blocked.length === 0) return "";
+  return ` (resolved to ${blocked.join(", ")})`;
+}
+
 async function validateResolvedAddresses(
   hostname: string,
   policy: OutboundUrlPolicy,
+  originalUrl?: string,
 ): Promise<Array<{ address: string; family: 4 | 6 }>> {
   const addresses = await resolveHostname(hostname);
   if (policy.allowMdns && isMdnsHostname(hostname)) {
     const preferred = preferIpv4Records(addresses);
     if (preferred.length === 0) {
-      throw new Error("mDNS resolution returned no addresses for hostname");
+      const target = originalUrl ?? hostname;
+      throw new Error(`Refused to fetch ${target}: hostname '${hostname}' did not resolve to any address.`);
     }
     return preferred;
   }
+
+  if (!policy.allowLocal && addresses.length === 0) {
+    // DNS failure (NXDOMAIN, SRV mismatch, etc.). Setting the local-URLs flag
+    // wouldn't help here, so don't tell the operator to flip it.
+    const target = originalUrl ?? hostname;
+    throw new Error(`Refused to fetch ${target}: hostname '${hostname}' did not resolve to any address.`);
+  }
   if (
     !policy.allowLocal &&
-    (addresses.length === 0 || addresses.some((record) => isBlockedResolvedAddress(record.address, policy)))
+    addresses.some((record) => isBlockedResolvedAddress(record.address, policy))
   ) {
-    throw new Error("Outbound URL resolved to a private, loopback, metadata, or reserved address");
+    // Genuine policy.allowLocal-driven rejection — naming the flag is useful.
+    const target = originalUrl ?? hostname;
+    throw new Error(
+      `Refused to fetch ${target}: '${hostname}'${describeBlockedAddresses(addresses, policy)} is in a private, loopback, metadata, or reserved IP range.${flagHint(policy)}`,
+    );
   }
   return addresses;
 }
 
 export async function validateOutboundUrl(url: string | URL, policy: OutboundUrlPolicy = {}): Promise<URL> {
   const parsed = typeof url === "string" ? new URL(url) : new URL(url.toString());
+  const original = typeof url === "string" ? url : parsed.toString();
   const allowedProtocols = policy.allowedProtocols ?? ["https:"];
   if (!allowedProtocols.includes(parsed.protocol)) {
-    throw new Error(`Outbound URL protocol is not allowed: ${parsed.protocol}`);
+    // Protocol gate is independent of policy.allowLocal — flipping
+    // PROVIDER_LOCAL_URLS_ENABLED won't allow gopher://, ftp://, etc.
+    // Don't append the flag hint to this rejection.
+    throw new Error(
+      `Refused to fetch ${original}: protocol '${parsed.protocol.replace(/:$/, "")}' is not allowed (allowed: ${allowedProtocols.map((proto) => proto.replace(/:$/, "")).join(", ")}).`,
+    );
   }
 
   if (!policy.allowLocal) {
@@ -285,10 +321,13 @@ export async function validateOutboundUrl(url: string | URL, policy: OutboundUrl
       !(policy.allowLoopback && isLoopbackHostname(parsed.hostname)) &&
       !(policy.allowMdns && isMdnsHostname(parsed.hostname))
     ) {
-      throw new Error("Outbound URL hostname is local or reserved");
+      // Genuine policy.allowLocal-driven rejection — naming the flag is useful.
+      throw new Error(
+        `Refused to fetch ${original}: hostname '${parsed.hostname}' is local or reserved.${flagHint(policy)}`,
+      );
     }
 
-    await validateResolvedAddresses(parsed.hostname, policy);
+    await validateResolvedAddresses(parsed.hostname, policy, original);
   }
 
   return parsed;
@@ -302,7 +341,8 @@ async function validateOutboundUrlForFetch(
   const parsed = await validateOutboundUrl(url, policy);
   if (policy.allowLocal) return { url: parsed, dispatcher: agentOptions ? new Agent(agentOptions) : undefined };
 
-  const addresses = await validateResolvedAddresses(parsed.hostname, policy);
+  const original = typeof url === "string" ? url : parsed.toString();
+  const addresses = await validateResolvedAddresses(parsed.hostname, policy, original);
   let used = false;
   const dispatcher = new Agent({
     ...(agentOptions ?? {}),

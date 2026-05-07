@@ -73,7 +73,7 @@ COPY scripts/docker-entrypoint.mjs /usr/local/bin/marinara-docker-entrypoint.mjs
 
 # Ensure /app/data exists for runtime use (file storage, uploads, generated assets)
 RUN mkdir -p /app/data && \
-    chown -R node:node /app
+    chown node:node /app/data
 
 # Point the server at /app/data regardless of working directory
 ENV DATA_DIR=/app/data

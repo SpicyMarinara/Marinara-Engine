@@ -16,6 +16,13 @@ import { getEnvFilePath, reloadRuntimeEnv, type EnvReloadResult } from "./runtim
 
 // Keys whose values are bound at process / app startup and won't take effect
 // without a full restart, even though we propagate them to process.env.
+//
+// CORS_ORIGINS is intentionally NOT in this list — the @fastify/cors plugin
+// uses a function-based origin that re-reads getCorsConfig() per request
+// (see cors-config.ts), so adding/removing origins is hot-reloadable. The
+// only sub-case that still needs a restart is switching between an explicit
+// origin list and "*" (the credentials response header changes), but that's
+// rare enough that we don't list the var here as "always restart-required."
 const RESTART_REQUIRED_KEYS = new Set<string>([
   "PORT",
   "HOST",
@@ -30,7 +37,6 @@ const RESTART_REQUIRED_KEYS = new Set<string>([
   "TZ",
   "AUTO_OPEN_BROWSER",
   "AUTO_CREATE_DEFAULT_CONNECTION",
-  "CORS_ORIGINS",
   "NODE_ENV",
 ]);
 

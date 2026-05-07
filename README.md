@@ -187,38 +187,15 @@ Export chats as JSONL or plain text. Fully local file-native storage — all dat
 
 ## Contributors
 
-- [Spicy Marinara](https://github.com/SpicyMarinara)
-- [Jorge Becerra](https://github.com/JorgeLTE)
-- [Coda](https://github.com/coxde)
-- [Andy Mauragis](https://github.com/amauragis)
-- [LukaTheHero](https://github.com/LukaTheHero)
-- [TheLonelyDevil9](https://github.com/TheLonelyDevil9)
-- [Ailthrim](https://github.com/joshellis625)
-- [Munimunigamer](https://github.com/munimunigamer)
-- [John](https://github.com/guybrush01)
-- [Pwildani](https://github.com/pwildani)
-- [Romu](https://github.com/Romuromylus)
-- [Felor](https://github.com/felorhik)
-- [MagicGoddess](https://github.com/MagicGoddess)
-- [Mm14141](https://github.com/mm14141)
-- [Romu](https://github.com/Romuromylus)
-- [Shadota](https://github.com/Shadota)
-- [Teuku Rezhaldy](https://github.com/0-trspace)
-- [Mohammad Javed](https://github.com/Javedz678)
-- [Loungemeister](https://github.com/loungemeister)
-- [Cha1latte](https://github.com/cha1latte)
-- [Trade-Mottoes](https://github.com/Trade-Mottoes)
-- [OnlyJimmy](https://github.com/Trade-Mottoes)
-- [Xelvanis](https://github.com/Xelvanis)
-- [Anarchistcowboy](https://github.com/Anarchistcowboy)
-- [Adunato](https://github.com/adunato)
-- [DarthTheMonster](https://github.com/DarthTheMonster)
-- [Morgul](https://github.com/Morgul)
-- [Kevin Ho](https://github.com/kevin-ho)
-- [Tom DARONDOVAS](https://github.com/LightD31)
-- [Jacob M](https://github.com/jake9000)
-- [Lochalan](https://github.com/Lochalan)
-- [Kolacheee](https://github.com/kolacheee)
+<p align="left">
+  <a href="https://github.com/Pasta-Devs/Marinara-Engine/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=Pasta-Devs/Marinara-Engine" alt="Marinara Engine contributors" />
+  </a>
+</p>
+
+<p align="left">
+  Made with <a href="https://contrib.rocks">contrib.rocks</a>.
+</p>
 
 ---
 

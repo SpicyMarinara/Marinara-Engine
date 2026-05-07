@@ -128,7 +128,7 @@ test("validateOutboundUrl rejects empty mDNS resolution results", async () => {
           allowMdns: true,
           allowedProtocols: ["http:", "https:"],
         }),
-      /mDNS resolution returned no addresses/,
+      /hostname 'empty\.local' did not resolve to any address/,
     );
   } finally {
     dns.lookup = originalLookup;

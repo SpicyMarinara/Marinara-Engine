@@ -113,7 +113,7 @@ COPY scripts/docker-entrypoint.mjs /usr/local/bin/marinara-docker-entrypoint.mjs
 
 # Ensure data directory exists
 RUN mkdir -p /app/data && \
-    chown -R nonroot:nonroot /app
+    chown nonroot:nonroot /app/data
 
 # Runtime feature flag
 ENV MARINARA_LITE=true

@@ -347,6 +347,15 @@ function parseChatMetadata(metadata: Chat["metadata"] | string | null | undefine
   return metadata as Record<string, unknown>;
 }
 
+function getCachedChatMode(qc: QueryClient, chatId: string): Chat["mode"] | undefined {
+  const detail = qc.getQueryData<Chat>(chatKeys.detail(chatId));
+  if (detail?.mode) return detail.mode;
+  const activeChat = useChatStore.getState().activeChat;
+  if (activeChat?.id === chatId) return activeChat.mode;
+  const list = qc.getQueryData<Chat[]>(chatKeys.list());
+  return list?.find((chat) => chat.id === chatId)?.mode;
+}
+
 function slugifyGameMapId(value: string): string {
   return value
     .trim()
@@ -565,6 +574,8 @@ export function useGenerate() {
       // Speed is controlled by the user's streamingSpeed setting (1–100).
       const transportStreaming = useUIStore.getState().enableStreaming;
       const streamingEnabled = transportStreaming;
+      const shouldDisplayRawStream =
+        getCachedChatMode(qc, params.chatId) !== "conversation" || !!params.regenerateMessageId;
       let fullBuffer = ""; // What the user sees (or accumulates silently when streaming is off)
       let pendingText = ""; // Tokens waiting to be typed out
       let receivedContent = false; // Whether any actual message content was received
@@ -619,7 +630,7 @@ export function useGenerate() {
         fullBuffer += pendingText;
         pendingText = "";
         typingActive = false;
-        if (streamingEnabled && fullBuffer) setStreamBuffer(fullBuffer, params.chatId);
+        if (streamingEnabled && shouldDisplayRawStream && fullBuffer) setStreamBuffer(fullBuffer, params.chatId);
       };
 
       const startTypewriter = () => {
@@ -750,7 +761,7 @@ export function useGenerate() {
 
               if (!chunk) break;
 
-              if (streamingEnabled) {
+              if (streamingEnabled && shouldDisplayRawStream) {
                 pendingText += chunk;
                 startTypewriter();
               } else {
@@ -1086,7 +1097,7 @@ export function useGenerate() {
                   }
                 }
                 fullBuffer = rw.editedText;
-                if (streamingEnabled) setStreamBuffer(rw.editedText, params.chatId);
+                if (streamingEnabled && shouldDisplayRawStream) setStreamBuffer(rw.editedText, params.chatId);
               }
               break;
             }
@@ -1100,7 +1111,7 @@ export function useGenerate() {
                 typingActive = false;
               }
               fullBuffer = cleanContent;
-              if (streamingEnabled) setStreamBuffer(cleanContent, params.chatId);
+              if (streamingEnabled && shouldDisplayRawStream) setStreamBuffer(cleanContent, params.chatId);
               break;
             }
 
@@ -1353,7 +1364,7 @@ export function useGenerate() {
         }
 
         // Wait for typewriter to finish draining pending text (streaming mode only)
-        if (streamingEnabled && isActiveChat() && (pendingText.length > 0 || typingActive)) {
+        if (streamingEnabled && shouldDisplayRawStream && isActiveChat() && (pendingText.length > 0 || typingActive)) {
           await new Promise<void>((resolve) => {
             if (pendingText.length === 0 && !typingActive) {
               resolve();
@@ -1364,7 +1375,7 @@ export function useGenerate() {
           });
         }
         // Final flush — ensure full content is set (only for the viewed chat)
-        if (streamingEnabled) setStreamBuffer(fullBuffer + pendingText, params.chatId);
+        if (streamingEnabled && shouldDisplayRawStream) setStreamBuffer(fullBuffer + pendingText, params.chatId);
       } catch (error) {
         // Flush everything instantly on error so user sees what arrived
         flushTypewriterBuffer();

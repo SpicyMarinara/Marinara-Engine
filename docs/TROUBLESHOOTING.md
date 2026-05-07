@@ -92,6 +92,23 @@ If a Docker or Podman container fails with permission errors on the data volume:
 
 ---
 
+## Lite Container Crashes on Raspberry Pi 4 / Cortex-A72
+
+If the lite container silently restarts when it sends an outgoing LLM API request on a Raspberry Pi 4 or another Cortex-A72-class ARM device, check the container exit code. Exit `132` or `SIGILL` points to a known upstream Wolfi `nodejs-24` aarch64 regression on CPUs without the optional `pmull` feature. Known affected lite images include `1.5.7-lite`, `1.5.8-lite`, and the `:lite` tag published for v1.5.8 on 2026-05-05.
+
+The regular Debian-based `:latest` image is not affected. Until Wolfi publishes a fixed Node package, use one of these workarounds:
+
+- Use `ghcr.io/pasta-devs/marinara-engine:latest` on the affected device.
+- Pin the last known-good lite image by digest:
+
+  ```yaml
+  image: ghcr.io/pasta-devs/marinara-engine@sha256:726b3c82468a1e1b0ed84579c754202d700e8cf27861465d1c41fd2dc99adab8
+  ```
+
+The upstream tracker is [wolfi-dev/os#78694](https://github.com/wolfi-dev/os/issues/78694). Marinara's project tracker is [Pasta-Devs/Marinara-Engine#449](https://github.com/Pasta-Devs/Marinara-Engine/issues/449).
+
+---
+
 ## Still Stuck?
 
 - Check the [open issues](https://github.com/Pasta-Devs/Marinara-Engine/issues) on GitHub.

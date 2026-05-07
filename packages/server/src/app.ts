@@ -28,12 +28,12 @@ import { basename, join, resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { getBuildCommit, getBuildLabel } from "./config/build-info.js";
 import {
-  getCorsConfig,
   getLogLevel,
   getNodeEnv,
   isFileStorageBackend,
   isAutoCreateDefaultConnectionDisabled,
 } from "./config/runtime-config.js";
+import { corsDelegate } from "./config/cors-config.js";
 import { sidecarProcessService } from "./services/sidecar/sidecar-process.service.js";
 
 const isLite = process.env.MARINARA_LITE === "true" || process.env.MARINARA_LITE === "1";
@@ -42,7 +42,6 @@ const NO_STORE_FILES = new Set(["manifest.json", "sw.js", "registerSW.js"]);
 const MAX_UPLOAD_BYTES = 256 * 1024 * 1024;
 
 export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
-  const corsConfig = getCorsConfig();
   const app = Fastify({
     logger: {
       level: getLogLevel(),
@@ -53,7 +52,13 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
   });
 
   // ── Plugins ──
-  await app.register(cors, corsConfig);
+  // CORS uses a per-request delegator so the trusted set is re-read each
+  // request (CORS_ORIGINS hot-reloads in ~2s without a restart) AND so
+  // same-origin requests (Origin matches the request's Host header) are
+  // auto-allowed regardless of configuration. @fastify/cors expects the
+  // delegator to be returned from a factory function passed as the plugin
+  // options. See cors-config.ts.
+  await app.register(cors, () => corsDelegate);
 
   await app.register(multipart, {
     limits: {
