@@ -639,6 +639,11 @@ const COLUMN_MIGRATIONS: ColumnMigration[] = [
     column: "additional_matching_sources",
     definition: "TEXT NOT NULL DEFAULT '[]'",
   },
+  {
+    table: "api_connections",
+    column: "claude_fast_mode",
+    definition: "TEXT NOT NULL DEFAULT 'false'",
+  },
 ];
 
 /**

@@ -83,6 +83,25 @@ export function useTestMessage() {
   });
 }
 
+export interface ClaudeSubscriptionDiagnosis {
+  success: boolean;
+  requestedModel: string;
+  modelsBilled: string[];
+  modelUsageDetail: Array<{ model: string; inputTokens: number; outputTokens: number }>;
+  billedDifferent: boolean;
+  fastModeState: "off" | "cooldown" | "on" | null;
+  response: string;
+  errors: string[];
+  latencyMs: number;
+}
+
+export function useDiagnoseClaudeSubscription() {
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<ClaudeSubscriptionDiagnosis>(`/connections/${id}/diagnose-claude-subscription`),
+  });
+}
+
 export function useTestImageGeneration() {
   return useMutation({
     mutationFn: (id: string) =>

@@ -51,6 +51,14 @@ export const apiConnections = sqliteTable("api_connections", {
   defaultParameters: text("default_parameters"),
   /** Optional hard cap on max_tokens for the API response (for providers like DeepSeek that have lower limits). */
   maxTokensOverride: integer("max_tokens_override"),
+  /**
+   * Claude (Subscription) only. When "true", Marinara passes `settings.fastMode = true`
+   * to the Claude Agent SDK, asking the SDK to use its faster, cheaper routing tier
+   * (response speed up, but lower-quality model behind the scenes). When "false"
+   * (default), Marinara explicitly forces fast mode off for every request so the
+   * exact model chosen on the connection is what runs.
+   */
+  claudeFastMode: text("claude_fast_mode").notNull().default("false"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });

@@ -36,6 +36,7 @@ export const createConnectionSchema = z.object({
   comfyuiWorkflow: z.string().nullable().default(null),
   imageService: z.string().nullable().default(null),
   maxTokensOverride: z.number().int().min(1).nullable().default(null),
+  claudeFastMode: z.boolean().default(false),
 });
 
 export type CreateConnectionInput = z.infer<typeof createConnectionSchema>;

@@ -87,6 +87,7 @@ export function createConnectionsStorage(db: DB) {
         comfyuiWorkflow: input.comfyuiWorkflow ?? null,
         imageService: input.imageService ?? null,
         maxTokensOverride: input.maxTokensOverride ?? null,
+        claudeFastMode: String(input.claudeFastMode ?? false),
         createdAt: timestamp,
         updatedAt: timestamp,
       });
@@ -162,6 +163,9 @@ export function createConnectionsStorage(db: DB) {
       if (data.maxTokensOverride !== undefined) {
         updateFields.maxTokensOverride = data.maxTokensOverride;
       }
+      if (data.claudeFastMode !== undefined) {
+        updateFields.claudeFastMode = String(data.claudeFastMode);
+      }
       await db.update(apiConnections).set(updateFields).where(eq(apiConnections.id, id));
       return this.getById(id);
     },
@@ -193,6 +197,7 @@ export function createConnectionsStorage(db: DB) {
         comfyuiWorkflow: source.comfyuiWorkflow,
         imageService: source.imageService,
         maxTokensOverride: source.maxTokensOverride,
+        claudeFastMode: source.claudeFastMode,
         createdAt: timestamp,
         updatedAt: timestamp,
       });

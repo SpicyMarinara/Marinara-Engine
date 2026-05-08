@@ -90,6 +90,23 @@ function renderTranscript(messages: ChatMessage[]): { systemPrompt: string | und
  * connection can opt into API billing instead of subscription billing.
  */
 export class ClaudeSubscriptionProvider extends BaseLLMProvider {
+  constructor(
+    baseUrl: string,
+    apiKey: string,
+    defaultMaxContext?: number,
+    defaultOpenrouterProvider?: string | null,
+    maxTokensOverride?: number | null,
+    /**
+     * Connection-level fast-mode preference. When `true`, the SDK is asked to
+     * route the request through its faster (and quality-degraded) path. When
+     * `false`, fast mode is explicitly forced off so a persisted CLI setting
+     * can't downgrade Marinara queries silently.
+     */
+    private readonly fastMode: boolean = false,
+  ) {
+    super(baseUrl, apiKey, defaultMaxContext, defaultOpenrouterProvider, maxTokensOverride);
+  }
+
   async *chat(messages: ChatMessage[], options: ChatOptions): AsyncGenerator<string, LLMUsage | void, unknown> {
     const configuredMaxTokens = options.maxTokens ?? 4096;
     const contextFit = this.fitMessagesToContext(messages, { ...options, maxTokens: configuredMaxTokens });
@@ -115,10 +132,22 @@ export class ClaudeSubscriptionProvider extends BaseLLMProvider {
     const modelLower = options.model.toLowerCase();
     const isAdaptiveOnly = /claude-opus-4-(?:[7-9]|\d{2,})/.test(modelLower);
 
+    // The SDK strips the model's version awareness if we pass a plain string
+    // `systemPrompt`. Without the Claude Code preset every model — Opus, Sonnet,
+    // Haiku — falsely answers "Sonnet" when asked which it is, because it has
+    // no framing for its own identity and falls back to the most-mentioned
+    // variant in its training data. Wrapping the caller's system content as
+    // the `append` of the `claude_code` preset preserves identity *and* the
+    // user's framing (character card / preset). This matches the `claude` CLI
+    // default and is what the SillyTavern subscription bridge uses too.
+    const presetSystemPrompt: NonNullable<Parameters<SdkModule["query"]>[0]["options"]>["systemPrompt"] = systemPrompt
+      ? { type: "preset", preset: "claude_code", append: systemPrompt }
+      : { type: "preset", preset: "claude_code" };
+
     const sdkOptions: Parameters<SdkModule["query"]>[0]["options"] = {
       abortController,
       model: options.model,
-      systemPrompt,
+      systemPrompt: presetSystemPrompt,
       includePartialMessages: options.stream ?? true,
       // Disable agent tooling — Marinara has its own tool/agent pipeline and
       // we only want plain text completions out of this provider. With tools
@@ -128,6 +157,11 @@ export class ClaudeSubscriptionProvider extends BaseLLMProvider {
       // response.
       tools: [],
       permissionMode: "bypassPermissions",
+      // Always pass `settings.fastMode` explicitly so the SDK can't fall back
+      // on a persisted CLI value that would silently downgrade the model. The
+      // value comes from the connection-level toggle — default `false` so
+      // unconfigured connections keep the requested model.
+      settings: { fastMode: this.fastMode },
     };
 
     if (options.enableThinking) {
@@ -188,6 +222,28 @@ export class ClaudeSubscriptionProvider extends BaseLLMProvider {
               outputTokens = usage.output_tokens ?? 0;
               cachedTokens = usage.cache_read_input_tokens ?? 0;
               cacheWriteTokens = usage.cache_creation_input_tokens ?? 0;
+            }
+            // The SDK can bill against a different model than the one we
+            // asked for (fast mode, post-rate-limit cooldown, account-tier
+            // gating). `modelUsage` is keyed by the model that actually ran,
+            // so any key that isn't our requested ID is a silent downgrade
+            // worth surfacing.
+            const usedModels = Object.keys(message.modelUsage ?? {});
+            const fastModeState = message.fast_mode_state;
+            const billedDifferent = usedModels.length > 0 && !usedModels.includes(options.model);
+            if (billedDifferent) {
+              logger.warn(
+                "[claude-subscription] Requested %s but SDK billed against %s (fast_mode_state=%s) — check `claude` CLI fast mode / rate-limit cooldown",
+                options.model,
+                usedModels.join(", "),
+                fastModeState ?? "unknown",
+              );
+            } else if (fastModeState && fastModeState !== "off") {
+              logger.warn(
+                "[claude-subscription] fast_mode_state=%s for %s — output may come from a smaller model than requested",
+                fastModeState,
+                options.model,
+              );
             }
           } else {
             const detail = message.errors?.length ? ` — ${message.errors.join("; ")}` : "";

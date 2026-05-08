@@ -29,6 +29,8 @@ export function createLLMProvider(
   maxContext?: number | null,
   openrouterProvider?: string | null,
   maxTokensOverride?: number | null,
+  /** Claude (Subscription) only. When true, asks the Agent SDK to use fast-mode routing. */
+  claudeFastMode?: boolean,
 ): BaseLLMProvider {
   const normalizedMaxContext =
     typeof maxContext === "number" && Number.isFinite(maxContext) && maxContext > 0
@@ -78,6 +80,7 @@ export function createLLMProvider(
         normalizedMaxContext,
         openrouterProvider,
         normalizedMaxTokensOverride,
+        claudeFastMode ?? false,
       );
     case "google":
       return new GoogleProvider(baseUrl, apiKey, normalizedMaxContext, openrouterProvider, normalizedMaxTokensOverride);

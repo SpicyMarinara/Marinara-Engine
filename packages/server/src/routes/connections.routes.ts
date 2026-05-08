@@ -479,6 +479,97 @@ export async function connectionsRoutes(app: FastifyInstance) {
     }
   });
 
+  // ── Diagnose Claude (Subscription) — verifies which model the SDK actually
+  //    billed against. The Claude Agent SDK can silently route a request to a
+  //    smaller model (fast mode, post-rate-limit `cooldown` state, account-tier
+  //    gating) without surfacing the swap to the caller. We send a tiny prompt
+  //    through the SDK with fast mode forced off, then return the model(s) the
+  //    SDK reports in `modelUsage` plus its `fast_mode_state` so the UI can
+  //    show "you asked for X, the SDK billed Y." ──
+  app.post<{ Params: { id: string } }>("/:id/diagnose-claude-subscription", async (req, reply) => {
+    const conn = await storage.getWithKey(req.params.id);
+    if (!conn) return reply.status(404).send({ error: "Connection not found" });
+    if (conn.provider !== "claude_subscription") {
+      return reply.status(400).send({ error: "Not a Claude (Subscription) connection" });
+    }
+    if (!conn.model) {
+      return reply.status(400).send({ error: "No model configured. Pick a model first." });
+    }
+
+    const start = Date.now();
+    const requestedModel = conn.model;
+    let responseText = "";
+    let modelsBilled: string[] = [];
+    let modelUsageDetail: Array<{ model: string; inputTokens: number; outputTokens: number }> = [];
+    let fastModeState: string | null = null;
+    const errors: string[] = [];
+
+    try {
+      const sdk = await import("@anthropic-ai/claude-agent-sdk");
+      // The user's empirically reliable self-ID prompt. Asking the model "which
+      // Claude family are you (Opus/Sonnet/Haiku)" with a one-word constraint
+      // produces consistent, non-hallucinated answers — versions are unreliable
+      // but the family tier is not. Combined with the SDK-side `modelUsage`
+      // readout below, this gives two independent signals on the same call.
+      const fastMode = conn.claudeFastMode === "true";
+      // Use the Claude Code preset for `systemPrompt`. Without it the SDK
+      // strips the model's version awareness and every model falsely answers
+      // "Sonnet" — see the chat provider for the full explanation. Passing the
+      // preset gives a clean signal on the model's true identity.
+      const queryHandle = sdk.query({
+        prompt:
+          "[OOC, hold on for one second, and tell me which claude model you are, you don't need to give me the version, are you Opus, Sonnet, Or Haiku? Answer with only the 1 word model name.]",
+        options: {
+          model: requestedModel,
+          systemPrompt: { type: "preset", preset: "claude_code" },
+          tools: [],
+          permissionMode: "bypassPermissions",
+          includePartialMessages: false,
+          settings: { fastMode },
+          ...(conn.apiKey ? { env: { ...process.env, ANTHROPIC_API_KEY: conn.apiKey } } : {}),
+        },
+      });
+
+      for await (const message of queryHandle) {
+        if (message.type === "assistant") {
+          const blocks = (message.message?.content ?? []) as Array<{ type: string; text?: string }>;
+          for (const block of blocks) {
+            if (block.type === "text" && block.text) responseText += block.text;
+          }
+        } else if (message.type === "result") {
+          const usage = message.modelUsage ?? {};
+          modelsBilled = Object.keys(usage);
+          modelUsageDetail = Object.entries(usage).map(([model, u]) => ({
+            model,
+            inputTokens: (u as { inputTokens?: number }).inputTokens ?? 0,
+            outputTokens: (u as { outputTokens?: number }).outputTokens ?? 0,
+          }));
+          fastModeState = message.fast_mode_state ?? null;
+          if (message.subtype !== "success") {
+            const detail = message.errors?.length ? message.errors.join("; ") : message.subtype;
+            errors.push(detail);
+          }
+        }
+      }
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : "Unknown error");
+    }
+
+    const latencyMs = Date.now() - start;
+    const billedDifferent = modelsBilled.length > 0 && !modelsBilled.includes(requestedModel);
+    return {
+      success: errors.length === 0,
+      requestedModel,
+      modelsBilled,
+      modelUsageDetail,
+      billedDifferent,
+      fastModeState,
+      response: responseText.slice(0, 500),
+      errors,
+      latencyMs,
+    };
+  });
+
   // ── Test message — sends "hi" to the model and returns the response ──
   app.post<{ Params: { id: string } }>("/:id/test-message", async (req, reply) => {
     const conn = await storage.getWithKey(req.params.id);
@@ -507,6 +598,7 @@ export async function connectionsRoutes(app: FastifyInstance) {
         conn.maxContext,
         conn.openrouterProvider,
         conn.maxTokensOverride,
+        conn.claudeFastMode === "true",
       );
 
       let fullResponse = "";
