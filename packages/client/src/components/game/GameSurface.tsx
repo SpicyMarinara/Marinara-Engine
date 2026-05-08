@@ -1492,6 +1492,25 @@ function getGameMapId(map: GameMap | null | undefined, fallbackIndex = 0): strin
   return slugifyGameMapId(map.name || "") || `map-${fallbackIndex + 1}`;
 }
 
+function normalizeGameMapsForMetadata(maps: readonly GameMap[]): GameMap[] {
+  const normalizedMaps: GameMap[] = [];
+  const usedIds = new Set<string>();
+
+  for (const [index, map] of maps.entries()) {
+    const existingId = getGameMapId(map, index) ?? `map-${index + 1}`;
+    const baseId = existingId || `map-${index + 1}`;
+    let mapId = baseId;
+    let suffix = 2;
+    while (usedIds.has(mapId)) {
+      mapId = `${baseId}-${suffix++}`;
+    }
+    usedIds.add(mapId);
+    normalizedMaps.push(map.id === mapId ? map : { ...map, id: mapId });
+  }
+
+  return normalizedMaps;
+}
+
 interface GameSurfaceProps {
   activeChatId: string;
   chat: Chat;
@@ -5466,12 +5485,19 @@ export function GameSurface({
         ? (chatMeta.gamePartyArcs as CurrentSessionSecrets["partyArcs"])
         : [],
       npcs: Array.isArray(chatMeta.gameNpcs) ? (chatMeta.gameNpcs as GameNpc[]) : [],
+      maps: Array.isArray(chatMeta.gameMaps)
+        ? (chatMeta.gameMaps as GameMap[])
+        : chatMeta.gameMap
+          ? [chatMeta.gameMap as GameMap]
+          : [],
       characterCards: Array.isArray(chatMeta.gameCharacterCards)
         ? (chatMeta.gameCharacterCards as Array<Record<string, unknown>>)
         : [],
     }),
     [
       chatMeta.gameCharacterCards,
+      chatMeta.gameMap,
+      chatMeta.gameMaps,
       chatMeta.gameNpcs,
       chatMeta.gamePartyArcs,
       chatMeta.gamePlotTwists,
@@ -5545,6 +5571,14 @@ export function GameSurface({
 
       setSavingCurrentSessionSecrets(true);
       try {
+        const normalizedMaps = normalizeGameMapsForMetadata(nextSecrets.maps);
+        const currentActiveMapId = typeof chatMeta.activeGameMapId === "string" ? chatMeta.activeGameMapId : null;
+        const activeMap =
+          normalizedMaps.find((map, index) => getGameMapId(map, index) === currentActiveMapId) ??
+          normalizedMaps[0] ??
+          null;
+        const activeMapId = getGameMapId(activeMap);
+
         await updateChatMetadata.mutateAsync({
           id: activeChatId,
           gameWorldOverview: nextSecrets.worldOverview,
@@ -5552,9 +5586,13 @@ export function GameSurface({
           gamePlotTwists: nextSecrets.plotTwists,
           gamePartyArcs: nextSecrets.partyArcs,
           gameNpcs: nextSecrets.npcs,
+          gameMap: activeMap,
+          gameMaps: normalizedMaps,
+          activeGameMapId: activeMapId,
           gameCharacterCards: nextSecrets.characterCards,
         });
         useGameModeStore.getState().setNpcs(nextSecrets.npcs);
+        useGameModeStore.getState().setMaps(normalizedMaps, activeMapId);
         toast.success("Current session spoilers updated.");
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to update current session spoilers.";
@@ -5564,7 +5602,7 @@ export function GameSurface({
         setSavingCurrentSessionSecrets(false);
       }
     },
-    [activeChatId, updateChatMetadata],
+    [activeChatId, chatMeta.activeGameMapId, updateChatMetadata],
   );
 
   const handleRegenerateSessionConclusion = useCallback(
