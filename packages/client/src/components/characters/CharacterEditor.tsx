@@ -31,6 +31,7 @@ import {
 } from "../../hooks/use-characters";
 import { useUIStore } from "../../stores/ui.store";
 import { lorebookKeys, useLorebook } from "../../hooks/use-lorebooks";
+import { useStartChatFromCharacter } from "../../hooks/use-start-chat-from-character";
 import { showConfirmDialog } from "../../lib/app-dialogs";
 import { SpriteGenerationModal } from "../ui/SpriteGenerationModal";
 import {
@@ -116,6 +117,7 @@ export function CharacterEditor() {
   const duplicateCharacter = useDuplicateCharacter();
   const createPersona = useCreatePersona();
   const uploadPersonaAvatar = useUploadPersonaAvatar();
+  const { startChatFromCharacter, isStartingChat } = useStartChatFromCharacter();
 
   const [activeTab, setActiveTab] = useState<TabId>("metadata");
   const [formData, setFormData] = useState<CharacterData | null>(null);
@@ -349,6 +351,26 @@ export function CharacterEditor() {
 
   const headerActions = (
     <>
+      <button
+        type="button"
+        onClick={() => {
+          if (!characterId) return;
+          startChatFromCharacter({
+            characterId,
+            characterName: formData.name,
+            mode: "roleplay",
+            firstMessage: formData.first_mes,
+            alternateGreetings: formData.alternate_greetings,
+          });
+        }}
+        disabled={!characterId || isStartingChat}
+        className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--primary)] px-3 py-2 text-xs font-medium text-[var(--primary-foreground)] transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 max-md:rounded-lg max-md:px-2.5 max-md:py-1.5"
+        title="Start new chat"
+      >
+        <MessageCircle size="1rem" />
+        <span className="max-sm:hidden">Start Chat</span>
+      </button>
+
       <button
         onClick={() => updateExtension("fav", !formData.extensions.fav)}
         className={cn(

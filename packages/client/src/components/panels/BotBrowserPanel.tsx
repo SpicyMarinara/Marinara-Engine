@@ -2,13 +2,9 @@
 // Panel: Browser (sidebar — shows imported characters)
 // ──────────────────────────────────────────────
 import { useState, useMemo, useCallback } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { useCharacters } from "../../hooks/use-characters";
-import { useCreateChat, chatKeys } from "../../hooks/use-chats";
-import { useChatPresets, useApplyChatPreset } from "../../hooks/use-chat-presets";
+import { useStartChatFromCharacter } from "../../hooks/use-start-chat-from-character";
 import { useUIStore } from "../../stores/ui.store";
-import { useChatStore } from "../../stores/chat.store";
-import { api } from "../../lib/api-client";
 import { Search, User, Globe, Wand2, MessageCircle } from "lucide-react";
 import { cn, getAvatarCropStyle } from "../../lib/utils";
 import { ContextMenu, type ContextMenuItem } from "../ui/ContextMenu";
@@ -20,10 +16,7 @@ export function BotBrowserPanel() {
   const openCharacterDetail = useUIStore((s) => s.openCharacterDetail);
   const openBotBrowser = useUIStore((s) => s.openBotBrowser);
   const botBrowserOpen = useUIStore((s) => s.botBrowserOpen);
-  const createChat = useCreateChat();
-  const queryClient = useQueryClient();
-  const { data: chatPresetsData } = useChatPresets();
-  const applyChatPreset = useApplyChatPreset();
+  const { startChatFromCharacter } = useStartChatFromCharacter();
   const [search, setSearch] = useState("");
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -65,67 +58,6 @@ export function BotBrowserPanel() {
       }
     },
     [characters],
-  );
-
-  const quickStartFromCharacter = useCallback(
-    (
-      charId: string,
-      charName: string,
-      mode: "roleplay" | "conversation",
-      firstMes?: string,
-      altGreetings?: string[],
-    ) => {
-      const label = mode === "conversation" ? "Conversation" : "Roleplay";
-      // Resolve the user's starred default preset for this mode (if any other than the built-in Default).
-      const presets = chatPresetsData ?? [];
-      const presetMode = mode === "conversation" ? "conversation" : "roleplay";
-      const starred = presets.find((p) => p.mode === presetMode && p.isActive && !p.isDefault);
-      createChat.mutate(
-        { name: charName ? `${charName} — ${label}` : `New ${label}`, mode, characterIds: [charId] },
-        {
-          onSuccess: async (chat) => {
-            useChatStore.getState().setActiveChatId(chat.id);
-            // Apply the user's starred default preset to the brand-new chat so its
-            // settings start where the user wants them.
-            if (starred) {
-              try {
-                await applyChatPreset.mutateAsync({ presetId: starred.id, chatId: chat.id });
-              } catch {
-                /* non-fatal — the chat still opens with system defaults */
-              }
-            }
-            // Mirror the wizard's roleplay first-message behavior so the
-            // character actually greets the user in the new chat.
-            if (mode === "roleplay" && firstMes?.trim()) {
-              try {
-                const msg = await api.post<{ id: string }>(`/chats/${chat.id}/messages`, {
-                  role: "assistant",
-                  content: firstMes,
-                  characterId: charId,
-                });
-                if (msg?.id && altGreetings?.length) {
-                  for (const greeting of altGreetings) {
-                    if (greeting.trim()) {
-                      await api.post(`/chats/${chat.id}/messages/${msg.id}/swipes`, {
-                        content: greeting,
-                        silent: true,
-                      });
-                    }
-                  }
-                }
-                queryClient.invalidateQueries({ queryKey: chatKeys.messages(chat.id) });
-              } catch {
-                /* swallow — don't block the chat from opening if greeting injection fails */
-              }
-            }
-            useChatStore.getState().setShouldOpenSettings(true);
-            useChatStore.getState().setShouldOpenWizard(true);
-            useChatStore.getState().setShouldOpenWizardInShortcutMode(true);
-          },
-        },
-      );
-    },
-    [createChat, queryClient, chatPresetsData, applyChatPreset],
   );
 
   return (
@@ -209,18 +141,23 @@ export function BotBrowserPanel() {
               label: "Quick Start Roleplay",
               icon: <Wand2 size="0.75rem" />,
               onSelect: () =>
-                quickStartFromCharacter(
-                  contextMenu.charId,
-                  contextMenu.charName,
-                  "roleplay",
-                  contextMenu.firstMes,
-                  contextMenu.altGreetings,
-                ),
+                startChatFromCharacter({
+                  characterId: contextMenu.charId,
+                  characterName: contextMenu.charName,
+                  mode: "roleplay",
+                  firstMessage: contextMenu.firstMes,
+                  alternateGreetings: contextMenu.altGreetings,
+                }),
             },
             {
               label: "Quick Start Conversation",
               icon: <MessageCircle size="0.75rem" />,
-              onSelect: () => quickStartFromCharacter(contextMenu.charId, contextMenu.charName, "conversation"),
+              onSelect: () =>
+                startChatFromCharacter({
+                  characterId: contextMenu.charId,
+                  characterName: contextMenu.charName,
+                  mode: "conversation",
+                }),
             },
           ];
           return <ContextMenu x={contextMenu.x} y={contextMenu.y} items={items} onClose={() => setContextMenu(null)} />;

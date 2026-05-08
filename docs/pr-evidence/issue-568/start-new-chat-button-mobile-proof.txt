@@ -1,0 +1,11 @@
+Issue 568 verification notes
+
+Claim:
+The character card/detail surface exposes a visible Start New Chat action for mobile/touch users.
+
+Machine verification:
+- pnpm check passed.
+- Playwright opened the local app at a mobile viewport, navigated to Characters, selected the proof character, waited for the Start New Chat button, and captured docs/pr-evidence/issue-568/start-new-chat-button-mobile.png.
+
+Proof screenshot:
+docs/pr-evidence/issue-568/start-new-chat-button-mobile.png

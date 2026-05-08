@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowUpDown, Download, Pencil, Plus, Search, Sparkles, Star, User } from "lucide-react";
+import { ArrowLeft, ArrowUpDown, Download, MessageCircle, Pencil, Plus, Search, Sparkles, Star, User } from "lucide-react";
 import { useCharacters } from "../../hooks/use-characters";
+import { useStartChatFromCharacter } from "../../hooks/use-start-chat-from-character";
 import { getCharacterTitle } from "../../lib/character-display";
 import { cn, getAvatarCropStyle } from "../../lib/utils";
 import { useUIStore } from "../../stores/ui.store";
@@ -81,6 +82,7 @@ function CharacterLibraryDetailCard({
   character: ParsedCharacterRow;
   onEdit: (id: string) => void;
 }) {
+  const { startChatFromCharacter, isStartingChat } = useStartChatFromCharacter();
   const characterName = getText(character.parsed.name) || "Unnamed";
   const characterTitle = getCharacterTitle({ name: characterName, comment: character.comment });
   const characterMeta = getCharacterMeta(character);
@@ -137,6 +139,25 @@ function CharacterLibraryDetailCard({
             )}
 
             <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  startChatFromCharacter({
+                    characterId: character.id,
+                    characterName,
+                    mode: "roleplay",
+                    firstMessage: getText(character.parsed.first_mes),
+                    alternateGreetings: Array.isArray(character.parsed.alternate_greetings)
+                      ? character.parsed.alternate_greetings
+                      : [],
+                  })
+                }
+                disabled={isStartingChat}
+                className="inline-flex items-center gap-2 rounded-2xl bg-[var(--primary)] px-4 py-2.5 text-sm font-medium text-[var(--primary-foreground)] shadow-lg shadow-pink-500/15 transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <MessageCircle size="0.875rem" />
+                Start New Chat
+              </button>
               <button
                 onClick={() => onEdit(character.id)}
                 className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-pink-400 to-rose-500 px-4 py-2.5 text-sm font-medium text-white shadow-lg shadow-pink-500/15 transition-all hover:shadow-pink-500/25"
