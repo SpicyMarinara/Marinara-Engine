@@ -1496,6 +1496,12 @@ export function GameNarration({
 
   const activeDisplayLen = active ? effectDisplayLength(active.content) : 0;
   const doneTyping = !!active && visibleChars >= activeDisplayLen;
+  const activeCanEditSegment = !!(
+    doneTyping &&
+    onEditSegment &&
+    editingContent === null &&
+    segmentEditInfoRef.current[activeIndex] != null
+  );
   const narrationComplete = !isStreaming && segments.length > 0 && activeIndex === segments.length - 1 && doneTyping;
 
   // Notify parent about narration completion state. While reviewing the past via
@@ -2982,11 +2988,9 @@ export function GameNarration({
                           )}
                         </div>
                         {/* Edit button */}
-                        {doneTyping &&
-                          onEditSegment &&
-                          editingContent === null &&
-                          segmentEditInfoRef.current[activeIndex] != null && (
+                        {activeCanEditSegment && (
                             <button
+                              type="button"
                               onClick={() => setEditingContent(active.content)}
                               className="absolute right-1.5 top-1.5 rounded p-1 text-[var(--muted-foreground)]/40 transition-colors hover:bg-[var(--muted)]/30 hover:text-[var(--muted-foreground)] dark:text-white/20 dark:hover:bg-white/10 dark:hover:text-white/60"
                               title="Edit"
@@ -3017,7 +3021,10 @@ export function GameNarration({
                             onClick={() => {
                               void handleCopyMessage(activeCopyKey, activeCopyText);
                             }}
-                            className="absolute right-7 top-1.5 rounded p-1 text-[var(--muted-foreground)]/40 transition-colors hover:bg-[var(--muted)]/30 hover:text-[var(--muted-foreground)] dark:text-white/20 dark:hover:bg-white/10 dark:hover:text-white/60"
+                            className={cn(
+                              "absolute top-1.5 rounded p-1 text-[var(--muted-foreground)]/40 transition-colors hover:bg-[var(--muted)]/30 hover:text-[var(--muted-foreground)] dark:text-white/20 dark:hover:bg-white/10 dark:hover:text-white/60",
+                              activeCanEditSegment ? "right-7" : "right-1.5",
+                            )}
                             title="Copy"
                           >
                             {copiedMessageKey === activeCopyKey ? <Check size={11} /> : <Copy size={11} />}
@@ -3106,11 +3113,9 @@ export function GameNarration({
                   />
                 )}
                 {/* Edit button */}
-                {doneTyping &&
-                  onEditSegment &&
-                  editingContent === null &&
-                  segmentEditInfoRef.current[activeIndex] != null && (
+                {activeCanEditSegment && (
                     <button
+                      type="button"
                       onClick={() => setEditingContent(active.content)}
                       className="absolute right-1.5 top-1.5 rounded p-1 text-[var(--muted-foreground)]/40 transition-colors hover:bg-[var(--muted)]/30 hover:text-[var(--muted-foreground)] dark:text-white/20 dark:hover:bg-white/10 dark:hover:text-white/60"
                       title="Edit"
@@ -3140,7 +3145,10 @@ export function GameNarration({
                     onClick={() => {
                       void handleCopyMessage(activeCopyKey, activeCopyText);
                     }}
-                    className="absolute right-7 top-1.5 rounded p-1 text-[var(--muted-foreground)]/40 transition-colors hover:bg-[var(--muted)]/30 hover:text-[var(--muted-foreground)] dark:text-white/20 dark:hover:bg-white/10 dark:hover:text-white/60"
+                    className={cn(
+                      "absolute top-1.5 rounded p-1 text-[var(--muted-foreground)]/40 transition-colors hover:bg-[var(--muted)]/30 hover:text-[var(--muted-foreground)] dark:text-white/20 dark:hover:bg-white/10 dark:hover:text-white/60",
+                      activeCanEditSegment ? "right-7" : "right-1.5",
+                    )}
                     title="Copy"
                   >
                     {copiedMessageKey === activeCopyKey ? <Check size={11} /> : <Copy size={11} />}
