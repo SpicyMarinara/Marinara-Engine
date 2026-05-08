@@ -724,7 +724,9 @@ export function buildGmFormatReminder(
       ``,
       `HUD WIDGETS:`,
       ...buildWidgetSummaryLines(hudWidgets),
-      `Widget usage: emit widget commands only when tracked state changes. value = bars/gauges, count = counters, stat = one stat_block entry, add/remove = rotating list items, running/seconds = timers.`,
+      `Widget usage: emit widget commands for every real change to these visible HUD widgets. Do not skip a changed widget just because another system tracks related player or party stats.`,
+      `HUD widgets are visual UI state only. Player stats, inventory, party member HP, party relationships, and other durable game facts remain in their own canonical systems; use [widget:] only to mirror a visible widget when that widget's displayed value should change.`,
+      `Command mapping: value = bars/gauges, count = counters, stat = one stat_block entry, add/remove = rotating list items, running/seconds = timers.`,
       `Widget commands: [widget: id, value: n] [widget: id, stat: "Name", value: x] [widget: id, count: n] [widget: id, add: "Item"] [widget: id, remove: "Item"] [widget: id, running: true, seconds: 60]`,
       `List widgets: keep at most 5 short entries visible; remove stale items freely.`,
     );

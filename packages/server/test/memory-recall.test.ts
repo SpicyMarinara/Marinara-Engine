@@ -8,6 +8,7 @@ import type { DB } from "../src/db/connection.js";
 import { runMigrations } from "../src/db/migrate.js";
 import { chats, memoryChunks, messages } from "../src/db/schema/index.js";
 import { chatsRoutes } from "../src/routes/chats.routes.js";
+import { chunkAndEmbedMessages, recallMemories } from "../src/services/memory-recall.js";
 import { createChatsStorage } from "../src/services/storage/chats.storage.js";
 
 test("editing a message invalidates stale memory chunks and refresh rebuilds from current text", async () => {
@@ -83,6 +84,74 @@ test("editing a message invalidates stale memory chunks and refresh rebuilds fro
     assert.equal(rebuiltChunks.length, 1);
     assert.ok(!rebuiltChunks[0]!.content.includes("florblesnatch"));
     assert.ok(rebuiltChunks[0]!.content.includes("silverleaf"));
+  } finally {
+    client.close();
+  }
+});
+
+test("memory recall uses configured embedding source when local embeddings are unavailable", async () => {
+  const client = createClient({ url: "file::memory:" });
+  const db = drizzle(client) as unknown as DB;
+
+  try {
+    await runMigrations(db);
+
+    const now = "2026-05-05T01:00:00.000Z";
+    await db.insert(chats).values({
+      id: "chat-435",
+      name: "Bug 435 repro",
+      mode: "roleplay",
+      characterIds: "[]",
+      metadata: "{}",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    for (let i = 1; i <= 5; i++) {
+      await db.insert(messages).values({
+        id: `message-435-${i}`,
+        chatId: "chat-435",
+        role: i % 2 === 0 ? "user" : "assistant",
+        characterId: null,
+        content: i === 5 ? "The orchard password is silverleaf." : `Memory fallback setup ${i}.`,
+        activeSwipeIndex: 0,
+        extra: "{}",
+        createdAt: `2026-05-05T01:0${i}:00.000Z`,
+      });
+    }
+
+    let fallbackCalls = 0;
+    const fallbackSource = {
+      label: "test embedding source",
+      async embed(texts: string[]) {
+        fallbackCalls += 1;
+        return texts.map((text) => (text.includes("silverleaf") ? [1, 0, 0] : [0, 1, 0]));
+      },
+    };
+
+    await chunkAndEmbedMessages(
+      db,
+      "chat-435",
+      { userName: "User", characterNames: {} },
+      {
+        localEmbedder: async () => null,
+        embeddingSource: fallbackSource,
+      },
+    );
+
+    const chunks = await db.select().from(memoryChunks).where(eq(memoryChunks.chatId, "chat-435"));
+    assert.equal(chunks.length, 1);
+    assert.equal(chunks[0]!.embedding, "[1,0,0]");
+
+    const recalled = await recallMemories(db, "silverleaf", ["chat-435"], {
+      topK: 1,
+      localEmbedder: async () => null,
+      embeddingSource: fallbackSource,
+    });
+
+    assert.equal(fallbackCalls, 2);
+    assert.equal(recalled.length, 1);
+    assert.ok(recalled[0]!.content.includes("silverleaf"));
   } finally {
     client.close();
   }

@@ -231,6 +231,29 @@ test("GM format reminder documents the simplified resolved skill_check command",
   assert.doesNotMatch(prompt, /\bmode=/);
 });
 
+test("GM format reminder separates HUD widget updates from durable stats", () => {
+  const prompt = buildGmFormatReminder({
+    gameActiveState: "exploration",
+    sessionNumber: 1,
+    partyNames: ["Aster"],
+    playerName: "Mari",
+    hudWidgets: [
+      {
+        id: "party_bonds",
+        label: "Party Bonds",
+        type: "stat_block",
+        position: "hud_left",
+        config: { stats: [{ name: "Aster", value: 50 }] },
+      },
+    ],
+  });
+
+  assert.match(prompt, /emit widget commands for every real change to these visible HUD widgets/);
+  assert.match(prompt, /Do not skip a changed widget just because another system tracks related player or party stats/);
+  assert.match(prompt, /HUD widgets are visual UI state only/);
+  assert.match(prompt, /party member HP, party relationships, and other durable game facts remain in their own canonical systems/);
+});
+
 test("session conclusion prompt combines summary progression and cards in one JSON shape", () => {
   const promptWithCards = buildSessionConclusionPrompt({ language: "Polish", includeCharacterCards: true });
   const promptWithoutCards = buildSessionConclusionPrompt({ includeCharacterCards: false });

@@ -16,6 +16,15 @@ export interface GameTime {
 
 export type TimeOfDay = "dawn" | "morning" | "afternoon" | "evening" | "night" | "midnight";
 
+const TIME_OF_DAY_HOURS: Record<TimeOfDay, number> = {
+  dawn: 6,
+  morning: 8,
+  afternoon: 14,
+  evening: 18,
+  night: 21,
+  midnight: 0,
+};
+
 /** Minutes advanced per action type. */
 const ACTION_DURATIONS: Record<string, number> = {
   dialogue: 15,
@@ -55,8 +64,18 @@ export function getTimeOfDay(hour: number): TimeOfDay {
   if (hour >= 7 && hour < 12) return "morning";
   if (hour >= 12 && hour < 17) return "afternoon";
   if (hour >= 17 && hour < 20) return "evening";
-  if (hour >= 20 || hour < 0) return "night";
+  if (hour >= 20) return "night";
   return "midnight";
+}
+
+/** Apply a scene analyzer time-of-day label without inventing a day skip on repeated labels. */
+export function setTimeOfDay(current: GameTime, label: TimeOfDay): GameTime {
+  const currentLabel = getTimeOfDay(current.hour);
+  if (label === currentLabel) return current;
+
+  const targetHour = TIME_OF_DAY_HOURS[label];
+  const targetDay = targetHour <= current.hour ? current.day + 1 : current.day;
+  return { ...current, day: targetDay, hour: targetHour, minute: 0 };
 }
 
 /** Format time as a human-readable string for narration injection. */

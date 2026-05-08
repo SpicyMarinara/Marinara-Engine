@@ -523,22 +523,22 @@ export function createChatsStorage(db: DB) {
 
     async removeMessages(ids: string[], chatId?: string) {
       if (ids.length === 0) return;
-      const existingRows: Array<{ chatId: string; createdAt: string }> = [];
+      const earliestByChat = new Map<string, string>();
       const CHUNK = 500;
       for (let i = 0; i < ids.length; i += CHUNK) {
         const chunk = ids.slice(i, i + CHUNK);
         const condition = chatId
           ? and(inArray(messages.id, chunk), eq(messages.chatId, chatId))
           : inArray(messages.id, chunk);
-        existingRows.push(
-          ...(await db.select({ chatId: messages.chatId, createdAt: messages.createdAt }).from(messages).where(condition)),
-        );
+        const existingRows = await db
+          .select({ chatId: messages.chatId, createdAt: messages.createdAt })
+          .from(messages)
+          .where(condition);
+        for (const row of existingRows) {
+          const current = earliestByChat.get(row.chatId);
+          if (!current || row.createdAt < current) earliestByChat.set(row.chatId, row.createdAt);
+        }
         await db.delete(messages).where(condition);
-      }
-      const earliestByChat = new Map<string, string>();
-      for (const row of existingRows) {
-        const current = earliestByChat.get(row.chatId);
-        if (!current || row.createdAt < current) earliestByChat.set(row.chatId, row.createdAt);
       }
       for (const [affectedChatId, createdAt] of earliestByChat) {
         await invalidateMemoryChunksFrom(db, affectedChatId, createdAt);
