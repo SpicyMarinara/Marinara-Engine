@@ -63,8 +63,7 @@ export async function resolveMemoryRecallEmbeddingSource(
   }
 
   embeddingBaseUrl = nonEmptyString(embeddingConnection.embeddingBaseUrl) ?? embeddingBaseUrl ?? resolveBaseUrl(embeddingConnection);
-  const embeddingModel =
-    nonEmptyString(embeddingConnection.embeddingModel) ?? nonEmptyString(activeConnection.embeddingModel);
+  const embeddingModel = nonEmptyString(embeddingConnection.embeddingModel);
 
   if (!embeddingModel || !embeddingBaseUrl) return null;
 

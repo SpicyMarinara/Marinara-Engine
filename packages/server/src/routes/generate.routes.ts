@@ -714,11 +714,16 @@ export async function generateRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "No base URL configured for this connection" });
     }
     const chatMeta = parseExtra(chat.metadata) as Record<string, unknown>;
-    const memoryRecallEmbeddingSource = await resolveMemoryRecallEmbeddingSource(app.db, {
-      chatMetadata: chatMeta,
-      activeConnection: conn,
-      activeBaseUrl: baseUrl,
-    });
+    let memoryRecallEmbeddingSource: Awaited<ReturnType<typeof resolveMemoryRecallEmbeddingSource>> | null = null;
+    try {
+      memoryRecallEmbeddingSource = await resolveMemoryRecallEmbeddingSource(app.db, {
+        chatMetadata: chatMeta,
+        activeConnection: conn,
+        activeBaseUrl: baseUrl,
+      });
+    } catch (err) {
+      logger.warn(err, "[memory-recall] Embedding source resolution failed; using default embedding path");
+    }
 
     // ── Abort controller: cancel agents when client disconnects ──
     const abortController = new AbortController();

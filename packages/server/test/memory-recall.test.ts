@@ -6,9 +6,10 @@ import { drizzle } from "drizzle-orm/libsql";
 import { eq } from "drizzle-orm";
 import type { DB } from "../src/db/connection.js";
 import { runMigrations } from "../src/db/migrate.js";
-import { chats, memoryChunks, messages } from "../src/db/schema/index.js";
+import { apiConnections, chats, memoryChunks, messages } from "../src/db/schema/index.js";
 import { chatsRoutes } from "../src/routes/chats.routes.js";
 import { chunkAndEmbedMessages, recallMemories } from "../src/services/memory-recall.js";
+import { resolveMemoryRecallEmbeddingSource } from "../src/services/memory-recall-embedding.js";
 import { createChatsStorage } from "../src/services/storage/chats.storage.js";
 
 test("editing a message invalidates stale memory chunks and refresh rebuilds from current text", async () => {
@@ -152,6 +153,61 @@ test("memory recall uses configured embedding source when local embeddings are u
     assert.equal(fallbackCalls, 2);
     assert.equal(recalled.length, 1);
     assert.ok(recalled[0]!.content.includes("silverleaf"));
+  } finally {
+    client.close();
+  }
+});
+
+test("memory recall embedding connection does not inherit the active connection embedding model", async () => {
+  const client = createClient({ url: "file::memory:" });
+  const db = drizzle(client) as unknown as DB;
+
+  try {
+    await runMigrations(db);
+
+    const now = "2026-05-05T02:00:00.000Z";
+    await db.insert(apiConnections).values([
+      {
+        id: "active-connection",
+        name: "Active generation",
+        provider: "custom",
+        baseUrl: "http://active.example",
+        apiKeyEncrypted: "",
+        model: "chat-model",
+        maxContext: 128000,
+        isDefault: "false",
+        useForRandom: "false",
+        enableCaching: "false",
+        defaultForAgents: "false",
+        embeddingModel: "active-embedding-model",
+        embeddingBaseUrl: "",
+        embeddingConnectionId: "embedding-connection",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: "embedding-connection",
+        name: "Dedicated embeddings",
+        provider: "custom",
+        baseUrl: "http://embedding.example",
+        apiKeyEncrypted: "",
+        model: "chat-model",
+        maxContext: 128000,
+        isDefault: "false",
+        useForRandom: "false",
+        enableCaching: "false",
+        defaultForAgents: "false",
+        embeddingModel: "",
+        embeddingBaseUrl: "",
+        embeddingConnectionId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+
+    const source = await resolveMemoryRecallEmbeddingSource(db, { connectionId: "active-connection" });
+
+    assert.equal(source, null);
   } finally {
     client.close();
   }
