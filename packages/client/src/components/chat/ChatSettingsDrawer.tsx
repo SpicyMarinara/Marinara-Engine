@@ -80,6 +80,7 @@ import {
   useChatMemories,
   useDeleteChatMemory,
   useClearChatMemories,
+  useRefreshChatMemories,
   useChatNotes,
   useDeleteChatNote,
   useClearChatNotes,
@@ -4800,6 +4801,7 @@ function MemoryRecallMemoriesModal({ chatId, open, onClose }: { chatId: string; 
   const memoriesQuery = useChatMemories(chatId, open);
   const deleteMemory = useDeleteChatMemory(chatId);
   const clearMemories = useClearChatMemories(chatId);
+  const refreshMemories = useRefreshChatMemories(chatId);
   const memories = useMemo(() => memoriesQuery.data ?? [], [memoriesQuery.data]);
   const totalTokens = useMemo(() => estimateMemoryTokens(memories), [memories]);
 
@@ -4841,12 +4843,15 @@ function MemoryRecallMemoriesModal({ chatId, open, onClose }: { chatId: string; 
           <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={() => void memoriesQuery.refetch()}
-              disabled={memoriesQuery.isFetching}
+              onClick={() => refreshMemories.mutate()}
+              disabled={memoriesQuery.isFetching || refreshMemories.isPending}
               className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] disabled:opacity-50"
-              title="Refresh"
+              title="Rebuild memories from current chat messages"
             >
-              <RefreshCw size="0.8125rem" className={cn(memoriesQuery.isFetching && "animate-spin")} />
+              <RefreshCw
+                size="0.8125rem"
+                className={cn((memoriesQuery.isFetching || refreshMemories.isPending) && "animate-spin")}
+              />
             </button>
             <button
               type="button"

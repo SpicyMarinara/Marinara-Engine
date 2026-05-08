@@ -20,6 +20,7 @@ import { createRegexScriptsStorage } from "../services/storage/regex-scripts.sto
 import { getLocalSidecarProvider, LOCAL_SIDECAR_MODEL } from "../services/llm/local-sidecar.js";
 import { createLLMProvider } from "../services/llm/provider-registry.js";
 import { generateMissingConversationSummaries } from "../services/conversation/auto-summary.service.js";
+import { rebuildMemoryChunks } from "../services/memory-recall.js";
 import { wrapContent } from "../services/prompt/format-engine.js";
 import { newId } from "../utils/id-generator.js";
 import { characters, gameStateSnapshots, memoryChunks } from "../db/schema/index.js";
@@ -587,6 +588,39 @@ export async function chatsRoutes(app: FastifyInstance) {
           hasEmbedding: !!embedding,
         }) satisfies ChatMemoryChunk,
     );
+  });
+
+  // Rebuild memory-recall chunks for this chat from the current message log.
+  app.post<{ Params: { id: string } }>("/:id/memories/refresh", async (req, reply) => {
+    const chat = await storage.getById(req.params.id);
+    if (!chat) return reply.status(404).send({ error: "Chat not found" });
+
+    const characterIds: string[] = Array.isArray(chat.characterIds)
+      ? chat.characterIds
+      : typeof chat.characterIds === "string"
+        ? JSON.parse(chat.characterIds)
+        : [];
+    const charactersStore = createCharactersStorage(app.db);
+    const characterNames: Record<string, string> = {};
+    for (const characterId of characterIds) {
+      const row = await charactersStore.getById(characterId);
+      if (!row) continue;
+      try {
+        const data = JSON.parse(row.data as string) as { name?: unknown };
+        characterNames[characterId] = typeof data.name === "string" && data.name.trim() ? data.name : "Character";
+      } catch {
+        characterNames[characterId] = "Character";
+      }
+    }
+
+    const personas = await charactersStore.listPersonas();
+    const persona =
+      (chat.personaId ? personas.find((candidate) => candidate.id === chat.personaId) : null) ??
+      personas.find((candidate) => candidate.isActive === "true");
+    const userName = persona?.name ?? "User";
+
+    const rebuilt = await rebuildMemoryChunks(app.db, req.params.id, { userName, characterNames });
+    return { rebuilt };
   });
 
   // Clear all memory-recall chunks for this chat.

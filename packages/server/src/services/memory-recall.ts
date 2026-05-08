@@ -142,6 +142,26 @@ export async function chunkAndEmbedMessages(
 }
 
 /**
+ * Rebuild all memory-recall chunks for a chat from the current message log.
+ */
+export async function rebuildMemoryChunks(
+  db: DB,
+  chatId: string,
+  nameMap: { userName: string; characterNames: Record<string, string> },
+): Promise<number> {
+  if (isLite) return 0;
+
+  await db.delete(memoryChunks).where(eq(memoryChunks.chatId, chatId));
+  await chunkAndEmbedMessages(db, chatId, nameMap);
+
+  const rebuilt = await db
+    .select({ id: memoryChunks.id })
+    .from(memoryChunks)
+    .where(eq(memoryChunks.chatId, chatId));
+  return rebuilt.length;
+}
+
+/**
  * Recall relevant conversation memories for a given query.
  * Searches only the specified chat IDs for relevant chunks.
  */

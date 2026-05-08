@@ -12,6 +12,7 @@ import {
   conversationNotes,
   agentRuns,
   agentMemory,
+  memoryChunks,
 } from "../../db/schema/index.js";
 import { newId, now } from "../../utils/id-generator.js";
 import { existsSync, rmSync } from "fs";
@@ -100,6 +101,15 @@ function parseMessageCursor(before?: string): { createdAt: string; rowid: number
     createdAt: before.slice(0, separatorIndex),
     rowid,
   };
+}
+
+async function invalidateMemoryChunksFrom(db: DB, chatId: string, createdAt: string) {
+  await db
+    .delete(memoryChunks)
+    .where(and(eq(memoryChunks.chatId, chatId), gt(memoryChunks.lastMessageAt, createdAt)));
+  await db
+    .delete(memoryChunks)
+    .where(and(eq(memoryChunks.chatId, chatId), eq(memoryChunks.lastMessageAt, createdAt)));
 }
 
 /** Create the chat storage facade used by routes and importers. */
@@ -455,7 +465,11 @@ export function createChatsStorage(db: DB) {
     },
 
     async updateMessageContent(id: string, content: string) {
+      const existing = await this.getMessage(id);
       await db.update(messages).set({ content }).where(eq(messages.id, id));
+      if (existing) {
+        await invalidateMemoryChunksFrom(db, existing.chatId, existing.createdAt);
+      }
       // Also sync the edit to the active swipe row so it persists across swipe switches
       const msg = await this.getMessage(id);
       if (msg) {
@@ -500,18 +514,34 @@ export function createChatsStorage(db: DB) {
     },
 
     async removeMessage(id: string) {
+      const existing = await this.getMessage(id);
       await db.delete(messages).where(eq(messages.id, id));
+      if (existing) {
+        await invalidateMemoryChunksFrom(db, existing.chatId, existing.createdAt);
+      }
     },
 
     async removeMessages(ids: string[], chatId?: string) {
       if (ids.length === 0) return;
+      const earliestByChat = new Map<string, string>();
       const CHUNK = 500;
       for (let i = 0; i < ids.length; i += CHUNK) {
         const chunk = ids.slice(i, i + CHUNK);
         const condition = chatId
           ? and(inArray(messages.id, chunk), eq(messages.chatId, chatId))
           : inArray(messages.id, chunk);
+        const existingRows = await db
+          .select({ chatId: messages.chatId, createdAt: messages.createdAt })
+          .from(messages)
+          .where(condition);
+        for (const row of existingRows) {
+          const current = earliestByChat.get(row.chatId);
+          if (!current || row.createdAt < current) earliestByChat.set(row.chatId, row.createdAt);
+        }
         await db.delete(messages).where(condition);
+      }
+      for (const [affectedChatId, createdAt] of earliestByChat) {
+        await invalidateMemoryChunksFrom(db, affectedChatId, createdAt);
       }
     },
 
