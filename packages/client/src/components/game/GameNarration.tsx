@@ -20,6 +20,7 @@ import {
   ScrollText,
   X,
   Package,
+  Copy,
   Pencil,
   Check,
   Play,
@@ -30,7 +31,7 @@ import {
   VolumeX,
   Loader2,
 } from "lucide-react";
-import { cn, getAvatarCropStyle, type AvatarCrop } from "../../lib/utils";
+import { cn, copyToClipboard, getAvatarCropStyle, type AvatarCrop } from "../../lib/utils";
 import { findNamedMapValue } from "../../lib/game-character-name-match";
 import type { GameSegmentEdit } from "../../lib/game-segment-edits";
 import { parseGmTags, stripGmTagsKeepReadables } from "../../lib/game-tag-parser";
@@ -711,6 +712,8 @@ export function GameNarration({
   const logScrolledRef = useRef(false);
   const stackedLogRef = useRef<HTMLDivElement | null>(null);
   const [stackedLogPinned, setStackedLogPinned] = useState(true);
+  const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
+  const copyResetTimerRef = useRef<number | null>(null);
   const segmentSourceMessageIdsRef = useRef<Array<string | null>>([]);
   const { data: ttsConfig } = useTTSConfig();
   const [gameVoiceVersion, setGameVoiceVersion] = useState(0);
@@ -727,6 +730,16 @@ export function GameNarration({
   useEffect(() => {
     setEditingContent(null);
   }, [activeIndex]);
+
+  useEffect(
+    () => () => {
+      if (copyResetTimerRef.current != null) {
+        window.clearTimeout(copyResetTimerRef.current);
+        copyResetTimerRef.current = null;
+      }
+    },
+    [],
+  );
 
   /** Internal ref tracking the typewriter position so the RAF loop can run without
    *  visibleChars in the effect deps (avoids effect restart per character). */
@@ -1316,6 +1329,8 @@ export function GameNarration({
   const activeSourceMessage = activeSourceMessageId ? (sourceMessagesById.get(activeSourceMessageId) ?? null) : null;
   const activeTranslatedText = activeSourceMessageId ? translations[activeSourceMessageId] : undefined;
   const activeIsTranslating = activeSourceMessageId ? !!translating[activeSourceMessageId] : false;
+  const activeCopyKey = active ? `active:${active.id}` : null;
+  const activeCopyText = active ? active.readableContent ?? stripGmTagsKeepReadables(active.content) : "";
   const gameVoiceEnabled = Boolean(ttsConfig?.enabled && ttsConfig.autoplayGame);
   const gameVoiceConfigSignature = useMemo(() => buildVoiceConfigSignature(ttsConfig), [ttsConfig]);
   const normalizedGameVoiceVolume = Math.max(0, Math.min(1, gameVoiceVolume));
@@ -2424,6 +2439,19 @@ export function GameNarration({
   const NARRATION_META_BTN =
     "flex min-h-7 items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--muted)]/20 px-2.5 py-1 text-xs text-[var(--foreground)]/75 transition-colors hover:bg-[var(--muted)]/40 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10";
 
+  const handleCopyMessage = useCallback(async (key: string, text: string) => {
+    const didCopy = await copyToClipboard(text);
+    if (!didCopy) return;
+    setCopiedMessageKey(key);
+    if (copyResetTimerRef.current != null) {
+      window.clearTimeout(copyResetTimerRef.current);
+    }
+    copyResetTimerRef.current = window.setTimeout(() => {
+      setCopiedMessageKey((current) => (current === key ? null : current));
+      copyResetTimerRef.current = null;
+    }, 1500);
+  }, []);
+
   const handleInterrupt = useCallback(() => {
     // Request only — the parent opens the confirmation modal. We don't pause
     // here; the parent flips `interruptPending` once the player has confirmed
@@ -2968,6 +2996,7 @@ export function GameNarration({
                           )}
                         {editingContent !== null && (
                           <button
+                            type="button"
                             onClick={() => {
                               if (editingContent.trim() && onEditSegment) {
                                 const ei = segmentEditInfoRef.current[activeIndex];
@@ -2980,6 +3009,18 @@ export function GameNarration({
                             title="Save"
                           >
                             <Check size={11} />
+                          </button>
+                        )}
+                        {editingContent === null && activeCopyKey && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handleCopyMessage(activeCopyKey, activeCopyText);
+                            }}
+                            className="absolute right-7 top-1.5 rounded p-1 text-[var(--muted-foreground)]/40 transition-colors hover:bg-[var(--muted)]/30 hover:text-[var(--muted-foreground)] dark:text-white/20 dark:hover:bg-white/10 dark:hover:text-white/60"
+                            title="Copy"
+                          >
+                            {copiedMessageKey === activeCopyKey ? <Check size={11} /> : <Copy size={11} />}
                           </button>
                         )}
                       </div>
@@ -3079,6 +3120,7 @@ export function GameNarration({
                   )}
                 {editingContent !== null && (
                   <button
+                    type="button"
                     onClick={() => {
                       if (editingContent.trim() && onEditSegment) {
                         const ei = segmentEditInfoRef.current[activeIndex];
@@ -3090,6 +3132,18 @@ export function GameNarration({
                     title="Save"
                   >
                     <Check size={11} />
+                  </button>
+                )}
+                {editingContent === null && activeCopyKey && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleCopyMessage(activeCopyKey, activeCopyText);
+                    }}
+                    className="absolute right-7 top-1.5 rounded p-1 text-[var(--muted-foreground)]/40 transition-colors hover:bg-[var(--muted)]/30 hover:text-[var(--muted-foreground)] dark:text-white/20 dark:hover:bg-white/10 dark:hover:text-white/60"
+                    title="Copy"
+                  >
+                    {copiedMessageKey === activeCopyKey ? <Check size={11} /> : <Copy size={11} />}
                   </button>
                 )}
               </div>
@@ -3135,7 +3189,7 @@ export function GameNarration({
                 </span>
               </div>
 
-              <div className="game-narration-prose max-h-40 overflow-y-auto rounded-xl border border-amber-400/20 bg-amber-950/20 px-3 py-2.5 sm:max-h-48">
+              <div className="relative game-narration-prose max-h-40 overflow-y-auto rounded-xl border border-amber-400/20 bg-amber-950/20 px-3 py-2.5 sm:max-h-48">
                 <div
                   className={cn(
                     "text-sm italic leading-relaxed text-amber-200/80",
@@ -3150,6 +3204,18 @@ export function GameNarration({
                     ),
                   }}
                 />
+                {activeCopyKey && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleCopyMessage(activeCopyKey, activeCopyText);
+                    }}
+                    className="absolute right-1.5 top-1.5 rounded p-1 text-amber-200/45 transition-colors hover:bg-amber-100/10 hover:text-amber-100/70"
+                    title="Copy"
+                  >
+                    {copiedMessageKey === activeCopyKey ? <Check size={11} /> : <Copy size={11} />}
+                  </button>
+                )}
               </div>
 
               {doneTyping &&
@@ -3376,8 +3442,28 @@ export function GameNarration({
                       const isEditingThis =
                         editingLogSeg?.messageId === sourceMessageId && editingLogSeg?.segIndex === sourceSegmentIndex;
                       const showDeleteButton = canDeleteMessage || canDeleteThisSegment;
+                      const copyKey =
+                        sourceMessageId && hasSourceSegmentIndex
+                          ? `log:${sourceMessageId}:${sourceSegmentIndex}`
+                          : sourceMessageId
+                            ? `log:${sourceMessageId}`
+                            : null;
+                      const copyText = seg.readableContent ?? stripGmTagsKeepReadables(seg.content);
+                      const copyButton = copyKey ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleCopyMessage(copyKey, copyText);
+                          }}
+                          className="rounded p-1 text-white/45 opacity-100 transition-all hover:bg-white/10 hover:text-white/60 md:text-white/20 md:opacity-0 md:group-hover/logseg:opacity-100"
+                          title="Copy"
+                        >
+                          {copiedMessageKey === copyKey ? <Check size={11} /> : <Copy size={11} />}
+                        </button>
+                      ) : null;
                       const deleteButton = showDeleteButton ? (
                         <button
+                          type="button"
                           onClick={() => {
                             if (canDeleteMessage && sourceMessageId) {
                               onDeleteMessage?.(sourceMessageId);
@@ -3385,10 +3471,7 @@ export function GameNarration({
                               onDeleteSegment?.(sourceMessageId, sourceSegmentIndex);
                             }
                           }}
-                          className={cn(
-                            "absolute top-1.5 z-10 rounded p-1 text-white/45 opacity-100 transition-all hover:bg-red-500/20 hover:text-red-400 md:text-white/20 md:opacity-0 md:group-hover/logseg:opacity-100",
-                            canEdit ? "right-7" : "right-1.5",
-                          )}
+                          className="rounded p-1 text-white/45 opacity-100 transition-all hover:bg-red-500/20 hover:text-red-400 md:text-white/20 md:opacity-0 md:group-hover/logseg:opacity-100"
                           title={canDeleteThisSegment ? "Delete segment" : "Delete message"}
                         >
                           <Trash2 size={11} />
@@ -3445,6 +3528,7 @@ export function GameNarration({
                         <>
                           {!isEditingThis && (
                             <button
+                              type="button"
                               onClick={() =>
                                 sourceMessageId &&
                                 (() => {
@@ -3466,7 +3550,7 @@ export function GameNarration({
                                   });
                                 })()
                               }
-                              className="absolute right-1.5 top-1.5 z-10 rounded p-1 text-white/45 opacity-100 transition-all hover:bg-white/10 hover:text-white/60 md:text-white/20 md:opacity-0 md:group-hover/logseg:opacity-100"
+                              className="rounded p-1 text-white/45 opacity-100 transition-all hover:bg-white/10 hover:text-white/60 md:text-white/20 md:opacity-0 md:group-hover/logseg:opacity-100"
                               title="Edit"
                             >
                               <Pencil size={11} />
@@ -3474,6 +3558,7 @@ export function GameNarration({
                           )}
                           {isEditingThis && (
                             <button
+                              type="button"
                               onClick={() =>
                                 commitLogEdit({
                                   sourceMessageId,
@@ -3483,7 +3568,7 @@ export function GameNarration({
                                   fallbackSpeaker: seg.speaker,
                                 })
                               }
-                              className="absolute right-1.5 top-1.5 z-10 rounded bg-emerald-500/20 p-1 text-emerald-300 transition-colors hover:bg-emerald-500/30"
+                              className="rounded bg-emerald-500/20 p-1 text-emerald-300 transition-colors hover:bg-emerald-500/30"
                               title="Save"
                             >
                               <Check size={11} />
@@ -3491,6 +3576,15 @@ export function GameNarration({
                           )}
                         </>
                       );
+
+                      const actionButtons =
+                        deleteButton || copyButton || editButtons ? (
+                          <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-0.5">
+                            {deleteButton}
+                            {copyButton}
+                            {editButtons}
+                          </div>
+                        ) : null;
 
                       const editSpeakerInput =
                         isEditingThis && seg.type === "dialogue" && canEditSegment ? (
@@ -3559,8 +3653,7 @@ export function GameNarration({
                               jumpRowClasses,
                             )}
                           >
-                            {deleteButton}
-                            {editButtons}
+                            {actionButtons}
                             {canUploadLogPortrait ? (
                               <button
                                 type="button"
@@ -3640,7 +3733,7 @@ export function GameNarration({
                               jumpRowClasses,
                             )}
                           >
-                            {deleteButton}
+                            {actionButtons}
                             <div className="mb-1 flex items-center">
                               <span className="text-[0.6rem] font-semibold uppercase tracking-wide text-cyan-200/80">
                                 System
@@ -3665,8 +3758,7 @@ export function GameNarration({
                               jumpRowClasses,
                             )}
                           >
-                            {deleteButton}
-                            {editButtons}
+                            {actionButtons}
                             <div className="mb-1 flex items-center">
                               <span className="text-[0.6rem] font-semibold uppercase tracking-wide text-amber-300/80">
                                 {seg.readableType === "book" ? "Book" : "Note"}
@@ -3696,8 +3788,7 @@ export function GameNarration({
                             jumpRowClasses,
                           )}
                         >
-                          {deleteButton}
-                          {editButtons}
+                          {actionButtons}
                           <div className="mb-1 flex items-center">
                             <span className="text-[0.6rem] font-semibold uppercase tracking-wide text-white/80">
                               Narration
