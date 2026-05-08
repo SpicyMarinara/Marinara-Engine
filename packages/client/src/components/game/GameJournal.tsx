@@ -9,6 +9,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { X, MapPin, Swords, ScrollText, Package, Users, PenLine, BookOpen, Trash2 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { api } from "../../lib/api-client";
+import { applyInlineMarkdown, renderMarkdownBlocks } from "../../lib/markdown";
 import { AnimatedText } from "./AnimatedText";
 
 import type { GameNpc } from "@marinara-engine/shared";
@@ -111,6 +112,10 @@ function pruneJournalNpc(journal: Journal, npcName: string): Journal {
 
 function shouldShowNpcDescription(npc: GameNpc): boolean {
   return (npc as GameNpc & { descriptionSource?: string }).descriptionSource === "model" && !!npc.description?.trim();
+}
+
+function JournalMarkdown({ text, className }: { text: string; className?: string }) {
+  return <div className={cn("mari-message-content", className)}>{renderMarkdownBlocks(text, applyInlineMarkdown, "gj")}</div>;
 }
 
 export function GameJournal({ chatId, npcs, onClose, onNpcPortraitClick, onNpcRemove }: GameJournalProps) {
@@ -485,7 +490,7 @@ function LibraryView({ entries }: { entries: JournalEntry[] }) {
               </span>
               <span className="ml-auto text-[0.5625rem] text-white/30">{entry.timestamp}</span>
             </div>
-            <div className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-white/70">{text}</div>
+            <JournalMarkdown text={text} className="mt-1.5 text-xs leading-relaxed text-white/70" />
           </div>
         );
       })}
@@ -506,11 +511,19 @@ function NotesView({ notes, onChange, saved }: { notes: string; onChange: (text:
           {saved ? "Saved" : "Saving..."}
         </span>
       </div>
+      {notes.trim() && (
+        <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-white/10 bg-black/30 px-3 py-2.5">
+          <JournalMarkdown text={notes} className="text-xs leading-relaxed text-white/80" />
+        </div>
+      )}
       <textarea
         value={notes}
         onChange={(e) => onChange(e.target.value)}
         placeholder="Write your notes here... track clues, plans, NPC names, theories — anything you want to remember."
-        className="flex-1 resize-none rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-xs leading-relaxed text-white/80 outline-none placeholder:text-white/25 focus:border-white/20"
+        className={cn(
+          "resize-none rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-xs leading-relaxed text-white/80 outline-none placeholder:text-white/25 focus:border-white/20",
+          notes.trim() ? "min-h-36 flex-[0_0_35%]" : "flex-1",
+        )}
         spellCheck={false}
       />
     </div>

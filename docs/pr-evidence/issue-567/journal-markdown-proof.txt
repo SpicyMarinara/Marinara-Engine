@@ -1,0 +1,12 @@
+Issue 567 verification notes
+
+Claim:
+Game journal library entries and player notes render markdown formatting while the note editor keeps raw plain text editing.
+
+Machine verification:
+- pnpm check passed.
+- Diff review confirms GameJournal renders journal library text and player-note preview text through the existing markdown renderer.
+- The textarea remains the raw editable source for player notes, so plaintext editing behavior is preserved.
+
+Browser screenshot limitation:
+An attempted fresh-browser verification landed in game setup before a usable journal overlay state. A faithful real-app screenshot needs a seeded game-mode fixture with journal content already present.
