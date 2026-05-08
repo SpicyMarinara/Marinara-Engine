@@ -86,6 +86,8 @@ export interface ChatMemoryChunk {
   createdAt: string;
   /** False when chunking succeeded but embedding generation was unavailable. */
   hasEmbedding: boolean;
+  /** Current vectorization state for display. */
+  embeddingStatus?: "vectorized" | "pending" | "unavailable";
 }
 
 /** Extra metadata stored on a chat. */

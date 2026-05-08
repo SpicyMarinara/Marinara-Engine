@@ -152,6 +152,16 @@ export function useClearChatMemories(chatId: string | null) {
   });
 }
 
+export function useRefreshChatMemories(chatId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<{ rebuilt: number }>(`/chats/${chatId}/memories/refresh`),
+    onSuccess: () => {
+      if (chatId) qc.invalidateQueries({ queryKey: chatKeys.memories(chatId) });
+    },
+  });
+}
+
 export function useChatNotes(chatId: string | null) {
   return useQuery({
     queryKey: chatKeys.notes(chatId ?? ""),

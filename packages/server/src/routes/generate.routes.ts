@@ -107,6 +107,7 @@ import { chats as chatsTable } from "../db/schema/index.js";
 import { eq, and, desc } from "drizzle-orm";
 import { PROFESSOR_MARI_ID } from "@marinara-engine/shared";
 import { chunkAndEmbedMessages, recallMemories } from "../services/memory-recall.js";
+import { resolveMemoryRecallEmbeddingSource } from "../services/memory-recall-embedding.js";
 import { postToDiscordWebhook } from "../services/discord-webhook.js";
 import {
   findLastIndex,
@@ -712,6 +713,12 @@ export async function generateRoutes(app: FastifyInstance) {
     if (!baseUrl) {
       return reply.status(400).send({ error: "No base URL configured for this connection" });
     }
+    const chatMeta = parseExtra(chat.metadata) as Record<string, unknown>;
+    const memoryRecallEmbeddingSource = await resolveMemoryRecallEmbeddingSource(app.db, {
+      chatMetadata: chatMeta,
+      activeConnection: conn,
+      activeBaseUrl: baseUrl,
+    });
 
     // ── Abort controller: cancel agents when client disconnects ──
     const abortController = new AbortController();
@@ -750,7 +757,6 @@ export async function generateRoutes(app: FastifyInstance) {
     try {
       // Get chat messages
       const allChatMessages = await chats.listMessages(input.chatId);
-      const chatMeta = parseExtra(chat.metadata) as Record<string, unknown>;
       const chatMode = requestChatMode;
       const lorebookGenerationTriggers = resolveLorebookGenerationTriggers(input, chatMode);
       const supportsHiddenFromAI = chatMode === "roleplay" || chatMode === "visual_novel";
@@ -3459,7 +3465,9 @@ export async function generateRoutes(app: FastifyInstance) {
           if (lastUserMsg?.content?.trim()) {
             // Scope recall to this chat only. Users expect memories to stay with
             // the exact conversation/roleplay/game where they were created.
-            const recalled = await recallMemories(app.db, lastUserMsg.content, [input.chatId]);
+            const recalled = await recallMemories(app.db, lastUserMsg.content, [input.chatId], {
+              embeddingSource: memoryRecallEmbeddingSource,
+            });
             if (recalled.length > 0) {
               const packedRecall = packRecalledMemories(recalled, effectiveMaxContext ?? connectionMaxContext);
               if (packedRecall.lines.length === 0) {
@@ -8549,9 +8557,12 @@ export async function generateRoutes(app: FastifyInstance) {
         for (const ci of charInfo) {
           charNameMap[ci.id] = ci.name;
         }
-        chunkAndEmbedMessages(app.db, input.chatId, { userName: personaName, characterNames: charNameMap }).catch(
-          (err) => logger.error(err, "[memory-recall] Background chunking failed"),
-        );
+        chunkAndEmbedMessages(
+          app.db,
+          input.chatId,
+          { userName: personaName, characterNames: charNameMap },
+          { embeddingSource: memoryRecallEmbeddingSource },
+        ).catch((err) => logger.error(err, "[memory-recall] Background chunking failed"));
       }
     } catch (err) {
       const message =

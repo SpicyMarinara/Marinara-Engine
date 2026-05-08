@@ -80,6 +80,7 @@ import {
   useChatMemories,
   useDeleteChatMemory,
   useClearChatMemories,
+  useRefreshChatMemories,
   useChatNotes,
   useDeleteChatNote,
   useClearChatNotes,
@@ -3857,7 +3858,7 @@ export function ChatSettingsDrawer({
             <Section
               label="Memory Recall"
               icon={<Brain size="0.875rem" />}
-              help="When enabled, relevant fragments from this chat are automatically recalled and injected into the prompt as memories. Uses a local embedding model — no API cost."
+              help="When enabled, relevant fragments from this chat are automatically recalled and injected into the prompt as memories. Uses the local embedding model when available, or the configured embedding connection."
             >
               {renderMemoryRecallControls(true)}
             </Section>
@@ -4161,7 +4162,7 @@ export function ChatSettingsDrawer({
             <Section
               label="Memory Recall"
               icon={<Brain size="0.875rem" />}
-              help="When enabled, relevant fragments from this chat are automatically recalled and injected into the prompt as memories. Uses a local embedding model — no API cost."
+              help="When enabled, relevant fragments from this chat are automatically recalled and injected into the prompt as memories. Uses the local embedding model when available, or the configured embedding connection."
             >
               {renderMemoryRecallControls(metadata.sceneStatus === "active")}
             </Section>
@@ -4800,6 +4801,7 @@ function MemoryRecallMemoriesModal({ chatId, open, onClose }: { chatId: string; 
   const memoriesQuery = useChatMemories(chatId, open);
   const deleteMemory = useDeleteChatMemory(chatId);
   const clearMemories = useClearChatMemories(chatId);
+  const refreshMemories = useRefreshChatMemories(chatId);
   const memories = useMemo(() => memoriesQuery.data ?? [], [memoriesQuery.data]);
   const totalTokens = useMemo(() => estimateMemoryTokens(memories), [memories]);
 
@@ -4841,12 +4843,15 @@ function MemoryRecallMemoriesModal({ chatId, open, onClose }: { chatId: string; 
           <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={() => void memoriesQuery.refetch()}
-              disabled={memoriesQuery.isFetching}
+              onClick={() => refreshMemories.mutate()}
+              disabled={memoriesQuery.isFetching || refreshMemories.isPending}
               className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] disabled:opacity-50"
-              title="Refresh"
+              title="Rebuild memories from current chat messages"
             >
-              <RefreshCw size="0.8125rem" className={cn(memoriesQuery.isFetching && "animate-spin")} />
+              <RefreshCw
+                size="0.8125rem"
+                className={cn((memoriesQuery.isFetching || refreshMemories.isPending) && "animate-spin")}
+              />
             </button>
             <button
               type="button"
@@ -4890,7 +4895,13 @@ function MemoryRecallMemoriesModal({ chatId, open, onClose }: { chatId: string; 
                     </div>
                     <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
                       <span>{memory.messageCount} messages</span>
-                      <span>{memory.hasEmbedding ? "Vectorized" : "Waiting for vector"}</span>
+                      <span>
+                        {memory.hasEmbedding
+                          ? "Vectorized"
+                          : memory.embeddingStatus === "unavailable"
+                            ? "Embedding unavailable"
+                            : "Waiting for vector"}
+                      </span>
                       <span>Created {formatMemoryDate(memory.createdAt)}</span>
                     </div>
                   </div>
