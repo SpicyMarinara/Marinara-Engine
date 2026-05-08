@@ -47,7 +47,14 @@ import {
 import { resolveCombatRound, type CombatantStats } from "../services/game/combat.service.js";
 import { getElementPreset, listElementPresets } from "../services/game/element-reactions.service.js";
 import { generateCombatLoot, generateLootTable } from "../services/game/loot.service.js";
-import { advanceTime, formatGameTime, createInitialTime, type GameTime } from "../services/game/time.service.js";
+import {
+  advanceTime,
+  formatGameTime,
+  createInitialTime,
+  setTimeOfDay,
+  type GameTime,
+  type TimeOfDay,
+} from "../services/game/time.service.js";
 import { generateWeather, inferBiome, shouldWeatherChange } from "../services/game/weather.service.js";
 import { rollEncounter, rollEnemyCount } from "../services/game/encounter.service.js";
 import { processReputationActions } from "../services/game/reputation.service.js";
@@ -492,6 +499,10 @@ function parseMeta(raw: unknown): Record<string, unknown> {
     }
   }
   return (raw as Record<string, unknown>) ?? {};
+}
+
+function isTimeOfDayLabel(action: string): action is TimeOfDay {
+  return ["dawn", "morning", "afternoon", "evening", "night", "midnight"].includes(action);
 }
 
 function normalizeCharacterLookupName(value: string): string {
@@ -5146,24 +5157,9 @@ export async function gameRoutes(app: FastifyInstance) {
 
     const meta = parseMeta(chat.metadata);
     const currentTime = (meta.gameTime as GameTime) ?? createInitialTime();
-
-    // Scene analyzer sends a time-of-day label (dawn, morning, etc.) — set directly
-    const TOD_HOURS: Record<string, number> = {
-      dawn: 6,
-      morning: 8,
-      noon: 12,
-      afternoon: 14,
-      evening: 18,
-      night: 21,
-      midnight: 0,
-    };
     let newTime: GameTime;
-    if (TOD_HOURS[action] != null) {
-      newTime = { ...currentTime, hour: TOD_HOURS[action]!, minute: 0 };
-      // If the target hour is behind current, advance to next day
-      if (newTime.hour <= currentTime.hour) {
-        newTime.day = currentTime.day + 1;
-      }
+    if (isTimeOfDayLabel(action)) {
+      newTime = setTimeOfDay(currentTime, action);
     } else {
       newTime = advanceTime(currentTime, action);
     }
