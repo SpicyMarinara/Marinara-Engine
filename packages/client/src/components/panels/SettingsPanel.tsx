@@ -2765,7 +2765,7 @@ function AdvancedSettings() {
               <span className="text-xs font-medium">
                 {updateCheck.data.versionUpdate
                   ? `v${updateCheck.data.latestVersion} available`
-                  : `${commitsBehind || 1} commit${(commitsBehind || 1) !== 1 ? "s" : ""} behind ${updateCheck.data.targetRef ?? "origin/main"}`}
+                  : `${commitsBehind} commit${commitsBehind !== 1 ? "s" : ""} behind ${updateCheck.data.targetRef ?? "origin/main"}`}
               </span>
               {updateCheck.data.versionUpdate && (
                 <a
