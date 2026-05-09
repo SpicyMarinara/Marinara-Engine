@@ -785,8 +785,7 @@ function injectPngTextChunk(png: Buffer, keyword: string, text: string): Buffer 
     throw new Error("Invalid PNG signature");
   }
 
-  const textData = Buffer.concat([Buffer.from(keyword, "latin1"), Buffer.from([0]), Buffer.from(text, "latin1")]);
-  const textChunk = buildPngChunk("tEXt", textData);
+  const textChunk = buildPngChunk("iTXt", buildPngInternationalTextData(keyword, text));
   const parts: Buffer[] = [PNG_SIGNATURE];
   let offset = 8;
   let inserted = false;
@@ -810,6 +809,14 @@ function injectPngTextChunk(png: Buffer, keyword: string, text: string): Buffer 
   }
 
   return Buffer.concat(parts);
+}
+
+function buildPngInternationalTextData(keyword: string, text: string): Buffer {
+  return Buffer.concat([
+    Buffer.from(keyword, "latin1"),
+    Buffer.from([0, 0, 0, 0, 0]),
+    Buffer.from(text, "utf8"),
+  ]);
 }
 
 function buildPngChunk(type: string, data: Buffer): Buffer {

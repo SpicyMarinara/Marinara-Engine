@@ -22,6 +22,19 @@ function readPngTextChunks(png: Buffer): Array<{ keyword: string; text: string }
           text: chunkData.subarray(nullIdx + 1).toString("latin1"),
         });
       }
+    } else if (chunkType === "iTXt") {
+      const keywordEnd = chunkData.indexOf(0);
+      if (keywordEnd > 0) {
+        const languageTagStart = keywordEnd + 3;
+        const languageTagEnd = chunkData.indexOf(0, languageTagStart);
+        const translatedKeywordEnd = languageTagEnd >= 0 ? chunkData.indexOf(0, languageTagEnd + 1) : -1;
+        if (translatedKeywordEnd >= 0) {
+          chunks.push({
+            keyword: chunkData.subarray(0, keywordEnd).toString("latin1"),
+            text: chunkData.subarray(translatedKeywordEnd + 1).toString("utf8"),
+          });
+        }
+      }
     }
     offset += 4 + 4 + chunkLen + 4;
   }
@@ -127,8 +140,8 @@ test("native NovelAI image generation sends stable request settings and embeds m
       "test-key",
       "novelai",
       {
-        prompt: "cat cafe",
-        negativePrompt: "lowres",
+        prompt: "cat cafe with 東京 neon",
+        negativePrompt: "lowres, déjà vu",
         model: "nai-diffusion-4-5-full",
         width: 640,
         height: 960,
@@ -147,13 +160,13 @@ test("native NovelAI image generation sends stable request settings and embeds m
     assert.equal(parameters.sampler, "k_dpmpp_2m");
     assert.equal(parameters.noise_schedule, "native");
     assert.equal(parameters.ucPreset, 2);
-    assert.equal(parameters.negative_prompt, "bad anatomy, lowres");
+    assert.equal(parameters.negative_prompt, "bad anatomy, lowres, déjà vu");
     assert.deepEqual((parameters.v4_prompt as Record<string, unknown>).caption, {
-      base_caption: "best quality, cat cafe",
+      base_caption: "best quality, cat cafe with 東京 neon",
       char_captions: [],
     });
     assert.deepEqual((parameters.v4_negative_prompt as Record<string, unknown>).caption, {
-      base_caption: "bad anatomy, lowres",
+      base_caption: "bad anatomy, lowres, déjà vu",
       char_captions: [],
     });
 
