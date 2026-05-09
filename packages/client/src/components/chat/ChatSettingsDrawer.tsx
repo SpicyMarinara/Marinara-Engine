@@ -87,6 +87,7 @@ import {
   chatKeys,
 } from "../../hooks/use-chats";
 import { api } from "../../lib/api-client";
+import { getChatDisplayName } from "../../lib/chat-display";
 import {
   getAgentRunIntervalMeta,
   getCadenceInputValue,
@@ -2759,7 +2760,9 @@ export function ChatSettingsDrawer({
                     <div className="flex items-center gap-2.5 rounded-lg bg-[var(--primary)]/10 px-3 py-2 ring-1 ring-[var(--primary)]/30">
                       <ArrowRightLeft size="0.875rem" className="text-[var(--primary)]" />
                       <div className="flex-1 min-w-0">
-                        <span className="truncate text-xs font-medium">{linked?.name ?? "Unknown chat"}</span>
+                        <span className="truncate text-xs font-medium">
+                          {linked ? getChatDisplayName(linked) : "Unknown chat"}
+                        </span>
                         <p className="text-[0.625rem] text-[var(--muted-foreground)]">
                           {linked ? (linked.mode === "roleplay" ? "Roleplay" : linked.mode) : "Deleted"}
                         </p>
@@ -2797,7 +2800,7 @@ export function ChatSettingsDrawer({
                         c.id !== chat.id &&
                         (c.mode === "roleplay" || c.mode === "game") &&
                         !c.connectedChatId &&
-                        c.name.toLowerCase().includes(connectionSearch.toLowerCase()),
+                        getChatDisplayName(c).toLowerCase().includes(connectionSearch.toLowerCase()),
                     )
                     .map((c) => (
                       <button
@@ -2809,7 +2812,7 @@ export function ChatSettingsDrawer({
                         className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs transition-colors hover:bg-[var(--accent)]"
                       >
                         <MessageSquare size="0.75rem" className="shrink-0 text-[var(--muted-foreground)]" />
-                        <span className="truncate">{c.name}</span>
+                        <span className="truncate">{getChatDisplayName(c)}</span>
                       </button>
                     ))}
                 </PickerDropdown>
@@ -2834,7 +2837,9 @@ export function ChatSettingsDrawer({
                       <div className="flex items-center gap-2.5 rounded-lg bg-[var(--primary)]/10 px-3 py-2 ring-1 ring-[var(--primary)]/30">
                         <MessageCircle size="0.875rem" className="text-[var(--primary)]" />
                         <div className="flex-1 min-w-0">
-                          <span className="truncate text-xs font-medium">{linked?.name ?? "Unknown chat"}</span>
+                          <span className="truncate text-xs font-medium">
+                            {linked ? getChatDisplayName(linked) : "Unknown chat"}
+                          </span>
                           <p className="text-[0.625rem] text-[var(--muted-foreground)]">Conversation</p>
                         </div>
                         <button
@@ -2908,7 +2913,9 @@ export function ChatSettingsDrawer({
                   <div className="flex items-center gap-2.5 rounded-lg bg-[var(--primary)]/10 px-3 py-2 ring-1 ring-[var(--primary)]/30">
                     <MessageCircle size="0.875rem" className="text-[var(--primary)]" />
                     <div className="flex-1 min-w-0">
-                      <span className="truncate text-xs font-medium">{linked?.name ?? "Unknown chat"}</span>
+                      <span className="truncate text-xs font-medium">
+                        {linked ? getChatDisplayName(linked) : "Unknown chat"}
+                      </span>
                       <p className="text-[0.625rem] text-[var(--muted-foreground)]">Conversation</p>
                     </div>
                     <button
@@ -2957,7 +2964,7 @@ export function ChatSettingsDrawer({
                         c.id !== chat.id &&
                         c.mode === "conversation" &&
                         !c.connectedChatId &&
-                        c.name.toLowerCase().includes(connectionSearch.toLowerCase()),
+                        getChatDisplayName(c).toLowerCase().includes(connectionSearch.toLowerCase()),
                     )
                     .map((c) => (
                       <button
@@ -2969,7 +2976,7 @@ export function ChatSettingsDrawer({
                         className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs transition-colors hover:bg-[var(--accent)]"
                       >
                         <MessageSquare size="0.75rem" className="shrink-0 text-[var(--muted-foreground)]" />
-                        <span className="truncate">{c.name}</span>
+                        <span className="truncate">{getChatDisplayName(c)}</span>
                       </button>
                     ))}
                 </PickerDropdown>

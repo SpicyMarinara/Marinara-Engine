@@ -4,6 +4,7 @@
 // ──────────────────────────────────────────────
 import { X, Trash2, FileText, MessageSquare, Download, Pencil } from "lucide-react";
 import { showConfirmDialog } from "../../lib/app-dialogs";
+import { getChatDisplayName } from "../../lib/chat-display";
 import { cn } from "../../lib/utils";
 import {
   useChatGroup,
@@ -32,21 +33,6 @@ export function ChatFilesDrawer({ chat, open, onClose }: ChatFilesDrawerProps) {
 
   const chatFiles = (groupChats ?? []) as Chat[];
 
-  const getBranchName = (cf: Chat) => {
-    const rawMeta = (cf as any).metadata;
-    const meta =
-      typeof rawMeta === "string"
-        ? (() => {
-            try {
-              return JSON.parse(rawMeta);
-            } catch {
-              return {};
-            }
-          })()
-        : (rawMeta ?? {});
-    return meta?.branchName ?? cf.name;
-  };
-
   const handleSwitch = (chatId: string) => {
     setActiveChatId(chatId);
     onClose();
@@ -55,7 +41,7 @@ export function ChatFilesDrawer({ chat, open, onClose }: ChatFilesDrawerProps) {
   const updateMetadata = useUpdateChatMetadata();
 
   const handleRename = async (cf: Chat) => {
-    const currentName = getBranchName(cf);
+    const currentName = getChatDisplayName(cf);
     const nextName = window.prompt("Rename branch:", currentName);
     if (!nextName) return;
 
@@ -218,7 +204,7 @@ export function ChatFilesDrawer({ chat, open, onClose }: ChatFilesDrawerProps) {
                     <MessageSquare size="0.875rem" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-xs font-medium">{getBranchName(cf)}</div>
+                    <div className="truncate text-xs font-medium">{getChatDisplayName(cf)}</div>
                     <div className="text-[0.625rem] text-[var(--muted-foreground)]">
                       {dateStr} at {timeStr}
                     </div>

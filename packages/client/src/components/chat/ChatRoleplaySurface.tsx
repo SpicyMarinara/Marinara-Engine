@@ -27,6 +27,7 @@ import {
   FlipHorizontal2,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { getChatDisplayName } from "../../lib/chat-display";
 import { useUIStore } from "../../stores/ui.store";
 import { useChatStore } from "../../stores/chat.store";
 import { useGameStateStore } from "../../stores/game-state.store";
@@ -562,7 +563,7 @@ function AuthorNotesButton({ chatId, chatMeta }: { chatId: string | null; chatMe
 type RoleplaySurfaceProps = {
   activeChatId: string;
   chat: ChatData | null | undefined;
-  allChats: Array<{ id: string; name: string }> | undefined;
+  allChats: Array<{ id: string; name: string; metadata?: string | Record<string, unknown> | null }> | undefined;
   chatMeta: Record<string, any>;
   chatMode: string;
   isRoleplay: boolean;
@@ -756,7 +757,9 @@ export function ChatRoleplaySurface({
   onSelectAllBelowSelection,
   isGrouped,
 }: RoleplaySurfaceProps) {
-  const linkedChatName = chat?.connectedChatId ? allChats?.find((c) => c.id === chat.connectedChatId)?.name : undefined;
+  const linkedChatName = chat?.connectedChatId
+    ? getChatDisplayName(allChats?.find((c) => c.id === chat.connectedChatId))
+    : undefined;
   const sidebarOpen = useUIStore((s) => s.sidebarOpen);
   const rightPanelOpen = useUIStore((s) => s.rightPanelOpen);
   const hideEchoChamberOnMobile =
