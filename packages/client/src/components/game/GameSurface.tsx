@@ -6427,7 +6427,8 @@ export function GameSurface({
   // (4) any in-flight image / NPC portrait generation has completed.
   // Once ALL conditions are met for the first time the screen never returns.
   // sceneProcessed is computed above (near scenePreparing).
-  const firstTurnFullyReady = hasEverHadContent && !isStreaming && sceneProcessed && !pendingAssetGeneration;
+  const firstTurnFullyReady =
+    hasEverHadContent && !isStreaming && sceneProcessed && (!pendingAssetGeneration || assetGenerationFailed);
   const sidecarStartupFailed = sidecarConfig.useForGameScene && sidecarStatus === "server_error" && !sidecarReady;
   // Don't auto-dismiss: wait for user to click Continue after typewriter finishes.
 
@@ -6494,7 +6495,7 @@ export function GameSurface({
                         <span>
                           {hasEverHadContent && !sceneProcessed
                             ? "Preparing the scene..."
-                            : hasEverHadContent && pendingAssetGeneration
+                            : hasEverHadContent && pendingAssetGeneration && !assetGenerationFailed
                               ? "Generating images..."
                               : hasEverHadContent && isStreaming
                                 ? "The GM is narrating..."
