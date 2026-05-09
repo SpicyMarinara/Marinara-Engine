@@ -1426,6 +1426,7 @@ export function GameCombatUI({
                           type="button"
                           disabled={insufficientMp}
                           onClick={() => {
+                            setSelectedAction("skill");
                             setSelectedSkillId(skill.id);
                             setSelectedItemName(null);
                             setPhase("target-select");
@@ -1945,6 +1946,7 @@ export function GameCombatUI({
                       type="button"
                       disabled={insufficientMp}
                       onClick={() => {
+                        setSelectedAction("skill");
                         setSelectedSkillId(skill.id);
                         setSelectedItemName(null);
                         setPhase("target-select");
@@ -2337,7 +2339,16 @@ function CombatantCard({
     : null;
 
   return (
-    <div className="relative flex flex-col items-center">
+    <button
+      type="button"
+      onClick={onSelect}
+      disabled={!isTargetable || isKo}
+      className={cn(
+        "relative flex flex-col items-center rounded-2xl border border-transparent p-1 text-center transition-all duration-200",
+        isTargetable && !isKo && "cursor-pointer border-amber-400/35 bg-amber-400/5",
+        !isTargetable && "cursor-default",
+      )}
+    >
       {combatant.statusEffects && combatant.statusEffects.length > 0 && (
         <div className="pointer-events-none absolute -top-3 left-1/2 z-10 flex -translate-x-1/2 gap-1">
           {combatant.statusEffects.map((effect, i) => (
@@ -2364,9 +2375,7 @@ function CombatantCard({
       ))}
 
       {/* Combatant sprite / avatar area */}
-      <button
-        onClick={onSelect}
-        disabled={!isTargetable || isKo}
+      <div
         className={cn(
           "relative flex h-16 w-16 items-center justify-center rounded-xl border-2 transition-all duration-200 sm:h-20 sm:w-20 xl:h-24 xl:w-24",
           isKo && "grayscale opacity-40",
@@ -2432,7 +2441,7 @@ function CombatantCard({
             <div className="h-1.5 w-6 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" />
           </div>
         )}
-      </button>
+      </div>
 
       {/* Name + Level */}
       <div className="mt-1.5 flex max-w-24 items-center gap-1.5 xl:max-w-28">
@@ -2491,7 +2500,7 @@ function CombatantCard({
           {combatant.elementAura.element}
         </div>
       )}
-    </div>
+    </button>
   );
 }
 
