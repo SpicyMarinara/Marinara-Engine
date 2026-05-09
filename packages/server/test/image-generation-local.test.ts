@@ -151,7 +151,7 @@ test("native NovelAI image generation sends stable request settings and embeds m
     );
 
     const parameters = capturedBody?.parameters as Record<string, unknown>;
-    assert.equal(capturedBody?.input, "");
+    assert.equal(capturedBody?.input, "best quality, cat cafe with 東京 neon");
     assert.equal(capturedBody?.model, "nai-diffusion-4-5-full");
     assert.equal(parameters.seed, 12345);
     assert.equal(parameters.steps, 33);
@@ -175,6 +175,64 @@ test("native NovelAI image generation sends stable request settings and embeds m
     assert.ok(requestMetadata);
     const metadata = JSON.parse(requestMetadata.text) as { request: Record<string, unknown> };
     assert.deepEqual(metadata.request, capturedBody);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+  }
+});
+
+test("native NovelAI image generation keeps V3 prompt shape", async () => {
+  const imageBytes = Buffer.from(PNG_1X1_BASE64, "base64");
+  let capturedBody: Record<string, unknown> | null = null;
+  let port = 0;
+  const server = createServer((req, res) => {
+    if (req.method === "POST" && req.url?.endsWith("/ai/generate-image")) {
+      let raw = "";
+      req.setEncoding("utf8");
+      req.on("data", (chunk) => {
+        raw += chunk;
+      });
+      req.on("end", () => {
+        capturedBody = JSON.parse(raw) as Record<string, unknown>;
+        res.writeHead(200, { "content-type": "image/png" });
+        res.end(imageBytes);
+      });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const addressInfo = server.address();
+  assert.ok(addressInfo && typeof addressInfo === "object");
+  port = addressInfo.port;
+
+  try {
+    await generateImage(
+      "novelai",
+      `http://127.0.0.1:${port}/novelai.net`,
+      "test-key",
+      "novelai",
+      {
+        prompt: "cat cafe",
+        negativePrompt: "lowres",
+        model: "nai-diffusion-3",
+        width: 640,
+        height: 960,
+        allowLocalUrls: true,
+      },
+    );
+
+    const parameters = capturedBody?.parameters as Record<string, unknown>;
+    assert.equal(capturedBody?.input, "cat cafe");
+    assert.equal(capturedBody?.model, "nai-diffusion-3");
+    assert.equal(parameters.negative_prompt, "lowres");
+    assert.equal(parameters.params_version, undefined);
+    assert.equal(parameters.v4_prompt, undefined);
+    assert.equal(parameters.v4_negative_prompt, undefined);
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));

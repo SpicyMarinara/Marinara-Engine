@@ -708,7 +708,7 @@ async function generateNovelAI(baseUrl: string, apiKey: string, request: ImageGe
   }
 
   const body: Record<string, unknown> = {
-    input: isV4 ? "" : prompt,
+    input: prompt,
     model,
     action: "generate",
     parameters,
