@@ -1,5 +1,11 @@
 import type { FastifyInstance } from "fastify";
-import { findKnownModel, LOCAL_SIDECAR_CONNECTION_ID, resolveMacros, type APIProvider } from "@marinara-engine/shared";
+import {
+  findKnownModel,
+  LOCAL_SIDECAR_CONNECTION_ID,
+  resolveMacros,
+  type APIProvider,
+  type LorebookEntryTimingState,
+} from "@marinara-engine/shared";
 import { randomUUID } from "crypto";
 import { createChatsStorage } from "../../services/storage/chats.storage.js";
 import { createConnectionsStorage } from "../../services/storage/connections.storage.js";
@@ -63,6 +69,11 @@ function resolveDryRunLorebookGenerationTriggers(
   }
 
   return Array.from(triggers);
+}
+
+function resolveDryRunLorebookTokenBudget(chatMeta: Record<string, unknown>): number | undefined {
+  const raw = chatMeta.lorebookTokenBudget ?? chatMeta.generationLorebookTokenBudget;
+  return typeof raw === "number" && Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : undefined;
 }
 
 async function loadLatestGameSnapshot(app: FastifyInstance, chatId: string): Promise<any | null> {
@@ -653,6 +664,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
       },
       chatMode,
     );
+    const lorebookTokenBudget = resolveDryRunLorebookTokenBudget(chatMeta);
     if (!impersonate && userMessage.trim()) {
       chatMessages = [
         ...chatMessages,
@@ -1016,9 +1028,26 @@ export async function registerDryRunRoute(app: FastifyInstance) {
               characterIds,
               personaId,
               activeLorebookIds,
+              tokenBudget: lorebookTokenBudget,
               chatEmbedding: null,
-              entryStateOverrides: undefined,
+              entryStateOverrides:
+                ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
+                typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object")
+                  ? ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) as Record<
+                      string,
+                      { ephemeral?: number | null; enabled?: boolean }
+                    >)
+                  : undefined,
+              entryTimingStates:
+                ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
+                typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object")
+                  ? ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) as Record<
+                      string,
+                      LorebookEntryTimingState
+                    >)
+                  : undefined,
               generationTriggers: lorebookGenerationTriggers,
+              previewOnly: true,
             });
             const loreContent = [lorebookResult.worldInfoBefore, lorebookResult.worldInfoAfter]
               .filter((content): content is string => typeof content === "string" && content.length > 0)
@@ -1201,7 +1230,25 @@ export async function registerDryRunRoute(app: FastifyInstance) {
               : []
             : [],
           chatEmbedding: null,
-          entryStateOverrides: undefined,
+          entryStateOverrides:
+            ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
+            typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object")
+              ? ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) as Record<
+                  string,
+                  { ephemeral?: number | null; enabled?: boolean }
+                >)
+              : undefined,
+          entryTimingStates:
+            ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
+            typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object")
+              ? ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) as Record<
+                  string,
+                  LorebookEntryTimingState
+                >)
+              : undefined,
+          lorebookTokenBudget,
+          generationTriggers: lorebookGenerationTriggers,
+          previewOnly: true,
           groupScenarioOverrideText:
             typeof chatMeta.groupScenarioText === "string" && (chatMeta.groupScenarioText as string).trim()
               ? (chatMeta.groupScenarioText as string).trim()
@@ -1278,9 +1325,26 @@ export async function registerDryRunRoute(app: FastifyInstance) {
         characterIds,
         personaId,
         activeLorebookIds,
+        tokenBudget: lorebookTokenBudget,
         chatEmbedding: null,
-        entryStateOverrides: undefined,
+        entryStateOverrides:
+          ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
+          typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object")
+            ? ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) as Record<
+                string,
+                { ephemeral?: number | null; enabled?: boolean }
+              >)
+            : undefined,
+        entryTimingStates:
+          ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
+          typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object")
+            ? ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) as Record<
+                string,
+                LorebookEntryTimingState
+              >)
+            : undefined,
         generationTriggers: lorebookGenerationTriggers,
+        previewOnly: true,
       });
       const loreContent = [lorebookResult.worldInfoBefore, lorebookResult.worldInfoAfter]
         .filter((content): content is string => typeof content === "string" && content.length > 0)

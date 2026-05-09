@@ -58,9 +58,10 @@ export function usePresetFull(id: string | null) {
         sections: PromptSection[];
         groups: PromptGroup[];
         choiceBlocks: ChoiceBlock[];
-      }>(`/prompts/${id}/full`),
+    }>(`/prompts/${id}/full`),
     enabled: !!id,
     staleTime: 5 * 60_000,
+    refetchOnMount: "always",
   });
 }
 

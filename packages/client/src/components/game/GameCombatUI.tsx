@@ -49,6 +49,27 @@ import {
   X,
 } from "lucide-react";
 
+// `combatant.sprite` is populated either from a real avatar URL (player party,
+// from the character sheet's `avatarUrl`) or from the encounter LLM, which is
+// instructed to emit "emoji or brief visual description" (see
+// `packages/server/src/routes/encounter.routes.ts`). Treat the field as a
+// shape-tagged value so the renderer picks `<img>`, an emoji glyph, or the
+// initials fallback instead of stuffing free text into `<img src>`.
+type SpriteKind = { kind: "url"; value: string } | { kind: "emoji"; value: string } | { kind: "none" };
+
+function resolveSpriteKind(sprite: string | null | undefined): SpriteKind {
+  if (!sprite) return { kind: "none" };
+  const trimmed = sprite.trim();
+  if (!trimmed) return { kind: "none" };
+  if (/^(https?:|\/|data:|blob:)/i.test(trimmed)) return { kind: "url", value: trimmed };
+  // Emoji / single glyph: short strings (≤12 chars to allow ZWJ sequences and
+  // skin-tone modifiers) that contain at least one Extended_Pictographic codepoint.
+  if (trimmed.length <= 12 && /\p{Extended_Pictographic}/u.test(trimmed)) {
+    return { kind: "emoji", value: trimmed };
+  }
+  return { kind: "none" };
+}
+
 // Mobile layout breakpoint. Uses Tailwind's `sm` boundary so the existing
 // desktop classes (`sm:`, `md:`, `lg:`, `xl:`) continue to apply unchanged on
 // the desktop branch and the mobile branch only renders below 640px.
@@ -1332,11 +1353,22 @@ export function GameCombatUI({
               phase === "target-select") && (
               <div className="flex shrink-0 items-center gap-2 border-b border-white/5 px-3 py-1.5">
                 <div className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-blue-500/20 text-blue-300 ring-1 ring-blue-400/40">
-                  {activePlayer.sprite ? (
-                    <img src={activePlayer.sprite} alt={activePlayer.name} className="h-full w-full object-cover" />
-                  ) : (
-                    <span className="text-[0.65rem] font-bold">{activePlayer.name.charAt(0).toUpperCase()}</span>
-                  )}
+                  {(() => {
+                    const spriteKind = resolveSpriteKind(activePlayer.sprite);
+                    if (spriteKind.kind === "url") {
+                      return (
+                        <img
+                          src={spriteKind.value}
+                          alt={activePlayer.name}
+                          className="h-full w-full object-cover"
+                        />
+                      );
+                    }
+                    if (spriteKind.kind === "emoji") {
+                      return <span className="text-base leading-none">{spriteKind.value}</span>;
+                    }
+                    return <span className="text-[0.65rem] font-bold">{activePlayer.name.charAt(0).toUpperCase()}</span>;
+                  })()}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-xs font-semibold text-white">{activePlayer.name}</div>
@@ -1842,11 +1874,22 @@ export function GameCombatUI({
             {/* Active character indicator */}
             <div className="mb-1 flex items-center gap-2 sm:mb-0 sm:min-w-[140px]">
               <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-blue-500/20 text-blue-300 ring-1 ring-blue-400/40">
-                {activePlayer.sprite ? (
-                  <img src={activePlayer.sprite} alt={activePlayer.name} className="h-full w-full object-cover" />
-                ) : (
-                  <span className="text-xs font-bold">{activePlayer.name.charAt(0).toUpperCase()}</span>
-                )}
+                {(() => {
+                  const spriteKind = resolveSpriteKind(activePlayer.sprite);
+                  if (spriteKind.kind === "url") {
+                    return (
+                      <img
+                        src={spriteKind.value}
+                        alt={activePlayer.name}
+                        className="h-full w-full object-cover"
+                      />
+                    );
+                  }
+                  if (spriteKind.kind === "emoji") {
+                    return <span className="text-lg leading-none">{spriteKind.value}</span>;
+                  }
+                  return <span className="text-xs font-bold">{activePlayer.name.charAt(0).toUpperCase()}</span>;
+                })()}
               </div>
               <div>
                 <div className="text-xs font-semibold text-white">{activePlayer.name}</div>
@@ -2340,19 +2383,36 @@ function CombatantCard({
           impactTone === "miss" && "game-combatant-impact--miss",
         )}
       >
-        {/* Placeholder sprite (initials) */}
-        {combatant.sprite ? (
-          <img src={combatant.sprite} alt={combatant.name} className="h-full w-full rounded-lg object-cover" />
-        ) : (
-          <span
-            className={cn(
-              "text-xl font-bold sm:text-2xl xl:text-3xl",
-              side === "enemy" ? "text-red-300/60" : "text-blue-300/60",
-            )}
-          >
-            {combatant.name.charAt(0).toUpperCase()}
-          </span>
-        )}
+        {/* Avatar: real image URL, LLM-suggested emoji, or initials placeholder. */}
+        {(() => {
+          const spriteKind = resolveSpriteKind(combatant.sprite);
+          if (spriteKind.kind === "url") {
+            return (
+              <img
+                src={spriteKind.value}
+                alt={combatant.name}
+                className="h-full w-full rounded-lg object-cover"
+              />
+            );
+          }
+          if (spriteKind.kind === "emoji") {
+            return (
+              <span className="text-2xl leading-none sm:text-3xl xl:text-4xl" aria-hidden="true">
+                {spriteKind.value}
+              </span>
+            );
+          }
+          return (
+            <span
+              className={cn(
+                "text-xl font-bold sm:text-2xl xl:text-3xl",
+                side === "enemy" ? "text-red-300/60" : "text-blue-300/60",
+              )}
+            >
+              {combatant.name.charAt(0).toUpperCase()}
+            </span>
+          );
+        })()}
 
         {/* KO overlay */}
         {isKo && (
@@ -2483,11 +2543,20 @@ function MobileCombatantChip({
           side === "enemy" ? "bg-red-500/15 text-red-300/65" : "bg-blue-500/15 text-blue-300/65",
         )}
       >
-        {combatant.sprite ? (
-          <img src={combatant.sprite} alt={combatant.name} className="h-full w-full object-cover" />
-        ) : (
-          <span className="text-sm font-bold">{combatant.name.charAt(0).toUpperCase()}</span>
-        )}
+        {(() => {
+          const spriteKind = resolveSpriteKind(combatant.sprite);
+          if (spriteKind.kind === "url") {
+            return <img src={spriteKind.value} alt={combatant.name} className="h-full w-full object-cover" />;
+          }
+          if (spriteKind.kind === "emoji") {
+            return (
+              <span className="text-lg leading-none" aria-hidden="true">
+                {spriteKind.value}
+              </span>
+            );
+          }
+          return <span className="text-sm font-bold">{combatant.name.charAt(0).toUpperCase()}</span>;
+        })()}
         {isKo && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/55">
             <Skull className="h-4 w-4 text-red-400/80" />

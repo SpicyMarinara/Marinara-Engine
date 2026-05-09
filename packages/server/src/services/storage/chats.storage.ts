@@ -594,6 +594,9 @@ export function createChatsStorage(db: DB) {
           .update(messages)
           .set({ activeSwipeIndex: nextIndex, content, extra: JSON.stringify(clearedExtra) })
           .where(eq(messages.id, messageId));
+        if (msg) {
+          await invalidateMemoryChunksFrom(db, msg.chatId, msg.createdAt);
+        }
       }
       return { id, index: nextIndex };
     },
@@ -626,6 +629,9 @@ export function createChatsStorage(db: DB) {
           extra: JSON.stringify(swipeExtra),
         })
         .where(eq(messages.id, messageId));
+      if (msg) {
+        await invalidateMemoryChunksFrom(db, msg.chatId, msg.createdAt);
+      }
       return this.getMessage(messageId);
     },
 
@@ -640,6 +646,7 @@ export function createChatsStorage(db: DB) {
       const remaining = swipes.filter((s: any) => s.index !== index);
       const currentExtra = typeof msg.extra === "string" ? JSON.parse(msg.extra) : (msg.extra ?? {});
 
+      const activeSwipeRemoved = msg.activeSwipeIndex === index;
       let nextActiveSwipeIndex = msg.activeSwipeIndex;
       let nextContent = msg.content;
       let nextExtra = currentExtra;
@@ -675,6 +682,9 @@ export function createChatsStorage(db: DB) {
           extra: JSON.stringify(nextExtra),
         })
         .where(eq(messages.id, messageId));
+      if (activeSwipeRemoved) {
+        await invalidateMemoryChunksFrom(db, msg.chatId, msg.createdAt);
+      }
 
       return this.getMessage(messageId);
     },

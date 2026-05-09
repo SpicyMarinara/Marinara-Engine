@@ -15,6 +15,8 @@ export const lorebookKeys = {
   entry: (entryId: string) => [...lorebookKeys.all, "entry", entryId] as const,
   folders: (lorebookId: string) => [...lorebookKeys.all, "folders", lorebookId] as const,
   search: (q: string) => [...lorebookKeys.all, "search", q] as const,
+  active: (chatId?: string | null) =>
+    chatId ? ([...lorebookKeys.all, "active", chatId] as const) : ([...lorebookKeys.all, "active"] as const),
 };
 
 // ── Lorebooks ──
@@ -53,9 +55,10 @@ export function useUpdateLorebook() {
     mutationFn: ({ id, ...data }: { id: string } & Record<string, unknown>) =>
       api.patch<Lorebook>(`/lorebooks/${id}`, data),
     onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: lorebookKeys.all });
       qc.invalidateQueries({ queryKey: lorebookKeys.list() });
       qc.invalidateQueries({ queryKey: lorebookKeys.detail(variables.id) });
-      qc.invalidateQueries({ queryKey: [...lorebookKeys.all, "active"] });
+      qc.invalidateQueries({ queryKey: lorebookKeys.active() });
     },
   });
 }
@@ -150,13 +153,7 @@ export function useCreateLorebookEntry() {
       api.post<LorebookEntry>(`/lorebooks/${lorebookId}/entries`, data),
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: lorebookKeys.entries(variables.lorebookId) });
-      qc.invalidateQueries({ queryKey: [...lorebookKeys.all, "active"] });
-      // Entry mutations on a character-linked lorebook are mirrored
-      // server-side into `character.data.character_book`, so any
-      // currently-mounted CharacterEditor must refetch — otherwise its
-      // Lorebook tab keeps rendering pre-mutation entries (the
-      // character query has a 5-minute staleTime).
-      qc.invalidateQueries({ queryKey: characterKeys.all });
+      qc.invalidateQueries({ queryKey: lorebookKeys.active() });
     },
   });
 }
@@ -169,8 +166,7 @@ export function useUpdateLorebookEntry() {
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: lorebookKeys.entries(variables.lorebookId) });
       qc.invalidateQueries({ queryKey: lorebookKeys.entry(variables.entryId) });
-      qc.invalidateQueries({ queryKey: [...lorebookKeys.all, "active"] });
-      qc.invalidateQueries({ queryKey: characterKeys.all });
+      qc.invalidateQueries({ queryKey: lorebookKeys.active() });
     },
   });
 }
@@ -182,8 +178,7 @@ export function useDeleteLorebookEntry() {
       api.delete(`/lorebooks/${lorebookId}/entries/${entryId}`),
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: lorebookKeys.entries(variables.lorebookId) });
-      qc.invalidateQueries({ queryKey: [...lorebookKeys.all, "active"] });
-      qc.invalidateQueries({ queryKey: characterKeys.all });
+      qc.invalidateQueries({ queryKey: lorebookKeys.active() });
     },
   });
 }
@@ -195,8 +190,7 @@ export function useBulkCreateEntries() {
       api.post<LorebookEntry[]>(`/lorebooks/${lorebookId}/entries/bulk`, { entries }),
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: lorebookKeys.entries(variables.lorebookId) });
-      qc.invalidateQueries({ queryKey: [...lorebookKeys.all, "active"] });
-      qc.invalidateQueries({ queryKey: characterKeys.all });
+      qc.invalidateQueries({ queryKey: lorebookKeys.active() });
     },
   });
 }
@@ -230,8 +224,7 @@ export function useTransferLorebookEntries() {
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: lorebookKeys.entries(variables.sourceLorebookId) });
       qc.invalidateQueries({ queryKey: lorebookKeys.entries(variables.targetLorebookId) });
-      qc.invalidateQueries({ queryKey: [...lorebookKeys.all, "active"] });
-      qc.invalidateQueries({ queryKey: characterKeys.all });
+      qc.invalidateQueries({ queryKey: lorebookKeys.active() });
     },
   });
 }
@@ -260,7 +253,7 @@ export function useReorderLorebookEntries() {
     onSuccess: (entries, variables) => {
       qc.setQueryData(lorebookKeys.entries(variables.lorebookId), entries);
       qc.invalidateQueries({ queryKey: lorebookKeys.entries(variables.lorebookId) });
-      qc.invalidateQueries({ queryKey: [...lorebookKeys.all, "active"] });
+      qc.invalidateQueries({ queryKey: lorebookKeys.active() });
     },
   });
 }
@@ -300,7 +293,7 @@ export function useUpdateLorebookFolder() {
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: lorebookKeys.folders(variables.lorebookId) });
       // Toggling folder.enabled changes which entries activate during scan
-      qc.invalidateQueries({ queryKey: [...lorebookKeys.all, "active"] });
+      qc.invalidateQueries({ queryKey: lorebookKeys.active() });
     },
   });
 }
@@ -314,7 +307,7 @@ export function useDeleteLorebookFolder() {
       qc.invalidateQueries({ queryKey: lorebookKeys.folders(variables.lorebookId) });
       // Removing a folder reparents its entries to root, so the entry list shape changes.
       qc.invalidateQueries({ queryKey: lorebookKeys.entries(variables.lorebookId) });
-      qc.invalidateQueries({ queryKey: [...lorebookKeys.all, "active"] });
+      qc.invalidateQueries({ queryKey: lorebookKeys.active() });
     },
   });
 }
@@ -357,7 +350,7 @@ export interface ActiveLorebookScan {
 
 export function useActiveLorebookEntries(chatId: string | null, enabled = false) {
   return useQuery({
-    queryKey: [...lorebookKeys.all, "active", chatId] as const,
+    queryKey: lorebookKeys.active(chatId),
     queryFn: () => api.get<ActiveLorebookScan>(`/lorebooks/scan/${chatId}`),
     enabled: !!chatId && enabled,
     staleTime: 30_000,

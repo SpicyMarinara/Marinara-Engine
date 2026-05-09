@@ -3,7 +3,13 @@
 // ──────────────────────────────────────────────
 import { eq, desc, and, like, inArray, asc } from "drizzle-orm";
 import type { DB } from "../../db/connection.js";
-import { lorebooks, lorebookEntries, lorebookFolders } from "../../db/schema/index.js";
+import {
+  lorebooks,
+  lorebookCharacterLinks,
+  lorebookEntries,
+  lorebookFolders,
+  lorebookPersonaLinks,
+} from "../../db/schema/index.js";
 import { newId, now } from "../../utils/id-generator.js";
 import type {
   CreateLorebookInput,
@@ -24,17 +30,35 @@ function resolveTimestamps(overrides?: TimestampOverrides | null) {
   };
 }
 
+function uniqueStrings(values: unknown): string[] {
+  const raw = Array.isArray(values) ? values : [];
+  return Array.from(
+    new Set(raw.map((value) => (typeof value === "string" ? value.trim() : "")).filter((value) => value.length > 0)),
+  );
+}
+
+function resolveLinkIds(arrayValue: unknown, singleValue: unknown): string[] {
+  const fromArray = uniqueStrings(arrayValue);
+  if (fromArray.length > 0) return fromArray;
+  return uniqueStrings(typeof singleValue === "string" ? [singleValue] : []);
+}
+
 /** Parse DB row booleans ("true"/"false") → real booleans and JSON strings → objects. */
 function parseLorebookRow(row: Record<string, unknown>) {
+  const characterIds = resolveLinkIds(row.characterIds, row.characterId);
+  const personaIds = resolveLinkIds(row.personaIds, row.personaId);
   return {
     ...row,
     recursiveScanning: row.recursiveScanning === "true",
     maxRecursionDepth: typeof row.maxRecursionDepth === "number" ? row.maxRecursionDepth : 3,
+    isGlobal: row.isGlobal === "true",
     enabled: row.enabled === "true",
     generatedBy: row.generatedBy || null,
     sourceAgentId: row.sourceAgentId || null,
-    characterId: row.characterId || null,
-    personaId: row.personaId || null,
+    characterId: characterIds[0] ?? null,
+    characterIds,
+    personaId: personaIds[0] ?? null,
+    personaIds,
     chatId: row.chatId || null,
     tags: JSON.parse((row.tags as string) || "[]"),
   };
@@ -88,13 +112,82 @@ function parseFolderRow(row: Record<string, unknown>) {
   };
 }
 
+type LorebookRow = typeof lorebooks.$inferSelect;
+
+async function hydrateLorebookRows(db: DB, rows: LorebookRow[]) {
+  if (rows.length === 0) return [];
+  const bookIds = rows.map((row) => row.id);
+  const [characterRows, personaRows] = await Promise.all([
+    db
+      .select()
+      .from(lorebookCharacterLinks)
+      .where(inArray(lorebookCharacterLinks.lorebookId, bookIds))
+      .orderBy(asc(lorebookCharacterLinks.lorebookId), asc(lorebookCharacterLinks.characterId)),
+    db
+      .select()
+      .from(lorebookPersonaLinks)
+      .where(inArray(lorebookPersonaLinks.lorebookId, bookIds))
+      .orderBy(asc(lorebookPersonaLinks.lorebookId), asc(lorebookPersonaLinks.personaId)),
+  ]);
+  const characterIdsByBook = new Map<string, string[]>();
+  for (const link of characterRows) {
+    const ids = characterIdsByBook.get(link.lorebookId) ?? [];
+    ids.push(link.characterId);
+    characterIdsByBook.set(link.lorebookId, ids);
+  }
+  const personaIdsByBook = new Map<string, string[]>();
+  for (const link of personaRows) {
+    const ids = personaIdsByBook.get(link.lorebookId) ?? [];
+    ids.push(link.personaId);
+    personaIdsByBook.set(link.lorebookId, ids);
+  }
+  return rows.map((row) =>
+    parseLorebookRow({
+      ...(row as Record<string, unknown>),
+      characterIds: characterIdsByBook.get(row.id) ?? [],
+      personaIds: personaIdsByBook.get(row.id) ?? [],
+    }),
+  );
+}
+
+async function syncLorebookLinks(
+  db: Pick<DB, "delete" | "insert">,
+  lorebookId: string,
+  characterIds: string[],
+  personaIds: string[],
+) {
+  const timestamp = now();
+  await db.delete(lorebookCharacterLinks).where(eq(lorebookCharacterLinks.lorebookId, lorebookId));
+  await db.delete(lorebookPersonaLinks).where(eq(lorebookPersonaLinks.lorebookId, lorebookId));
+  if (characterIds.length > 0) {
+    await db.insert(lorebookCharacterLinks).values(
+      characterIds.map((characterId) => ({
+        id: newId(),
+        lorebookId,
+        characterId,
+        createdAt: timestamp,
+      })),
+    );
+  }
+  if (personaIds.length > 0) {
+    await db.insert(lorebookPersonaLinks).values(
+      personaIds.map((personaId) => ({
+        id: newId(),
+        lorebookId,
+        personaId,
+        createdAt: timestamp,
+      })),
+    );
+  }
+}
+
 export function createLorebooksStorage(db: DB) {
   return {
     // ── Lorebooks ──
 
     async list() {
       const rows = await db.select().from(lorebooks).orderBy(desc(lorebooks.updatedAt));
-      return rows.map((r) => parseLorebookRow(r as Record<string, unknown>));
+      return hydrateLorebookRows(db, rows);
     },
 
     async listByCategory(category: string) {
@@ -103,25 +196,17 @@ export function createLorebooksStorage(db: DB) {
         .from(lorebooks)
         .where(eq(lorebooks.category, category))
         .orderBy(desc(lorebooks.updatedAt));
-      return rows.map((r) => parseLorebookRow(r as Record<string, unknown>));
+      return hydrateLorebookRows(db, rows);
     },
 
     async listByCharacter(characterId: string) {
-      const rows = await db
-        .select()
-        .from(lorebooks)
-        .where(eq(lorebooks.characterId, characterId))
-        .orderBy(desc(lorebooks.updatedAt));
-      return rows.map((r) => parseLorebookRow(r as Record<string, unknown>));
+      const all = (await this.list()) as Array<{ characterIds?: string[]; characterId?: string | null }>;
+      return all.filter((row) => row.characterIds?.includes(characterId) || row.characterId === characterId);
     },
 
     async listByPersona(personaId: string) {
-      const rows = await db
-        .select()
-        .from(lorebooks)
-        .where(eq(lorebooks.personaId, personaId))
-        .orderBy(desc(lorebooks.updatedAt));
-      return rows.map((r) => parseLorebookRow(r as Record<string, unknown>));
+      const all = (await this.list()) as Array<{ personaIds?: string[]; personaId?: string | null }>;
+      return all.filter((row) => row.personaIds?.includes(personaId) || row.personaId === personaId);
     },
 
     async listByChat(chatId: string) {
@@ -130,36 +215,41 @@ export function createLorebooksStorage(db: DB) {
         .from(lorebooks)
         .where(eq(lorebooks.chatId, chatId))
         .orderBy(desc(lorebooks.updatedAt));
-      return rows.map((r) => parseLorebookRow(r as Record<string, unknown>));
+      return hydrateLorebookRows(db, rows);
     },
 
     async getById(id: string) {
       const rows = await db.select().from(lorebooks).where(eq(lorebooks.id, id));
-      const row = rows[0];
-      return row ? parseLorebookRow(row as Record<string, unknown>) : null;
+      return (await hydrateLorebookRows(db, rows))[0] ?? null;
     },
 
     async create(input: CreateLorebookInput, timestampOverrides?: TimestampOverrides | null) {
       const id = newId();
       const timestamp = resolveTimestamps(timestampOverrides);
-      await db.insert(lorebooks).values({
-        id,
-        name: input.name,
-        description: input.description ?? "",
-        category: input.category ?? "uncategorized",
-        scanDepth: input.scanDepth ?? 2,
-        tokenBudget: input.tokenBudget ?? 2048,
-        recursiveScanning: String(input.recursiveScanning ?? false),
-        maxRecursionDepth: input.maxRecursionDepth ?? 3,
-        characterId: input.characterId ?? null,
-        personaId: input.personaId ?? null,
-        chatId: input.chatId ?? null,
-        enabled: String(input.enabled ?? true),
-        tags: input.tags ? JSON.stringify(input.tags) : "[]",
-        generatedBy: input.generatedBy ?? null,
-        sourceAgentId: input.sourceAgentId ?? null,
-        createdAt: timestamp.createdAt,
-        updatedAt: timestamp.updatedAt,
+      const characterIds = resolveLinkIds(input.characterIds, input.characterId);
+      const personaIds = resolveLinkIds(input.personaIds, input.personaId);
+      await db.transaction(async (tx) => {
+        await tx.insert(lorebooks).values({
+          id,
+          name: input.name,
+          description: input.description ?? "",
+          category: input.category ?? "uncategorized",
+          scanDepth: input.scanDepth ?? 2,
+          tokenBudget: input.tokenBudget ?? 2048,
+          recursiveScanning: String(input.recursiveScanning ?? false),
+          maxRecursionDepth: input.maxRecursionDepth ?? 3,
+          characterId: characterIds[0] ?? null,
+          personaId: personaIds[0] ?? null,
+          chatId: input.chatId ?? null,
+          isGlobal: String(input.isGlobal ?? false),
+          enabled: String(input.enabled ?? true),
+          tags: input.tags ? JSON.stringify(input.tags) : "[]",
+          generatedBy: input.generatedBy ?? null,
+          sourceAgentId: input.sourceAgentId ?? null,
+          createdAt: timestamp.createdAt,
+          updatedAt: timestamp.updatedAt,
+        });
+        await syncLorebookLinks(tx, id, characterIds, personaIds);
       });
       return this.getById(id);
     },
@@ -173,20 +263,40 @@ export function createLorebooksStorage(db: DB) {
       if (input.tokenBudget !== undefined) updates.tokenBudget = input.tokenBudget;
       if (input.recursiveScanning !== undefined) updates.recursiveScanning = String(input.recursiveScanning);
       if (input.maxRecursionDepth !== undefined) updates.maxRecursionDepth = input.maxRecursionDepth;
-      if (input.characterId !== undefined) updates.characterId = input.characterId;
-      if (input.personaId !== undefined) updates.personaId = input.personaId;
+      const shouldUpdateCharacterLinks = input.characterIds !== undefined || input.characterId !== undefined;
+      const shouldUpdatePersonaLinks = input.personaIds !== undefined || input.personaId !== undefined;
+      const current = shouldUpdateCharacterLinks || shouldUpdatePersonaLinks ? ((await this.getById(id)) as any) : null;
+      if ((shouldUpdateCharacterLinks || shouldUpdatePersonaLinks) && !current) return null;
+      const nextCharacterIds = shouldUpdateCharacterLinks
+        ? resolveLinkIds(input.characterIds, input.characterId)
+        : ((current?.characterIds as string[] | undefined) ?? []);
+      const nextPersonaIds = shouldUpdatePersonaLinks
+        ? resolveLinkIds(input.personaIds, input.personaId)
+        : ((current?.personaIds as string[] | undefined) ?? []);
+      if (shouldUpdateCharacterLinks) updates.characterId = nextCharacterIds[0] ?? null;
+      if (shouldUpdatePersonaLinks) updates.personaId = nextPersonaIds[0] ?? null;
       if (input.chatId !== undefined) updates.chatId = input.chatId;
+      if (input.isGlobal !== undefined) updates.isGlobal = String(input.isGlobal);
       if (input.enabled !== undefined) updates.enabled = String(input.enabled);
       if (input.tags !== undefined) updates.tags = JSON.stringify(input.tags);
       if (input.generatedBy !== undefined) updates.generatedBy = input.generatedBy;
       if (input.sourceAgentId !== undefined) updates.sourceAgentId = input.sourceAgentId;
 
-      await db.update(lorebooks).set(updates).where(eq(lorebooks.id, id));
+      await db.transaction(async (tx) => {
+        const updatedRows = await tx.update(lorebooks).set(updates).where(eq(lorebooks.id, id)).returning({ id: lorebooks.id });
+        if (updatedRows.length > 0 && (shouldUpdateCharacterLinks || shouldUpdatePersonaLinks)) {
+          await syncLorebookLinks(tx, id, nextCharacterIds, nextPersonaIds);
+        }
+      });
       return this.getById(id);
     },
 
     async remove(id: string) {
-      await db.delete(lorebooks).where(eq(lorebooks.id, id));
+      await db.transaction(async (tx) => {
+        await tx.delete(lorebookCharacterLinks).where(eq(lorebookCharacterLinks.lorebookId, id));
+        await tx.delete(lorebookPersonaLinks).where(eq(lorebookPersonaLinks.lorebookId, id));
+        await tx.delete(lorebooks).where(eq(lorebooks.id, id));
+      });
     },
 
     // ── Entries ──
@@ -214,6 +324,7 @@ export function createLorebooksStorage(db: DB) {
     /**
      * Get all enabled entries from lorebooks that are relevant for a given context.
      * A lorebook is relevant if it's enabled AND one of:
+     *  - `isGlobal` is true
      *  - Its ID is in `activeLorebookIds` (user explicitly added it to this chat)
      *  - Its `characterId` matches one of the chat's active characters
      *  - Its `personaId` matches the chat's active persona
@@ -232,16 +343,29 @@ export function createLorebooksStorage(db: DB) {
       personaId?: string | null;
       chatId?: string;
     }) {
-      const enabledBooks = await db.select().from(lorebooks).where(eq(lorebooks.enabled, "true"));
+      const enabledBookRows = await db.select().from(lorebooks).where(eq(lorebooks.enabled, "true"));
+      const enabledBooks = (await hydrateLorebookRows(db, enabledBookRows)) as unknown as Array<{
+        id: string;
+        isGlobal: boolean;
+        characterId?: string | null;
+        characterIds?: string[];
+        personaId?: string | null;
+        personaIds?: string[];
+        chatId?: string | null;
+      }>;
 
       let relevantBooks = enabledBooks;
       if (filters) {
         relevantBooks = enabledBooks.filter((b) => {
+          // Globally active lorebooks bypass all scope filters
+          if (b.isGlobal) return true;
           // Explicitly added to this chat
           if (filters.activeLorebookIds?.includes(b.id)) return true;
           // Belongs to one of the active characters
+          if ((b.characterIds ?? []).some((id) => filters.characterIds?.includes(id))) return true;
           if (b.characterId && filters.characterIds?.includes(b.characterId)) return true;
           // Belongs to the active persona
+          if (filters.personaId && (b.personaIds ?? []).includes(filters.personaId)) return true;
           if (b.personaId && b.personaId === filters.personaId) return true;
           // Belongs to this chat
           if (b.chatId && b.chatId === filters.chatId) return true;

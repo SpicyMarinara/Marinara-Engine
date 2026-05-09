@@ -79,6 +79,12 @@ const DEFAULT_ATTRIBUTES = [
   { name: "CHA", value: 10 },
 ];
 
+// Mirrors server's attributeModifier in skill-check.service.ts: floor((score - 10) / 2).
+function formatAttributeModifier(score: number): string {
+  const mod = Math.floor((score - 10) / 2);
+  return mod >= 0 ? `+${mod}` : `${mod}`;
+}
+
 const FIELD_LABEL_CLASS = "text-[0.6875rem] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]";
 const TEXT_INPUT_CLASS =
   "w-full rounded-lg border border-[var(--border)] bg-[var(--secondary)]/60 px-3 py-2 text-sm text-[var(--foreground)] outline-none transition-colors focus:border-[var(--primary)]/40";
@@ -790,6 +796,9 @@ export function GameCharacterSheet({
                         {attr.name}
                       </span>
                       <span className="text-lg font-bold leading-tight text-[var(--foreground)]">{attr.value}</span>
+                      <span className="text-[0.625rem] font-mono leading-none text-[var(--muted-foreground)]">
+                        {formatAttributeModifier(attr.value)}
+                      </span>
                     </div>
                   ))}
                 </div>

@@ -7,6 +7,7 @@ import { createConnectionsStorage } from "../services/storage/connections.storag
 import { createCharactersStorage } from "../services/storage/characters.storage.js";
 import { createGameStateStorage } from "../services/storage/game-state.storage.js";
 import { createLorebooksStorage } from "../services/storage/lorebooks.storage.js";
+import { mapSheetAttributesToRPG } from "../services/game/skill-check.service.js";
 import { createLLMProvider } from "../services/llm/provider-registry.js";
 import type { ChatMessage } from "../services/llm/base-provider.js";
 import type {
@@ -196,6 +197,7 @@ async function buildGameStateContext(
   gsStorage: ReturnType<typeof createGameStateStorage>,
   chatId: string,
   personaName: string,
+  chatMeta?: Record<string, unknown> | null,
 ) {
   const gs = await gsStorage.getLatest(chatId);
   if (!gs) return "";
@@ -224,6 +226,34 @@ async function buildGameStateContext(
     if (playerStats.attributes) {
       const a = playerStats.attributes;
       ctx += `Attributes: STR ${a.str}, DEX ${a.dex}, CON ${a.con}, INT ${a.int}, WIS ${a.wis}, CHA ${a.cha}\n`;
+    }
+  }
+
+  // Fallback: if playerStats.attributes is missing (it is never seeded today),
+  // surface the player's Game Mode character-sheet attributes so the encounter
+  // init prompt can scale combat stats to match the build.
+  if (!playerStats?.attributes && chatMeta) {
+    const cards = Array.isArray(chatMeta.gameCharacterCards)
+      ? (chatMeta.gameCharacterCards as Array<Record<string, unknown>>)
+      : [];
+    const playerCard = cards[0];
+    const rpgStats = playerCard?.rpgStats as
+      | { attributes?: Array<{ name: string; value: number }> }
+      | undefined;
+    const mapped = mapSheetAttributesToRPG(rpgStats?.attributes);
+    const ordered: Array<keyof typeof mapped> = ["str", "dex", "con", "int", "wis", "cha"];
+    const present = ordered.filter((k) => mapped[k] != null);
+    if (present.length > 0) {
+      const labels: Record<string, string> = {
+        str: "STR",
+        dex: "DEX",
+        con: "CON",
+        int: "INT",
+        wis: "WIS",
+        cha: "CHA",
+      };
+      const line = present.map((k) => `${labels[k]} ${mapped[k]}`).join(", ");
+      ctx += `${personaName}'s Character Sheet Attributes: ${line}\n`;
     }
   }
 
@@ -338,6 +368,7 @@ function buildInitPrompt(
   inst += `- visuals: set isBossFight true only for bosses/story-significant enemies. backgroundPrompt/illustrationPrompt are optional and only for important fights.\n`;
   inst += `- statuses: format {"name":"Status","emoji":"💀","duration":X,"modifier":-2,"stat":"attack|defense|speed|hp"}\n`;
   inst += `- HP values: if the persona section above lists a configured Max HP (from stat bars named HP/Health/etc, or from "Max HP" under Persona RPG Stats), use that EXACT number for the player's maxHp, and set hp = maxHp so combat starts at full health. If a character ally has a "Max HP: N" line in its block, do the same for that ally. Do NOT invent or "rebalance" a defined Max HP, and do NOT start any combatant below full HP at combat init. Only invent HP for combatants (enemies, unstatted allies) that have no defined HP in the context.\n`;
+  inst += `- RPG attribute scaling: when the context lists Attributes for the player or an ally (STR/DEX/CON/INT/WIS/CHA, on a roughly 8-20 D&D-style scale), let those values shape the generated stats: high STR → stronger physical attack power; high DEX → higher speed and accuracy; high CON → larger HP pool when HP is not already defined; high INT/WIS/CHA → stronger magical/support attack power for casters. Treat 10 as average and scale proportionally. Do NOT override an explicitly configured Max HP using these attributes.\n`;
   inst += `- Use the player's stats/inventory from the context to populate their data. Return ONLY the JSON.\n`;
   inst += `- Write ALL text values (environment, descriptions, attack names, item names, etc.) in the same language the chat history is written in.\n`;
 
@@ -513,7 +544,17 @@ export async function encounterRoutes(app: FastifyInstance) {
       const characterIds: string[] = JSON.parse(chat.characterIds as string);
       const characterCtx = await buildCharacterContext(chars, characterIds);
       const { personaName, personaCtx } = await buildPersonaContext(chars, chat.personaId ?? null);
-      const gameStateCtx = await buildGameStateContext(gsStorage, chatId, personaName);
+      let chatMeta: Record<string, unknown> | null = null;
+      if (typeof chat.metadata === "string") {
+        try {
+          chatMeta = JSON.parse(chat.metadata) as Record<string, unknown>;
+        } catch {
+          chatMeta = null;
+        }
+      } else {
+        chatMeta = (chat.metadata as Record<string, unknown> | null) ?? null;
+      }
+      const gameStateCtx = await buildGameStateContext(gsStorage, chatId, personaName, chatMeta);
       const spellbookCtx = await loadSpellbookContext(spellbookId);
 
       // Get recent chat messages for history

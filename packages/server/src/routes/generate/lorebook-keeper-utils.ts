@@ -77,7 +77,9 @@ export async function resolveLorebookKeeperTarget(args: {
     name?: string | null;
     enabled?: unknown;
     characterId?: string | null;
+    characterIds?: string[] | null;
     personaId?: string | null;
+    personaIds?: string[] | null;
     chatId?: string | null;
   }>;
 
@@ -85,7 +87,9 @@ export async function resolveLorebookKeeperTarget(args: {
     if (preferredTargetLorebookId && book.id === preferredTargetLorebookId) return true;
     if (!isEnabledLorebook(book.enabled)) return false;
     if (activeLorebookIds.includes(book.id)) return true;
+    if (book.characterIds?.some((characterId) => characterIds.includes(characterId))) return true;
     if (book.characterId && characterIds.includes(book.characterId)) return true;
+    if (personaId && book.personaIds?.includes(personaId)) return true;
     if (book.personaId && book.personaId === personaId) return true;
     if (book.chatId && book.chatId === chatId) return true;
     return false;

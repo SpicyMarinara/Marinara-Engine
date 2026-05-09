@@ -20,6 +20,12 @@ export interface SkillCheckInput {
   /** Roll with advantage (take higher of 2) or disadvantage (take lower). */
   advantage?: boolean;
   disadvantage?: boolean;
+  /**
+   * Player-submitted d20 result (1-20). When present, skips internal d20()
+   * and uses this value as the used roll, so a [dice:1d20] pre-roll flows
+   * through the same modifier-application code path. Ignored if out of range.
+   */
+  preRolledD20?: number;
 }
 
 export interface SkillCheckResult {
@@ -101,22 +107,68 @@ export function getGoverningAttribute(skill: string): keyof RPGAttributes {
 }
 
 /**
+ * Map character-sheet attribute names (free-form, e.g. "STR", "Strength",
+ * "Dexterity") to the strict {str,dex,...} RPGAttributes shape used for skill
+ * resolution. Case-insensitive; unrecognised names are dropped.
+ */
+const ATTRIBUTE_NAME_MAP: Record<string, keyof RPGAttributes> = {
+  str: "str",
+  strength: "str",
+  dex: "dex",
+  dexterity: "dex",
+  con: "con",
+  constitution: "con",
+  int: "int",
+  intelligence: "int",
+  wis: "wis",
+  wisdom: "wis",
+  cha: "cha",
+  charisma: "cha",
+};
+
+export function mapSheetAttributesToRPG(
+  attrs: ReadonlyArray<{ name: string; value: number }> | null | undefined,
+): Partial<RPGAttributes> {
+  if (!Array.isArray(attrs)) return {};
+  const out: Partial<RPGAttributes> = {};
+  for (const attr of attrs) {
+    if (!attr || typeof attr.name !== "string") continue;
+    const key = ATTRIBUTE_NAME_MAP[attr.name.trim().toLowerCase()];
+    if (!key) continue;
+    const value = Number(attr.value);
+    if (!Number.isFinite(value)) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+/**
  * Resolve a skill check with d20 + modifiers vs DC.
  */
 export function resolveSkillCheck(input: SkillCheckInput): SkillCheckResult {
   const modifier = input.skillModifier + input.attributeModifier;
 
-  // Roll d20 (twice if advantage/disadvantage)
-  const useAdvantage = input.advantage && !input.disadvantage;
-  const useDisadvantage = input.disadvantage && !input.advantage;
+  // Player-submitted [dice:1d20] short-circuits internal rolling so the
+  // sheet's attribute modifier still applies on top of the player's number.
+  const preRoll =
+    Number.isInteger(input.preRolledD20) && input.preRolledD20! >= 1 && input.preRolledD20! <= 20
+      ? input.preRolledD20!
+      : null;
+
+  // Roll d20 (twice if advantage/disadvantage; ignored when preRoll present)
+  const useAdvantage = !preRoll && input.advantage && !input.disadvantage;
+  const useDisadvantage = !preRoll && input.disadvantage && !input.advantage;
   const rollTwice = useAdvantage || useDisadvantage;
 
-  const rolls = rollTwice ? [d20(), d20()] : [d20()];
-  const usedRoll = rollTwice
-    ? useAdvantage
-      ? Math.max(rolls[0]!, rolls[1]!)
-      : Math.min(rolls[0]!, rolls[1]!)
-    : rolls[0]!;
+  const rolls = preRoll != null ? [preRoll] : rollTwice ? [d20(), d20()] : [d20()];
+  const usedRoll =
+    preRoll != null
+      ? preRoll
+      : rollTwice
+        ? useAdvantage
+          ? Math.max(rolls[0]!, rolls[1]!)
+          : Math.min(rolls[0]!, rolls[1]!)
+        : rolls[0]!;
 
   const total = usedRoll + modifier;
   const criticalSuccess = usedRoll === 20;

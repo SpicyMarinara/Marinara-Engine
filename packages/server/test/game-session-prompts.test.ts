@@ -211,7 +211,7 @@ test("GM format reminder only allows explicit content for NSFW games", () => {
   assert.match(nsfwPrompt, /Adult mode enabled, explicit content allowed\./);
 });
 
-test("GM format reminder documents the simplified resolved skill_check command", () => {
+test("GM format reminder documents the sparse skill_check command for engine-resolved checks", () => {
   const prompt = buildGmFormatReminder({
     gameActiveState: "exploration",
     sessionNumber: 1,
@@ -219,16 +219,28 @@ test("GM format reminder documents the simplified resolved skill_check command",
     playerName: "Mari",
   });
 
-  assert.match(
-    prompt,
-    /\[skill_check: skill="Skill Name" dc="1-20" rolls="1-20" modifier="0-10" total="roll \+ modifier \| 1 \| 20" result="critical_success \| success \| failure \| critical_failure"\]/,
-  );
+  // AI-initiated checks emit only skill + dc; the engine fills in the rest.
+  assert.match(prompt, /\[skill_check: skill="Skill Name" dc="1-20"\]/);
   assert.match(prompt, /when uncertainty or the player's actions should be resolved mechanically\./);
   assert.match(prompt, /Abandon positivity bias/);
-  assert.match(prompt, /roll honestly, and narrate the consequence in the same turn\./);
+  assert.match(prompt, /Do NOT include rolls\/modifier\/total\/result/);
   assert.doesNotMatch(prompt, /Legacy fallback:/);
   assert.doesNotMatch(prompt, /\bused=/);
   assert.doesNotMatch(prompt, /\bmode=/);
+});
+
+test("GM format reminder uses sparse skill_check tag echoing player d20 when a dice roll was submitted", () => {
+  const prompt = buildGmFormatReminder({
+    gameActiveState: "exploration",
+    sessionNumber: 1,
+    partyNames: ["Aster"],
+    playerName: "Mari",
+    playerDiceRollSubmitted: true,
+  });
+
+  assert.match(prompt, /\[skill_check: skill="Skill Name" dc="1-20" rolls="player's d20 result"\]/);
+  assert.match(prompt, /engine applies the player's attribute modifier on top of the rolled number/);
+  assert.match(prompt, /do NOT compute or invent rolls\/modifier\/total\/result fields/);
 });
 
 test("GM format reminder separates HUD widget updates from durable stats", () => {

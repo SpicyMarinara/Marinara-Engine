@@ -684,11 +684,11 @@ export function buildGmFormatReminder(
 
   if (ctx.playerDiceRollSubmitted) {
     lines.push(
-      `- [skill_check: skill="Skill Name" dc="1-20" rolls="player's dice result" modifier="0-10" total="roll + modifier | 1 | 20" result="critical_success | success | failure | critical_failure"] - if the player presented you with a [dice: ...] roll, start the turn with the check and narrate the consequences in the same turn. Choose DC fairly (5 trivial, 10 routine under pressure, 15 hard, 20 desperate).`,
+      `- [skill_check: skill="Skill Name" dc="1-20" rolls="player's d20 result"] - if the player presented you with a [dice: ...] roll, start the turn with the check tag (echo the player's d20 in rolls=) and narrate the consequences in the same turn. Choose DC fairly (5 trivial, 10 routine under pressure, 15 hard, 20 desperate). The engine applies the player's attribute modifier on top of the rolled number — do NOT compute or invent rolls/modifier/total/result fields, the system fills those in.`,
     );
   } else {
     lines.push(
-      `- [skill_check: skill="Skill Name" dc="1-20" rolls="1-20" modifier="0-10" total="roll + modifier | 1 | 20" result="critical_success | success | failure | critical_failure"] - only when uncertainty or the player's actions should be resolved mechanically. Abandon positivity bias: choose DC (5 trivial, 10 routine under pressure, 15 hard, 20 desperate), roll honestly, and narrate the consequence in the same turn.`,
+      `- [skill_check: skill="Skill Name" dc="1-20"] - only when uncertainty or the player's actions should be resolved mechanically. Abandon positivity bias: choose DC fairly (5 trivial, 10 routine under pressure, 15 hard, 20 desperate) and narrate the consequence in the same turn. Do NOT include rolls/modifier/total/result — the engine rolls the d20, applies the player's attribute modifier, and resolves success/failure deterministically.`,
     );
   }
 

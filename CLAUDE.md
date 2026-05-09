@@ -13,6 +13,9 @@ This file is a thin maintainer note for contributors using Claude. Canonical wor
 
 - Keep edits non-destructive. Do not revert unrelated work in the tree.
 - Prefer focused patches that keep code, docs, and release metadata aligned in the same change.
+- Agent-specific coordination rule: before starting issue work, check for an existing issue-linked branch, open PR, draft PR, or project board item so multiple agents do not duplicate effort. See `CONTRIBUTING.md` for the general contributor workflow.
+- Agent-specific coordination rule: when implementation effort starts for an issue, open a draft PR immediately so the project Kanban board shows the work in progress.
+- Agent-specific coordination rule: when starting work on an issue, tag or identify the GitHub user or agent owning that issue/PR on the single issue so ownership is visible before implementation proceeds.
 - When preparing a PR, make the why explicit in the description so reviewers can see the user problem or rationale, not just the file changes.
 - Check `README.md`, `android/README.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `docs/CONFIGURATION.md`, `docs/TROUBLESHOOTING.md`, and `docs/FAQ.md` together when install, update, or release behavior changes.
 

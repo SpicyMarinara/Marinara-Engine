@@ -93,6 +93,9 @@ function buildCompatibleLorebookExport(lb: Record<string, any>) {
 
   return {
     name: String(lb.name ?? "Lorebook"),
+    characterId: lb.characterId ?? null,
+    personaId: lb.personaId ?? null,
+    chatId: lb.chatId ?? null,
     extensions: {
       marinara: {
         exportedAt: new Date().toISOString(),
@@ -558,6 +561,23 @@ export async function backupRoutes(app: FastifyInstance) {
               recursiveScanning: lb.recursiveScanning,
               maxRecursionDepth: lb.maxRecursionDepth,
               enabled: lb.enabled ?? true,
+              characterId: lb.characterId ?? null,
+              characterIds: Array.isArray(lb.characterIds)
+                ? lb.characterIds.filter((value: unknown): value is string => typeof value === "string")
+                : typeof lb.characterId === "string"
+                  ? [lb.characterId]
+                  : [],
+              personaId: lb.personaId ?? null,
+              personaIds: Array.isArray(lb.personaIds)
+                ? lb.personaIds.filter((value: unknown): value is string => typeof value === "string")
+                : typeof lb.personaId === "string"
+                  ? [lb.personaId]
+                  : [],
+              chatId: lb.chatId ?? null,
+              isGlobal: lb.isGlobal ?? false,
+              tags: Array.isArray(lb.tags) ? lb.tags : [],
+              generatedBy: lb.generatedBy ?? null,
+              sourceAgentId: lb.sourceAgentId ?? null,
             },
             normalizeTimestampOverrides({ createdAt: lb.createdAt, updatedAt: lb.updatedAt }),
           );

@@ -307,6 +307,7 @@ async function refreshMessagesAuthoritatively(
 
   // Also refresh the total message count used for absolute numbering
   qc.invalidateQueries({ queryKey: chatKeys.messageCount(chatId) });
+  qc.invalidateQueries({ queryKey: lorebookKeys.active(chatId) });
 
   await qc.cancelQueries({ queryKey: msgKey, exact: true });
 
@@ -1081,6 +1082,7 @@ export function useGenerate() {
 
             case "metadata_patch": {
               qc.invalidateQueries({ queryKey: chatKeys.detail(params.chatId) });
+              qc.invalidateQueries({ queryKey: lorebookKeys.active(params.chatId) });
               break;
             }
 
@@ -1337,6 +1339,7 @@ export function useGenerate() {
               const oocData = event.data as { chatId: string; count: number };
               if (oocData.chatId) {
                 qc.invalidateQueries({ queryKey: chatKeys.messages(oocData.chatId) });
+                qc.invalidateQueries({ queryKey: lorebookKeys.active(oocData.chatId) });
               }
               break;
             }

@@ -54,6 +54,8 @@ export const LIMITS = {
   AGENT_CONTEXT_MESSAGES: 20,
   /** Max lorebook entries that can be injected */
   MAX_LOREBOOK_ENTRIES: 100,
+  /** Default global lorebook token budget per generation. 0 means unlimited when explicitly configured per chat. */
+  DEFAULT_LOREBOOK_TOKEN_BUDGET: 8192,
   /** Default summary trigger: every N messages */
   SUMMARY_INTERVAL: 50,
   /** Default vectorization: top-K results */

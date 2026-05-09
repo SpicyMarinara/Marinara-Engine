@@ -59,7 +59,12 @@ import { generateWeather, inferBiome, shouldWeatherChange } from "../services/ga
 import { rollEncounter, rollEnemyCount } from "../services/game/encounter.service.js";
 import { processReputationActions } from "../services/game/reputation.service.js";
 import { createCheckpointService, type CheckpointTrigger } from "../services/game/checkpoint.service.js";
-import { resolveSkillCheck, attributeModifier, getGoverningAttribute } from "../services/game/skill-check.service.js";
+import {
+  resolveSkillCheck,
+  attributeModifier,
+  getGoverningAttribute,
+  mapSheetAttributesToRPG,
+} from "../services/game/skill-check.service.js";
 import { applyAllSegmentEdits, stripGmCommandTags } from "../services/game/segment-edits.js";
 import { processLorebooks } from "../services/lorebook/index.js";
 import {
@@ -4709,6 +4714,7 @@ export async function gameRoutes(app: FastifyInstance) {
     dc: z.number().int().min(1).max(40),
     advantage: z.boolean().optional(),
     disadvantage: z.boolean().optional(),
+    preRolledD20: z.number().int().min(1).max(20).optional(),
   });
 
   app.post("/skill-check", async (req) => {
@@ -4721,13 +4727,27 @@ export async function gameRoutes(app: FastifyInstance) {
     // Look up skill modifier
     const skillMod = playerStats?.skills?.[input.skill] ?? playerStats?.skills?.[input.skill.toLowerCase()] ?? 0;
 
-    // Look up governing attribute modifier
+    // Look up governing attribute modifier. Prefer playerStats.attributes
+    // (engine-shape), fall back to the player's character-sheet rpgStats
+    // (free-form names) since playerStats.attributes is never seeded today.
+    const attr = getGoverningAttribute(input.skill);
     let attrMod = 0;
-    if (playerStats?.attributes) {
-      const attr = getGoverningAttribute(input.skill);
-      const score = playerStats.attributes[attr] ?? 10;
-      attrMod = attributeModifier(score);
+    let attrScore: number | null = null;
+    if (playerStats?.attributes && Number.isFinite(Number(playerStats.attributes[attr]))) {
+      attrScore = Number(playerStats.attributes[attr]);
+    } else {
+      const chats = createChatsStorage(app.db);
+      const chat = await chats.getById(input.chatId);
+      const meta = chat ? parseMeta(chat.metadata) : {};
+      const cards = Array.isArray(meta.gameCharacterCards)
+        ? (meta.gameCharacterCards as Array<Record<string, unknown>>)
+        : [];
+      const playerCard = cards[0];
+      const rpgStats = playerCard?.rpgStats as { attributes?: Array<{ name: string; value: number }> } | undefined;
+      const mapped = mapSheetAttributesToRPG(rpgStats?.attributes);
+      if (mapped[attr] != null) attrScore = mapped[attr]!;
     }
+    if (attrScore != null) attrMod = attributeModifier(attrScore);
 
     const result = resolveSkillCheck({
       skill: input.skill,
@@ -4736,6 +4756,7 @@ export async function gameRoutes(app: FastifyInstance) {
       attributeModifier: attrMod,
       advantage: input.advantage,
       disadvantage: input.disadvantage,
+      preRolledD20: input.preRolledD20,
     });
 
     return { result };

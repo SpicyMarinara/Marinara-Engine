@@ -302,6 +302,29 @@ type ApplyUpdateBody = {
   targetCommit?: string;
 };
 
+function getApplyAvailability(gitInstall: boolean) {
+  const enabled = isUpdatesApplyEnabled();
+  if (!gitInstall) {
+    return {
+      applyAvailable: false,
+      updatesApplyEnabled: enabled,
+      applyUnavailableReason: "unsupported-install",
+    };
+  }
+  if (!enabled) {
+    return {
+      applyAvailable: false,
+      updatesApplyEnabled: false,
+      applyUnavailableReason: "disabled",
+    };
+  }
+  return {
+    applyAvailable: true,
+    updatesApplyEnabled: true,
+    applyUnavailableReason: null,
+  };
+}
+
 export async function updatesRoutes(app: FastifyInstance) {
   // ── Check for updates ──
   // GET /api/updates/check
@@ -313,6 +336,7 @@ export async function updatesRoutes(app: FastifyInstance) {
     const currentCommit = getBuildCommit();
     const currentBuild = getBuildLabel();
     const gitInstall = isGitInstall();
+    const applyAvailability = getApplyAvailability(gitInstall);
 
     // Check commits behind for git installs
     let commitsBehind: number | null = null;
@@ -338,6 +362,7 @@ export async function updatesRoutes(app: FastifyInstance) {
         versionUpdate,
         commitsBehind: commitsBehind ?? 0,
         installType: gitInstall ? "git" : "standalone",
+        ...applyAvailability,
         targetRef: UPDATE_REF,
         targetCommit: gitInstall ? await resolveGitRef(getMonorepoRoot(), UPDATE_REF) : null,
       };
@@ -363,6 +388,7 @@ export async function updatesRoutes(app: FastifyInstance) {
         versionUpdate,
         commitsBehind: commitsBehind ?? 0,
         installType: gitInstall ? "git" : "standalone",
+        ...applyAvailability,
         targetRef: UPDATE_REF,
         targetCommit: gitInstall ? await resolveGitRef(getMonorepoRoot(), UPDATE_REF) : null,
       };
@@ -375,6 +401,8 @@ export async function updatesRoutes(app: FastifyInstance) {
         currentBuild,
         updateAvailable: commitsBehind != null && commitsBehind > 0,
         commitsBehind: commitsBehind ?? 0,
+        installType: gitInstall ? "git" : "standalone",
+        ...applyAvailability,
       });
     }
   });

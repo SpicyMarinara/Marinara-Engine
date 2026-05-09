@@ -2,6 +2,7 @@
 // Importer: SillyTavern Character (JSON / V2 Card / CharX)
 // ──────────────────────────────────────────────
 import type { DB } from "../../db/connection.js";
+import { logger } from "../../lib/logger.js";
 import { createCharactersStorage } from "../storage/characters.storage.js";
 import { importSTLorebook } from "./st-lorebook.importer.js";
 import type { CharacterData } from "@marinara-engine/shared";
@@ -23,11 +24,7 @@ function ensureAvatarDir() {
 }
 
 function countEmbeddedLorebookEntries(book: unknown): number {
-  if (!book || typeof book !== "object") return 0;
-  const entries = (book as Record<string, unknown>).entries;
-  if (Array.isArray(entries)) return entries.length;
-  if (entries && typeof entries === "object") return Object.keys(entries).length;
-  return 0;
+  return getCharacterBookEntries(book).length;
 }
 
 /**
@@ -62,6 +59,10 @@ export async function importSTCharacter(raw: Record<string, unknown>, db: DB, op
   delete raw._botBrowserSource;
 
   const data = normalizeCharacterData(raw);
+  const rawEmbeddedLorebook = extractRawCharacterBook(raw) ?? data.character_book;
+  if (rawEmbeddedLorebook) {
+    data.character_book = normalizeCharacterBook(rawEmbeddedLorebook);
+  }
 
   // Tag with browser source if imported from browser
   if (botBrowserSource) {
@@ -119,11 +120,20 @@ export async function importSTCharacter(raw: Record<string, unknown>, db: DB, op
   // Extract character_book into a standalone lorebook linked to this character
   let lorebookResult: { lorebookId?: string; entriesImported?: number } | null = null;
   if (shouldImportEmbeddedLorebook && data.character_book && charId) {
-    const bookRaw = data.character_book as unknown as Record<string, unknown>;
+    const bookRaw = rawEmbeddedLorebook as unknown as Record<string, unknown>;
     // ST character_book uses the same shape as World Info
     const wiData: Record<string, unknown> = {
       name: `${data.name}'s Lorebook`,
       entries: bookRaw.entries ?? {},
+      description: bookRaw.description,
+      scan_depth: bookRaw.scan_depth,
+      scanDepth: bookRaw.scanDepth,
+      token_budget: bookRaw.token_budget,
+      tokenBudget: bookRaw.tokenBudget,
+      recursive_scanning: bookRaw.recursive_scanning,
+      recursiveScanning: bookRaw.recursiveScanning,
+      max_recursion_depth: bookRaw.max_recursion_depth,
+      maxRecursionDepth: bookRaw.maxRecursionDepth,
       extensions: bookRaw.extensions ?? {},
     };
 
@@ -155,7 +165,8 @@ export async function importSTCharacter(raw: Record<string, unknown>, db: DB, op
           skipVersionSnapshot: true,
         });
       }
-    } catch {
+    } catch (err) {
+      logger.warn(err, "Lorebook extraction failed for character import");
       // Non-fatal — character was imported, just lorebook extraction failed
     }
   }
@@ -294,6 +305,44 @@ function normalizeCharacterData(raw: Record<string, unknown>): CharacterData {
   return normalizeV2(raw);
 }
 
+function extractRawCharacterBook(raw: Record<string, unknown>): unknown {
+  if ((raw.spec === "chara_card_v2" || raw.spec === "chara_card_v3") && raw.data && typeof raw.data === "object") {
+    return selectBestCharacterBook(raw.character_book, (raw.data as Record<string, unknown>).character_book);
+  }
+  if (raw.type === "character" && raw.data && typeof raw.data === "object") {
+    return selectBestCharacterBook(raw.character_book, (raw.data as Record<string, unknown>).character_book);
+  }
+  return raw.character_book;
+}
+
+function getCharacterBookEntries(raw: unknown): Record<string, unknown>[] {
+  if (!raw || typeof raw !== "object") return [];
+  const entries = (raw as Record<string, unknown>).entries;
+  if (Array.isArray(entries)) return entries.filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === "object");
+  if (entries && typeof entries === "object") {
+    return Object.values(entries).filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === "object");
+  }
+  return [];
+}
+
+function selectBestCharacterBook(...books: unknown[]): unknown {
+  let best: unknown = null;
+  let bestNamedEntries = -1;
+
+  for (const book of books) {
+    if (!book || typeof book !== "object") continue;
+    const entries = getCharacterBookEntries(book);
+    if (entries.length === 0) continue;
+    const namedEntries = entries.filter((entry) => firstNonEmptyString(entry.comment, entry.name)).length;
+    if (namedEntries > bestNamedEntries) {
+      best = book;
+      bestNamedEntries = namedEntries;
+    }
+  }
+
+  return best;
+}
+
 function buildCardSpecMetadata(raw: Record<string, unknown>) {
   const spec = typeof raw.spec === "string" ? raw.spec : null;
   const specVersion = typeof raw.spec_version === "string" ? raw.spec_version : null;
@@ -379,6 +428,13 @@ function normalizeStringArray(raw: unknown): string[] {
   return [];
 }
 
+function firstNonEmptyString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return null;
+}
+
 /**
  * Normalize a character_book from any format (ST World Info or V2 spec) into
  * the V2 CharacterBook shape with entries as an array of CharacterBookEntry objects.
@@ -387,18 +443,7 @@ function normalizeCharacterBook(raw: unknown): CharacterData["character_book"] {
   if (!raw || typeof raw !== "object") return null;
   const book = raw as Record<string, unknown>;
 
-  // entries can be an object { "0": {...}, "1": {...} } (ST) or an array [{...}, {...}] (V2)
-  const rawEntries = book.entries;
-  let entryList: Record<string, unknown>[];
-  if (Array.isArray(rawEntries)) {
-    entryList = rawEntries;
-  } else if (rawEntries && typeof rawEntries === "object") {
-    entryList = Object.values(rawEntries);
-  } else {
-    entryList = [];
-  }
-
-  const entries = entryList.map((e, i) => {
+  const entries = getCharacterBookEntries(book).map((e, i) => {
     const posRaw = e.position;
     let position: "before_char" | "after_char" = "before_char";
     if (typeof posRaw === "string") {
@@ -406,6 +451,7 @@ function normalizeCharacterBook(raw: unknown): CharacterData["character_book"] {
     } else if (typeof posRaw === "number") {
       position = posRaw === 1 ? "after_char" : "before_char";
     }
+    const title = firstNonEmptyString(e.comment, e.name) ?? `Entry ${i + 1}`;
 
     return {
       keys: normalizeStringArray(e.key ?? e.keys),
@@ -415,10 +461,10 @@ function normalizeCharacterBook(raw: unknown): CharacterData["character_book"] {
       enabled: e.disable != null ? !e.disable : e.enabled != null ? Boolean(e.enabled) : true,
       insertion_order: (e.order ?? e.insertion_order ?? 100) as number,
       case_sensitive: Boolean(e.caseSensitive ?? e.case_sensitive ?? false),
-      name: String(e.comment ?? e.name ?? `Entry ${i + 1}`),
+      name: title,
       priority: (e.priority ?? 10) as number,
       id: (e.uid ?? e.id ?? i) as number,
-      comment: String(e.comment ?? e.name ?? ""),
+      comment: title,
       selective: Boolean(e.selective ?? false),
       constant: Boolean(e.constant ?? false),
       position,

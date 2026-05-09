@@ -8,7 +8,15 @@
 // flow has been replaced so users can edit row-level params without leaving
 // the list. Inspired by SillyTavern's World Info layout.
 // ──────────────────────────────────────────────
-import { useState, useEffect, useCallback, useMemo, useRef, type DragEvent as ReactDragEvent } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  type DragEvent as ReactDragEvent,
+  type ReactNode,
+} from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -30,6 +38,7 @@ import { useCharacters, usePersonas } from "../../hooks/use-characters";
 import { useConnections } from "../../hooks/use-connections";
 import { showConfirmDialog } from "../../lib/app-dialogs";
 import { useUIStore } from "../../stores/ui.store";
+import { useChatStore } from "../../stores/chat.store";
 import {
   ArrowLeft,
   Save,
@@ -64,7 +73,7 @@ import { api } from "../../lib/api-client";
 import type { Lorebook, LorebookEntry, LorebookFolder, LorebookCategory } from "@marinara-engine/shared";
 import { LorebookEntryRow } from "./LorebookEntryRow";
 import { LorebookFolderRow } from "./LorebookFolderRow";
-import { estimateTokens } from "./LorebookFormFields";
+import { ExpandableTextarea, estimateTokens } from "./LorebookFormFields";
 import { ExportFormatDialog, type ExportFormatChoice } from "../ui/ExportFormatDialog";
 
 // ──────────────────────────────────────────────
@@ -97,6 +106,148 @@ function writeCollapsedFolderIds(lorebookId: string, ids: Set<string>) {
 }
 
 // ── Types ──
+type LinkedResourceItem = {
+  id: string;
+  name: string;
+  description?: string | null;
+  deleted?: boolean;
+};
+
+function LinkedResourcePicker({
+  label,
+  help,
+  emptyText,
+  addLabel,
+  searchPlaceholder,
+  icon,
+  items,
+  selectedIds,
+  search,
+  onSearchChange,
+  isOpen,
+  onOpen,
+  onClose,
+  onAdd,
+  onRemove,
+}: {
+  label: string;
+  help: string;
+  emptyText: string;
+  addLabel: string;
+  searchPlaceholder: string;
+  icon: ReactNode;
+  items: LinkedResourceItem[];
+  selectedIds: string[];
+  search: string;
+  onSearchChange: (value: string) => void;
+  isOpen: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  onAdd: (id: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  const selectedItems = selectedIds.map(
+    (id) =>
+      items.find((item) => item.id === id) ?? {
+        id,
+        name: "(deleted)",
+        description: id,
+        deleted: true,
+      },
+  );
+  const availableItems = items.filter(
+    (item) =>
+      !selectedIds.includes(item.id) &&
+      [item.name, item.description ?? ""].some((value) => value.toLowerCase().includes(search.toLowerCase())),
+  );
+
+  return (
+    <div>
+      <label className="mb-1.5 flex items-center gap-1 text-xs font-medium">
+        {label} <HelpTooltip text={help} />
+      </label>
+
+      {selectedItems.length === 0 ? (
+        <p className="text-[0.6875rem] text-[var(--muted-foreground)]">{emptyText}</p>
+      ) : (
+        <div className="flex flex-col gap-1">
+          {selectedItems.map((item) => (
+            <div
+              key={item.id}
+              className="flex items-center gap-2.5 rounded-lg bg-[var(--primary)]/10 px-3 py-2 ring-1 ring-[var(--primary)]/30"
+            >
+              <span className="text-[var(--primary)]">{icon}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-xs">{item.name}</span>
+                {item.description && (
+                  <span className="block truncate text-[0.625rem] text-[var(--muted-foreground)]">{item.description}</span>
+                )}
+              </span>
+              <button
+                onClick={() => onRemove(item.id)}
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)]"
+                title={`Remove ${item.name}`}
+              >
+                <X size="0.6875rem" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!isOpen ? (
+        <button
+          onClick={onOpen}
+          className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)] transition-colors hover:border-[var(--primary)]/40 hover:text-[var(--primary)]"
+        >
+          <Plus size="0.75rem" /> {addLabel}
+        </button>
+      ) : (
+        <div className="mt-2 overflow-hidden rounded-lg bg-[var(--card)] ring-1 ring-[var(--border)]">
+          <div className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-2">
+            <Search size="0.75rem" className="text-[var(--muted-foreground)]" />
+            <input
+              value={search}
+              onChange={(event) => onSearchChange(event.target.value)}
+              placeholder={searchPlaceholder}
+              autoFocus
+              className="flex-1 bg-transparent text-xs outline-none placeholder:text-[var(--muted-foreground)]"
+            />
+            <button onClick={onClose} className="text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)]">
+              <X size="0.75rem" />
+            </button>
+          </div>
+          <div className="max-h-40 overflow-y-auto">
+            {availableItems.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => onAdd(item.id)}
+                className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-all hover:bg-[var(--accent)]"
+              >
+                <span className="text-[var(--muted-foreground)]">{icon}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs">{item.name}</span>
+                  {item.description && (
+                    <span className="block truncate text-[0.625rem] text-[var(--muted-foreground)]">
+                      {item.description}
+                    </span>
+                  )}
+                </span>
+                <Plus size="0.75rem" className="shrink-0 text-[var(--muted-foreground)]" />
+              </button>
+            ))}
+            {availableItems.length === 0 && (
+              <p className="px-3 py-2 text-[0.6875rem] text-[var(--muted-foreground)]">
+                {items.length === selectedItems.length ? `All ${label.toLowerCase()} already added.` : "No matches."}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const TABS = [
   { id: "overview", label: "Overview", icon: Settings2 },
   { id: "entries", label: "Entries", icon: FileText },
@@ -126,6 +277,7 @@ const SORT_OPTIONS: Array<{ value: EntrySortKey; label: string }> = [
 export function LorebookEditor() {
   const lorebookId = useUIStore((s) => s.lorebookDetailId);
   const closeDetail = useUIStore((s) => s.closeLorebookDetail);
+  const activeChat = useChatStore((s) => s.activeChat);
   const { data: rawLorebook, isLoading, isError } = useLorebook(lorebookId);
   const { data: rawLorebooks } = useLorebooks();
   const { data: rawEntries } = useLorebookEntries(lorebookId);
@@ -169,6 +321,18 @@ export function LorebookEditor() {
       comment: p.comment ?? null,
     }));
   }, [rawPersonas]);
+  const activeChatLorebookIds = useMemo(() => {
+    if (!activeChat?.metadata) return [] as string[];
+    try {
+      const meta =
+        typeof activeChat.metadata === "string"
+          ? JSON.parse(activeChat.metadata)
+          : (activeChat.metadata as Record<string, unknown>);
+      return Array.isArray(meta.activeLorebookIds) ? meta.activeLorebookIds.map(String) : [];
+    } catch {
+      return [];
+    }
+  }, [activeChat?.metadata]);
 
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
@@ -230,14 +394,64 @@ export function LorebookEditor() {
   const [formDescription, setFormDescription] = useState("");
   const [formCategory, setFormCategory] = useState<LorebookCategory>("uncategorized");
   const [formEnabled, setFormEnabled] = useState(true);
+  const [formIsGlobal, setFormIsGlobal] = useState(false);
   const [formScanDepth, setFormScanDepth] = useState(2);
   const [formTokenBudget, setFormTokenBudget] = useState(2048);
   const [formRecursive, setFormRecursive] = useState(false);
   const [formMaxRecursionDepth, setFormMaxRecursionDepth] = useState(3);
-  const [formCharacterId, setFormCharacterId] = useState<string | null>(null);
-  const [formPersonaId, setFormPersonaId] = useState<string | null>(null);
+  const [formCharacterIds, setFormCharacterIds] = useState<string[]>([]);
+  const [formPersonaIds, setFormPersonaIds] = useState<string[]>([]);
   const [formTags, setFormTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState("");
+  const [characterLinkSearch, setCharacterLinkSearch] = useState("");
+  const [personaLinkSearch, setPersonaLinkSearch] = useState("");
+  const [characterLinkPickerOpen, setCharacterLinkPickerOpen] = useState(false);
+  const [personaLinkPickerOpen, setPersonaLinkPickerOpen] = useState(false);
+
+  const characterNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const character of characters) map.set(character.id, character.name);
+    return map;
+  }, [characters]);
+  const personaNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const persona of personas) map.set(persona.id, persona.comment ? `${persona.name} - ${persona.comment}` : persona.name);
+    return map;
+  }, [personas]);
+
+  const scopeSummary = useMemo(() => {
+    if (!formEnabled) return null;
+    if (formIsGlobal) return { text: "Global" };
+    if (lorebookId && activeChatLorebookIds.includes(lorebookId)) return { text: "Attached to this chat" };
+    if (formCharacterIds.length > 0 || formPersonaIds.length > 0) {
+      return {
+        characters:
+          formCharacterIds.length > 0
+            ? {
+                label: `${formCharacterIds.length} Character${formCharacterIds.length === 1 ? "" : "s"}:`,
+                names: formCharacterIds.map((id) => characterNameById.get(id) ?? id).join(", "),
+              }
+            : null,
+        personas:
+          formPersonaIds.length > 0
+            ? {
+                label: `${formPersonaIds.length} Persona${formPersonaIds.length === 1 ? "" : "s"}:`,
+                names: formPersonaIds.map((id) => personaNameById.get(id) ?? id).join(", "),
+              }
+            : null,
+      };
+    }
+    return { text: "Not active anywhere yet" };
+  }, [
+    activeChatLorebookIds,
+    characterNameById,
+    formCharacterIds,
+    formEnabled,
+    formIsGlobal,
+    formPersonaIds,
+    lorebookId,
+    personaNameById,
+  ]);
 
   const loadedLorebookIdRef = useRef<string | null>(null);
 
@@ -251,12 +465,25 @@ export function LorebookEditor() {
     setFormDescription(lorebook.description);
     setFormCategory(lorebook.category);
     setFormEnabled(lorebook.enabled);
+    setFormIsGlobal(lorebook.isGlobal ?? false);
     setFormScanDepth(lorebook.scanDepth);
     setFormTokenBudget(lorebook.tokenBudget);
     setFormRecursive(lorebook.recursiveScanning);
     setFormMaxRecursionDepth(lorebook.maxRecursionDepth ?? 3);
-    setFormCharacterId(lorebook.characterId ?? null);
-    setFormPersonaId(lorebook.personaId ?? null);
+    const characterSource =
+      Array.isArray(lorebook.characterIds) && lorebook.characterIds.length > 0
+        ? lorebook.characterIds
+        : lorebook.characterId
+          ? [lorebook.characterId]
+          : [];
+    const personaSource =
+      Array.isArray(lorebook.personaIds) && lorebook.personaIds.length > 0
+        ? lorebook.personaIds
+        : lorebook.personaId
+          ? [lorebook.personaId]
+          : [];
+    setFormCharacterIds(Array.from(new Set(characterSource)));
+    setFormPersonaIds(Array.from(new Set(personaSource)));
     setFormTags(lorebook.tags ?? []);
     setLorebookDirty(false);
     loadedLorebookIdRef.current = lorebook.id;
@@ -341,7 +568,6 @@ export function LorebookEditor() {
 
   // ── Handlers ──
   const markLorebookDirty = useCallback(() => setLorebookDirty(true), []);
-
   const exitEntrySelectionMode = useCallback(() => {
     setEntrySelectionMode(false);
     setSelectedEntryIds(new Set());
@@ -633,12 +859,13 @@ export function LorebookEditor() {
         description: formDescription,
         category: formCategory,
         enabled: formEnabled,
+        isGlobal: formIsGlobal,
         scanDepth: formScanDepth,
         tokenBudget: formTokenBudget,
         recursiveScanning: formRecursive,
         maxRecursionDepth: formMaxRecursionDepth,
-        characterId: formCharacterId,
-        personaId: formPersonaId,
+        characterIds: formIsGlobal ? [] : formCharacterIds,
+        personaIds: formIsGlobal ? [] : formPersonaIds,
         tags: formTags,
       });
       setLorebookDirty(false);
@@ -651,12 +878,13 @@ export function LorebookEditor() {
     formDescription,
     formCategory,
     formEnabled,
+    formIsGlobal,
     formScanDepth,
     formTokenBudget,
     formRecursive,
     formMaxRecursionDepth,
-    formCharacterId,
-    formPersonaId,
+    formCharacterIds,
+    formPersonaIds,
     formTags,
     updateLorebook,
   ]);
@@ -869,14 +1097,14 @@ export function LorebookEditor() {
                 {/* Description */}
                 <div>
                   <label className="mb-1.5 block text-xs font-medium">Description</label>
-                  <textarea
+                  <ExpandableTextarea
                     value={formDescription}
-                    onChange={(e) => {
-                      setFormDescription(e.target.value);
+                    onChange={(value) => {
+                      setFormDescription(value);
                       markLorebookDirty();
                     }}
                     rows={3}
-                    className="w-full resize-y rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                    title="Edit lorebook description"
                   />
                 </div>
 
@@ -966,105 +1194,151 @@ export function LorebookEditor() {
                   </div>
                 </div>
 
-                {/* Character Link */}
-                <div>
-                  <label className="mb-1.5 flex items-center gap-1 text-xs font-medium">
-                    Linked Character{" "}
-                    <HelpTooltip text="When linked to a character, this lorebook auto-activates in any chat that includes that character. For multi-character or chat-specific scope, leave this empty and attach the lorebook per-chat via the chat settings drawer's Lorebooks section instead." />
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={formCharacterId ?? ""}
-                      onChange={(e) => {
-                        const nextCharacterId = e.target.value || null;
-                        setFormCharacterId(nextCharacterId);
-                        if (nextCharacterId) setFormPersonaId(null);
-                        markLorebookDirty();
-                      }}
-                      className="flex-1 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-                    >
-                      <option value="">None</option>
-                      {characters.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                    {formCharacterId && (
-                      <button
-                        onClick={() => {
-                          setFormCharacterId(null);
+                {!formIsGlobal && (
+                  <div className="rounded-xl bg-[var(--secondary)]/60 p-4 ring-1 ring-[var(--border)]">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                      {/* Character Link */}
+                      <LinkedResourcePicker
+                        label="Linked Characters"
+                        help="When linked to characters, this lorebook auto-activates in chats that include any of them."
+                        emptyText="No characters selected"
+                        addLabel="Add Character"
+                        searchPlaceholder="Search characters..."
+                        icon={<Users size="0.875rem" />}
+                        items={characters}
+                        selectedIds={formCharacterIds}
+                        search={characterLinkSearch}
+                        onSearchChange={setCharacterLinkSearch}
+                        isOpen={characterLinkPickerOpen}
+                        onOpen={() => {
+                          setCharacterLinkPickerOpen(true);
+                          setCharacterLinkSearch("");
+                        }}
+                        onClose={() => setCharacterLinkPickerOpen(false)}
+                        onAdd={(id) => {
+                          setFormCharacterIds((current) => (current.includes(id) ? current : [...current, id]));
                           markLorebookDirty();
                         }}
-                        className="rounded-xl bg-[var(--secondary)] p-2.5 text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-colors hover:text-[var(--foreground)]"
-                        title="Unlink character"
-                      >
-                        <X size="0.875rem" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Persona Link */}
-                <div>
-                  <label className="mb-1.5 flex items-center gap-1 text-xs font-medium">
-                    Linked Persona{" "}
-                    <HelpTooltip text="When linked to a persona, this lorebook auto-activates in any chat that uses that persona. For chat-specific scope, leave this empty and attach the lorebook per-chat via the chat settings drawer's Lorebooks section instead." />
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={formPersonaId ?? ""}
-                      onChange={(e) => {
-                        const nextPersonaId = e.target.value || null;
-                        setFormPersonaId(nextPersonaId);
-                        if (nextPersonaId) setFormCharacterId(null);
-                        markLorebookDirty();
-                      }}
-                      className="flex-1 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-                    >
-                      <option value="">None</option>
-                      {personas.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.comment ? `${p.name} — ${p.comment}` : p.name}
-                        </option>
-                      ))}
-                    </select>
-                    {formPersonaId && (
-                      <button
-                        onClick={() => {
-                          setFormPersonaId(null);
+                        onRemove={(id) => {
+                          setFormCharacterIds((current) => current.filter((characterId) => characterId !== id));
                           markLorebookDirty();
                         }}
-                        className="rounded-xl bg-[var(--secondary)] p-2.5 text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-colors hover:text-[var(--foreground)]"
-                        title="Unlink persona"
-                      >
-                        <X size="0.875rem" />
-                      </button>
-                    )}
-                  </div>
-                </div>
+                      />
 
-                {/* Enabled toggle */}
-                <div className="flex items-center justify-between rounded-xl bg-[var(--secondary)] px-4 py-3 ring-1 ring-[var(--border)]">
-                  <div>
-                    <p className="text-xs font-medium">Enabled</p>
-                    <p className="text-[0.6875rem] text-[var(--muted-foreground)]">
-                      When off, entries in this lorebook won't activate
-                    </p>
+                      {/* Persona Link */}
+                      <LinkedResourcePicker
+                        label="Linked Personas"
+                        help="When linked to personas, this lorebook auto-activates in chats that use any of them."
+                        emptyText="No personas selected"
+                        addLabel="Add Persona"
+                        searchPlaceholder="Search personas..."
+                        icon={<UserRound size="0.875rem" />}
+                        items={personas.map((persona) => ({
+                          id: persona.id,
+                          name: persona.name,
+                          description: persona.comment,
+                        }))}
+                        selectedIds={formPersonaIds}
+                        search={personaLinkSearch}
+                        onSearchChange={setPersonaLinkSearch}
+                        isOpen={personaLinkPickerOpen}
+                        onOpen={() => {
+                          setPersonaLinkPickerOpen(true);
+                          setPersonaLinkSearch("");
+                        }}
+                        onClose={() => setPersonaLinkPickerOpen(false)}
+                        onAdd={(id) => {
+                          setFormPersonaIds((current) => (current.includes(id) ? current : [...current, id]));
+                          markLorebookDirty();
+                        }}
+                        onRemove={(id) => {
+                          setFormPersonaIds((current) => current.filter((personaId) => personaId !== id));
+                          markLorebookDirty();
+                        }}
+                      />
+                    </div>
                   </div>
-                  <button
-                    onClick={() => {
-                      setFormEnabled(!formEnabled);
-                      markLorebookDirty();
-                    }}
-                    className="transition-colors"
-                  >
-                    {formEnabled ? (
-                      <ToggleRight size="1.75rem" className="text-amber-400" />
-                    ) : (
-                      <ToggleLeft size="1.75rem" className="text-[var(--muted-foreground)]" />
-                    )}
-                  </button>
+                )}
+
+                {/* Status cards */}
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="flex min-h-[4.75rem] items-center justify-between rounded-xl bg-[var(--secondary)] px-4 py-3 ring-1 ring-[var(--border)]">
+                    <div>
+                      <p className="text-xs font-medium">Enabled</p>
+                      <p className="text-[0.6875rem] text-[var(--muted-foreground)]">
+                        When off, entries in this lorebook won't activate
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setFormEnabled(!formEnabled);
+                        markLorebookDirty();
+                      }}
+                      className="transition-colors"
+                    >
+                      {formEnabled ? (
+                        <ToggleRight size="1.75rem" className="text-amber-400" />
+                      ) : (
+                        <ToggleLeft size="1.75rem" className="text-[var(--muted-foreground)]" />
+                      )}
+                    </button>
+                  </div>
+
+                  {scopeSummary && (
+                    <div className="flex h-[10.25rem] items-start overflow-hidden rounded-xl bg-[var(--secondary)] px-4 py-3 ring-1 ring-[var(--border)] md:row-span-2">
+                      <div className="min-w-0 overflow-hidden">
+                        <p className="text-xs font-medium mb-1">Linked To:</p>
+                        {"text" in scopeSummary ? (
+                          <p className="text-[0.6875rem] text-[var(--muted-foreground)]">{scopeSummary.text}</p>
+                        ) : (
+                          <div
+                            className="space-y-1 overflow-hidden text-[0.6875rem] leading-snug text-[var(--muted-foreground)]"
+                            title={[scopeSummary.characters, scopeSummary.personas]
+                              .filter((line): line is { label: string; names: string } => line !== null)
+                              .map((line) => `${line.label} ${line.names}`)
+                              .join("\n")}
+                          >
+                            {scopeSummary.characters && (
+                              <p>
+                                <span className="font-medium text-[var(--foreground)]">
+                                  {scopeSummary.characters.label}
+                                </span>{" "}
+                                {scopeSummary.characters.names}
+                              </p>
+                            )}
+                            {scopeSummary.personas && (
+                              <p>
+                                <span className="font-medium text-[var(--foreground)]">{scopeSummary.personas.label}</span>{" "}
+                                {scopeSummary.personas.names}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex min-h-[4.75rem] items-center justify-between rounded-xl bg-[var(--secondary)] px-4 py-3 ring-1 ring-[var(--border)]">
+                    <div>
+                      <p className="text-xs font-medium">Global</p>
+                      <p className="text-[0.6875rem] text-[var(--muted-foreground)]">
+                        Active in every chat when this lorebook is enabled
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setFormIsGlobal(!formIsGlobal);
+                        markLorebookDirty();
+                      }}
+                      className="transition-colors"
+                    >
+                      {formIsGlobal ? (
+                        <ToggleRight size="1.75rem" className="text-amber-400" />
+                      ) : (
+                        <ToggleLeft size="1.75rem" className="text-[var(--muted-foreground)]" />
+                      )}
+                    </button>
+                  </div>
                 </div>
 
                 {/* Scan settings */}

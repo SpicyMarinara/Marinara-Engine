@@ -3,7 +3,14 @@
 // sections into actual content at assembly time.
 // ──────────────────────────────────────────────
 import type { DB } from "../../db/connection.js";
-import type { MarkerConfig, ChatMLMessage, CharacterData, WrapFormat, RPGStatsConfig } from "@marinara-engine/shared";
+import type {
+  MarkerConfig,
+  ChatMLMessage,
+  CharacterData,
+  WrapFormat,
+  RPGStatsConfig,
+  LorebookEntryTimingState,
+} from "@marinara-engine/shared";
 import { createCharactersStorage } from "../storage/characters.storage.js";
 import { createAgentsStorage } from "../storage/agents.storage.js";
 import { processLorebooks } from "../lorebook/index.js";
@@ -37,16 +44,28 @@ export interface MarkerContext {
   activeAgentIds: string[];
   /** Per-chat list of manually activated lorebook IDs from chat settings */
   activeLorebookIds: string[];
+  /** When true, lorebook markers expand to empty content without scanning global or scoped lorebooks. */
+  disableLorebooks?: boolean;
   /** Pre-computed embedding of the chat context for semantic lorebook matching. */
   chatEmbedding?: number[] | null;
   /** Per-chat ephemeral state overrides for lorebook entries (from chat metadata). */
   entryStateOverrides?: Record<string, { ephemeral?: number | null; enabled?: boolean }>;
+  /** Per-chat sticky/cooldown/delay timing state for lorebook entries. */
+  entryTimingStates?: Record<string, LorebookEntryTimingState>;
+  /** Global lorebook token budget for this chat/generation. */
+  lorebookTokenBudget?: number;
+  /** Current game state for lorebook conditions and schedules. */
+  gameState?: Record<string, unknown> | null;
   /** Generation trigger labels used by per-entry lorebook include/exclude filters. */
   generationTriggers?: string[];
+  /** Preview/debug expansion: lorebook markers should not consume timing or ephemeral state. */
+  previewOnly?: boolean;
   /** Collector for lorebook depth entries — populated during expansion, consumed by the assembler. */
   lorebookDepthEntries?: Array<{ content: string; role: "system" | "user" | "assistant"; depth: number }>;
   /** Collector for updated entry state overrides after ephemeral processing — saved to chat metadata by caller. */
   updatedEntryStateOverrides?: Record<string, { ephemeral?: number | null; enabled?: boolean }>;
+  /** Collector for updated sticky/cooldown/delay timing state — saved to chat metadata by caller. */
+  updatedEntryTimingStates?: Record<string, LorebookEntryTimingState>;
   /** When set, replaces all individual character scenario fields with this shared group scenario. */
   groupScenarioOverrideText?: string | null;
 }
@@ -224,19 +243,29 @@ async function expandPersona(_config: MarkerConfig, ctx: MarkerContext): Promise
 // ── Lorebook / World Info ──────────────────────
 
 async function expandLorebook(config: MarkerConfig, ctx: MarkerContext): Promise<ExpandedMarker> {
-  const result = await processLorebooks(ctx.db, ctx.chatMessages, null, {
+  if (ctx.disableLorebooks === true) return { content: "" };
+
+  const result = await processLorebooks(ctx.db, ctx.chatMessages, ctx.gameState ?? null, {
     chatId: ctx.chatId,
     characterIds: ctx.characterIds,
     personaId: ctx.personaId ?? null,
     activeLorebookIds: ctx.activeLorebookIds,
+    tokenBudget: ctx.lorebookTokenBudget,
     chatEmbedding: ctx.chatEmbedding ?? null,
     entryStateOverrides: ctx.entryStateOverrides,
+    entryTimingStates: ctx.entryTimingStates,
     generationTriggers: ctx.generationTriggers ?? ["chat"],
+    previewOnly: ctx.previewOnly === true,
   });
 
   // Collect updated per-chat entry state overrides for the caller to persist
   if (result.updatedEntryStateOverrides) {
     ctx.updatedEntryStateOverrides = result.updatedEntryStateOverrides;
+    ctx.entryStateOverrides = result.updatedEntryStateOverrides;
+  }
+  if (result.updatedEntryTimingStates !== undefined) {
+    ctx.updatedEntryTimingStates = result.updatedEntryTimingStates;
+    ctx.entryTimingStates = result.updatedEntryTimingStates;
   }
 
   // Collect depth entries for the assembler to inject later

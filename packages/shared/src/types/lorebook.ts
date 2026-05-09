@@ -40,11 +40,17 @@ export interface Lorebook {
   maxRecursionDepth: number;
   /** ID of the character this lorebook is linked to (character books) */
   characterId: string | null;
+  /** IDs of characters this lorebook is linked to */
+  characterIds: string[];
   /** ID of the persona this lorebook is linked to (persona books) */
   personaId: string | null;
+  /** IDs of personas this lorebook is linked to */
+  personaIds: string[];
   /** ID of the chat this lorebook is scoped to (if any) */
   chatId: string | null;
-  /** Whether this lorebook is globally active */
+  /** Whether this lorebook bypasses character/persona/chat scope filters */
+  isGlobal: boolean;
+  /** Master on/off switch for this lorebook */
   enabled: boolean;
   /** Tags for organizing/filtering lorebooks */
   tags: string[];
@@ -205,6 +211,18 @@ export interface LorebookSchedule {
   activeDates: string[];
   /** In-game locations where active */
   activeLocations: string[];
+}
+
+/** Per-chat runtime state for sticky/cooldown/delay lorebook entry timing. */
+export interface LorebookEntryTimingState {
+  /** Message index when this entry was last activated */
+  lastActivatedAt: number | null;
+  /** Sticky messages remaining after the original activation */
+  stickyCount: number;
+  /** Messages remaining before this entry may activate again */
+  cooldownRemaining: number;
+  /** Messages remaining before this entry may first activate */
+  delayRemaining: number;
 }
 
 /** Quest-specific fields for quest-type lorebook entries. */

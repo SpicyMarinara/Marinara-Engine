@@ -487,8 +487,14 @@ export function useRollDice() {
 
 export function useSkillCheck() {
   return useMutation({
-    mutationFn: (data: { chatId: string; skill: string; dc: number; advantage?: boolean; disadvantage?: boolean }) =>
-      api.post<{ result: import("@marinara-engine/shared").SkillCheckResult }>("/game/skill-check", data),
+    mutationFn: (data: {
+      chatId: string;
+      skill: string;
+      dc: number;
+      advantage?: boolean;
+      disadvantage?: boolean;
+      preRolledD20?: number;
+    }) => api.post<{ result: import("@marinara-engine/shared").SkillCheckResult }>("/game/skill-check", data),
   });
 }
 

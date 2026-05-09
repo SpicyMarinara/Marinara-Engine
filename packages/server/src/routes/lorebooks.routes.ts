@@ -10,6 +10,7 @@ import {
   createLorebookFolderSchema,
   updateLorebookFolderSchema,
   type CreateLorebookEntryInput,
+  type LorebookEntryTimingState,
   type LorebookEntry,
 } from "@marinara-engine/shared";
 import type { ExportEnvelope } from "@marinara-engine/shared";
@@ -525,6 +526,7 @@ export async function lorebooksRoutes(app: FastifyInstance) {
     let characterIds: string[] = [];
     let personaId: string | null = null;
     let activeLorebookIds: string[] = [];
+    let chatMeta: Record<string, unknown> = {};
     if (chat) {
       personaId = typeof chat.personaId === "string" ? chat.personaId : null;
       if (!personaId && chat.mode !== "game") {
@@ -545,11 +547,11 @@ export async function lorebooksRoutes(app: FastifyInstance) {
         /* ignore */
       }
       try {
-        const meta =
+        chatMeta =
           typeof chat.metadata === "string"
             ? JSON.parse(chat.metadata)
             : ((chat.metadata as Record<string, unknown>) ?? {});
-        activeLorebookIds = Array.isArray(meta.activeLorebookIds) ? meta.activeLorebookIds : [];
+        activeLorebookIds = Array.isArray(chatMeta.activeLorebookIds) ? chatMeta.activeLorebookIds : [];
       } catch {
         /* ignore */
       }
@@ -565,6 +567,24 @@ export async function lorebooksRoutes(app: FastifyInstance) {
       characterIds,
       personaId,
       activeLorebookIds,
+      tokenBudget: typeof chatMeta.lorebookTokenBudget === "number" ? chatMeta.lorebookTokenBudget : undefined,
+      entryStateOverrides:
+        ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
+        typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object")
+          ? ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) as Record<
+              string,
+              { ephemeral?: number | null; enabled?: boolean }
+            >)
+          : undefined,
+      entryTimingStates:
+        ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
+        typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object")
+          ? ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) as Record<
+              string,
+              LorebookEntryTimingState
+            >)
+          : undefined,
+      previewOnly: true,
       generationTriggers: resolveScanGenerationTriggers(chat?.mode),
     });
 

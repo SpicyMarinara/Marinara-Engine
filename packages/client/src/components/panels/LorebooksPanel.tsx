@@ -113,6 +113,20 @@ export function LorebooksPanel() {
     }
     return map;
   }, [rawPersonas]);
+  const getCharacterNames = useCallback(
+    (lb: Lorebook) => {
+      const ids = Array.isArray(lb.characterIds) && lb.characterIds.length > 0 ? lb.characterIds : lb.characterId ? [lb.characterId] : [];
+      return ids.map((id) => characterNameById.get(id) ?? id);
+    },
+    [characterNameById],
+  );
+  const getPersonaNames = useCallback(
+    (lb: Lorebook) => {
+      const ids = Array.isArray(lb.personaIds) && lb.personaIds.length > 0 ? lb.personaIds : lb.personaId ? [lb.personaId] : [];
+      return ids.map((id) => personaNameById.get(id) ?? id);
+    },
+    [personaNameById],
+  );
 
   const parseTags = (lb: Lorebook): string[] => {
     const raw = lb.tags;
@@ -167,13 +181,16 @@ export function LorebooksPanel() {
     if (!lorebooks) return [];
     let list = lorebooks as Lorebook[];
     // "Active" filter: show lorebooks active in the current chat
-    // Mirrors server-side filterRelevantLorebooks: pinned + character-linked + persona-linked + chat-scoped
+    // Mirrors server-side filterRelevantLorebooks: global + pinned + character-linked + persona-linked + chat-scoped
     if (activeCategory === "active") {
       list = list.filter(
         (lb) =>
           lb.enabled &&
-          (activeLorebookIds.includes(lb.id) ||
+          (lb.isGlobal ||
+            activeLorebookIds.includes(lb.id) ||
+            (Array.isArray(lb.characterIds) && lb.characterIds.some((id) => activeCharacterIds.includes(id))) ||
             (lb.characterId && activeCharacterIds.includes(lb.characterId)) ||
+            (Array.isArray(lb.personaIds) && lb.personaIds.includes(activePersonaId ?? "")) ||
             (lb.personaId && lb.personaId === activePersonaId) ||
             (lb.chatId && lb.chatId === activeChatId)),
       );
@@ -187,8 +204,8 @@ export function LorebooksPanel() {
       (lb: Lorebook) =>
         lb.name.toLowerCase().includes(q) ||
         lb.description.toLowerCase().includes(q) ||
-        (lb.characterId ? (characterNameById.get(lb.characterId) ?? "").toLowerCase().includes(q) : false) ||
-        (lb.personaId ? (personaNameById.get(lb.personaId) ?? "").toLowerCase().includes(q) : false) ||
+        getCharacterNames(lb).some((name) => name.toLowerCase().includes(q)) ||
+        getPersonaNames(lb).some((name) => name.toLowerCase().includes(q)) ||
         parseTags(lb).some((t) => t.toLowerCase().includes(q)),
     );
   }, [
@@ -200,8 +217,8 @@ export function LorebooksPanel() {
     activeChatId,
     searchQuery,
     activeTag,
-    characterNameById,
-    personaNameById,
+    getCharacterNames,
+    getPersonaNames,
   ]);
 
   const sorted = useMemo(() => {
@@ -545,64 +562,70 @@ export function LorebooksPanel() {
                       {catMeta.label}
                       <span className="ml-auto text-[0.625rem] font-normal">{books.length}</span>
                     </div>
-                    {books.map((lb) => (
-                      <LorebookRow
-                        key={lb.id}
-                        lorebook={lb}
-                        characterName={lb.characterId ? characterNameById.get(lb.characterId) : undefined}
-                        personaName={lb.personaId ? personaNameById.get(lb.personaId) : undefined}
-                        onClick={() => {
-                          if (selectionMode) toggleSelection(lb.id);
-                          else openLorebookDetail(lb.id);
-                        }}
-                        onDelete={async () => {
-                          if (
-                            await showConfirmDialog({
-                              title: "Delete Lorebook",
-                              message: `Delete "${lb.name}"? All entries will be lost.`,
-                              confirmLabel: "Delete",
-                              tone: "destructive",
-                            })
-                          ) {
-                            deleteLorebook.mutate(lb.id);
-                          }
-                        }}
-                        selectionMode={selectionMode}
-                        isSelected={selectedLorebookIds.has(lb.id)}
-                        onToggleSelect={() => toggleSelection(lb.id)}
-                      />
-                    ))}
+                    {books.map((lb) => {
+                      const combinedNames = [...getCharacterNames(lb), ...getPersonaNames(lb)].join(", ") || undefined;
+                      return (
+                        <LorebookRow
+                          key={lb.id}
+                          lorebook={lb}
+                          characterName={combinedNames}
+                          personaName={undefined}
+                          onClick={() => {
+                            if (selectionMode) toggleSelection(lb.id);
+                            else openLorebookDetail(lb.id);
+                          }}
+                          onDelete={async () => {
+                            if (
+                              await showConfirmDialog({
+                                title: "Delete Lorebook",
+                                message: `Delete "${lb.name}"? All entries will be lost.`,
+                                confirmLabel: "Delete",
+                                tone: "destructive",
+                              })
+                            ) {
+                              deleteLorebook.mutate(lb.id);
+                            }
+                          }}
+                          selectionMode={selectionMode}
+                          isSelected={selectedLorebookIds.has(lb.id)}
+                          onToggleSelect={() => toggleSelection(lb.id)}
+                        />
+                      );
+                    })}
                   </div>
                 );
               })
             : // Flat view
-              sorted.map((lb: Lorebook) => (
-                <LorebookRow
-                  key={lb.id}
-                  lorebook={lb}
-                  characterName={lb.characterId ? characterNameById.get(lb.characterId) : undefined}
-                  personaName={lb.personaId ? personaNameById.get(lb.personaId) : undefined}
-                  onClick={() => {
-                    if (selectionMode) toggleSelection(lb.id);
-                    else openLorebookDetail(lb.id);
-                  }}
-                  onDelete={async () => {
-                    if (
-                      await showConfirmDialog({
-                        title: "Delete Lorebook",
-                        message: `Delete "${lb.name}"? All entries will be lost.`,
-                        confirmLabel: "Delete",
-                        tone: "destructive",
-                      })
-                    ) {
-                      deleteLorebook.mutate(lb.id);
-                    }
-                  }}
-                  selectionMode={selectionMode}
-                  isSelected={selectedLorebookIds.has(lb.id)}
-                  onToggleSelect={() => toggleSelection(lb.id)}
-                />
-              ))}
+              sorted.map((lb: Lorebook) => {
+                const combinedNames = [...getCharacterNames(lb), ...getPersonaNames(lb)].join(", ") || undefined;
+                return (
+                  <LorebookRow
+                    key={lb.id}
+                    lorebook={lb}
+                    characterName={combinedNames}
+                    personaName={undefined}
+                    onClick={() => {
+                      if (selectionMode) toggleSelection(lb.id);
+                      else openLorebookDetail(lb.id);
+                    }}
+                    onDelete={async () => {
+                      if (
+                        await showConfirmDialog({
+                          title: "Delete Lorebook",
+                          message: `Delete "${lb.name}"? All entries will be lost.`,
+                          confirmLabel: "Delete",
+                          tone: "destructive",
+                        })
+                      ) {
+                        deleteLorebook.mutate(lb.id);
+                      }
+                    }}
+                    selectionMode={selectionMode}
+                    isSelected={selectedLorebookIds.has(lb.id)}
+                    onToggleSelect={() => toggleSelection(lb.id)}
+                  />
+                );
+              })}
         </div>
       )}
     </div>

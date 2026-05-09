@@ -3,7 +3,14 @@
 // Ties together storage, scanning, and injection.
 // ──────────────────────────────────────────────
 import type { DB } from "../../db/connection.js";
-import type { CharacterData, Lorebook, LorebookEntry, LorebookMatchingSource } from "@marinara-engine/shared";
+import { LIMITS } from "@marinara-engine/shared";
+import type {
+  CharacterData,
+  Lorebook,
+  LorebookEntry,
+  LorebookEntryTimingState,
+  LorebookMatchingSource,
+} from "@marinara-engine/shared";
 import { createCharactersStorage } from "../storage/characters.storage.js";
 import { createLorebooksStorage } from "../storage/lorebooks.storage.js";
 import {
@@ -13,6 +20,8 @@ import {
   type ScanOptions,
   type GameStateForScanning,
   type ActivatedEntry,
+  type EntryTimingState,
+  updateTimingStatesForScan,
 } from "./keyword-scanner.js";
 import { applyTokenBudget, processActivatedEntries } from "./prompt-injector.js";
 
@@ -25,6 +34,8 @@ export interface LorebookScanResult {
   activatedEntryIds: string[];
   /** Updated per-chat entry state overrides (ephemeral countdown). Caller should persist to chat metadata. */
   updatedEntryStateOverrides?: Record<string, { ephemeral?: number | null; enabled?: boolean }>;
+  /** Updated per-chat timing states for sticky/cooldown/delay. Caller should persist to chat metadata. */
+  updatedEntryTimingStates?: Record<string, LorebookEntryTimingState>;
 }
 
 type LorebookFilters = {
@@ -42,8 +53,11 @@ type RelevantLorebook = Pick<
   | "tokenBudget"
   | "recursiveScanning"
   | "maxRecursionDepth"
+  | "isGlobal"
   | "characterId"
+  | "characterIds"
   | "personaId"
+  | "personaIds"
   | "chatId"
 >;
 
@@ -144,12 +158,62 @@ export function filterRelevantLorebooks(lorebooks: RelevantLorebook[], filters?:
   if (!filters) return enabledBooks;
 
   return enabledBooks.filter((book) => {
+    if (book.isGlobal) return true;
     if (filters.activeLorebookIds?.includes(book.id)) return true;
+    if ((book.characterIds ?? []).some((id) => filters.characterIds?.includes(id))) return true;
     if (book.characterId && filters.characterIds?.includes(book.characterId)) return true;
+    if (filters.personaId && (book.personaIds ?? []).includes(filters.personaId)) return true;
     if (book.personaId && book.personaId === filters.personaId) return true;
     if (book.chatId && book.chatId === filters.chatId) return true;
     return false;
   });
+}
+
+function toTimingStateMap(states?: Record<string, LorebookEntryTimingState>): Map<string, EntryTimingState> {
+  if (!states) return new Map();
+  const map = new Map<string, EntryTimingState>();
+  for (const [entryId, state] of Object.entries(states)) {
+    if (!state || typeof state !== "object") continue;
+    map.set(entryId, {
+      lastActivatedAt: typeof state.lastActivatedAt === "number" ? state.lastActivatedAt : null,
+      stickyCount: Math.max(0, Number(state.stickyCount ?? 0)),
+      cooldownRemaining: Math.max(0, Number(state.cooldownRemaining ?? 0)),
+      delayRemaining: Math.max(0, Number(state.delayRemaining ?? 0)),
+    });
+  }
+  return map;
+}
+
+function hasSerializedTimingStates(states?: Record<string, LorebookEntryTimingState>): boolean {
+  return states !== undefined && Object.keys(states).length > 0;
+}
+
+export function serializeTimingStateMap(states: Map<string, EntryTimingState>): Record<string, LorebookEntryTimingState> {
+  const record: Record<string, LorebookEntryTimingState> = {};
+  for (const [entryId, state] of states) {
+    record[entryId] = {
+      lastActivatedAt: state.lastActivatedAt,
+      stickyCount: state.stickyCount,
+      cooldownRemaining: state.cooldownRemaining,
+      delayRemaining: state.delayRemaining,
+    };
+  }
+  return record;
+}
+
+export function enforceMaxActivatedEntries(
+  activatedEntries: ActivatedEntry[],
+  maxEntries: number = LIMITS.MAX_LOREBOOK_ENTRIES,
+): ActivatedEntry[] {
+  if (maxEntries <= 0 || activatedEntries.length <= maxEntries) return activatedEntries;
+  return [...activatedEntries]
+    .sort((a, b) => {
+      if (a.entry.constant && !b.entry.constant) return -1;
+      if (!a.entry.constant && b.entry.constant) return 1;
+      return a.injectionOrder - b.injectionOrder;
+    })
+    .slice(0, maxEntries)
+    .sort((a, b) => a.injectionOrder - b.injectionOrder);
 }
 
 export function applyLorebookDefaults(
@@ -213,6 +277,10 @@ export async function processLorebooks(
     /** Per-chat entry state overrides (from chat metadata). When provided, ephemeral
      *  countdown is tracked here instead of modifying the global entry row. */
     entryStateOverrides?: Record<string, { ephemeral?: number | null; enabled?: boolean }>;
+    /** Per-chat timing state for sticky/cooldown/delay. */
+    entryTimingStates?: Record<string, LorebookEntryTimingState>;
+    /** Preview/debug scan: read timing state but do not return mutable timing updates. */
+    previewOnly?: boolean;
     /** Generation trigger labels used by per-entry include/exclude filters. */
     generationTriggers?: string[];
   },
@@ -264,6 +332,8 @@ export async function processLorebooks(
       });
   }
 
+  const previewOnly = options?.previewOnly === true;
+
   if (allEntries.length === 0) {
     return {
       worldInfoBefore: "",
@@ -272,10 +342,13 @@ export async function processLorebooks(
       totalEntries: 0,
       totalTokensEstimate: 0,
       activatedEntryIds: [],
+      ...(!previewOnly && hasSerializedTimingStates(options?.entryTimingStates) ? { updatedEntryTimingStates: {} } : {}),
     };
   }
 
-  const tokenBudget = options?.tokenBudget ?? 0;
+  const tokenBudget = options?.tokenBudget ?? LIMITS.DEFAULT_LOREBOOK_TOKEN_BUDGET;
+  const timingStates = toTimingStateMap(options?.entryTimingStates);
+  const currentMessageIndex = messages.length;
   const matchingContext = await buildLorebookMatchingContext(
     db,
     options?.characterIds,
@@ -293,6 +366,8 @@ export async function processLorebooks(
     activeCharacterTags: matchingContext.activeCharacterTags,
     generationTriggers: options?.generationTriggers ?? ["chat"],
     additionalMatchingSourceText: matchingContext.additionalMatchingSourceText,
+    timingStates,
+    currentMessageIndex,
   };
 
   // Determine recursion settings from relevant enabled lorebooks only.
@@ -313,7 +388,8 @@ export async function processLorebooks(
     activated = scanForActivatedEntries(messages, allEntries, scanOpts);
   }
 
-  const budgetedActivated = applyPerLorebookTokenBudgets(activated, relevantLorebooksById);
+  const perLorebookBudgeted = applyPerLorebookTokenBudgets(activated, relevantLorebooksById);
+  const cappedActivated = enforceMaxActivatedEntries(perLorebookBudgeted);
 
   // Decrement ephemeral counters for activated entries.
   // When per-chat overrides are provided, track the countdown in those overrides
@@ -322,10 +398,12 @@ export async function processLorebooks(
   // that don't pass a chatId).
   let updatedOverrides: Record<string, { ephemeral?: number | null; enabled?: boolean }> | undefined;
 
-  if (overrides) {
+  if (previewOnly) {
+    updatedOverrides = undefined;
+  } else if (overrides) {
     // Per-chat tracking: write to overrides, leave global entry untouched
     updatedOverrides = { ...overrides };
-    for (const a of budgetedActivated) {
+    for (const a of cappedActivated) {
       if (a.entry.ephemeral !== null && a.entry.ephemeral > 0) {
         const remaining = a.entry.ephemeral - 1;
         updatedOverrides[a.entry.id] = {
@@ -338,7 +416,7 @@ export async function processLorebooks(
   } else if (options?.chatId) {
     // Legacy path: first call for this chat (no overrides yet) — initialise per-chat overrides
     updatedOverrides = {};
-    for (const a of budgetedActivated) {
+    for (const a of cappedActivated) {
       if (a.entry.ephemeral !== null && a.entry.ephemeral > 0) {
         const remaining = a.entry.ephemeral - 1;
         updatedOverrides[a.entry.id] = {
@@ -352,11 +430,20 @@ export async function processLorebooks(
   // don't modify global state or return overrides.
 
   // Process into injectable content
-  const result = processActivatedEntries(budgetedActivated, tokenBudget);
+  const updatedTimingMap = previewOnly
+    ? undefined
+    : updateTimingStatesForScan(allEntries, cappedActivated, timingStates, currentMessageIndex);
+  const updatedEntryTimingStates =
+    updatedTimingMap && (timingStates.size > 0 || updatedTimingMap.size > 0)
+      ? serializeTimingStateMap(updatedTimingMap)
+      : undefined;
+
+  const result = processActivatedEntries(cappedActivated, tokenBudget);
 
   return {
     ...result,
-    activatedEntryIds: budgetedActivated.map((a) => a.entry.id),
+    activatedEntryIds: cappedActivated.map((a) => a.entry.id),
     ...(updatedOverrides ? { updatedEntryStateOverrides: updatedOverrides } : {}),
+    ...(updatedEntryTimingStates ? { updatedEntryTimingStates } : {}),
   };
 }

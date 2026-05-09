@@ -12,7 +12,7 @@ import {
   resolveMacros,
   summariesPatchSchema,
 } from "@marinara-engine/shared";
-import type { CharacterData, ChatMemoryChunk } from "@marinara-engine/shared";
+import type { CharacterData, ChatMemoryChunk, LorebookEntryTimingState } from "@marinara-engine/shared";
 import { createChatsStorage } from "../services/storage/chats.storage.js";
 import { createCharactersStorage } from "../services/storage/characters.storage.js";
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
@@ -1121,8 +1121,32 @@ export async function chatsRoutes(app: FastifyInstance) {
             activeLorebookIds: Array.isArray(chatMeta.activeLorebookIds)
               ? (chatMeta.activeLorebookIds as string[])
               : [],
-            entryStateOverrides,
-            generationTriggers: resolveLorebookGenerationTriggers(chat.mode),
+            entryStateOverrides:
+              ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
+              typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object")
+                ? ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) as Record<
+                    string,
+                    { ephemeral?: number | null; enabled?: boolean }
+                  >)
+                : undefined,
+            entryTimingStates:
+              ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
+              typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object")
+                ? ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) as Record<
+                    string,
+                    LorebookEntryTimingState
+                  >)
+                : undefined,
+            generationTriggers:
+              ((chatMeta.generationTriggers ?? chatMeta.lorebookGenerationTriggers) &&
+              Array.isArray(chatMeta.generationTriggers ?? chatMeta.lorebookGenerationTriggers))
+                ? ((chatMeta.generationTriggers ?? chatMeta.lorebookGenerationTriggers) as string[])
+                : undefined,
+            lorebookTokenBudget:
+              typeof (chatMeta.lorebookTokenBudget ?? chatMeta.generationLorebookTokenBudget) === "number"
+                ? ((chatMeta.lorebookTokenBudget ?? chatMeta.generationLorebookTokenBudget) as number)
+                : undefined,
+            previewOnly: true,
             groupScenarioOverrideText:
               typeof chatMeta.groupScenarioText === "string" && (chatMeta.groupScenarioText as string).trim()
                 ? (chatMeta.groupScenarioText as string).trim()

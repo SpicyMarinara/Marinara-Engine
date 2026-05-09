@@ -123,6 +123,7 @@ import {
   DEFAULT_IMPERSONATE_PROMPT,
   DEFAULT_AGENT_MAX_TOKENS,
   DEFAULT_AGENT_PROMPTS,
+  LIMITS,
   MAX_AGENT_MAX_TOKENS,
   MIN_AGENT_MAX_TOKENS,
   estimateAgentLoadCost,
@@ -130,7 +131,7 @@ import {
   AGENT_COST_HIGH_TOKENS,
   getDefaultBuiltInAgentSettings,
 } from "@marinara-engine/shared";
-import type { Chat, CharacterGroup } from "@marinara-engine/shared";
+import type { Chat, CharacterGroup, Lorebook } from "@marinara-engine/shared";
 import {
   isCustomToolSelectable,
   useCustomToolCapabilities,
@@ -175,6 +176,13 @@ type AvailableAgent = {
   category: string;
   phase: AgentPhase;
   builtIn: boolean;
+};
+
+type LorebookActiveReason = "Global" | "Character" | "Persona" | "Chat";
+
+type ActiveLorebookView = Lorebook & {
+  activeReasons: LorebookActiveReason[];
+  isPinned: boolean;
 };
 
 type AgentAddPreview = {
@@ -313,14 +321,43 @@ export function ChatSettingsDrawer({
     () => (Array.isArray(metadata.activeLorebookIds) ? metadata.activeLorebookIds : []),
     [metadata.activeLorebookIds],
   );
-  const existingActiveLorebooks = useMemo(() => {
-    const lorebookList = (lorebooks ?? []) as Array<{ id: string; name: string }>;
-    const lorebookById = new Map(lorebookList.map((lorebook) => [lorebook.id, lorebook]));
-    return activeLorebookIds.flatMap((lorebookId) => {
-      const lorebook = lorebookById.get(lorebookId);
-      return lorebook ? [lorebook] : [];
+  const activeLorebooks = useMemo<ActiveLorebookView[]>(() => {
+    const pinnedIds = new Set(activeLorebookIds);
+    const lorebookList = (lorebooks ?? []) as Lorebook[];
+
+    return lorebookList.flatMap((lorebook) => {
+      const reasons: LorebookActiveReason[] = [];
+      const isPinned = pinnedIds.has(lorebook.id);
+
+      if (lorebook.enabled !== false) {
+        if (isPinned) reasons.push("Chat");
+        if (lorebook.isGlobal) reasons.push("Global");
+        if (
+          lorebook.characterIds?.some((id) => chatCharIds.includes(id)) ||
+          (lorebook.characterId && chatCharIds.includes(lorebook.characterId))
+        ) {
+          reasons.push("Character");
+        }
+        if (
+          chat.personaId &&
+          (lorebook.personaIds?.includes(chat.personaId) || lorebook.personaId === chat.personaId)
+        ) {
+          reasons.push("Persona");
+        }
+        if (lorebook.chatId === chat.id && !reasons.includes("Chat")) reasons.push("Chat");
+      }
+
+      return reasons.length > 0 ? [{ ...lorebook, activeReasons: reasons, isPinned }] : [];
     });
-  }, [activeLorebookIds, lorebooks]);
+  }, [activeLorebookIds, chat.id, chat.personaId, chatCharIds, lorebooks]);
+  const activeLorebookIdSet = useMemo(
+    () => new Set(activeLorebooks.map((lorebook) => lorebook.id)),
+    [activeLorebooks],
+  );
+  const lorebookTokenBudget =
+    typeof metadata.lorebookTokenBudget === "number" && Number.isFinite(metadata.lorebookTokenBudget)
+      ? Math.max(0, Math.floor(metadata.lorebookTokenBudget))
+      : LIMITS.DEFAULT_LOREBOOK_TOKEN_BUDGET;
   const activeAgentIds = useMemo<string[]>(() => metadata.activeAgentIds ?? [], [metadata.activeAgentIds]);
   const activeToolIds: string[] = metadata.activeToolIds ?? [];
   const gameLorebookKeeperEnabled = metadata.gameLorebookKeeperEnabled === true;
@@ -740,6 +777,11 @@ export function ChatSettingsDrawer({
     updateMeta.mutate({ id: chat.id, activeLorebookIds: current });
   };
 
+  const pinLorebookToChat = (lbId: string) => {
+    if (activeLorebookIds.includes(lbId)) return;
+    updateMeta.mutate({ id: chat.id, activeLorebookIds: [...activeLorebookIds, lbId] });
+  };
+
   const hasSecretPlotMemory = (memory: Record<string, unknown> | null | undefined) => {
     if (!memory) return false;
     const arc = memory.overarchingArc;
@@ -847,6 +889,50 @@ export function ChatSettingsDrawer({
   };
 
   const currentPromptPresetHasVariables = (currentPromptPresetFull?.choiceBlocks?.length ?? 0) > 0;
+  const currentPromptPresetHasLorebookMarker = useMemo(() => {
+    const sections = currentPromptPresetFull?.sections ?? [];
+    return sections.some((section) => {
+      const enabled = (section as { enabled?: boolean | string }).enabled;
+      const isMarker = (section as { isMarker?: boolean | string }).isMarker;
+      if (enabled === false || enabled === "false") return false;
+      if (isMarker !== true && isMarker !== "true") return false;
+      try {
+        const config =
+          typeof section.markerConfig === "string" ? JSON.parse(section.markerConfig) : section.markerConfig;
+        return (
+          config?.type === "lorebook" ||
+          config?.type === "world_info_before" ||
+          config?.type === "world_info_after"
+        );
+      } catch {
+        return false;
+      }
+    });
+  }, [currentPromptPresetFull?.sections]);
+  const hasScopedOrGlobalLorebooks = useMemo(() => {
+    return ((lorebooks ?? []) as Array<{
+      id: string;
+      enabled?: boolean;
+      isGlobal?: boolean;
+      characterId?: string | null;
+      characterIds?: string[];
+      personaId?: string | null;
+      personaIds?: string[];
+      chatId?: string | null;
+    }>).some(
+      (lorebook) =>
+        lorebook.enabled !== false &&
+        (lorebook.isGlobal ||
+          activeLorebookIds.includes(lorebook.id) ||
+          lorebook.characterIds?.some((id) => chatCharIds.includes(id)) ||
+          (lorebook.characterId && chatCharIds.includes(lorebook.characterId)) ||
+          (chat.personaId && lorebook.personaIds?.includes(chat.personaId)) ||
+          (lorebook.personaId && lorebook.personaId === chat.personaId) ||
+          (lorebook.chatId && lorebook.chatId === chat.id)),
+    );
+  }, [activeLorebookIds, chat.id, chat.personaId, chatCharIds, lorebooks]);
+  const showLorebookMarkerWarning =
+    !!chat.promptPresetId && hasScopedOrGlobalLorebooks && !currentPromptPresetHasLorebookMarker;
 
   const setPreset = (presetId: string | null) => {
     updateChat.mutate(
@@ -1507,6 +1593,12 @@ export function ChatSettingsDrawer({
                   </button>
                 )}
               </div>
+              {showLorebookMarkerWarning && (
+                <div className="mt-2 flex items-start gap-2 rounded-lg bg-amber-400/10 px-3 py-2 text-[0.6875rem] text-amber-200 ring-1 ring-amber-400/25">
+                  <AlertTriangle size="0.75rem" className="mt-[0.125rem] shrink-0" />
+                  <span>This preset has active lorebooks available, but no lorebook marker.</span>
+                </div>
+              )}
             </Section>
           )}
 
@@ -2889,29 +2981,68 @@ export function ChatSettingsDrawer({
           <Section
             label="Lorebooks"
             icon={<BookOpen size="0.875rem" />}
-            count={existingActiveLorebooks.length}
+            count={activeLorebooks.length}
             help="Lorebooks contain world info, character backstories, and lore that gets injected into the AI's context when relevant keywords appear."
-          >
+         >
+              <div className="mb-2 rounded-lg bg-[var(--secondary)]/70 p-3 ring-1 ring-[var(--border)]">
+              <label className="mb-1.5 flex items-center gap-1 text-xs font-medium">
+                Lorebook Token Budget{" "}
+                <HelpTooltip text={`Context cap for activated lorebook retrievals in this chat. Default: ${LIMITS.DEFAULT_LOREBOOK_TOKEN_BUDGET}. Set to 0 for unlimited.`} />
+              </label>
+              <input
+                type="number"
+                min={0}
+                value={lorebookTokenBudget}
+                onChange={(event) => {
+                  const next = Math.max(0, Math.floor(Number(event.target.value) || 0));
+                  updateMeta.mutate({ id: chat.id, lorebookTokenBudget: next });
+                }}
+                className="w-full rounded-lg bg-[var(--background)] px-3 py-2 text-xs ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+              />
+            </div>
+
             {/* Active lorebooks */}
-            {existingActiveLorebooks.length === 0 ? (
-              <p className="text-[0.6875rem] text-[var(--muted-foreground)]">No lorebooks added to this chat.</p>
+            {activeLorebooks.length === 0 ? (
+              <p className="text-[0.6875rem] text-[var(--muted-foreground)]">No lorebooks active in this chat.</p>
             ) : (
               <div className="flex flex-col gap-1">
-                {existingActiveLorebooks.map((lb) => {
+                {activeLorebooks.map((lb) => {
                   return (
                     <div
                       key={lb.id}
                       className="flex items-center gap-2.5 rounded-lg bg-[var(--primary)]/10 px-3 py-2 ring-1 ring-[var(--primary)]/30"
                     >
                       <BookOpen size="0.875rem" className="text-[var(--primary)]" />
-                      <span className="flex-1 truncate text-xs">{lb.name}</span>
-                      <button
-                        onClick={() => toggleLorebook(lb.id)}
-                        className="flex h-5 w-5 items-center justify-center rounded-md text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)]"
-                        title="Remove from chat"
-                      >
-                        <Trash2 size="0.6875rem" />
-                      </button>
+                      <div className="min-w-0 flex-1">
+                        <span className="block truncate text-xs">{lb.name}</span>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {lb.activeReasons.map((reason) => (
+                            <span
+                              key={reason}
+                              className="rounded-full bg-[var(--background)]/70 px-1.5 py-0.5 text-[0.5625rem] font-medium text-[var(--muted-foreground)] ring-1 ring-[var(--border)]"
+                            >
+                              {reason}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      {lb.isPinned ? (
+                        <button
+                          onClick={() => toggleLorebook(lb.id)}
+                          className="flex h-5 w-5 items-center justify-center rounded-md text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)]"
+                          title="Remove from chat"
+                        >
+                          <Trash2 size="0.6875rem" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => pinLorebookToChat(lb.id)}
+                          className="flex h-5 w-5 items-center justify-center rounded-md text-[var(--muted-foreground)] transition-colors hover:bg-[var(--primary)]/15 hover:text-[var(--primary)]"
+                          title="Add to chat"
+                        >
+                          <Plus size="0.6875rem" />
+                        </button>
+                      )}
                     </div>
                   );
                 })}
@@ -2937,7 +3068,7 @@ export function ChatSettingsDrawer({
                 placeholder="Search lorebooks…"
               >
                 {((lorebooks ?? []) as Array<{ id: string; name: string }>)
-                  .filter((lb) => !activeLorebookIds.includes(lb.id))
+                  .filter((lb) => !activeLorebookIdSet.has(lb.id))
                   .filter((lb) => lb.name.toLowerCase().includes(lbSearch.toLowerCase()))
                   .map((lb) => (
                     <button
@@ -2954,12 +3085,12 @@ export function ChatSettingsDrawer({
                     </button>
                   ))}
                 {((lorebooks ?? []) as Array<{ id: string; name: string }>)
-                  .filter((lb) => !activeLorebookIds.includes(lb.id))
+                  .filter((lb) => !activeLorebookIdSet.has(lb.id))
                   .filter((lb) => lb.name.toLowerCase().includes(lbSearch.toLowerCase())).length === 0 && (
                   <p className="px-3 py-2 text-[0.6875rem] text-[var(--muted-foreground)]">
-                    {((lorebooks ?? []) as Array<{ id: string }>).filter((lb) => !activeLorebookIds.includes(lb.id))
+                    {((lorebooks ?? []) as Array<{ id: string }>).filter((lb) => !activeLorebookIdSet.has(lb.id))
                       .length === 0
-                      ? "All lorebooks already added."
+                      ? "All available lorebooks are already active here."
                       : "No matches."}
                   </p>
                 )}

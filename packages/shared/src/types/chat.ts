@@ -143,6 +143,10 @@ export interface ChatMetadata {
   /** Per-chat ephemeral / enabled overrides for lorebook entries (entryId → state).
    *  Tracked per-chat so ephemeral countdown in one chat doesn't affect others. */
   entryStateOverrides?: Record<string, { ephemeral?: number | null; enabled?: boolean }>;
+  /** Per-chat sticky/cooldown/delay runtime state for lorebook entries. */
+  entryTimingStates?: Record<string, import("./lorebook.js").LorebookEntryTimingState>;
+  /** Per-chat global lorebook token budget. Missing uses app default; 0 means unlimited. */
+  lorebookTokenBudget?: number | null;
   /** ID of the chat preset most recently applied to this chat (drives the preset bar dropdown). */
   appliedChatPresetId?: string | null;
   /** Custom prompt prefix used by the /impersonate slash command. */
