@@ -3,12 +3,13 @@ import type {
   ComfyUiDefaults,
   ImageDefaultsService,
   ImageGenerationDefaultsProfile,
+  NovelAiDefaults,
 } from "../types/image-generation-defaults.js";
 
 export const IMAGE_DEFAULTS_STORAGE_KEY = "imageGeneration";
 export const IMAGE_GENERATION_DEFAULTS_VERSION = 1 as const;
 
-export const IMAGE_DEFAULTS_SERVICES: ImageDefaultsService[] = ["automatic1111", "comfyui"];
+export const IMAGE_DEFAULTS_SERVICES: ImageDefaultsService[] = ["automatic1111", "comfyui", "novelai"];
 
 export const DEFAULT_AUTOMATIC1111_DEFAULTS: Automatic1111Defaults = {
   promptPrefix: "",
@@ -31,6 +32,17 @@ export const DEFAULT_COMFYUI_DEFAULTS: ComfyUiDefaults = {
   cfgScale: 7,
   denoisingStrength: 1,
   clipSkip: null,
+};
+
+export const DEFAULT_NOVELAI_DEFAULTS: NovelAiDefaults = {
+  promptPrefix: "",
+  negativePromptPrefix: "",
+  sampler: "k_euler_ancestral",
+  noiseSchedule: "karras",
+  steps: 28,
+  promptGuidance: 6,
+  promptGuidanceRescale: 0,
+  undesiredContentPreset: 0,
 };
 
 export const SD_WEBUI_SAMPLER_OPTIONS = [
@@ -84,6 +96,21 @@ export const COMFYUI_SCHEDULER_OPTIONS = [
   { value: "ddim_uniform", label: "DDIM uniform" },
 ] as const;
 
+export const NOVELAI_SAMPLER_OPTIONS = [
+  { value: "k_euler_ancestral", label: "Euler ancestral" },
+  { value: "k_euler", label: "Euler" },
+  { value: "k_dpmpp_2m", label: "DPM++ 2M" },
+  { value: "k_dpmpp_sde", label: "DPM++ SDE" },
+  { value: "ddim", label: "DDIM" },
+] as const;
+
+export const NOVELAI_NOISE_SCHEDULE_OPTIONS = [
+  { value: "karras", label: "Karras" },
+  { value: "native", label: "Native" },
+  { value: "exponential", label: "Exponential" },
+  { value: "polyexponential", label: "Polyexponential" },
+] as const;
+
 export interface NormalizeImageGenerationProfileResult {
   profile: ImageGenerationDefaultsProfile;
   changed: boolean;
@@ -108,6 +135,7 @@ export function createDefaultImageGenerationProfile(service: ImageDefaultsServic
   };
   if (service === "automatic1111") profile.automatic1111 = { ...DEFAULT_AUTOMATIC1111_DEFAULTS };
   if (service === "comfyui") profile.comfyui = { ...DEFAULT_COMFYUI_DEFAULTS };
+  if (service === "novelai") profile.novelai = { ...DEFAULT_NOVELAI_DEFAULTS };
   return profile;
 }
 
@@ -124,8 +152,10 @@ export function normalizeImageGenerationProfile(
 
   if (service === "automatic1111") {
     profile.automatic1111 = normalizeAutomatic1111Defaults(rawProfile.automatic1111);
-  } else {
+  } else if (service === "comfyui") {
     profile.comfyui = normalizeComfyUiDefaults(rawProfile.comfyui);
+  } else {
+    profile.novelai = normalizeNovelAiDefaults(rawProfile.novelai);
   }
 
   const changed = JSON.stringify(profile) !== JSON.stringify(rawProfile);
@@ -181,6 +211,30 @@ function normalizeComfyUiDefaults(rawDefaults: unknown): ComfyUiDefaults {
     cfgScale: readNumber(raw.cfgScale, DEFAULT_COMFYUI_DEFAULTS.cfgScale, 0, 30),
     denoisingStrength: readNumber(raw.denoisingStrength, DEFAULT_COMFYUI_DEFAULTS.denoisingStrength, 0, 1),
     clipSkip: readNullableInteger(raw.clipSkip, DEFAULT_COMFYUI_DEFAULTS.clipSkip, 1, 12),
+  };
+}
+
+function normalizeNovelAiDefaults(rawDefaults: unknown): NovelAiDefaults {
+  const raw = isRecord(rawDefaults) ? rawDefaults : {};
+  return {
+    promptPrefix: readString(raw.promptPrefix, DEFAULT_NOVELAI_DEFAULTS.promptPrefix),
+    negativePromptPrefix: readString(raw.negativePromptPrefix, DEFAULT_NOVELAI_DEFAULTS.negativePromptPrefix),
+    sampler: readString(raw.sampler, DEFAULT_NOVELAI_DEFAULTS.sampler),
+    noiseSchedule: readString(raw.noiseSchedule, DEFAULT_NOVELAI_DEFAULTS.noiseSchedule),
+    steps: readInteger(raw.steps, DEFAULT_NOVELAI_DEFAULTS.steps, 1, 150),
+    promptGuidance: readNumber(raw.promptGuidance, DEFAULT_NOVELAI_DEFAULTS.promptGuidance, 0, 30),
+    promptGuidanceRescale: readNumber(
+      raw.promptGuidanceRescale,
+      DEFAULT_NOVELAI_DEFAULTS.promptGuidanceRescale,
+      0,
+      1,
+    ),
+    undesiredContentPreset: readInteger(
+      raw.undesiredContentPreset,
+      DEFAULT_NOVELAI_DEFAULTS.undesiredContentPreset,
+      0,
+      4,
+    ),
   };
 }
 

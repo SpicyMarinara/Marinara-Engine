@@ -60,6 +60,8 @@ import {
   IMAGE_DEFAULTS_STORAGE_KEY,
   COMFYUI_SAMPLER_OPTIONS,
   COMFYUI_SCHEDULER_OPTIONS,
+  NOVELAI_NOISE_SCHEDULE_OPTIONS,
+  NOVELAI_SAMPLER_OPTIONS,
   SD_WEBUI_SAMPLER_OPTIONS,
   SD_WEBUI_SCHEDULER_OPTIONS,
   createDefaultImageGenerationProfile,
@@ -1938,6 +1940,7 @@ function ImageGenerationDefaultsPanel({
 
   const automatic1111 = value.automatic1111 ?? createDefaultImageGenerationProfile("automatic1111").automatic1111!;
   const comfyui = value.comfyui ?? createDefaultImageGenerationProfile("comfyui").comfyui!;
+  const novelai = value.novelai ?? createDefaultImageGenerationProfile("novelai").novelai!;
 
   const updateAutomatic1111 = (patch: Partial<typeof automatic1111>) => {
     onChange({
@@ -1955,6 +1958,14 @@ function ImageGenerationDefaultsPanel({
     });
   };
 
+  const updateNovelAi = (patch: Partial<typeof novelai>) => {
+    onChange({
+      ...value,
+      service: "novelai",
+      novelai: { ...novelai, ...patch },
+    });
+  };
+
   return (
     <FieldGroup
       label="Local Image Defaults"
@@ -1969,10 +1980,14 @@ function ImageGenerationDefaultsPanel({
         >
           <div className="min-w-0">
             <div className="text-xs font-medium text-[var(--foreground)]">
-              {service === "comfyui" ? "ComfyUI generation setup" : "AUTOMATIC1111 / Forge setup"}
+              {service === "comfyui"
+                ? "ComfyUI generation setup"
+                : service === "novelai"
+                  ? "NovelAI generation setup"
+                  : "AUTOMATIC1111 / Forge setup"}
             </div>
             <p className="mt-0.5 text-[0.625rem] text-[var(--muted-foreground)]">
-              Prompt prefixes, sampler, scheduler, steps, CFG, seed, clip skip, and denoise.
+              Prompt prefixes, sampler, scheduler, steps, guidance, seed, clip skip, and denoise.
             </p>
           </div>
           <ChevronDown
@@ -2032,7 +2047,7 @@ function ImageGenerationDefaultsPanel({
                     onCommit={(denoisingStrength) => updateAutomatic1111({ denoisingStrength })}
                   />
                 </>
-              ) : (
+              ) : service === "comfyui" ? (
                 <>
                   <NumberSetting
                     label="Steps"
@@ -2063,6 +2078,39 @@ function ImageGenerationDefaultsPanel({
                     min={0}
                     max={12}
                     onCommit={(clipSkip) => updateComfyUi({ clipSkip: clipSkip > 0 ? clipSkip : null })}
+                  />
+                </>
+              ) : (
+                <>
+                  <NumberSetting
+                    label="Steps"
+                    value={novelai.steps}
+                    min={1}
+                    max={150}
+                    onCommit={(steps) => updateNovelAi({ steps })}
+                  />
+                  <NumberSetting
+                    label="Prompt Guidance"
+                    value={novelai.promptGuidance}
+                    min={0}
+                    max={30}
+                    integer={false}
+                    onCommit={(promptGuidance) => updateNovelAi({ promptGuidance })}
+                  />
+                  <NumberSetting
+                    label="Guidance Rescale"
+                    value={novelai.promptGuidanceRescale}
+                    min={0}
+                    max={1}
+                    integer={false}
+                    onCommit={(promptGuidanceRescale) => updateNovelAi({ promptGuidanceRescale })}
+                  />
+                  <NumberSetting
+                    label="UC Preset"
+                    value={novelai.undesiredContentPreset}
+                    min={0}
+                    max={4}
+                    onCommit={(undesiredContentPreset) => updateNovelAi({ undesiredContentPreset })}
                   />
                 </>
               )}
@@ -2106,7 +2154,7 @@ function ImageGenerationDefaultsPanel({
                   <span className="text-xs text-[var(--foreground)]">Restore faces</span>
                 </label>
               </>
-            ) : (
+            ) : service === "comfyui" ? (
               <>
                 <TextSetting
                   label="Prompt Prefix"
@@ -2137,6 +2185,39 @@ function ImageGenerationDefaultsPanel({
                 <p className="text-[0.55rem] text-[var(--muted-foreground)]">
                   Custom ComfyUI workflows can use %steps%, %cfg%, %sampler%, %scheduler%, %denoise%, and %clip_skip%
                   placeholders.
+                </p>
+              </>
+            ) : (
+              <>
+                <TextSetting
+                  label="Prompt Prefix"
+                  value={novelai.promptPrefix}
+                  onChange={(promptPrefix) => updateNovelAi({ promptPrefix })}
+                  placeholder="e.g. masterpiece, best quality"
+                />
+                <TextSetting
+                  label="Negative Prefix"
+                  value={novelai.negativePromptPrefix}
+                  onChange={(negativePromptPrefix) => updateNovelAi({ negativePromptPrefix })}
+                  placeholder="e.g. low quality, blurry"
+                />
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <ChoiceSetting
+                    label="Sampler"
+                    value={novelai.sampler}
+                    options={NOVELAI_SAMPLER_OPTIONS}
+                    onChange={(sampler) => updateNovelAi({ sampler })}
+                  />
+                  <ChoiceSetting
+                    label="Noise Schedule"
+                    value={novelai.noiseSchedule}
+                    options={NOVELAI_NOISE_SCHEDULE_OPTIONS}
+                    onChange={(noiseSchedule) => updateNovelAi({ noiseSchedule })}
+                  />
+                </div>
+                <p className="text-[0.55rem] text-[var(--muted-foreground)]">
+                  These values are sent with native NovelAI requests and embedded in generated PNG metadata for
+                  troubleshooting.
                 </p>
               </>
             )}

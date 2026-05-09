@@ -12,17 +12,20 @@ import { newId } from "../../utils/id-generator.js";
 import {
   DEFAULT_AUTOMATIC1111_DEFAULTS,
   DEFAULT_COMFYUI_DEFAULTS,
+  DEFAULT_NOVELAI_DEFAULTS,
   mergeNegativePrompt,
   mergePromptPrefix,
   inferImageSource,
   type Automatic1111Defaults,
   type ComfyUiDefaults,
   type ImageGenerationDefaultsProfile,
+  type NovelAiDefaults,
 } from "@marinara-engine/shared";
 import { isImageLocalUrlsEnabled } from "../../config/runtime-config.js";
 import { normalizeLoopbackUrl, safeFetch, validateOutboundUrl } from "../../utils/security.js";
 
 const GALLERY_DIR = join(DATA_DIR, "gallery");
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 /** Strip HTML tags and collapse whitespace — keeps error messages readable when APIs return HTML error pages. */
 function sanitizeErrorText(text: string): string {
@@ -654,28 +657,38 @@ async function generateNovelAI(baseUrl: string, apiKey: string, request: ImageGe
   const url = `${baseUrl.replace(/\/+$/, "")}/ai/generate-image`;
   const model = request.model || "nai-diffusion-4-5-full";
   const isV4 = model.includes("nai-diffusion-4");
+  const defaults = resolveNovelAiDefaults(request);
+  const prompt = mergePromptPrefix(defaults.promptPrefix, request.prompt);
+  const negativePrompt = mergeNegativePrompt(defaults.negativePromptPrefix, request.negativePrompt);
+  const seed = resolveSeed(request.imageDefaults);
 
   const parameters: Record<string, unknown> = {
     width: request.width ?? 832,
     height: request.height ?? 1216,
     n_samples: 1,
-    ucPreset: 0,
-    negative_prompt: request.negativePrompt ?? "",
-    seed: Math.floor(Math.random() * 2 ** 32),
-    scale: 6,
-    steps: 28,
-    sampler: "k_euler_ancestral",
+    ucPreset: defaults.undesiredContentPreset,
+    negative_prompt: negativePrompt,
+    seed,
+    scale: defaults.promptGuidance,
+    steps: defaults.steps,
+    sampler: defaults.sampler,
   };
+  if (defaults.noiseSchedule) {
+    parameters.noise_schedule = defaults.noiseSchedule;
+  }
+  if (isV4) {
+    parameters.cfg_rescale = defaults.promptGuidanceRescale;
+  }
 
   if (isV4) {
     parameters.params_version = 3;
     parameters.v4_prompt = {
-      caption: { base_caption: request.prompt, char_captions: [] },
+      caption: { base_caption: prompt, char_captions: [] },
       use_coords: false,
       use_order: true,
     };
     parameters.v4_negative_prompt = {
-      caption: { base_caption: request.negativePrompt ?? "", char_captions: [] },
+      caption: { base_caption: negativePrompt, char_captions: [] },
       use_coords: false,
       use_order: true,
     };
@@ -695,7 +708,7 @@ async function generateNovelAI(baseUrl: string, apiKey: string, request: ImageGe
   }
 
   const body: Record<string, unknown> = {
-    input: isV4 ? "" : request.prompt,
+    input: isV4 ? "" : prompt,
     model,
     action: "generate",
     parameters,
@@ -728,14 +741,16 @@ async function generateNovelAI(baseUrl: string, apiKey: string, request: ImageGe
   if (bytes[0] === 0x50 && bytes[1] === 0x4b) {
     const extracted = extractFirstFileFromZip(bytes);
     if (extracted) {
-      const base64 = Buffer.from(extracted).toString("base64");
+      const imageBytes = appendNovelAiGenerationMetadata(Buffer.from(extracted), body);
+      const base64 = imageBytes.toString("base64");
       return { base64, mimeType: "image/png", ext: "png" };
     }
   }
 
   // Check if it's a PNG directly
   if (bytes[0] === 0x89 && bytes[1] === 0x50) {
-    const base64 = Buffer.from(bytes).toString("base64");
+    const imageBytes = appendNovelAiGenerationMetadata(Buffer.from(bytes), body);
+    const base64 = imageBytes.toString("base64");
     return { base64, mimeType: "image/png", ext: "png" };
   }
 
@@ -750,6 +765,71 @@ async function generateNovelAI(baseUrl: string, apiKey: string, request: ImageGe
   }
 
   throw new Error("Could not parse NovelAI image response");
+}
+
+function appendNovelAiGenerationMetadata(image: Buffer, body: Record<string, unknown>): Buffer {
+  try {
+    const metadata = JSON.stringify({
+      source: "marinara-engine",
+      provider: "novelai",
+      request: body,
+    });
+    return injectPngTextChunk(image, "marinara_novelai_request", metadata);
+  } catch {
+    return image;
+  }
+}
+
+function injectPngTextChunk(png: Buffer, keyword: string, text: string): Buffer {
+  if (png.subarray(0, 8).compare(PNG_SIGNATURE) !== 0) {
+    throw new Error("Invalid PNG signature");
+  }
+
+  const textData = Buffer.concat([Buffer.from(keyword, "latin1"), Buffer.from([0]), Buffer.from(text, "latin1")]);
+  const textChunk = buildPngChunk("tEXt", textData);
+  const parts: Buffer[] = [PNG_SIGNATURE];
+  let offset = 8;
+  let inserted = false;
+
+  while (offset < png.length) {
+    const chunkLen = png.readUInt32BE(offset);
+    const chunkType = png.subarray(offset + 4, offset + 8).toString("ascii");
+    const totalChunkSize = 4 + 4 + chunkLen + 4;
+    const chunkBuf = png.subarray(offset, offset + totalChunkSize);
+
+    if (chunkType === "IDAT" && !inserted) {
+      parts.push(textChunk);
+      inserted = true;
+    }
+    parts.push(chunkBuf);
+    offset += totalChunkSize;
+  }
+
+  if (!inserted) {
+    parts.splice(parts.length - 1, 0, textChunk);
+  }
+
+  return Buffer.concat(parts);
+}
+
+function buildPngChunk(type: string, data: Buffer): Buffer {
+  const typeBytes = Buffer.from(type, "ascii");
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(Buffer.concat([typeBytes, data])) >>> 0);
+  return Buffer.concat([length, typeBytes, data, crc]);
+}
+
+function crc32(buf: Buffer): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) {
+    crc ^= buf[i]!;
+    for (let j = 0; j < 8; j++) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
 }
 
 /**
@@ -934,6 +1014,13 @@ function randomSeed(): number {
 
 function resolveSeed(profile: ImageGenerationDefaultsProfile | null | undefined): number {
   return typeof profile?.seed === "number" && profile.seed >= 0 ? profile.seed : randomSeed();
+}
+
+function resolveNovelAiDefaults(request: ImageGenRequest): NovelAiDefaults {
+  if (request.imageDefaults?.service === "novelai" && request.imageDefaults.novelai) {
+    return request.imageDefaults.novelai;
+  }
+  return DEFAULT_NOVELAI_DEFAULTS;
 }
 
 function resolveAutomatic1111Defaults(request: ImageGenRequest): Automatic1111Defaults {

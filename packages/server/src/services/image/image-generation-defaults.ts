@@ -18,6 +18,7 @@ export interface ImageDefaultsConnection {
 export function resolveImageGenerationService(conn: ImageDefaultsConnection): string {
   const explicit = (conn.imageService || conn.imageGenerationSource || "").trim();
   if (explicit) return explicit.toLowerCase();
+  if (conn.baseUrl?.toLowerCase().includes("novelai.net")) return "novelai";
   return inferImageSource(conn.model || "", conn.baseUrl || "");
 }
 
