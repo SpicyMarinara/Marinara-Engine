@@ -580,14 +580,7 @@ async function createSpotifyPlaylist(
 ): Promise<
   Omit<DjMariPlaylistResult, "success" | "requestedTrackCount" | "tracks" | "playbackStarted" | "playbackError">
 > {
-  const profileRes = await fetchSpotifyApi(credentials, "/me", { signal: AbortSignal.timeout(15_000) });
-  if (!profileRes.ok) {
-    fail(profileRes.status, `Spotify profile failed: ${await readSpotifyError(profileRes, "Could not read profile.")}`);
-  }
-  const profile = (await profileRes.json()) as { id?: string };
-  if (!profile.id) fail(502, "Spotify profile did not include a user ID.");
-
-  const playlistRes = await fetchSpotifyApi(credentials, `/users/${encodeURIComponent(profile.id)}/playlists`, {
+  const playlistRes = await fetchSpotifyApi(credentials, "/me/playlists", {
     method: "POST",
     body: JSON.stringify({
       name,
@@ -611,7 +604,7 @@ async function createSpotifyPlaylist(
   if (!playlist.id || !playlist.uri) fail(502, "Spotify playlist creation returned an incomplete response.");
 
   const uris = tracks.map((track) => track.uri);
-  const addRes = await fetchSpotifyApi(credentials, `/playlists/${encodeURIComponent(playlist.id)}/tracks`, {
+  const addRes = await fetchSpotifyApi(credentials, `/playlists/${encodeURIComponent(playlist.id)}/items`, {
     method: "POST",
     body: JSON.stringify({ uris }),
     signal: AbortSignal.timeout(15_000),
