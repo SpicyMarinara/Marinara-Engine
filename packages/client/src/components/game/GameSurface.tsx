@@ -2591,10 +2591,14 @@ export function GameSurface({
     sceneReadyMsgIdRef.current = messageId;
     setSceneReadyTick((t) => t + 1);
 
-    if (!options?.notify || pendingSceneReadyNotificationMsgIdRef.current !== messageId) {
+    const isPendingNotification = pendingSceneReadyNotificationMsgIdRef.current === messageId;
+    if (isPendingNotification) {
+      pendingSceneReadyNotificationMsgIdRef.current = null;
+    }
+
+    if (!options?.notify || !isPendingNotification) {
       return;
     }
-    pendingSceneReadyNotificationMsgIdRef.current = null;
     if (notifiedSceneReadyMsgIdsRef.current.has(messageId)) {
       return;
     }
@@ -2622,6 +2626,11 @@ export function GameSurface({
         notification.close();
       };
     }
+  }, [activeChatId]);
+
+  useEffect(() => {
+    pendingSceneReadyNotificationMsgIdRef.current = null;
+    notifiedSceneReadyMsgIdsRef.current.clear();
   }, [activeChatId]);
 
   useEffect(() => {
