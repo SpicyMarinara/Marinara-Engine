@@ -3609,7 +3609,7 @@ export async function generateRoutes(app: FastifyInstance) {
           [
             `<dm_commands>`,
             `Optional hidden command, use only when it naturally fits the scene:`,
-            `- [dm: character="${dmTargetHint}" message="short text"] - only if a roleplay character sends {{user}} a direct message through a phone, communicator, letter app, terminal, or similar in-world channel. Marinara strips the command from the roleplay reply, creates a new DM conversation with that character, and posts the message there.`,
+            `- [dm: character="${dmTargetHint}" message="short text"] - only if a roleplay character sends {{user}} a direct message through a phone, communicator, letter app, terminal, or similar in-world channel. Marinara strips the command from the roleplay reply and posts the full message into the linked conversation when one exists; otherwise it creates a new DM conversation with that character.`,
             `Do not also quote the exact same direct-message text in the roleplay narration unless the user should see it in both places.`,
             `</dm_commands>`,
           ].join("\n"),
@@ -7988,7 +7988,7 @@ export async function generateRoutes(app: FastifyInstance) {
               }
 
               if (command.type === "dm") {
-                // ── Roleplay DM: create a conversation chat and post the character's direct message there ──
+                // ── Roleplay DM: post into the linked conversation when available; otherwise create a DM chat ──
                 const dmCmd = command as DirectMessageCommand;
                 try {
                   const requestedTarget = dmCmd.character.trim();
@@ -8022,6 +8022,43 @@ export async function generateRoutes(app: FastifyInstance) {
 
                   if (!targetCharId) {
                     logger.warn('[commands] DM target character "%s" not found', dmCmd.character);
+                    continue;
+                  }
+
+                  const freshChat = await chats.getById(input.chatId);
+                  const connectedId = freshChat?.connectedChatId as string | null;
+                  const connectedChat = connectedId ? await chats.getById(connectedId) : null;
+                  const linkedConversationId = connectedChat?.mode === "conversation" ? connectedChat.id : null;
+
+                  if (linkedConversationId) {
+                    const dmMessage = await chats.createMessage({
+                      chatId: linkedConversationId,
+                      role: "assistant",
+                      characterId: targetCharId,
+                      content: messageText,
+                    });
+                    recordAssistantActivity(linkedConversationId, targetCharId);
+
+                    reply.raw.write(
+                      `data: ${JSON.stringify({
+                        type: "assistant_action",
+                        data: {
+                          action: "dm_posted",
+                          chatId: linkedConversationId,
+                          mode: "conversation",
+                          characterName: targetName,
+                          sourceChatId: input.chatId,
+                          sourceMessageId: messageId || null,
+                          messageId: dmMessage?.id ?? null,
+                        },
+                      })}\n\n`,
+                    );
+                    logger.info(
+                      '[commands] Roleplay DM from "%s" posted to linked conversation %s from chat %s',
+                      targetName,
+                      linkedConversationId,
+                      input.chatId,
+                    );
                     continue;
                   }
 
