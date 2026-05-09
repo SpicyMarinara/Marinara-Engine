@@ -3960,7 +3960,6 @@ export function GameSurface({
   const updateSessionHistoryMetadata = useUpdateChatMetadata();
   const updateMessage = useUpdateMessage(activeChatId);
   const startSessionLocked = startSession.isPending || startSessionRequested;
-  const maxInventorySlots = 20;
   const gameId = (chatMeta.gameId as string) || null;
 
   const handleJsonRepairError = useCallback((error: unknown) => {
@@ -4126,10 +4125,6 @@ export function GameSurface({
 
   const handleAddInventoryItem = useCallback(async () => {
     if (!activeChatId) return null;
-    if (inventoryItems.length >= maxInventorySlots) {
-      toast.error("Inventory is full.");
-      return null;
-    }
 
     const addedItemName = getNextInventoryItemName(inventoryItems);
     const updatedInventory = [...inventoryItems, { name: addedItemName, quantity: 1 }];
@@ -4178,7 +4173,7 @@ export function GameSurface({
       toast.error(message);
       return null;
     }
-  }, [activeChatId, inventoryItems, maxInventorySlots, updateChatMetadata]);
+  }, [activeChatId, inventoryItems, updateChatMetadata]);
 
   const handleRemoveInventoryItem = useCallback(
     async (itemName: string) => {
