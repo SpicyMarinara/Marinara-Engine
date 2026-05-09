@@ -498,6 +498,7 @@ export async function charactersRoutes(app: FastifyInstance) {
       boxColor?: string;
       createdAt?: string;
       updatedAt?: string;
+      savedStatusOptions?: string;
     };
     return storage.createPersona(
       name,

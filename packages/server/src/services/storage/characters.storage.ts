@@ -239,6 +239,7 @@ export function createCharactersStorage(db: DB) {
         personaStats?: string;
         altDescriptions?: string;
         tags?: string;
+        savedStatusOptions?: string;
       },
       timestampOverrides?: TimestampOverrides | null,
     ) {
@@ -261,6 +262,7 @@ export function createCharactersStorage(db: DB) {
         personaStats: extra?.personaStats ?? "",
         altDescriptions: extra?.altDescriptions ?? "[]",
         tags: extra?.tags ?? "[]",
+        savedStatusOptions: extra?.savedStatusOptions ?? "[]",
         createdAt: timestamp.createdAt,
         updatedAt: timestamp.updatedAt,
       });
@@ -300,6 +302,7 @@ export function createCharactersStorage(db: DB) {
         personaStats: source.personaStats ?? "",
         altDescriptions: source.altDescriptions ?? "[]",
         tags: source.tags ?? "[]",
+        savedStatusOptions: source.savedStatusOptions ?? "[]",
         createdAt: timestamp,
         updatedAt: timestamp,
       });
@@ -323,6 +326,7 @@ export function createCharactersStorage(db: DB) {
         personaStats?: string;
         altDescriptions?: string;
         tags?: string;
+        savedStatusOptions?: string;
       },
     ) {
       const sets: Record<string, unknown> = { updatedAt: now() };
@@ -340,6 +344,7 @@ export function createCharactersStorage(db: DB) {
       if (updates.personaStats !== undefined) sets.personaStats = updates.personaStats;
       if (updates.altDescriptions !== undefined) sets.altDescriptions = updates.altDescriptions;
       if (updates.tags !== undefined) sets.tags = updates.tags;
+      if (updates.savedStatusOptions !== undefined) sets.savedStatusOptions = updates.savedStatusOptions;
       await db.update(personas).set(sets).where(eq(personas.id, id));
       return this.getPersona(id);
     },
