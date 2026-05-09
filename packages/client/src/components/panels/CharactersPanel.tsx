@@ -103,7 +103,7 @@ export function CharactersPanel() {
   const updateChat = useUpdateChat();
   const createMessage = useCreateMessage(activeChat?.id ?? null);
   const queryClient = useQueryClient();
-  const { startChatFromCharacter } = useStartChatFromCharacter();
+  const { startChatFromCharacter, isStartingChat } = useStartChatFromCharacter();
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -427,6 +427,19 @@ export function CharactersPanel() {
 
     exitSelectionMode();
   }, [selectedCharacterIds, deleteCharacter, exitSelectionMode]);
+
+  const handleStartNewChat = useCallback(
+    (characterId: string, characterName: string, firstMessage?: string, alternateGreetings?: string[]) => {
+      startChatFromCharacter({
+        characterId,
+        characterName,
+        mode: "roleplay",
+        firstMessage,
+        alternateGreetings,
+      });
+    },
+    [startChatFromCharacter],
+  );
 
   return (
     <div className="flex flex-col gap-2 p-3">
@@ -858,6 +871,25 @@ export function CharactersPanel() {
                               )}
                             </div>
                             <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const fullMember = parsedCharacters.find((c) => c.id === memberId);
+                                handleStartNewChat(
+                                  memberId,
+                                  member.name,
+                                  fullMember?.parsed?.first_mes as string | undefined,
+                                  (fullMember?.parsed?.alternate_greetings ?? []) as string[],
+                                );
+                              }}
+                              disabled={isStartingChat}
+                              className="rounded p-0.5 text-[var(--muted-foreground)] opacity-0 transition-all hover:bg-[var(--primary)]/10 hover:text-[var(--primary)] group-hover/member:opacity-100 disabled:cursor-not-allowed disabled:opacity-50 max-md:opacity-100"
+                              title="Start New Chat"
+                              aria-label={`Start New Chat with ${member.name}`}
+                            >
+                              <MessageCircle size="0.6875rem" />
+                            </button>
+                            <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 toggleGroupMember(group.id, memberId, group.memberIds);
@@ -1078,9 +1110,31 @@ export function CharactersPanel() {
                 )}
               </div>
 
+              {!assigningToGroup && !selectionMode && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleStartNewChat(
+                      char.id,
+                      charName,
+                      char.parsed?.first_mes as string | undefined,
+                      (char.parsed?.alternate_greetings ?? []) as string[],
+                    );
+                  }}
+                  disabled={isStartingChat}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-[var(--primary)]/10 px-2 py-1 text-[0.625rem] font-medium text-[var(--primary)] ring-1 ring-[var(--primary)]/20 transition-all hover:bg-[var(--primary)]/15 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+                  title="Start New Chat"
+                  aria-label={`Start New Chat with ${charName}`}
+                >
+                  <MessageCircle size="0.6875rem" />
+                  <span>New Chat</span>
+                </button>
+              )}
+
               {/* Actions (hidden during group assign mode) */}
               {!assigningToGroup && !selectionMode && (
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100">
+                <div className="absolute right-[4.5rem] top-1/2 -translate-y-1/2 flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100">
                   {activeChat && (
                     <button
                       onClick={(e) => {
@@ -1152,13 +1206,12 @@ export function CharactersPanel() {
               label: "Quick Start Roleplay",
               icon: <Wand2 size="0.75rem" />,
               onSelect: () =>
-                startChatFromCharacter({
-                  characterId: contextMenu.charId,
-                  characterName: contextMenu.charName,
-                  mode: "roleplay",
-                  firstMessage: contextMenu.firstMes,
-                  alternateGreetings: contextMenu.altGreetings,
-                }),
+                handleStartNewChat(
+                  contextMenu.charId,
+                  contextMenu.charName,
+                  contextMenu.firstMes,
+                  contextMenu.altGreetings,
+                ),
             },
             {
               label: "Quick Start Conversation",
