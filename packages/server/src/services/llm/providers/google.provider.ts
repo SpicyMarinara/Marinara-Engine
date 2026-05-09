@@ -139,12 +139,12 @@ export class GoogleProvider extends BaseLLMProvider {
     // ── Non-streaming path (also used when thinking is enabled) ──
     if (!useStreaming) {
       const json = (await response.json()) as {
-        candidates: Array<{
+        candidates?: Array<{
           content: { parts: GeminiPart[] };
         }>;
         usageMetadata?: { promptTokenCount: number; candidatesTokenCount: number; totalTokenCount: number };
       };
-      const parts = json.candidates[0]?.content?.parts ?? [];
+      const parts = json.candidates?.[0]?.content?.parts ?? [];
 
       // Report full parts (with thought signatures) for storage
       if (options.onResponseParts) options.onResponseParts(parts);
