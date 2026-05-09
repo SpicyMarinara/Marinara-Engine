@@ -7,7 +7,7 @@ import {
   type AgentResult,
 } from "@marinara-engine/shared";
 import { eq } from "drizzle-orm";
-import { listCharacterSprites } from "../../services/game/sprite.service.js";
+import { buildSpriteExpressionChoices, listCharacterSprites } from "../../services/game/sprite.service.js";
 import { DATA_DIR } from "../../utils/data-dir.js";
 import type { ResolvedAgent } from "../../services/agents/agent-pipeline.js";
 import { executeAgent, executeAgentBatch, normalizeAgentContextSize } from "../../services/agents/agent-executor.js";
@@ -296,11 +296,21 @@ async function buildRetryAgentContext(args: {
   // If the expression agent is being retried, load available sprite expressions per character
   if (resolvedAgentTypes.has("expression")) {
     try {
-      const perChar: Array<{ characterId: string; characterName: string; expressions: string[] }> = [];
+      const perChar: Array<{
+        characterId: string;
+        characterName: string;
+        expressions: string[];
+        expressionChoices: string[];
+      }> = [];
       for (const char of agentContext.characters) {
         const sprites = listCharacterSprites(char.id);
         if (sprites && sprites.expressions.length > 0) {
-          perChar.push({ characterId: char.id, characterName: char.name, expressions: sprites.expressions });
+          perChar.push({
+            characterId: char.id,
+            characterName: char.name,
+            expressions: sprites.expressions,
+            expressionChoices: buildSpriteExpressionChoices(sprites.expressions),
+          });
         }
       }
       if (perChar.length > 0) {

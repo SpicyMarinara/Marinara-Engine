@@ -63,6 +63,7 @@ import { executeToolCalls, type MetadataPatchInput } from "../services/tools/too
 import { createAgentPipeline, type ResolvedAgent, type AgentInjection } from "../services/agents/agent-pipeline.js";
 import { DATA_DIR } from "../utils/data-dir.js";
 import { executeAgent, normalizeAgentContextSize, resolveAgentResultType } from "../services/agents/agent-executor.js";
+import { buildSpriteExpressionChoices, listCharacterSprites } from "../services/game/sprite.service.js";
 import { getLocalSidecarProvider, LOCAL_SIDECAR_MODEL } from "../services/llm/local-sidecar.js";
 import {
   parseCharacterCommands,
@@ -3854,18 +3855,21 @@ export async function generateRoutes(app: FastifyInstance) {
       // If the expression agent is enabled, load available sprite expressions per character
       if (resolvedAgents.some((a) => a.type === "expression")) {
         try {
-          const { readdirSync, existsSync: existsSyncFs } = await import("fs");
-          const { join: joinPath, extname: extnameFs } = await import("path");
-          const spritesRoot = joinPath(DATA_DIR, "sprites");
-          const spriteExts = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".svg"]);
-          const perChar: Array<{ characterId: string; characterName: string; expressions: string[] }> = [];
+          const perChar: Array<{
+            characterId: string;
+            characterName: string;
+            expressions: string[];
+            expressionChoices: string[];
+          }> = [];
           for (const char of agentContext.characters) {
-            const charDir = joinPath(spritesRoot, char.id);
-            if (!existsSyncFs(charDir)) continue;
-            const files = readdirSync(charDir).filter((f: string) => spriteExts.has(extnameFs(f).toLowerCase()));
-            const exprNames = files.map((f: string) => f.slice(0, -extnameFs(f).length));
-            if (exprNames.length > 0) {
-              perChar.push({ characterId: char.id, characterName: char.name, expressions: exprNames });
+            const sprites = listCharacterSprites(char.id);
+            if (sprites && sprites.expressions.length > 0) {
+              perChar.push({
+                characterId: char.id,
+                characterName: char.name,
+                expressions: sprites.expressions,
+                expressionChoices: buildSpriteExpressionChoices(sprites.expressions),
+              });
             }
           }
           if (perChar.length > 0) {

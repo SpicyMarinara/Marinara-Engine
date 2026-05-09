@@ -2,6 +2,7 @@ export type AvailableSpriteCharacter = {
   characterId: string;
   characterName: string;
   expressions: string[];
+  expressionChoices?: string[];
 };
 
 export type SpriteExpressionEntry = {
@@ -54,6 +55,17 @@ function hasUsefulContainmentMatch(candidate: string, option: string): boolean {
   return candidate.includes(option) || option.includes(candidate);
 }
 
+function pickRandomExpression(expressions: string[]): string | null {
+  if (expressions.length === 0) return null;
+  return expressions[Math.floor(Math.random() * expressions.length)] ?? expressions[0] ?? null;
+}
+
+function getExpressionPrefixVariant(expression: string, groupKey: string): boolean {
+  const lower = expression.toLowerCase();
+  const normalizedGroup = groupKey.trim().toLowerCase();
+  return lower.startsWith(`${normalizedGroup}_`);
+}
+
 function resolveCharacter(
   entry: SpriteExpressionEntry,
   availableSprites: AvailableSpriteCharacter[],
@@ -97,6 +109,11 @@ function resolveExpression(expression: string, availableExpressions: string[]): 
   if (!trimmed) return null;
 
   const lower = trimmed.toLowerCase();
+
+  const prefixMatches = availableExpressions.filter((entry) => getExpressionPrefixVariant(entry, trimmed));
+  const randomPrefixMatch = prefixMatches.length > 1 ? pickRandomExpression(prefixMatches) : null;
+  if (randomPrefixMatch) return randomPrefixMatch;
+
   const exact = availableExpressions.find((entry) => entry.toLowerCase() === lower);
   if (exact) return exact;
 

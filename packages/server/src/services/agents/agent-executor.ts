@@ -874,10 +874,12 @@ function buildAvailableSpritesBlock(context: AgentContext): string {
     characterId: string;
     characterName: string;
     expressions: string[];
+    expressionChoices?: string[];
   }>;
   const parts: string[] = [`<available_sprites>`];
   for (const char of sprites) {
-    parts.push(`${char.characterName} (${char.characterId}): ${char.expressions.join(", ")}`);
+    const choices = char.expressionChoices?.length ? char.expressionChoices : char.expressions;
+    parts.push(`${char.characterName} (${char.characterId}): ${choices.join(", ")}`);
   }
   parts.push(`</available_sprites>`);
   return parts.join("\n");

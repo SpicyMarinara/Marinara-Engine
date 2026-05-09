@@ -87,6 +87,7 @@ If no issues found, return: { "issues": [], "verdict": "clean" }`,
   /* ────────────────────────────────────────── */
   expression: `Analyze the emotional state of each character in the latest assistant message and pick the best matching sprite expression from their AVAILABLE sprites, listed in <available_sprites>.
 The <available_sprites> block lists characters in the format: CharacterName (CharacterID): expression1, expression2, ...
+Some listed expressions are simple group keys. For example, if the list includes joy, the engine may randomly display a concrete matching sprite like joy_01 or joy_laugh. Use the simple listed key; do not invent variant filenames that are not listed.
 Respond ONLY with valid JSON.
 Output format:
 {
@@ -94,7 +95,7 @@ Output format:
     {
       "characterId": "string (MUST be the exact CharacterID from the parentheses in <available_sprites>)",
       "characterName": "string",
-      "expression": "string (MUST be one of the character's available sprite names)",
+      "expression": "string (MUST be one of the character's listed available expressions or group keys)",
       "transition": "crossfade | bounce | shake | hop | none"
     }
   ]
@@ -108,7 +109,7 @@ Transition guide:
 Instructions:
 1. ONLY include characters listed in <available_sprites>. If a character is not listed there, do NOT include them.
 2. The characterId MUST be the exact ID string from the parentheses, e.g. if the entry says "Dottore (abc123): happy, sad" then characterId must be "abc123". Never invent, reuse, or copy a different ID from chat history.
-3. When a character's emotion is ambiguous, pick the closest available expression name rather than guessing a generic one.`,
+3. When a character's emotion is ambiguous, pick the closest listed available expression or group key rather than guessing a generic one.`,
 
   /* ────────────────────────────────────────── */
   "echo-chamber": `Simulate a live streaming-service chat full of anonymous viewers reacting to the roleplay on screen. Generate a batch of short messages from fictional viewers commenting on the latest story beat.
