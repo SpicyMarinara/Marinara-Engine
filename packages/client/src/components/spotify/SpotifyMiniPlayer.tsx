@@ -118,6 +118,7 @@ const SPOTIFY_GREEN_BG_CLASS = "bg-[oklch(0.72_0.18_145)]";
 const REPEAT_TRACK_END_GRACE_MS = 15_000;
 const REPEAT_TRACK_REPLAY_COOLDOWN_MS = 8_000;
 const MANUAL_CONTROL_REPEAT_SUPPRESS_MS = 15_000;
+const DJ_MARI_PLAYLIST_READY_TOAST_MS = 20_000;
 const DOTTOR_SUPPORT_GIF = "/sprites/dottore/dottore_jumping.gif";
 
 let spotifySdkPromise: Promise<void> | null = null;
@@ -397,9 +398,10 @@ export function SpotifyMiniPlayer({ mobile = false }: { mobile?: boolean }) {
       invalidate();
       toast.success("DJ Mari playlist is ready", {
         description: `${result.name} - ${result.trackCount} tracks`,
+        duration: DJ_MARI_PLAYLIST_READY_TOAST_MS,
         action: result.playlistUrl
           ? {
-              label: "Open",
+              label: "Open playlist",
               onClick: () => window.open(result.playlistUrl!, "_blank", "noopener,noreferrer"),
             }
           : undefined,
