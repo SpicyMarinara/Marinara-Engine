@@ -938,7 +938,7 @@ class FileTableStore {
       this.dirtyTables.clear();
     } catch (err) {
       this.dirty = true;
-      logger.error({ err }, "[file-storage] Failed to persist file-native storage");
+      logger.error(err, "[file-storage] Failed to persist file-native storage");
     } finally {
       this.saving = false;
     }
