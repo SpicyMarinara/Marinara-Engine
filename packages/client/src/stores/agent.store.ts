@@ -63,6 +63,7 @@ interface AgentState {
     label: string;
     text: string;
   }>;
+  cyoaChoicesChatId: string | null;
   pendingCardUpdates: PendingCardUpdate[];
 
   // Actions
@@ -82,7 +83,7 @@ interface AgentState {
   setEchoVisibleCount: (count: number) => void;
   setEchoBaseline: (count: number) => void;
   setEchoLoadedChatId: (chatId: string | null) => void;
-  setCyoaChoices: (choices: Array<{ label: string; text: string }>) => void;
+  setCyoaChoices: (choices: Array<{ label: string; text: string }>, chatId?: string | null) => void;
   clearCyoaChoices: () => void;
   enqueuePendingCardUpdate: (entry: PendingCardUpdate) => void;
   dismissPendingCardUpdate: (id: string) => void;
@@ -102,6 +103,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   echoBaseline: 0,
   echoLoadedChatId: null,
   cyoaChoices: [],
+  cyoaChoicesChatId: null,
   pendingCardUpdates: [],
 
   setActiveAgents: (agents) => set({ activeAgents: agents }),
@@ -154,8 +156,8 @@ export const useAgentStore = create<AgentState>((set) => ({
   setEchoBaseline: (count) => set({ echoBaseline: count }),
   setEchoLoadedChatId: (chatId) => set({ echoLoadedChatId: chatId }),
 
-  setCyoaChoices: (choices) => set({ cyoaChoices: choices }),
-  clearCyoaChoices: () => set({ cyoaChoices: [] }),
+  setCyoaChoices: (choices, chatId = null) => set({ cyoaChoices: choices, cyoaChoicesChatId: chatId }),
+  clearCyoaChoices: () => set({ cyoaChoices: [], cyoaChoicesChatId: null }),
 
   enqueuePendingCardUpdate: (entry) =>
     set((s) => ({ pendingCardUpdates: [...s.pendingCardUpdates, entry].slice(-20) })),
@@ -176,6 +178,7 @@ export const useAgentStore = create<AgentState>((set) => ({
       echoBaseline: 0,
       echoLoadedChatId: null,
       cyoaChoices: [],
+      cyoaChoicesChatId: null,
       pendingCardUpdates: [],
     }),
 }));

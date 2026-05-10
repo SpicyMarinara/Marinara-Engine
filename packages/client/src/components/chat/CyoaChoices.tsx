@@ -30,6 +30,7 @@ function normalizeChoices(choices: CyoaChoice[]) {
 
 export function CyoaChoices({ messages }: Props) {
   const choices = useAgentStore((s) => s.cyoaChoices);
+  const choicesChatId = useAgentStore((s) => s.cyoaChoicesChatId);
   const setCyoaChoices = useAgentStore((s) => s.setCyoaChoices);
   const clearCyoaChoices = useAgentStore((s) => s.clearCyoaChoices);
   const { generate, retryAgents } = useGenerate();
@@ -41,6 +42,18 @@ export function CyoaChoices({ messages }: Props) {
   const [isRerolling, setIsRerolling] = useState(false);
   const [draftChoices, setDraftChoices] = useState<CyoaChoice[]>([]);
   const hydratedChatIdRef = useRef<string | null>(null);
+  const previousChatIdRef = useRef<string | null>(null);
+
+  const setChoicesForActiveChat = useCallback(
+    (nextChoices: CyoaChoice[]) => {
+      setCyoaChoices(nextChoices, activeChatId);
+    },
+    [activeChatId, setCyoaChoices],
+  );
+
+  const clearChoicesForActiveChat = useCallback(() => {
+    clearCyoaChoices();
+  }, [clearCyoaChoices]);
 
   // Hydrate CYOA choices from the last assistant message's extras on mount / chat switch
   const persistedChoiceState = useMemo(() => {
@@ -58,6 +71,9 @@ export function CyoaChoices({ messages }: Props) {
   }, [messages]);
 
   useEffect(() => {
+    const switchedChats = previousChatIdRef.current !== activeChatId;
+    previousChatIdRef.current = activeChatId;
+
     if (!activeChatId) {
       hydratedChatIdRef.current = null;
       setIsEditing(false);
@@ -66,7 +82,9 @@ export function CyoaChoices({ messages }: Props) {
       return;
     }
 
-    if (hydratedChatIdRef.current === activeChatId) return;
+    if (switchedChats) {
+      hydratedChatIdRef.current = null;
+    }
 
     setIsEditing(false);
     setDraftChoices([]);
@@ -81,23 +99,48 @@ export function CyoaChoices({ messages }: Props) {
     // On chat switch, clear any previous chat's choices and hydrate from the
     // new chat's last assistant extra (if present).
     if (isStreaming) {
-      clearCyoaChoices();
+      if (switchedChats) clearCyoaChoices();
       return;
     }
 
     if (persistedChoiceState?.choices?.length) {
-      setCyoaChoices(persistedChoiceState.choices);
-    } else {
+      setChoicesForActiveChat(persistedChoiceState.choices);
+      hydratedChatIdRef.current = activeChatId;
+      return;
+    }
+
+    const hasLiveChoicesForActiveChat = choicesChatId === activeChatId && choices.length > 0;
+    if (hasLiveChoicesForActiveChat) {
+      return;
+    }
+
+    if (hydratedChatIdRef.current === activeChatId) {
+      return;
+    }
+
+    if (switchedChats) {
       clearCyoaChoices();
+    } else {
+      clearChoicesForActiveChat();
     }
 
     hydratedChatIdRef.current = activeChatId;
-  }, [activeChatId, clearCyoaChoices, isStreaming, messages, persistedChoiceState, setCyoaChoices]);
+  }, [
+    activeChatId,
+    choices.length,
+    choicesChatId,
+    clearChoicesForActiveChat,
+    clearCyoaChoices,
+    isStreaming,
+    messages,
+    persistedChoiceState,
+    setChoicesForActiveChat,
+  ]);
 
   const handleChoice = useCallback(
     async (text: string) => {
       if (!activeChatId || isStreaming || isEditing) return;
-      clearCyoaChoices();
+      clearChoicesForActiveChat();
       if (impersonateCyoaChoices) {
         const { impersonatePresetId, impersonateConnectionId, impersonateBlockAgents, impersonatePromptTemplate } =
           useUIStore.getState();
@@ -121,7 +164,7 @@ export function CyoaChoices({ messages }: Props) {
         userMessage: text,
       });
     },
-    [activeChatId, isStreaming, isEditing, impersonateCyoaChoices, clearCyoaChoices, generate],
+    [activeChatId, isStreaming, isEditing, impersonateCyoaChoices, clearChoicesForActiveChat, generate],
   );
 
   const handleReroll = useCallback(async () => {
@@ -157,7 +200,7 @@ export function CyoaChoices({ messages }: Props) {
     const normalizedChoices = normalizeChoices(draftChoices);
     if (normalizedChoices.length === 0) return;
 
-    setCyoaChoices(normalizedChoices);
+    setChoicesForActiveChat(normalizedChoices);
     if (persistedChoiceState?.messageId) {
       await updateMessageExtra.mutateAsync({
         messageId: persistedChoiceState.messageId,
@@ -167,7 +210,7 @@ export function CyoaChoices({ messages }: Props) {
 
     setIsEditing(false);
     setDraftChoices([]);
-  }, [draftChoices, persistedChoiceState?.messageId, setCyoaChoices, updateMessageExtra]);
+  }, [draftChoices, persistedChoiceState?.messageId, setChoicesForActiveChat, updateMessageExtra]);
 
   if (choices.length === 0) return null;
 
