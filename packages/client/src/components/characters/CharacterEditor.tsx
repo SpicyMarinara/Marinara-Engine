@@ -2644,6 +2644,10 @@ function SpritesTab({
             bulk-import a folder of PNGs (each filename = expression name, e.g. admiration.png → "admiration")
           </li>
           <li>
+            • To make one expression randomly rotate between variants, use a shared prefix before an underscore, e.g.
+            happy_01.png and happy_blush.png are offered to the agent as "happy"
+          </li>
+          <li>
             • Enable the <strong className="text-[var(--foreground)]">Expression Engine</strong> agent in the Agents
             panel
           </li>
