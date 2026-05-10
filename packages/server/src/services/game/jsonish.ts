@@ -131,25 +131,40 @@ function repairJsonish(raw: string): string {
   );
 }
 
+function unwrapJsonString(value: unknown): unknown {
+  let next = value;
+  for (let depth = 0; depth < 2 && typeof next === "string"; depth++) {
+    const nested = stripFences(next.trim());
+    if (!nested.startsWith("{") && !nested.startsWith("[")) break;
+
+    try {
+      next = JSON.parse(nested);
+    } catch {
+      break;
+    }
+  }
+  return next;
+}
+
 export function parseGameJsonish(raw: string): unknown {
   const trimmed = raw.trim();
   try {
-    return JSON.parse(trimmed);
+    return unwrapJsonString(JSON.parse(trimmed));
   } catch {
     // Continue through the increasingly tolerant parse path below.
   }
 
   const unfenced = stripFences(trimmed);
   try {
-    return JSON.parse(unfenced.trim());
+    return unwrapJsonString(JSON.parse(unfenced.trim()));
   } catch {
     // Continue.
   }
 
   const candidate = extractObjectCandidate(unfenced);
   try {
-    return JSON.parse(repairJsonish(candidate));
+    return unwrapJsonString(JSON.parse(repairJsonish(candidate)));
   } catch {
-    return JSON.parse(candidate);
+    return unwrapJsonString(JSON.parse(candidate));
   }
 }
