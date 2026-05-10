@@ -89,10 +89,12 @@ export function CyoaChoices({ messages }: Props) {
     setIsEditing(false);
     setDraftChoices([]);
 
+    const hasLiveChoicesForActiveChat = choicesChatId === activeChatId && choices.length > 0;
+
     // Wait until the messages query has produced a value for this chat; otherwise
     // we would mark hydrated too early and skip re-running when extras arrive.
     if (messages === undefined) {
-      clearCyoaChoices();
+      if (switchedChats && !hasLiveChoicesForActiveChat) clearCyoaChoices();
       return;
     }
 
@@ -109,7 +111,6 @@ export function CyoaChoices({ messages }: Props) {
       return;
     }
 
-    const hasLiveChoicesForActiveChat = choicesChatId === activeChatId && choices.length > 0;
     if (hasLiveChoicesForActiveChat) {
       return;
     }
