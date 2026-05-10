@@ -1730,7 +1730,7 @@ export function useGenerate() {
                 if (result.agentType === "cyoa") {
                   const d = result.data as Record<string, unknown>;
                   const choices = (d.choices as Array<{ label: string; text: string }>) ?? [];
-                  if (choices.length > 0 && isActiveChat()) setCyoaChoices(choices, chatId);
+                  if (isActiveChat()) setCyoaChoices(choices, chatId);
                 }
                 if (result.resultType === "background_change") {
                   const bg = result.data as { chosen?: string | null };
