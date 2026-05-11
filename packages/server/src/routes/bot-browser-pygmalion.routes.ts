@@ -3,7 +3,7 @@
 // ──────────────────────────────────────────────
 import type { FastifyInstance } from "fastify";
 import { logger } from "../lib/logger.js";
-import { safeFetch } from "../utils/security.js";
+import { isAllowedImageBuffer, safeFetch } from "../utils/security.js";
 
 const PYGMALION_API_BASE = "https://server.pygmalion.chat/galatea.v1.PublicCharacterService";
 const PYGMALION_ORIGIN = "https://pygmalion.chat";
@@ -254,12 +254,21 @@ export async function botBrowserPygmalionRoutes(app: FastifyInstance) {
       const res = await safeFetch(url, {
         signal: controller.signal,
         policy: { allowedProtocols: ["https:"] },
-        allowedContentTypes: ["image/"],
         maxResponseBytes: 10 * 1024 * 1024,
       });
       if (!res.ok) return reply.status(404).send({ error: "Avatar not found" });
       const buf = Buffer.from(await res.arrayBuffer());
-      const ct = res.headers.get("content-type") || "image/webp";
+      const contentType = res.headers.get("content-type")?.toLowerCase() ?? "";
+      const imageInfo = isAllowedImageBuffer(buf);
+      if (contentType && !contentType.startsWith("image/") && !imageInfo) {
+        logger.warn("[bot-browser] Pygmalion avatar returned unsupported content type: %s", contentType);
+        return reply.status(415).send({ error: "Unsupported avatar content type" });
+      }
+      if (!contentType && !imageInfo) {
+        logger.warn("[bot-browser] Pygmalion avatar response was missing a usable image content type");
+        return reply.status(415).send({ error: "Unsupported avatar content type" });
+      }
+      const ct = contentType || imageInfo?.mimeType || "image/webp";
       return reply.header("Content-Type", ct).header("Cache-Control", "public, max-age=86400").send(buf);
     } finally {
       clearTimeout(timeout);
