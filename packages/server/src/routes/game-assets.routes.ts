@@ -169,6 +169,20 @@ function prepareAssetTarget(category: string, subcategory: string, filename: str
   if (!isSafePath(subcategory)) {
     throw new Error("Invalid subcategory");
   }
+
+  const ext = extname(filename).toLowerCase();
+  const isTextFile = TEXT_EXTS.has(ext);
+  const allowedExts = CATEGORY_EXTENSIONS[category];
+  if (!isTextFile && !allowedExts?.has(ext)) {
+    const typeLabel = category === "music" || category === "sfx" || category === "ambient"
+      ? "audio files"
+      : category === "sprites" || category === "backgrounds"
+        ? "images"
+        : "files";
+    const extList = allowedExts ? Array.from(allowedExts).join(", ") : "";
+    throw new Error(`Can't upload ${ext} to ${category}. This folder only accepts ${typeLabel} (${extList})`);
+  }
+
   if (category === "music") {
     const parts = subcategory.split("/").filter(Boolean);
     const [state, genre, intensity] = parts;
@@ -183,19 +197,6 @@ function prepareAssetTarget(category: string, subcategory: string, filename: str
     ) {
       throw new Error("Music folder must be state/genre/intensity, e.g. exploration/fantasy/calm");
     }
-  }
-
-  const ext = extname(filename).toLowerCase();
-  const isTextFile = TEXT_EXTS.has(ext);
-  const allowedExts = CATEGORY_EXTENSIONS[category];
-  if (!isTextFile && !allowedExts?.has(ext)) {
-    const typeLabel = category === "music" || category === "sfx" || category === "ambient"
-      ? "audio files"
-      : category === "sprites" || category === "backgrounds"
-        ? "images"
-        : "files";
-    const extList = allowedExts ? Array.from(allowedExts).join(", ") : "";
-    throw new Error(`Can't upload ${ext} to ${category}. This folder only accepts ${typeLabel} (${extList})`);
   }
 
   const targetDir = join(GAME_ASSETS_DIR, category, subcategory);
@@ -233,6 +234,7 @@ interface TreeNode {
   description?: string;
   size?: number;
   modified?: string;
+  native?: boolean;
 }
 
 /**
@@ -268,6 +270,7 @@ function buildTree(dir: string, relPrefix: string, meta: Record<string, FolderMe
         type: "folder",
         children,
         description: meta[rel]?.description,
+        native: existsSync(join(full, ".native")),
       });
     } else {
       const ext = extname(entry).toLowerCase();
@@ -533,7 +536,15 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "Invalid folder path" });
     }
 
+    if (VALID_CATEGORIES.has(wildcard)) {
+      return reply.status(403).send({ error: "Cannot delete root category folders" });
+    }
+
     const target = join(GAME_ASSETS_DIR, wildcard);
+
+    if (existsSync(join(target, ".native"))) {
+      return reply.status(403).send({ error: "Cannot delete native folders" });
+    }
     try {
       assertInsideDir(GAME_ASSETS_DIR, target);
     } catch {
@@ -550,17 +561,22 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
     }
 
     const entries = readdirSync(target);
+    const visibleEntries = entries.filter((e) => !e.startsWith("."));
     const recursive = (req.query as { recursive?: string }).recursive === "true";
 
-    if (entries.length > 0 && !recursive) {
-      return reply.status(400).send({ error: "Folder is not empty", fileCount: entries.length });
+    if (visibleEntries.length > 0 && !recursive) {
+      return reply.status(400).send({ error: "Folder is not empty", fileCount: visibleEntries.length });
     }
 
-    if (recursive && entries.length > 0) {
-      const { rmSync } = await import("fs");
-      rmSync(target, { recursive: true, force: true });
-    } else {
-      rmdirSync(target);
+    try {
+      if (recursive && visibleEntries.length > 0) {
+        const { rmSync } = await import("fs");
+        rmSync(target, { recursive: true, force: true });
+      } else {
+        rmdirSync(target);
+      }
+    } catch (err) {
+      return reply.status(500).send({ error: "Failed to delete folder", detail: String(err) });
     }
 
     buildAssetManifest();

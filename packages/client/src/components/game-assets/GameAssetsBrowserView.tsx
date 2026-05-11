@@ -48,6 +48,8 @@ import { isImage, isAudio, isEditableText, countItems } from "./utils";
 import { encodeAssetPath } from "./encode-asset-path";
 import { useUIStore } from "../../stores/ui.store";
 
+const PROTECTED_PATHS = new Set(["", "music", "sfx", "ambient", "sprites", "backgrounds"]);
+
 /**
  * Full-screen overlay for browsing, previewing, and managing game assets.
  *
@@ -236,6 +238,10 @@ export function GameAssetsBrowserView() {
   const handleUpload = useCallback(
     async (files: FileList | null) => {
       if (!files || files.length === 0) return;
+      if (selectedPath === "") {
+        toast.error("Please navigate to a category folder before uploading.");
+        return;
+      }
       const parts = selectedPath.split("/").filter(Boolean);
       const category = parts[0] ?? "sfx";
       const subcategory = parts.slice(1).join("/");
@@ -315,7 +321,7 @@ export function GameAssetsBrowserView() {
           { label: "Create subfolder", onSelect: () => setModal({ type: "create-folder" }) },
           { label: "Open in system folder", onSelect: () => openFolder.mutate(node.path) },
         );
-        if (node.path !== "" && (!node.children || node.children.length === 0)) {
+        if (node.path !== "" && !PROTECTED_PATHS.has(node.path) && !node.native) {
           items.push({
             label: "Delete folder",
             onSelect: () => setModal({ type: "delete", node }),
@@ -526,6 +532,13 @@ export function GameAssetsBrowserView() {
               >
                 Cancel
               </button>
+            </div>
+          ) : PROTECTED_PATHS.has(selectedPath) ? (
+            <div className="flex w-full items-center gap-1.5 text-left text-xs">
+              <FileText size="0.75rem" className="shrink-0 text-[var(--muted-foreground)]" />
+              <span className="text-[var(--foreground)]">
+                {currentDescription}
+              </span>
             </div>
           ) : (
             <button

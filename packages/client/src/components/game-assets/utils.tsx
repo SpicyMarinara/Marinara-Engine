@@ -57,8 +57,9 @@ export function FileIcon({
  */
 export function countItems(node: TreeNode): number {
   if (node.type === "file") return 1;
-  // Count the folder itself plus all descendants
-  const self = 1;
-  if (!node.children || node.children.length === 0) return self;
-  return self + node.children.reduce((sum, child) => sum + countItems(child), 0);
+  if (!node.children || node.children.length === 0) return 0;
+  // Count each child: files are 1, folders are 1 (themselves) + their contents
+  return node.children.reduce((sum, child) => {
+    return sum + (child.type === "file" ? 1 : 1 + countItems(child));
+  }, 0);
 }

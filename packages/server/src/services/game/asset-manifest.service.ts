@@ -199,8 +199,6 @@ function parsePathParts(rel: string): { category: string; subcategory: string } 
 
 /** Scan the entire game-assets tree and build the manifest. */
 export function buildAssetManifest(): AssetManifest {
-  ensureAssetDirs();
-
   const assets: Record<string, AssetEntry> = {};
   const byCategory: Record<string, AssetEntry[]> = {};
 

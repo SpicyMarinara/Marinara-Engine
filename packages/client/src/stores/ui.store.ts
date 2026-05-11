@@ -932,6 +932,7 @@ export const useUIStore = create<UIState>()(
       openBotBrowser: () =>
         set({
           botBrowserOpen: true,
+          gameAssetsBrowserOpen: false,
           characterLibraryOpen: false,
           regexDetailId: null,
           personaDetailId: null,

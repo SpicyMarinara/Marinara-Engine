@@ -20,7 +20,7 @@ import { seedDefaultConnection } from "./db/seed-connection.js";
 import { seedDefaultBackgrounds } from "./db/seed-backgrounds.js";
 import { seedDefaultGameAssets } from "./db/seed-game-assets.js";
 import { seedDefaultRegexScripts } from "./db/seed-regex.js";
-import { buildAssetManifest } from "./services/game/asset-manifest.service.js";
+import { buildAssetManifest, ensureAssetDirs } from "./services/game/asset-manifest.service.js";
 import { recoverGalleryImages } from "./services/storage/gallery-recovery.js";
 import { APP_VERSION } from "@marinara-engine/shared";
 import { existsSync } from "fs";
@@ -96,7 +96,8 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
   await seedDefaultBackgrounds();
   await seedDefaultGameAssets();
 
-  // ── Build game asset manifest (scans game-assets + user backgrounds) ──
+  // ── Ensure default asset directories exist, then build manifest ──
+  ensureAssetDirs();
   buildAssetManifest();
 
   // ── Recover orphaned gallery images (files on disk without DB records) ──

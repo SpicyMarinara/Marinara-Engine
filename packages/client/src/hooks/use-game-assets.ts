@@ -24,6 +24,8 @@ export interface TreeNode {
   size?: number;
   /** ISO 8601 modification timestamp */
   modified?: string;
+  /** True if this folder was created by the seed script (bundled default assets) */
+  native?: boolean;
 }
 
 /** TanStack Query key factory for game-assets queries. */

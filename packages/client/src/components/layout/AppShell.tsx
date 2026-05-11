@@ -92,13 +92,28 @@ function MainPaneFallback() {
     <div className="flex flex-1 items-center justify-center text-sm text-[var(--muted-foreground)]">Loading...</div>
   );
 }
-/** Mounts children once `open` becomes true, then keeps them mounted (hidden via CSS) so state persists. */
-function MountOnceWhenOpened({ open, children }: { open: boolean; children: React.ReactNode }) {
+/** Mounts children once `open` becomes true, then keeps them mounted so state persists.
+ *  `overlay` mode uses framer-motion slide-in and never unmounts. */
+function MountOnceWhenOpened({ open, children, overlay }: { open: boolean; children: React.ReactNode; overlay?: boolean }) {
   const [everOpened, setEverOpened] = useState(false);
   useEffect(() => {
     if (open && !everOpened) setEverOpened(true);
   }, [open, everOpened]);
   if (!everOpened) return null;
+  if (overlay) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, x: 30 }}
+        animate={open ? { opacity: 1, x: 0 } : { opacity: 0, x: 30 }}
+        transition={{ duration: 0.2 }}
+        className={cn("absolute inset-0 flex flex-col overflow-hidden bg-[var(--background)]", open ? "z-20" : "z-10 pointer-events-none")}
+      >
+        <Suspense fallback={<MainPaneFallback />}>
+          {children}
+        </Suspense>
+      </motion.div>
+    );
+  }
   return (
     <div className={open ? "flex flex-1 flex-col overflow-hidden" : "hidden"}>
       <Suspense fallback={<MainPaneFallback />}>
@@ -787,7 +802,7 @@ export function AppShell() {
         />
       )}
 
-      <AnimatePresence initial={false}>{!isMobile && trackerPanelDesktop("left")}</AnimatePresence>
+      <AnimatePresence initial={false}>{!isMobile && !botBrowserOpen && !gameAssetsBrowserOpen && trackerPanelDesktop("left")}</AnimatePresence>
 
       {/* Center content */}
       <main
@@ -798,35 +813,37 @@ export function AppShell() {
         className="@container mari-main relative flex min-w-0 flex-1 flex-col overflow-hidden"
       >
         <TopBar />
-        {/* Bot Browser — kept mounted once opened so state persists across close/reopen */}
-        <MountOnceWhenOpened open={botBrowserOpen}>
-          <BotBrowserView />
-        </MountOnceWhenOpened>
-        {/* Game Assets Browser — kept mounted once opened so state persists across close/reopen */}
-        <MountOnceWhenOpened open={gameAssetsBrowserOpen}>
-          <GameAssetsBrowserView />
-        </MountOnceWhenOpened>
-        <div
-          className={botBrowserOpen || gameAssetsBrowserOpen ? "hidden" : "flex flex-1 flex-col overflow-hidden"}
-          style={
-            {
-              "--tracker-chat-avoid-left": `${trackerPanelSide === "left" ? trackerPanelChatAvoidance : 0}px`,
-              "--tracker-chat-avoid-right": `${trackerPanelSide === "right" ? trackerPanelChatAvoidance : 0}px`,
-              "--tracker-panel-hud-clear-left": `${trackerPanelSide === "left" ? trackerPanelHudClearance : 0}px`,
-              "--tracker-panel-hud-clear-right": `${trackerPanelSide === "right" ? trackerPanelHudClearance : 0}px`,
-            } as CSSProperties
-          }
-        >
-          <Suspense fallback={<MainPaneFallback />}>{detailView ?? <ChatArea />}</Suspense>
+        <div className="relative flex flex-1 flex-col overflow-hidden">
+          {/* Bot Browser — kept mounted once opened so state persists across close/reopen */}
+          <MountOnceWhenOpened open={botBrowserOpen} overlay>
+            <BotBrowserView />
+          </MountOnceWhenOpened>
+          {/* Game Assets Browser — kept mounted once opened so state persists across close/reopen */}
+          <MountOnceWhenOpened open={gameAssetsBrowserOpen} overlay>
+            <GameAssetsBrowserView />
+          </MountOnceWhenOpened>
+          <div
+            className={botBrowserOpen || gameAssetsBrowserOpen ? "hidden" : "flex flex-1 flex-col overflow-hidden"}
+            style={
+              {
+                "--tracker-chat-avoid-left": `${trackerPanelSide === "left" ? trackerPanelChatAvoidance : 0}px`,
+                "--tracker-chat-avoid-right": `${trackerPanelSide === "right" ? trackerPanelChatAvoidance : 0}px`,
+                "--tracker-panel-hud-clear-left": `${trackerPanelSide === "left" ? trackerPanelHudClearance : 0}px`,
+                "--tracker-panel-hud-clear-right": `${trackerPanelSide === "right" ? trackerPanelHudClearance : 0}px`,
+              } as CSSProperties
+            }
+          >
+            <Suspense fallback={<MainPaneFallback />}>{detailView ?? <ChatArea />}</Suspense>
+          </div>
         </div>
         {/* Floating avatar notification bubbles (right edge) */}
         <ChatNotificationBubbles />
       </main>
 
-      <AnimatePresence initial={false}>{!isMobile && trackerPanelDesktop("right")}</AnimatePresence>
+      <AnimatePresence initial={false}>{!isMobile && !botBrowserOpen && !gameAssetsBrowserOpen && trackerPanelDesktop("right")}</AnimatePresence>
 
       {/* Mobile tracker panel backdrop */}
-      {trackerPanelActive && (
+      {trackerPanelActive && !botBrowserOpen && !gameAssetsBrowserOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm md:hidden"
           onClick={() => setTrackerPanelOpen(false)}
@@ -836,7 +853,7 @@ export function AppShell() {
       {/* Mobile tracker panel */}
       {isMobile && (
         <AnimatePresence mode="wait">
-          {trackerPanelActive && (
+          {trackerPanelActive && !botBrowserOpen && !gameAssetsBrowserOpen && (
             <motion.aside
               key="mobile-tracker"
               initial={{ x: trackerPanelSide === "left" ? "-100%" : "100%" }}

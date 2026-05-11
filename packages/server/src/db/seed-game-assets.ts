@@ -68,6 +68,29 @@ function copyDirRecursive(src: string, dest: string): number {
   return copied;
 }
 
+/**
+ * Ensure every directory that exists in the bundled assets has a `.native`
+ * marker at the corresponding destination path. Idempotent.
+ */
+function ensureNativeMarkers(src: string, dest: string) {
+  if (!existsSync(src)) return;
+  if (!existsSync(dest)) {
+    mkdirSync(dest, { recursive: true });
+  }
+  const nativeMarker = join(dest, ".native");
+  if (!existsSync(nativeMarker)) {
+    writeFileSync(nativeMarker, "", "utf-8");
+  }
+  for (const entry of readdirSync(src)) {
+    if (entry.startsWith(".")) continue;
+    const srcPath = join(src, entry);
+    const destPath = join(dest, entry);
+    if (statSync(srcPath).isDirectory()) {
+      ensureNativeMarkers(srcPath, destPath);
+    }
+  }
+}
+
 export async function seedDefaultGameAssets(): Promise<void> {
   if (!existsSync(BUNDLED_DIR)) {
     logger.warn("[seed] Default game assets bundle not found — skipping");
@@ -76,16 +99,16 @@ export async function seedDefaultGameAssets(): Promise<void> {
 
   const bundleHash = hashDirRecursive(BUNDLED_DIR);
   const existingHash = existsSync(SEED_MARKER) ? readFileSync(SEED_MARKER, "utf-8").trim() : "";
-  if (bundleHash && existingHash === bundleHash) {
-    return;
+  const needsCopy = !bundleHash || existingHash !== bundleHash;
+
+  if (needsCopy) {
+    const copied = copyDirRecursive(BUNDLED_DIR, GAME_ASSETS_DIR);
+    writeFileSync(SEED_MARKER, `${bundleHash}\n`, "utf-8");
+    if (copied > 0) {
+      logger.info(`[seed] Installed ${copied} default game asset${copied > 1 ? "s" : ""} (music, ambient, SFX, sprites)`);
+    }
   }
 
-  // Seed whenever the bundled asset set changes, while still skipping files
-  // the user already has at the destination.
-  const copied = copyDirRecursive(BUNDLED_DIR, GAME_ASSETS_DIR);
-  writeFileSync(SEED_MARKER, `${bundleHash}\n`, "utf-8");
-
-  if (copied > 0) {
-    logger.info(`[seed] Installed ${copied} default game asset${copied > 1 ? "s" : ""} (music, ambient, SFX, sprites)`);
-  }
+  // Always ensure native markers are up to date (idempotent)
+  ensureNativeMarkers(BUNDLED_DIR, GAME_ASSETS_DIR);
 }
