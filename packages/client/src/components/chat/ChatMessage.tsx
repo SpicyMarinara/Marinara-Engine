@@ -874,14 +874,14 @@ export const ChatMessage = memo(function ChatMessage({
   }, []);
 
   useEffect(() => {
-    if (message.role !== "user" || !onEdit) return;
+    if (!onEdit) return;
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ messageId?: string }>).detail;
       if (detail?.messageId === message.id) startEditing();
     };
     window.addEventListener("marinara:start-edit-message", handler);
     return () => window.removeEventListener("marinara:start-edit-message", handler);
-  }, [message.id, message.role, onEdit, startEditing]);
+  }, [message.id, onEdit, startEditing]);
 
   const handleSaveEdit = useCallback(
     (content: string) => {

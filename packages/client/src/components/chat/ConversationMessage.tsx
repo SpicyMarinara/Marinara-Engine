@@ -535,7 +535,7 @@ export const ConversationMessage = memo(function ConversationMessage({
   }, [message.content]);
 
   useEffect(() => {
-    if (message.role !== "user" || !onEdit) return;
+    if (!onEdit) return;
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ messageId?: string }>).detail;
       if (detail?.messageId !== message.id) return;
@@ -544,7 +544,7 @@ export const ConversationMessage = memo(function ConversationMessage({
     };
     window.addEventListener("marinara:start-edit-message", handler);
     return () => window.removeEventListener("marinara:start-edit-message", handler);
-  }, [message.id, message.role, onEdit, onEditClick, startEditing]);
+  }, [message.id, onEdit, onEditClick, startEditing]);
 
   const editValueRef = useRef(editValue);
   editValueRef.current = editValue;

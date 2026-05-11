@@ -443,6 +443,8 @@ function GeneralSettings() {
   const setIntuitiveSwipeNavigation = useUIStore((s) => s.setIntuitiveSwipeNavigation);
   const intuitiveSwipeRerollLatest = useUIStore((s) => s.intuitiveSwipeRerollLatest);
   const setIntuitiveSwipeRerollLatest = useUIStore((s) => s.setIntuitiveSwipeRerollLatest);
+  const editLastMessageOnArrowUp = useUIStore((s) => s.editLastMessageOnArrowUp);
+  const setEditLastMessageOnArrowUp = useUIStore((s) => s.setEditLastMessageOnArrowUp);
   const rescanGameAssets = useGameAssetStore((s) => s.rescanAssets);
   const assetFileRef = useRef<HTMLInputElement>(null);
   const [assetCategory, setAssetCategory] = useState<GameAssetCategoryId>("backgrounds");
@@ -729,7 +731,7 @@ function GeneralSettings() {
         label="Intuitive swipe navigation"
         checked={intuitiveSwipeNavigation}
         onChange={setIntuitiveSwipeNavigation}
-        help="In Conversation and Roleplay modes, use Left/Right Arrow on desktop or horizontal touch swipes on mobile to move between alternate generations on the latest assistant message. Up Arrow edits your last sent message (only when the chat input is empty)."
+        help="In Conversation and Roleplay modes, use Left/Right Arrow on desktop or horizontal touch swipes on mobile to move between alternate generations on the latest assistant message."
       />
 
       <div className={cn("pl-5 transition-opacity", intuitiveSwipeNavigation ? "" : "pointer-events-none opacity-45")}>
@@ -740,6 +742,13 @@ function GeneralSettings() {
           help="When intuitive swipes are enabled, pressing Right Arrow or swiping left on the newest swipe of the latest assistant message creates a new reroll."
         />
       </div>
+
+      <ToggleSetting
+        label="Up Arrow edits last message"
+        checked={editLastMessageOnArrowUp}
+        onChange={setEditLastMessageOnArrowUp}
+        help="In Conversation and Roleplay modes, press Up Arrow while the chat input is empty to open the most recent message in the chat for editing — whether it's yours or the AI's."
+      />
 
       <div className="rounded-xl bg-[var(--secondary)]/50 p-4 ring-1 ring-[var(--border)]">
         <div className="mb-3 flex flex-col gap-1">

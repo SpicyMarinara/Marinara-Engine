@@ -276,6 +276,8 @@ interface UIState {
   intuitiveSwipeNavigation: boolean;
   /** When true, moving past the newest swipe on the latest assistant message creates a new reroll. */
   intuitiveSwipeRerollLatest: boolean;
+  /** When true, pressing Up Arrow with an empty chat input opens the last user message for editing (Conversation/Roleplay). */
+  editLastMessageOnArrowUp: boolean;
 
   // ── Text Appearance ──
   /** Color for narrator text in RP mode (empty = default amber) */
@@ -471,6 +473,7 @@ interface UIState {
   setSpotifyMobileWidgetPosition: (position: FloatingWidgetPosition) => void;
   setIntuitiveSwipeNavigation: (v: boolean) => void;
   setIntuitiveSwipeRerollLatest: (v: boolean) => void;
+  setEditLastMessageOnArrowUp: (v: boolean) => void;
   setNarrationFontColor: (v: string) => void;
   setNarrationOpacity: (v: number) => void;
   setChatFontColor: (v: string) => void;
@@ -582,6 +585,7 @@ export function pickSyncedSettings(state: UIState) {
     spotifyMobileWidgetPosition: state.spotifyMobileWidgetPosition,
     intuitiveSwipeNavigation: state.intuitiveSwipeNavigation,
     intuitiveSwipeRerollLatest: state.intuitiveSwipeRerollLatest,
+    editLastMessageOnArrowUp: state.editLastMessageOnArrowUp,
     narrationFontColor: state.narrationFontColor,
     narrationOpacity: state.narrationOpacity,
     chatFontColor: state.chatFontColor,
@@ -691,6 +695,7 @@ export const useUIStore = create<UIState>()(
       spotifyMobileWidgetPosition: { x: 16, y: 96 },
       intuitiveSwipeNavigation: false,
       intuitiveSwipeRerollLatest: false,
+      editLastMessageOnArrowUp: true,
       narrationFontColor: "",
       narrationOpacity: 80,
       chatFontColor: "",
@@ -1023,6 +1028,7 @@ export const useUIStore = create<UIState>()(
         }),
       setIntuitiveSwipeNavigation: (v) => set({ intuitiveSwipeNavigation: v }),
       setIntuitiveSwipeRerollLatest: (v) => set({ intuitiveSwipeRerollLatest: v }),
+      setEditLastMessageOnArrowUp: (v) => set({ editLastMessageOnArrowUp: v }),
       setNarrationFontColor: (v) => set({ narrationFontColor: v }),
       setNarrationOpacity: (v) => set({ narrationOpacity: Math.max(0, Math.min(100, v)) }),
       setChatFontColor: (v) => set({ chatFontColor: v }),
@@ -1110,7 +1116,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "marinara-engine-ui",
-      version: 27,
+      version: 28,
       // Debounce localStorage writes to avoid sync I/O on every state change
       storage: createJSONStorage(() => {
         let timer: ReturnType<typeof setTimeout> | null = null;
@@ -1360,6 +1366,10 @@ export const useUIStore = create<UIState>()(
           if (persisted.roleplaySpriteScale === undefined) {
             persisted.roleplaySpriteScale = 1;
           }
+        }
+        // v27 -> v28: enable Up-Arrow recall of the last user message by default.
+        if (version <= 27 && persisted.editLastMessageOnArrowUp === undefined) {
+          persisted.editLastMessageOnArrowUp = true;
         }
         return persisted;
       },
