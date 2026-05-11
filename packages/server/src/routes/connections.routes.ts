@@ -53,6 +53,30 @@ function buildStabilityUrl(baseUrl: string, targetPath: string): string {
   }
 }
 
+function buildHordeUrl(baseUrl: string, targetPath: string): string {
+  try {
+    const url = new URL(baseUrl);
+    const parts = url.pathname.split("/").filter(Boolean);
+    const versionIndex = parts.findIndex((part, index) => part === "api" && parts[index + 1] === "v2");
+    const prefix = versionIndex >= 0 ? parts.slice(0, versionIndex + 2) : [...parts, "api", "v2"];
+    url.pathname = `/${[...prefix, ...targetPath.split("/").filter(Boolean)].join("/")}`;
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return `${baseUrl.replace(/\/+$/, "")}/api/v2/${targetPath.replace(/^\/+/, "")}`;
+  }
+}
+
+function hordeHeaders(apiKey: string): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    apikey: apiKey.trim() || "0000000000",
+    "Client-Agent": "Marinara-Engine",
+  };
+}
+
 function isStabilityV1Base(baseUrl: string): boolean {
   try {
     const parts = new URL(baseUrl).pathname.split("/").filter(Boolean);
@@ -188,6 +212,9 @@ export async function connectionsRoutes(app: FastifyInstance) {
       if (conn.provider === "image_generation" && imageSource === "novelai") {
         // NovelAI: validate the API key via the user subscription endpoint
         testUrl = "https://api.novelai.net/user/subscription";
+      } else if (conn.provider === "image_generation" && imageSource === "horde") {
+        // Horde: heartbeat is the lightweight health endpoint for the public API.
+        testUrl = buildHordeUrl(baseUrl, "status/heartbeat");
       } else if (conn.provider === "image_generation" && imageSource === "stability") {
         // Stability's generation endpoints live under v2beta, but account/key checks are v1.
         testUrl = buildStabilityUrl(baseUrl, "v1/user/account");
@@ -201,8 +228,10 @@ export async function connectionsRoutes(app: FastifyInstance) {
         testUrl = `${baseUrl}${provider?.modelsEndpoint || "/models"}`;
       }
 
+      const testHeaders =
+        conn.provider === "image_generation" && imageSource === "horde" ? hordeHeaders(conn.apiKey) : headers;
       const res = await safeFetch(testUrl, {
-        headers,
+        headers: testHeaders,
         policy: localUrlPolicyForProvider(conn.provider, imageSource),
         maxResponseBytes: 2 * 1024 * 1024,
       });
@@ -431,6 +460,38 @@ export async function connectionsRoutes(app: FastifyInstance) {
           });
         }
         return { models: normalizeModelsResponse("openrouter", json) };
+      }
+
+      if (conn.provider === "image_generation" && imageSource === "horde") {
+        const res = await safeFetch(`${buildHordeUrl(baseUrl, "status/models")}?type=image`, {
+          headers: hordeHeaders(conn.apiKey),
+          policy: localUrlPolicyForProvider(conn.provider, imageSource),
+          maxResponseBytes: 5 * 1024 * 1024,
+        });
+        if (!res.ok) {
+          const body = await res.text();
+          return reply.status(502).send({
+            error: `Horde returned ${res.status}: ${sanitizeProviderBody(body)}`,
+          });
+        }
+        const text = await res.text();
+        let json: unknown;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          return reply.status(502).send({
+            error: `Failed to fetch models: ${sanitizeProviderBody(text)}`,
+          });
+        }
+        const models = (Array.isArray(json) ? json : [])
+          .map((model) => {
+            if (!model || typeof model !== "object") return null;
+            const record = model as { name?: string; id?: string };
+            const id = record.name ?? record.id ?? "";
+            return id ? { id, name: id } : null;
+          })
+          .filter((model): model is { id: string; name: string } => Boolean(model));
+        return { models };
       }
 
       let modelsUrl = `${baseUrl}${provider?.modelsEndpoint ?? "/models"}`;

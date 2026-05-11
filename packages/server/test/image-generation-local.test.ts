@@ -150,6 +150,80 @@ test("OpenRouter image generation uses chat completions modalities and image dat
   }
 });
 
+test("Horde image generation uses native async endpoints", async () => {
+  let capturedBody: Record<string, unknown> | null = null;
+  const requests: Array<{ method?: string; url?: string }> = [];
+  let port = 0;
+  const server = createServer((req, res) => {
+    requests.push({ method: req.method, url: req.url });
+    if (req.method === "POST" && req.url === "/api/v2/generate/async") {
+      let raw = "";
+      req.setEncoding("utf8");
+      req.on("data", (chunk) => {
+        raw += chunk;
+      });
+      req.on("end", () => {
+        capturedBody = JSON.parse(raw) as Record<string, unknown>;
+        res.writeHead(202, { "content-type": "application/json" });
+        res.end(JSON.stringify({ id: "job-711" }));
+      });
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/api/v2/generate/check/job-711") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ done: true, is_possible: true }));
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/api/v2/generate/status/job-711") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ generations: [{ img: PNG_1X1_BASE64 }] }));
+      return;
+    }
+
+    res.writeHead(404, { "content-type": "text/html" });
+    res.end("<!doctype html><html><title>404 Not Found</title></html>");
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const addressInfo = server.address();
+  assert.ok(addressInfo && typeof addressInfo === "object");
+  port = addressInfo.port;
+
+  try {
+    const result = await generateImage("horde", `http://127.0.0.1:${port}/api/v2`, "", "horde", {
+      prompt: "spaghetti",
+      negativePrompt: "burned",
+      model: "stable_diffusion",
+      width: 512,
+      height: 640,
+      allowLocalUrls: true,
+    });
+
+    assert.equal(result.mimeType, "image/png");
+    assert.equal(result.base64, PNG_1X1_BASE64);
+    assert.deepEqual(
+      requests.map((req) => `${req.method} ${req.url}`),
+      ["POST /api/v2/generate/async", "GET /api/v2/generate/check/job-711", "GET /api/v2/generate/status/job-711"],
+    );
+    assert.equal(capturedBody?.prompt, "spaghetti ### burned");
+    assert.deepEqual(capturedBody?.models, ["stable_diffusion"]);
+    assert.deepEqual(capturedBody?.params, {
+      n: 1,
+      width: 512,
+      height: 640,
+      steps: 30,
+      cfg_scale: 7,
+      sampler_name: "k_euler",
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+  }
+});
+
 test("native NovelAI image generation sends stable request settings and embeds metadata", async () => {
   const imageBytes = Buffer.from(PNG_1X1_BASE64, "base64");
   let capturedBody: Record<string, unknown> | null = null;

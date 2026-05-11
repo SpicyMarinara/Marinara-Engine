@@ -74,6 +74,7 @@ const EXPLICIT_IMAGE_SOURCES = new Set([
   "stability",
   "togetherai",
   "novelai",
+  "horde",
   "comfyui",
   "automatic1111",
   "gemini_image",
@@ -135,6 +136,8 @@ export async function generateImage(
       return generateTogetherAI(normalizedBaseUrl, apiKey, scopedRequest);
     case "novelai":
       return generateNovelAI(normalizedBaseUrl, apiKey, scopedRequest);
+    case "horde":
+      return generateHorde(normalizedBaseUrl, apiKey, scopedRequest);
     case "comfyui":
       return generateComfyUI(normalizedBaseUrl, scopedRequest);
     case "automatic1111":
@@ -586,6 +589,146 @@ async function generatePollinations(request: ImageGenRequest): Promise<ImageGenR
   const base64 = Buffer.from(arrayBuffer).toString("base64");
 
   return { base64, mimeType: "image/jpeg", ext: "jpg" };
+}
+
+const HORDE_ANON_API_KEY = "0000000000";
+
+function hordeUrl(baseUrl: string, targetPath: string): string {
+  try {
+    const url = new URL(baseUrl);
+    const parts = url.pathname.split("/").filter(Boolean);
+    const versionIndex = parts.findIndex((part, index) => part === "api" && parts[index + 1] === "v2");
+    const prefix = versionIndex >= 0 ? parts.slice(0, versionIndex + 2) : [...parts, "api", "v2"];
+    url.pathname = `/${[...prefix, ...targetPath.split("/").filter(Boolean)].join("/")}`;
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return `${baseUrl.replace(/\/+$/, "")}/api/v2/${targetPath.replace(/^\/+/, "")}`;
+  }
+}
+
+function hordeHeaders(apiKey: string): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    apikey: apiKey.trim() || HORDE_ANON_API_KEY,
+    "Client-Agent": "Marinara-Engine",
+  };
+}
+
+function hordePrompt(request: ImageGenRequest): string {
+  const prompt = request.prompt.trim();
+  const negativePrompt = request.negativePrompt?.trim();
+  return negativePrompt ? `${prompt} ### ${negativePrompt}` : prompt;
+}
+
+async function readHordeJson<T>(resp: Response, fallback: string): Promise<T> {
+  const text = await resp.text();
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`${fallback}: ${sanitizeErrorText(text)}`);
+  }
+}
+
+async function generateHorde(baseUrl: string, apiKey: string, request: ImageGenRequest): Promise<ImageGenResult> {
+  const body: Record<string, unknown> = {
+    prompt: hordePrompt(request),
+    params: {
+      n: 1,
+      width: request.width ?? 512,
+      height: request.height ?? 512,
+      steps: 30,
+      cfg_scale: 7,
+      sampler_name: "k_euler",
+    },
+  };
+  if (request.model) body.models = [request.model];
+
+  const startResp = await imageFetch(
+    hordeUrl(baseUrl, "generate/async"),
+    {
+      method: "POST",
+      headers: hordeHeaders(apiKey),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
+    },
+    { allowLocal: request.allowLocalUrls },
+  );
+
+  if (!startResp.ok) {
+    const errText = await startResp.text().catch(() => "Unknown error");
+    throw new Error(`Horde image generation failed (${startResp.status}): ${sanitizeErrorText(errText)}`);
+  }
+
+  const start = await readHordeJson<{ id?: string }>(startResp, "Could not parse Horde generation response");
+  const jobId = start.id?.trim();
+  if (!jobId) throw new Error("Horde image generation did not return a job id");
+
+  const maxAttempts = Math.max(1, Math.ceil(IMAGE_GEN_TIMEOUT / 2000));
+  let completed = false;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const checkResp = await imageFetch(
+      hordeUrl(baseUrl, `generate/check/${encodeURIComponent(jobId)}`),
+      {
+        headers: hordeHeaders(apiKey),
+        signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
+      },
+      { allowLocal: request.allowLocalUrls },
+    );
+
+    if (!checkResp.ok) {
+      const errText = await checkResp.text().catch(() => "Unknown error");
+      throw new Error(`Horde image generation check failed (${checkResp.status}): ${sanitizeErrorText(errText)}`);
+    }
+
+    const check = await readHordeJson<{ done?: boolean; is_possible?: boolean; faulted?: boolean }>(
+      checkResp,
+      "Could not parse Horde generation check response",
+    );
+    if (check.is_possible === false || check.faulted) {
+      throw new Error("Horde image generation could not be completed by available workers");
+    }
+    if (check.done) {
+      completed = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+
+  if (!completed) {
+    throw new Error("Horde image generation timed out before the worker finished");
+  }
+
+  const statusResp = await imageFetch(
+    hordeUrl(baseUrl, `generate/status/${encodeURIComponent(jobId)}`),
+    {
+      headers: hordeHeaders(apiKey),
+      signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
+    },
+    { allowLocal: request.allowLocalUrls },
+  );
+
+  if (!statusResp.ok) {
+    const errText = await statusResp.text().catch(() => "Unknown error");
+    throw new Error(`Horde image generation status failed (${statusResp.status}): ${sanitizeErrorText(errText)}`);
+  }
+
+  const status = await readHordeJson<{ generations?: Array<{ img?: string; censored?: boolean }> }>(
+    statusResp,
+    "Could not parse Horde generation status response",
+  );
+  const generation = status.generations?.find((item) => item.img);
+  if (!generation?.img) throw new Error("No image data in Horde response");
+  if (generation.censored) throw new Error("Horde image generation was censored by the worker");
+
+  const image = generation.img.trim();
+  if (image.startsWith("data:")) return decodeImageDataUrl(image);
+  if (/^https?:\/\//i.test(image)) return downloadImageUrl(image, request.allowLocalUrls);
+
+  const mimeType = detectImageMimeType(image);
+  return { base64: image, mimeType, ext: imageExtensionFromMimeType(mimeType) };
 }
 
 function buildStabilityUrl(baseUrl: string, targetPath: string): string {
