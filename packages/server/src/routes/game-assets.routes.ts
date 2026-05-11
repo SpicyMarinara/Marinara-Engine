@@ -608,6 +608,152 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
     return { sourcePath: filePath, newPath: newRel };
   });
 
+  // ── POST /game-assets/move-bulk ──
+  app.post("/move-bulk", async (req, reply) => {
+    const schema = z.object({
+      paths: z.array(z.string().min(1).max(500)).min(1).max(100),
+      targetFolder: z.string().min(1).max(300),
+    });
+    const { paths, targetFolder } = schema.parse(req.body);
+
+    if (!isSafePath(targetFolder)) {
+      return reply.status(400).send({ error: "Invalid target folder" });
+    }
+    const destDir = join(GAME_ASSETS_DIR, targetFolder);
+    try {
+      assertInsideDir(GAME_ASSETS_DIR, destDir);
+    } catch {
+      return reply.status(400).send({ error: "Target escapes game assets directory" });
+    }
+    if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true });
+
+    const succeeded: string[] = [];
+    const failed: { path: string; error: string }[] = [];
+
+    for (const filePath of paths) {
+      if (!isSafePath(filePath)) {
+        failed.push({ path: filePath, error: "Invalid path" });
+        continue;
+      }
+      const oldFull = join(GAME_ASSETS_DIR, filePath);
+      try {
+        assertInsideDir(GAME_ASSETS_DIR, oldFull);
+      } catch {
+        failed.push({ path: filePath, error: "Path escapes game assets directory" });
+        continue;
+      }
+      if (!existsSync(oldFull)) {
+        failed.push({ path: filePath, error: "File not found" });
+        continue;
+      }
+      const stat = statSync(oldFull);
+      if (!stat.isFile()) {
+        failed.push({ path: filePath, error: "Not a file" });
+        continue;
+      }
+      const safeName = uniqueFilename(destDir, basename(filePath));
+      const newFull = join(destDir, safeName);
+      renameSync(oldFull, newFull);
+      succeeded.push(filePath);
+    }
+
+    if (succeeded.length > 0) buildAssetManifest();
+    return { succeeded, failed, targetFolder };
+  });
+
+  // ── POST /game-assets/copy-bulk ──
+  app.post("/copy-bulk", async (req, reply) => {
+    const schema = z.object({
+      paths: z.array(z.string().min(1).max(500)).min(1).max(100),
+      targetFolder: z.string().min(1).max(300),
+    });
+    const { paths, targetFolder } = schema.parse(req.body);
+
+    if (!isSafePath(targetFolder)) {
+      return reply.status(400).send({ error: "Invalid target folder" });
+    }
+    const destDir = join(GAME_ASSETS_DIR, targetFolder);
+    try {
+      assertInsideDir(GAME_ASSETS_DIR, destDir);
+    } catch {
+      return reply.status(400).send({ error: "Target escapes game assets directory" });
+    }
+    if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true });
+
+    const succeeded: string[] = [];
+    const failed: { path: string; error: string }[] = [];
+
+    for (const filePath of paths) {
+      if (!isSafePath(filePath)) {
+        failed.push({ path: filePath, error: "Invalid path" });
+        continue;
+      }
+      const oldFull = join(GAME_ASSETS_DIR, filePath);
+      try {
+        assertInsideDir(GAME_ASSETS_DIR, oldFull);
+      } catch {
+        failed.push({ path: filePath, error: "Path escapes game assets directory" });
+        continue;
+      }
+      if (!existsSync(oldFull)) {
+        failed.push({ path: filePath, error: "File not found" });
+        continue;
+      }
+      const stat = statSync(oldFull);
+      if (!stat.isFile()) {
+        failed.push({ path: filePath, error: "Not a file" });
+        continue;
+      }
+      const safeName = uniqueFilename(destDir, basename(filePath));
+      const newFull = join(destDir, safeName);
+      copyFileSync(oldFull, newFull);
+      succeeded.push(filePath);
+    }
+
+    if (succeeded.length > 0) buildAssetManifest();
+    return { succeeded, failed, targetFolder };
+  });
+
+  // ── POST /game-assets/delete-bulk ──
+  app.post("/delete-bulk", async (req, reply) => {
+    const schema = z.object({
+      paths: z.array(z.string().min(1).max(500)).min(1).max(100),
+    });
+    const { paths } = schema.parse(req.body);
+
+    const succeeded: string[] = [];
+    const failed: { path: string; error: string }[] = [];
+    const { unlinkSync } = await import("fs");
+
+    for (const filePath of paths) {
+      if (!isSafePath(filePath)) {
+        failed.push({ path: filePath, error: "Invalid path" });
+        continue;
+      }
+      const full = join(GAME_ASSETS_DIR, filePath);
+      try {
+        assertInsideDir(GAME_ASSETS_DIR, full);
+      } catch {
+        failed.push({ path: filePath, error: "Path escapes game assets directory" });
+        continue;
+      }
+      if (!existsSync(full)) {
+        failed.push({ path: filePath, error: "File not found" });
+        continue;
+      }
+      const stat = statSync(full);
+      if (!stat.isFile()) {
+        failed.push({ path: filePath, error: "Not a file" });
+        continue;
+      }
+      unlinkSync(full);
+      succeeded.push(filePath);
+    }
+
+    if (succeeded.length > 0) buildAssetManifest();
+    return { succeeded, failed };
+  });
+
   // ── GET /game-assets/file-content/* ──
   app.get("/file-content/*", async (req, reply) => {
     const wildcard = (req.params as Record<string, string>)["*"];
