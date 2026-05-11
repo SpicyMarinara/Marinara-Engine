@@ -4212,6 +4212,26 @@ export async function generateRoutes(app: FastifyInstance) {
       // ────────────────────────────────────────
       // Tracker Data Injection
       // ────────────────────────────────────────
+      // The Card Evolution Auditor proposes user-facing character-card edits,
+      // so gate it by assistant-message cadence instead of auditing every turn.
+      if (resolvedAgents.some((a) => a.type === "card-evolution-auditor")) {
+        const ceaAgent = resolvedAgents.find((a) => a.type === "card-evolution-auditor")!;
+        const defaultInterval = (getDefaultBuiltInAgentSettings("card-evolution-auditor").runInterval as number) ?? 8;
+        const runInterval = (ceaAgent.settings.runInterval as number) ?? defaultInterval;
+
+        if (runInterval > 1) {
+          const lastRun = await agentsStore.getLastSuccessfulRunByType("card-evolution-auditor", input.chatId);
+          if (lastRun) {
+            const lastRunIdx = allChatMessages.findIndex((m: any) => m.id === lastRun.messageId);
+            const assistantMsgsSince =
+              lastRunIdx >= 0 ? allChatMessages.slice(lastRunIdx + 1).filter((m: any) => m.role === "assistant") : [];
+            if (assistantMsgsSince.length + 1 < runInterval) {
+              resolvedAgents.splice(resolvedAgents.indexOf(ceaAgent), 1);
+            }
+          }
+        }
+      }
+
       // Always inject committed tracker data as a system message regardless of
       // preset configuration. This replaces the old agent_data marker approach.
       if (chatEnableAgents && chatActiveAgentIds.length > 0) {

@@ -26,6 +26,14 @@ export function getAgentRunIntervalMeta(agentType: string, isBuiltIn = true): Ag
         defaultValue: 8,
         max: 100,
       };
+    case "card-evolution-auditor":
+      return {
+        label: "Run Interval",
+        unit: "assistant messages",
+        help: "How many assistant messages should pass between Card Evolution Auditor checks.",
+        defaultValue: 8,
+        max: 100,
+      };
     case "chat-summary":
       return {
         label: "Triggers After",
