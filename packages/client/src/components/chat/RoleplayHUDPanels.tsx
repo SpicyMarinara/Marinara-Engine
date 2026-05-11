@@ -1127,12 +1127,13 @@ function InlinePreviewPortal({
     if (anchor) resizeObserver?.observe(anchor);
     if (previewRef.current) resizeObserver?.observe(previewRef.current);
     window.addEventListener("resize", update);
-    window.addEventListener("scroll", update, true);
+    const scrollOptions: AddEventListenerOptions = { capture: true, passive: true };
+    window.addEventListener("scroll", update, scrollOptions);
 
     return () => {
       resizeObserver?.disconnect();
       window.removeEventListener("resize", update);
-      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("scroll", update, scrollOptions);
     };
   }, [anchorRef, open, updatePosition, value]);
 
