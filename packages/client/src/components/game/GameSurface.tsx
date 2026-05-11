@@ -7102,26 +7102,13 @@ export function GameSurface({
 
   const widgetSessionPrepModal = (
     <GameWidgetSessionPrepModal
-      open={prepareInitialWidgetsOpen || prepareSessionWidgetsOpen}
+      open={prepareSessionWidgetsOpen}
       widgets={normalizedWidgets}
       chatId={activeChatId}
-      mode={prepareInitialWidgetsOpen ? "initial" : "next"}
-      onClose={() => {
-        if (prepareInitialWidgetsOpen) {
-          setPrepareInitialWidgetsOpen(false);
-          return;
-        }
-        setPrepareSessionWidgetsOpen(false);
-      }}
-      onStartSession={
-        prepareInitialWidgetsOpen
-          ? () => {
-              setPrepareInitialWidgetsOpen(false);
-              handleStartGameNow();
-            }
-          : handleStartNewSessionNow
-      }
-      isStartingSession={prepareInitialWidgetsOpen ? startGame.isPending || startGameRequested : startSessionLocked}
+      mode="next"
+      onClose={() => setPrepareSessionWidgetsOpen(false)}
+      onStartSession={handleStartNewSessionNow}
+      isStartingSession={startSessionLocked}
     />
   );
 
