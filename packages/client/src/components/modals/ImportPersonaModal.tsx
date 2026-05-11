@@ -20,6 +20,12 @@ export function ImportPersonaModal({ open, onClose }: Props) {
   const [dragOver, setDragOver] = useState(false);
   const qc = useQueryClient();
 
+  const isZipFile = async (file: File): Promise<boolean> => {
+    if (file.size < 4) return false;
+    const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+    return head[0] === 0x50 && head[1] === 0x4b;
+  };
+
   const handleFiles = async (files: File[]) => {
     if (files.length === 0) return;
     setStatus("loading");
@@ -28,6 +34,28 @@ export function ImportPersonaModal({ open, onClose }: Props) {
     const nextResults: Array<{ filename: string; success: boolean; message: string }> = [];
     for (const file of files) {
       try {
+        // Marinara native packages are .marinara files (zip with data.json +
+        // avatar binary). Detect via the zip signature so a renamed file
+        // still works.
+        if (await isZipFile(file)) {
+          const form = new FormData();
+          form.append("file", file, file.name);
+          form.append(
+            "timestampOverrides",
+            JSON.stringify({ createdAt: file.lastModified, updatedAt: file.lastModified }),
+          );
+          const data = await api.upload<{ success: boolean; name?: string; error?: string }>(
+            "/import/marinara-package",
+            form,
+          );
+          nextResults.push({
+            filename: file.name,
+            success: data.success,
+            message: data.success ? `Imported "${data.name ?? file.name}"` : (data.error ?? "Import failed"),
+          });
+          continue;
+        }
+
         const text = await file.text();
         const json = JSON.parse(text) as Record<string, unknown>;
 

@@ -18,7 +18,7 @@ import { createConnectionsStorage } from "../services/storage/connections.storag
 import { generateImage } from "../services/image/image-generation.js";
 import { resolveConnectionImageDefaults } from "../services/image/image-generation-defaults.js";
 import { loadImageGenerationUserSettings } from "../services/image/image-generation-settings.js";
-import { writeFile, mkdir, readFile } from "fs/promises";
+import { writeFile, mkdir, readFile, readdir } from "fs/promises";
 import { join } from "path";
 import { DATA_DIR } from "../utils/data-dir.js";
 import { createWriteStream, existsSync, rmSync, unlinkSync } from "fs";
@@ -102,10 +102,101 @@ async function resolveAvatarGenerationConnection(app: FastifyInstance, body: Ava
 
 type ExportFormat = "native" | "compatible";
 
-function buildNativeCharacterEnvelope(
-  char: { createdAt: string; updatedAt: string; comment?: string | null },
+// Read an image file and return it as a base64 data URL, or null if the file
+// is missing, outside the expected dir, or not a recognized image type. Used
+// by native exports to embed binary data (avatars, sprites, gallery shots)
+// directly into the JSON envelope so personas/characters round-trip with
+// every image intact.
+async function readImageAsDataUrl(rootDir: string, filename: string): Promise<string | null> {
+  if (!filename || filename.includes("..") || filename.includes("/") || filename.includes("\\")) return null;
+  let filepath: string;
+  try {
+    filepath = assertInsideDir(rootDir, join(rootDir, filename));
+  } catch {
+    return null;
+  }
+  if (!existsSync(filepath)) return null;
+  try {
+    const buf = await readFile(filepath);
+    const info = isAllowedImageBuffer(buf, extname(filename));
+    if (!info) return null;
+    return `data:${info.mimeType};base64,${buf.toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
+
+// Pull the avatar off disk for the persona/character row's avatarPath
+// (format: /api/avatars/file/<filename>). Returns null if missing/invalid.
+async function readAvatarDataUrl(avatarPath: string | null | undefined): Promise<string | null> {
+  if (!avatarPath || typeof avatarPath !== "string") return null;
+  const filename = avatarPath.split("?")[0]!.split("/").pop();
+  if (!filename) return null;
+  return readImageAsDataUrl(join(DATA_DIR, "avatars"), filename);
+}
+
+// Read every sprite file in data/sprites/<id>/ and return it as
+// { filename, data } so import can restore the same expression set under a
+// new id.
+async function readSpritesForId(
+  id: string,
+): Promise<Array<{ filename: string; data: string }>> {
+  const dir = join(DATA_DIR, "sprites", id);
+  if (!existsSync(dir)) return [];
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch {
+    return [];
+  }
+  const sprites: Array<{ filename: string; data: string }> = [];
+  for (const entry of entries) {
+    const dataUrl = await readImageAsDataUrl(dir, entry);
+    if (dataUrl) sprites.push({ filename: entry, data: dataUrl });
+  }
+  return sprites;
+}
+
+// Read every gallery image for a character (metadata row + binary on disk),
+// returning a serializable list that import can rebuild the gallery from.
+async function readGalleryForCharacter(
+  characterId: string,
+  galleryStorage: { listByCharacterId: (id: string) => Promise<any[]> },
+): Promise<Array<Record<string, unknown>>> {
+  const images = await galleryStorage.listByCharacterId(characterId);
+  const result: Array<Record<string, unknown>> = [];
+  for (const img of images) {
+    // img.filePath is stored relative to data/gallery/, e.g.
+    // "characters/<id>/<filename>". The original filename is the basename.
+    const relPath: string = typeof img.filePath === "string" ? img.filePath : "";
+    const filename = relPath.split("/").pop() ?? "";
+    if (!filename) continue;
+    const galleryDir = join(DATA_DIR, "gallery", "characters", characterId);
+    const dataUrl = await readImageAsDataUrl(galleryDir, filename);
+    if (!dataUrl) continue;
+    result.push({
+      filename,
+      data: dataUrl,
+      prompt: img.prompt ?? "",
+      provider: img.provider ?? "",
+      model: img.model ?? "",
+      width: img.width ?? null,
+      height: img.height ?? null,
+    });
+  }
+  return result;
+}
+
+async function buildNativeCharacterEnvelope(
+  char: { id: string; createdAt: string; updatedAt: string; comment?: string | null; avatarPath?: string | null },
   data: any,
+  galleryStorage: { listByCharacterId: (id: string) => Promise<any[]> },
 ) {
+  const [avatar, sprites, gallery] = await Promise.all([
+    readAvatarDataUrl(char.avatarPath),
+    readSpritesForId(char.id),
+    readGalleryForCharacter(char.id, galleryStorage),
+  ]);
   return {
     type: "marinara_character",
     version: 1,
@@ -114,6 +205,9 @@ function buildNativeCharacterEnvelope(
       spec: "chara_card_v2",
       spec_version: "2.0",
       data,
+      ...(avatar ? { avatar } : {}),
+      ...(sprites.length > 0 ? { sprites } : {}),
+      ...(gallery.length > 0 ? { gallery } : {}),
       metadata: {
         createdAt: char.createdAt,
         updatedAt: char.updatedAt,
@@ -131,14 +225,21 @@ function buildCompatibleCharacterExport(data: any) {
   };
 }
 
-function buildNativePersonaEnvelope(persona: Record<string, unknown>) {
-  const { id: _id, createdAt, updatedAt, avatarPath: _avatarPath, isActive: _isActive, ...personaData } = persona;
+async function buildNativePersonaEnvelope(persona: Record<string, unknown>) {
+  const { id: _id, createdAt, updatedAt, avatarPath, isActive: _isActive, ...personaData } = persona;
+  const personaId = typeof _id === "string" ? _id : "";
+  const [avatar, sprites] = await Promise.all([
+    readAvatarDataUrl(typeof avatarPath === "string" ? avatarPath : null),
+    personaId ? readSpritesForId(personaId) : Promise.resolve([] as Array<{ filename: string; data: string }>),
+  ]);
   return {
     type: "marinara_persona",
     version: 1,
     exportedAt: new Date().toISOString(),
     data: {
       ...personaData,
+      ...(avatar ? { avatar } : {}),
+      ...(sprites.length > 0 ? { sprites } : {}),
       metadata: {
         createdAt,
         updatedAt,
@@ -417,7 +518,7 @@ export async function charactersRoutes(app: FastifyInstance) {
     const compatible = req.query.format === "compatible";
     const payload = compatible
       ? buildCompatibleCharacterExport(charData)
-      : buildNativeCharacterEnvelope(char, charData);
+      : await buildNativeCharacterEnvelope(char, charData, characterGallery);
     return reply
       .header(
         "Content-Disposition",
@@ -441,7 +542,7 @@ export async function charactersRoutes(app: FastifyInstance) {
       const payload =
         format === "compatible"
           ? buildCompatibleCharacterExport(charData)
-          : buildNativeCharacterEnvelope(char, charData);
+          : await buildNativeCharacterEnvelope(char, charData, characterGallery);
       zip.addFile(
         `${toSafeExportName(String(charData.name ?? "character"), `character-${exportedCount + 1}`)}.${format === "compatible" ? "json" : "marinara.json"}`,
         Buffer.from(JSON.stringify(payload, null, 2), "utf-8"),
@@ -689,7 +790,7 @@ export async function charactersRoutes(app: FastifyInstance) {
       const compatible = req.query.format === "compatible";
       const payload = compatible
         ? buildCompatiblePersonaExport(persona as Record<string, unknown>)
-        : buildNativePersonaEnvelope(persona as Record<string, unknown>);
+        : await buildNativePersonaEnvelope(persona as Record<string, unknown>);
       return reply
         .header(
           "Content-Disposition",
@@ -713,7 +814,7 @@ export async function charactersRoutes(app: FastifyInstance) {
       const payload =
         format === "compatible"
           ? buildCompatiblePersonaExport(persona as Record<string, unknown>)
-          : buildNativePersonaEnvelope(persona as Record<string, unknown>);
+          : await buildNativePersonaEnvelope(persona as Record<string, unknown>);
       zip.addFile(
         `${toSafeExportName(String(persona.name ?? "persona"), `persona-${exportedCount + 1}`)}.${format === "compatible" ? "json" : "marinara.json"}`,
         Buffer.from(JSON.stringify(payload, null, 2), "utf-8"),

@@ -5,9 +5,126 @@ import type { DB } from "../../db/connection.js";
 import { lorebookFilterModeSchema } from "@marinara-engine/shared";
 import type { ExportEnvelope, ExportType, LorebookFilterMode, LorebookMatchingSource } from "@marinara-engine/shared";
 import { createCharactersStorage } from "../storage/characters.storage.js";
+import { createCharacterGalleryStorage } from "../storage/character-gallery.storage.js";
 import { createLorebooksStorage } from "../storage/lorebooks.storage.js";
 import { createPromptsStorage } from "../storage/prompts.storage.js";
 import { normalizeTimestampOverrides, type TimestampOverrides } from "./import-timestamps.js";
+import { mkdir, writeFile } from "fs/promises";
+import { join } from "path";
+import { DATA_DIR } from "../../utils/data-dir.js";
+import { assertInsideDir, extensionFromImageMime, isAllowedImageBuffer } from "../../utils/security.js";
+
+// Decode a base64 data URL into validated image bytes. Returns null if the
+// payload is missing, malformed, or not a recognized image type — so callers
+// can treat optional images as "skip this one" rather than failing the whole
+// import.
+function decodeImageDataUrl(dataUrl: unknown): { buffer: Buffer; ext: string } | null {
+  if (typeof dataUrl !== "string" || dataUrl.length === 0) return null;
+  let base64 = dataUrl;
+  let hintedExt = ".png";
+  if (base64.startsWith("data:")) {
+    const match = base64.match(/^data:image\/([\w+]+);base64,/);
+    if (match?.[1]) hintedExt = `.${match[1].replace("+xml", "")}`;
+    const commaIdx = base64.indexOf(",");
+    if (commaIdx >= 0) base64 = base64.slice(commaIdx + 1);
+  }
+  let buffer: Buffer;
+  try {
+    buffer = Buffer.from(base64, "base64");
+  } catch {
+    return null;
+  }
+  if (buffer.length === 0) return null;
+  const info = isAllowedImageBuffer(buffer, hintedExt);
+  if (!info) return null;
+  return { buffer, ext: extensionFromImageMime(info.mimeType) };
+}
+
+// Decode an `avatar` data URL carried in a native export, validate it as a
+// real image, write it under data/avatars/, and return the URL path the row
+// should store. Returns null on any failure so the import still succeeds
+// without an avatar rather than 500-ing.
+async function saveAvatarFromDataUrl(dataUrl: unknown, prefix: string, id: string): Promise<string | null> {
+  const decoded = decodeImageDataUrl(dataUrl);
+  if (!decoded) return null;
+  const avatarsDir = join(DATA_DIR, "avatars");
+  await mkdir(avatarsDir, { recursive: true });
+  const filename = `${prefix}-${id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${decoded.ext}`;
+  const filepath = assertInsideDir(avatarsDir, join(avatarsDir, filename));
+  await writeFile(filepath, decoded.buffer);
+  return `/api/avatars/file/${filename}`;
+}
+
+// Restore sprites embedded as [{ filename, data }, ...] in a native export
+// by writing each one under data/sprites/<id>/. Filenames are sanitized to
+// just an expression stem + an extension matching the actual image bytes, so
+// a malicious export can't traverse out of the sprites dir.
+async function restoreSprites(sprites: unknown, id: string): Promise<void> {
+  if (!Array.isArray(sprites) || sprites.length === 0) return;
+  const dir = join(DATA_DIR, "sprites", id);
+  await mkdir(dir, { recursive: true });
+  for (const sprite of sprites) {
+    if (!sprite || typeof sprite !== "object") continue;
+    const entry = sprite as Record<string, unknown>;
+    const decoded = decodeImageDataUrl(entry.data);
+    if (!decoded) continue;
+    // Take the original filename's stem (e.g. "happy" from "happy.png"), drop
+    // any path segments or .. tricks, and pair it with the verified extension.
+    const rawName = typeof entry.filename === "string" ? entry.filename : "";
+    const stem =
+      rawName
+        .replace(/\\/g, "/")
+        .split("/")
+        .pop()
+        ?.replace(/\.[^.]+$/, "")
+        ?.replace(/[^a-zA-Z0-9_\- ]/g, "_")
+        ?.slice(0, 80) || `sprite-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const safeName = `${stem}.${decoded.ext}`;
+    try {
+      const filepath = assertInsideDir(dir, join(dir, safeName));
+      await writeFile(filepath, decoded.buffer);
+    } catch {
+      // skip this sprite
+    }
+  }
+}
+
+// Restore gallery images embedded as
+// [{ filename, data, prompt, provider, model, width, height }, ...]
+// in a native character export. Writes the binary under
+// data/gallery/characters/<id>/ and creates a matching row in
+// character_images so the gallery panel can find each shot.
+async function restoreCharacterGallery(
+  gallery: unknown,
+  characterId: string,
+  galleryStorage: ReturnType<typeof createCharacterGalleryStorage>,
+): Promise<void> {
+  if (!Array.isArray(gallery) || gallery.length === 0) return;
+  const dir = join(DATA_DIR, "gallery", "characters", characterId);
+  await mkdir(dir, { recursive: true });
+  for (const item of gallery) {
+    if (!item || typeof item !== "object") continue;
+    const entry = item as Record<string, unknown>;
+    const decoded = decodeImageDataUrl(entry.data);
+    if (!decoded) continue;
+    const safeFilename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${decoded.ext}`;
+    try {
+      const filepath = assertInsideDir(dir, join(dir, safeFilename));
+      await writeFile(filepath, decoded.buffer);
+      await galleryStorage.create({
+        characterId,
+        filePath: `characters/${characterId}/${safeFilename}`,
+        prompt: typeof entry.prompt === "string" ? entry.prompt : "",
+        provider: typeof entry.provider === "string" ? entry.provider : "",
+        model: typeof entry.model === "string" ? entry.model : "",
+        width: typeof entry.width === "number" ? entry.width : undefined,
+        height: typeof entry.height === "number" ? entry.height : undefined,
+      });
+    } catch {
+      // skip this image
+    }
+  }
+}
 
 function readTimestampOverrides(value: unknown): TimestampOverrides | undefined {
   if (!value || typeof value !== "object") return undefined;
@@ -79,7 +196,16 @@ export async function importMarinara(
 
 async function importCharacter(data: unknown, db: DB) {
   const storage = createCharactersStorage(db);
-  const d = data as { data?: Record<string, unknown>; spec?: string; spec_version?: string; metadata?: unknown };
+  const galleryStorage = createCharacterGalleryStorage(db);
+  const d = data as {
+    data?: Record<string, unknown>;
+    spec?: string;
+    spec_version?: string;
+    metadata?: unknown;
+    avatar?: unknown;
+    sprites?: unknown;
+    gallery?: unknown;
+  };
   const charData = d?.data ? { ...(d.data as Record<string, unknown>) } : undefined;
   const metadata = d?.metadata && typeof d.metadata === "object" ? (d.metadata as Record<string, unknown>) : null;
   const comment = typeof metadata?.comment === "string" ? metadata.comment : undefined;
@@ -133,6 +259,14 @@ async function importCharacter(data: unknown, db: DB) {
   }
 
   const result = await storage.create(charData as any, undefined, readTimestampOverrides(d), comment);
+  if (result?.id) {
+    const avatarPath = await saveAvatarFromDataUrl(d.avatar, "character", result.id);
+    if (avatarPath) {
+      await storage.updateAvatar(result.id, avatarPath);
+    }
+    await restoreSprites(d.sprites, result.id);
+    await restoreCharacterGallery(d.gallery, result.id, galleryStorage);
+  }
   return {
     success: true,
     type: "marinara_character" as const,
@@ -149,11 +283,19 @@ async function importPersona(data: unknown, db: DB) {
   if (!d || typeof d !== "object") {
     return { success: false, type: "marinara_persona" as const, error: "Invalid persona data" };
   }
+  // Stringify JSON-array DB fields if the exporter sent them as parsed arrays;
+  // the table stores them as strings ("[]" when empty).
+  const stringifyJsonField = (value: unknown, fallback: string): string => {
+    if (typeof value === "string") return value;
+    if (Array.isArray(value) || (value && typeof value === "object")) return JSON.stringify(value);
+    return fallback;
+  };
   const result = await storage.createPersona(
     String(d.name ?? "Imported Persona"),
     String(d.description ?? ""),
     undefined,
     {
+      comment: typeof d.comment === "string" ? d.comment : "",
       personality: String(d.personality ?? ""),
       scenario: String(d.scenario ?? ""),
       backstory: String(d.backstory ?? ""),
@@ -161,6 +303,10 @@ async function importPersona(data: unknown, db: DB) {
       nameColor: String(d.nameColor ?? ""),
       dialogueColor: String(d.dialogueColor ?? ""),
       boxColor: String(d.boxColor ?? ""),
+      personaStats: typeof d.personaStats === "string" ? d.personaStats : "",
+      altDescriptions: stringifyJsonField(d.altDescriptions, "[]"),
+      tags: stringifyJsonField(d.tags, "[]"),
+      savedStatusOptions: stringifyJsonField(d.savedStatusOptions, "[]"),
       // avatarCrop is stored as a JSON string in the DB; the export round-trips it
       // as either an object or the empty string. Re-stringify objects on import.
       avatarCrop:
@@ -172,6 +318,13 @@ async function importPersona(data: unknown, db: DB) {
     },
     readTimestampOverrides(d),
   );
+  if (result?.id) {
+    const avatarPath = await saveAvatarFromDataUrl(d.avatar, "persona", result.id);
+    if (avatarPath) {
+      await storage.updatePersona(result.id, { avatarPath });
+    }
+    await restoreSprites(d.sprites, result.id);
+  }
   return {
     success: true,
     type: "marinara_persona" as const,

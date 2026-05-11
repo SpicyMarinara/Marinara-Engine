@@ -1,8 +1,8 @@
-import { FileJson, Layers, X } from "lucide-react";
+import { FileJson, ImageDown, Layers, X } from "lucide-react";
 import { Modal } from "./Modal";
 import { cn } from "../../lib/utils";
 
-export type ExportFormatChoice = "native" | "compatible";
+export type ExportFormatChoice = "native" | "compatible" | "compatible-png";
 
 interface ExportFormatDialogProps {
   open: boolean;
@@ -10,6 +10,8 @@ interface ExportFormatDialogProps {
   description?: string;
   nativeDescription?: string;
   compatibleDescription?: string;
+  pngDescription?: string;
+  showPngOption?: boolean;
   onClose: () => void;
   onSelect: (format: ExportFormatChoice) => void;
 }
@@ -20,6 +22,8 @@ export function ExportFormatDialog({
   description = "Choose how Marinara should package this export.",
   nativeDescription = "Keeps Marinara-specific fields, folders, metadata, and import fidelity.",
   compatibleDescription = "Uses folderless, platform-friendly JSON where possible for tools like SillyTavern and Chub.",
+  pngDescription = "Chara Card V2 PNG with the avatar baked in — works in SillyTavern, Chub, and Risu.",
+  showPngOption = false,
   onClose,
   onSelect,
 }: ExportFormatDialogProps) {
@@ -31,13 +35,17 @@ export function ExportFormatDialog({
   }> = [
     { id: "native", label: "Marinara Native", icon: Layers, description: nativeDescription },
     { id: "compatible", label: "Compatible JSON", icon: FileJson, description: compatibleDescription },
+    ...(showPngOption
+      ? [{ id: "compatible-png" as const, label: "Compatible PNG Card", icon: ImageDown, description: pngDescription }]
+      : []),
   ];
 
   return (
     <Modal open={open} onClose={onClose} title={title} width="max-w-lg">
       <div className="space-y-4">
         <p className="text-xs leading-relaxed text-[var(--muted-foreground)]">{description}</p>
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className={cn("grid gap-2", showPngOption ? "sm:grid-cols-3" : "sm:grid-cols-2")}>
+
           {options.map((option) => {
             const Icon = option.icon;
             return (

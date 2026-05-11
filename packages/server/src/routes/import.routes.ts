@@ -440,6 +440,64 @@ export async function importRoutes(app: FastifyInstance) {
     return importMarinara(payload as any, app.db);
   });
 
+  /**
+   * Import a Marinara Engine native package (.marinara file — a zip with
+   * data.json plus the avatar binary). Single-file multipart upload.
+   */
+  app.post("/marinara-package", async (req, reply) => {
+    const file = await req.file();
+    if (!file) return reply.status(400).send({ success: false, error: "No file uploaded" });
+    const buffer = await file.toBuffer();
+    if (buffer.length < 4 || buffer[0] !== 0x50 || buffer[1] !== 0x4b) {
+      return reply.status(400).send({ success: false, error: "Not a .marinara package (zip signature missing)" });
+    }
+    const AdmZip = (await import("adm-zip")).default;
+    let zip: InstanceType<typeof AdmZip>;
+    try {
+      zip = new AdmZip(buffer);
+    } catch {
+      return reply.status(400).send({ success: false, error: "Could not read .marinara package" });
+    }
+    const dataEntry = zip.getEntry("data.json");
+    if (!dataEntry) {
+      return reply.status(400).send({ success: false, error: ".marinara package is missing data.json" });
+    }
+    let envelope: Record<string, unknown>;
+    try {
+      envelope = JSON.parse(dataEntry.getData().toString("utf-8")) as Record<string, unknown>;
+    } catch {
+      return reply.status(400).send({ success: false, error: "data.json is not valid JSON" });
+    }
+    // Find an avatar.* entry (any image extension) and inject as data URL on
+    // envelope.data so the existing importer's avatar-handling kicks in.
+    const avatarEntry = zip
+      .getEntries()
+      .find((e) => /^avatar\.(png|jpe?g|webp|gif|avif)$/i.test(e.entryName));
+    if (avatarEntry && envelope.data && typeof envelope.data === "object") {
+      const ext = avatarEntry.entryName.split(".").pop()!.toLowerCase();
+      const mime =
+        ext === "jpg" || ext === "jpeg"
+          ? "image/jpeg"
+          : ext === "webp"
+            ? "image/webp"
+            : ext === "gif"
+              ? "image/gif"
+              : ext === "avif"
+                ? "image/avif"
+                : "image/png";
+      const dataUrl = `data:${mime};base64,${avatarEntry.getData().toString("base64")}`;
+      (envelope.data as Record<string, unknown>).avatar = dataUrl;
+    }
+    const timestampOverrides = readTimestampOverridesFromMultipart(file as any);
+    if (timestampOverrides && envelope.data && typeof envelope.data === "object") {
+      const data = envelope.data as Record<string, unknown>;
+      const existingMeta =
+        data.metadata && typeof data.metadata === "object" ? (data.metadata as Record<string, unknown>) : {};
+      data.metadata = { ...existingMeta, timestamps: timestampOverrides };
+    }
+    return importMarinara(envelope as any, app.db);
+  });
+
   /** Import a SillyTavern character (JSON body or PNG file upload). */
   app.post("/st-character", async (req) => {
     const contentType = req.headers["content-type"] ?? "";

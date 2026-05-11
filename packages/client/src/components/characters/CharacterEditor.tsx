@@ -466,14 +466,6 @@ export function CharacterEditor() {
       </button>
 
       <button
-        onClick={() => api.download(`/characters/${characterId}/export-png`, "character.png")}
-        className={headerActionButtonClass}
-        title="Export as PNG card"
-      >
-        <ImageDown size="1rem" />
-      </button>
-
-      <button
         onClick={() => {
           if (!characterId) return;
           duplicateCharacter.mutate(characterId, {
@@ -505,11 +497,16 @@ export function CharacterEditor() {
         title="Export Character"
         description="Native keeps Marinara metadata. Compatible exports direct Chara Card V2 JSON for other platforms."
         compatibleDescription="Exports direct Chara Card V2 JSON without the Marinara wrapper."
+        showPngOption
         onClose={() => setExportDialogOpen(false)}
         onSelect={(format: ExportFormatChoice) => {
           if (!characterId) return;
           setExportDialogOpen(false);
-          void api.download(`/characters/${characterId}/export?format=${format}`);
+          if (format === "compatible-png") {
+            void api.download(`/characters/${characterId}/export-png`, "character.png");
+          } else {
+            void api.download(`/characters/${characterId}/export?format=${format}`);
+          }
         }}
       />
       <AvatarGenerationModal

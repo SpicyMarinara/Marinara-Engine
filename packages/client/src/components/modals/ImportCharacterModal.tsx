@@ -35,6 +35,12 @@ export function ImportCharacterModal({ open, onClose }: Props) {
   } | null>(null);
   const qc = useQueryClient();
 
+  const isZipFile = async (file: File): Promise<boolean> => {
+    if (file.size < 4) return false;
+    const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+    return head[0] === 0x50 && head[1] === 0x4b;
+  };
+
   const handleFiles = async (files: File[], importEmbeddedLorebook?: boolean) => {
     if (files.length === 0) return;
     setStatus("loading");
@@ -44,11 +50,19 @@ export function ImportCharacterModal({ open, onClose }: Props) {
     try {
       const stCharacterFiles: File[] = [];
       const marinaraPayloads: Array<{ file: File; payload: Record<string, unknown> }> = [];
+      const marinaraPackages: File[] = [];
 
       for (const file of files) {
         const lower = file.name.toLowerCase();
         if (lower.endsWith(".png") || lower.endsWith(".charx")) {
           stCharacterFiles.push(file);
+          continue;
+        }
+
+        // Marinara native packages are .marinara zip files (data.json + avatar
+        // binary). Detect via the zip signature so a renamed file still works.
+        if (await isZipFile(file)) {
+          marinaraPackages.push(file);
           continue;
         }
 
@@ -144,6 +158,32 @@ export function ImportCharacterModal({ open, onClose }: Props) {
         } catch (error) {
           nextResults.push({
             filename: item.file.name,
+            success: false,
+            message: error instanceof Error ? error.message : "Import failed",
+          });
+        }
+      }
+
+      for (const file of marinaraPackages) {
+        try {
+          const form = new FormData();
+          form.append("file", file, file.name);
+          form.append(
+            "timestampOverrides",
+            JSON.stringify({ createdAt: file.lastModified, updatedAt: file.lastModified }),
+          );
+          const result = await api.upload<{ success: boolean; name?: string; error?: string }>(
+            "/import/marinara-package",
+            form,
+          );
+          nextResults.push({
+            filename: file.name,
+            success: result.success,
+            message: result.success ? `Imported "${result.name ?? file.name}"` : (result.error ?? "Import failed"),
+          });
+        } catch (error) {
+          nextResults.push({
+            filename: file.name,
             success: false,
             message: error instanceof Error ? error.message : "Import failed",
           });
