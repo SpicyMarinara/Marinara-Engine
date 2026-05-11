@@ -106,6 +106,9 @@ function FileIcon({ ext, className, size }: { ext?: string; className?: string; 
   if (isAudio(ext)) {
     return <FileAudio className={className} size={size} />;
   }
+  if (isEditableText(ext)) {
+    return <FileText className={className} size={size} />;
+  }
   return <File className={className} size={size} />;
 }
 
