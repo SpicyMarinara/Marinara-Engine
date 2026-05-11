@@ -1383,6 +1383,10 @@ export function useGenerate() {
               } else if (actionData.action === "character_updated") {
                 toast(`Updated character: ${actionData.name}`, { icon: "✏️" });
                 qc.invalidateQueries({ queryKey: characterKeys.list() });
+                if (typeof actionData.id === "string" && actionData.id.length > 0) {
+                  qc.invalidateQueries({ queryKey: characterKeys.detail(actionData.id) });
+                  qc.invalidateQueries({ queryKey: characterKeys.versions(actionData.id) });
+                }
               } else if (actionData.action === "lorebook_created") {
                 const entryCount = Number(actionData.entryCount ?? 0);
                 toast(`Created lorebook: ${actionData.name}${entryCount > 0 ? ` (${entryCount} entries)` : ""}`, {
