@@ -65,6 +65,20 @@ export function attributeModifier(score: number): number {
  * Falls back to "int" for unlisted skills.
  */
 const SKILL_ATTRIBUTE_MAP: Record<string, keyof RPGAttributes> = {
+  // Direct ability checks
+  str: "str",
+  strength: "str",
+  dex: "dex",
+  dexterity: "dex",
+  con: "con",
+  constitution: "con",
+  int: "int",
+  intelligence: "int",
+  wis: "wis",
+  wisdom: "wis",
+  cha: "cha",
+  charisma: "cha",
+
   // STR
   athletics: "str",
 
@@ -102,7 +116,14 @@ const SKILL_ATTRIBUTE_MAP: Record<string, keyof RPGAttributes> = {
  * Normalises the skill name (lowercase, spaces → underscores).
  */
 export function getGoverningAttribute(skill: string): keyof RPGAttributes {
-  const key = skill.toLowerCase().replace(/\s+/g, "_");
+  const key = skill
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_(?:ability_)?check$/, "")
+    .replace(/_saving_throw$/, "")
+    .replace(/_save$/, "");
   return SKILL_ATTRIBUTE_MAP[key] ?? "int";
 }
 

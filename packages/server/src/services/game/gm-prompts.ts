@@ -682,7 +682,7 @@ export function buildGmFormatReminder(
       : []),
     `- Keep each character's vocabulary, grammar, and cadence distinct, shaped by personality and mood.`,
     `- Pace the plot well without rushing it.`,
-    `- ZERO TOLERANCE FOR LAZIER AI WRITING! Absolutely NO: "doesn't X, doesn't Y", "not X, not Y," "jaw working," "mechanical precision," "ozone," "somewhere," "outside," and other overused patterns like descriptions via negations in your narrative prose. Replace them with creative detail, human cadence, and affirmative forms. State what happens instead of what doesn't ("not moving" should be described as "still").`,
+    `- ZERO TOLERANCE FOR LAZIER AI WRITING! Absolutely NO: "doesn't X, doesn't Y", "not X, not Y," "jaw working," "mechanical precision," "ozone," "somewhere," "outside," and negative parallelisms in your narrative prose. Replace them with creative detail, human cadence, and affirmative forms. State what happens instead of what doesn't (example, skip "not moving", describe something as just "still").`,
     `- Default expressions: neutral, happy, sad, angry, surprised, scared, disgusted, thinking, laughing, crying, blushing, smirk, embarrassed, determined, confused, sleepy.`,
     ...(customSpriteLines.length
       ? [
@@ -750,11 +750,11 @@ export function buildGmFormatReminder(
 
   if (ctx.playerDiceRollSubmitted) {
     lines.push(
-      `- [skill_check: skill="Skill Name" dc="1-20" rolls="player's d20 result"] - if the player presented you with a [dice: ...] roll, start the turn with the check tag (echo the player's d20 in rolls=) and narrate the consequences in the same turn. Choose DC fairly (5 trivial, 10 routine under pressure, 15 hard, 20 desperate). The engine applies the player's attribute modifier on top of the rolled number — do NOT compute or invent rolls/modifier/total/result fields, the system fills those in.`,
+      `- [skill_check: skill="Skill Name" dc="1-20" rolls="player's d20 result" modifier="situational or player-card modifier" total="roll + modifier" result="critical_success | success | failure | critical_failure"] - if the player presented you with a [dice: ...] roll, start the turn with the check tag, use the player's roll as the base, choose the DC fairly (5 trivial, 10 routine under pressure, 15 hard, 20 desperate), and narrate the consequences in the same turn.`,
     );
   } else {
     lines.push(
-      `- [skill_check: skill="Skill Name" dc="1-20"] - only when uncertainty or the player's actions should be resolved mechanically. Abandon positivity bias: choose DC fairly (5 trivial, 10 routine under pressure, 15 hard, 20 desperate) and narrate the consequence in the same turn. Do NOT include rolls/modifier/total/result — the engine rolls the d20, applies the player's attribute modifier, and resolves success/failure deterministically.`,
+      `- [skill_check: skill="Skill Name" dc="1-20" rolls="1-20" modifier="situational or player-card modifier" total="roll + modifier" result="critical_success | success | failure | critical_failure"] - only when uncertainty or the player's actions should be resolved mechanically. Abandon positivity bias: choose the DC fairly (5 trivial, 10 routine under pressure, 15 hard, 20 desperate), roll honestly, and narrate the consequence in the same turn.`,
     );
   }
 
