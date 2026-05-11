@@ -28,13 +28,17 @@ export function FileEditorModal({
   const [mode, setMode] = useState<"edit" | "preview">(initialMode);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lineNumbersRef = useRef<HTMLPreElement>(null);
+  const didInitRef = useRef(false);
 
   // Track dirty state against last loaded / saved content
   const originalContent = data?.content ?? "";
   const isDirty = content !== originalContent;
 
   useEffect(() => {
-    if (data) setContent(data.content);
+    if (data && !didInitRef.current) {
+      setContent(data.content);
+      didInitRef.current = true;
+    }
   }, [data]);
 
   const lines = useMemo(() => content.split("\n").length, [content]);

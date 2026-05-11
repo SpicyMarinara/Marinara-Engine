@@ -6,6 +6,7 @@ import type { TreeNode } from "../../hooks/use-game-assets";
 import { formatBytes, formatDate } from "../../lib/format";
 import { CATEGORY_ICONS } from "./constants";
 import { FileIcon, isImage } from "./utils";
+import { encodeAssetPath } from "./encode-asset-path";
 
 export interface AssetGridProps {
   nodes: TreeNode[];
@@ -17,6 +18,16 @@ export interface AssetGridProps {
   onNavigateFolder: (path: string) => void;
   onOpenActionMenu: (node: TreeNode, anchorEl: HTMLElement) => void;
   listColumns: { size: boolean; modified: boolean };
+}
+
+function listGridCols(listColumns: { size: boolean; modified: boolean }): string {
+  // Base: checkbox + icon + name + actions = 4 columns minimum
+  // Add size (80px) and/or modified (80px) when enabled
+  const parts = ["2rem", "auto", "1fr"];
+  if (listColumns.size) parts.push("80px");
+  if (listColumns.modified) parts.push("80px");
+  parts.push("40px");
+  return `grid-cols-[${parts.join("_")}]`;
 }
 
 export function AssetGrid({
@@ -39,6 +50,8 @@ export function AssetGrid({
       </div>
     );
   }
+
+  const gridColsClass = listGridCols(listColumns);
 
   if (viewMode === "grid") {
     return (
@@ -94,7 +107,7 @@ export function AssetGrid({
                   })()
                 ) : isImage(node.ext) ? (
                   <img
-                    src={`/api/game-assets/file/${node.path}`}
+                    src={`/api/game-assets/file/${encodeAssetPath(node.path)}`}
                     alt={node.name}
                     className="h-full w-full object-cover"
                     loading="lazy"
@@ -116,7 +129,7 @@ export function AssetGrid({
   // List view
   return (
     <div className="flex flex-col">
-      <div className="grid grid-cols-[2rem_auto_1fr_80px_80px_40px] items-center gap-3 border-b border-[var(--border)]/40 px-3 py-1.5 text-xs font-medium text-[var(--muted-foreground)]">
+      <div className={`grid ${gridColsClass} items-center gap-3 border-b border-[var(--border)]/40 px-3 py-1.5 text-xs font-medium text-[var(--muted-foreground)]`}>
         <span></span>
         <span className="col-span-2">Name</span>
         {listColumns.size && <span className="text-right">Size</span>}
@@ -135,7 +148,7 @@ export function AssetGrid({
               else onSelectFile(node);
             }}
             className={
-              "group grid grid-cols-[2rem_auto_1fr_80px_80px_40px] items-center gap-3 rounded-lg px-3 py-2 transition-colors " +
+              `group grid ${gridColsClass} items-center gap-3 rounded-lg px-3 py-2 transition-colors ` +
               (isSelected ? "bg-[var(--primary)]/10" : "hover:bg-[var(--accent)]")
             }
           >
@@ -159,7 +172,7 @@ export function AssetGrid({
             ) : isImage(node.ext) ? (
               <div className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded bg-[var(--accent)]">
                 <img
-                  src={`/api/game-assets/file/${node.path}`}
+                  src={`/api/game-assets/file/${encodeAssetPath(node.path)}`}
                   alt=""
                   className="h-full w-full object-cover"
                   loading="lazy"

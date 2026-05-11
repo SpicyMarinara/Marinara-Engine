@@ -21,10 +21,17 @@ export function ImageInfoPopover({
     const handle = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
-    const raf = requestAnimationFrame(() => document.addEventListener("mousedown", handle));
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    const raf = requestAnimationFrame(() => {
+      document.addEventListener("mousedown", handle);
+      document.addEventListener("keydown", handleKey);
+    });
     return () => {
       cancelAnimationFrame(raf);
       document.removeEventListener("mousedown", handle);
+      document.removeEventListener("keydown", handleKey);
     };
   }, [onClose]);
 
@@ -36,6 +43,8 @@ export function ImageInfoPopover({
       <div className="mb-3 flex items-center justify-between">
         <h4 className="text-sm font-semibold text-[var(--foreground)]">File Info</h4>
         <button
+          type="button"
+          aria-label="Close"
           onClick={onClose}
           className="rounded-md p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
         >

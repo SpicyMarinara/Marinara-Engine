@@ -762,6 +762,12 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
     }
 
     const filePath = join(GAME_ASSETS_DIR, wildcard);
+    try {
+      assertInsideDir(GAME_ASSETS_DIR, filePath);
+    } catch {
+      return reply.status(400).send({ error: "Path escapes game assets directory" });
+    }
+
     if (!existsSync(filePath)) {
       return reply.status(404).send({ error: "File not found" });
     }
@@ -811,6 +817,12 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
     }
 
     const filePath = join(GAME_ASSETS_DIR, wildcard);
+    try {
+      assertInsideDir(GAME_ASSETS_DIR, filePath);
+    } catch {
+      return reply.status(400).send({ error: "Path escapes game assets directory" });
+    }
+
     if (!existsSync(filePath)) {
       return reply.status(404).send({ error: "File not found" });
     }

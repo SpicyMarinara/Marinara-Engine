@@ -1,12 +1,13 @@
 // ──────────────────────────────────────────────
 // File Browser — Full-screen image preview with info panel
 // ──────────────────────────────────────────────
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Info } from "lucide-react";
 import type { TreeNode } from "../../hooks/use-game-assets";
 import { useGameAssetFileInfo } from "../../hooks/use-game-assets";
 import { cn } from "../../lib/utils";
 import { formatBytes, formatDate } from "../../lib/format";
+import { encodeAssetPath } from "./encode-asset-path";
 
 export function ImagePreviewModal({
   node,
@@ -18,15 +19,26 @@ export function ImagePreviewModal({
   const [showInfo, setShowInfo] = useState(false);
   const { data: info } = useGameAssetFileInfo(node.path);
 
+  useEffect(() => {
+    const handle = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handle);
+    return () => document.removeEventListener("keydown", handle);
+  }, [onClose]);
+
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Image preview: ${node.name}`}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
       onClick={onClose}
     >
       <div className="relative flex max-h-[90vh] max-w-[90vw]">
         <div className="relative">
           <img
-            src={`/api/game-assets/file/${node.path}`}
+            src={`/api/game-assets/file/${encodeAssetPath(node.path)}`}
             alt={node.name}
             className={cn(
               "max-h-[85vh] rounded-lg object-contain shadow-2xl",
@@ -35,6 +47,8 @@ export function ImagePreviewModal({
             onClick={(e) => e.stopPropagation()}
           />
           <button
+            type="button"
+            aria-label={showInfo ? "Hide file info" : "Show file info"}
             onClick={(e) => {
               e.stopPropagation();
               setShowInfo(!showInfo);

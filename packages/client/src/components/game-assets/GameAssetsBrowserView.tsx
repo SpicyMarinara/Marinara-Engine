@@ -45,6 +45,8 @@ import { FileEditorModal } from "./FileEditorModal";
 import { ActionDropdown } from "./ActionDropdown";
 import { DEFAULT_DESCRIPTIONS } from "./constants";
 import { isImage, isAudio, isEditableText, countItems } from "./utils";
+import { encodeAssetPath } from "./encode-asset-path";
+import { useUIStore } from "../../stores/ui.store";
 
 export function GameAssetsBrowserView() {
   const { data: tree, isLoading } = useGameAssetTree();
@@ -64,7 +66,7 @@ export function GameAssetsBrowserView() {
   const [selectedPath, setSelectedPath] = useState("");
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
-  const [expanded, setExpanded] = useState<Set<string>>(new Set(["", "music", "sfx", "ambient", "sprites", "backgrounds"]));
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(Object.keys(DEFAULT_DESCRIPTIONS)));
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
   const [actionMenu, setActionMenu] = useState<{ node: TreeNode; x: number; y: number } | null>(null);
   const [previewImage, setPreviewImage] = useState<TreeNode | null>(null);
@@ -158,9 +160,34 @@ export function GameAssetsBrowserView() {
     setSelectedPaths(new Set());
   }, []);
 
-  // Keyboard shortcuts for selection
+  const isBrowserVisible = useUIStore((s) => s.gameAssetsBrowserOpen);
+
+  // Modal Escape handler
   useEffect(() => {
+    if (!modal) return;
     const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setModal(null);
+        setModalValue("");
+        setDeleteRecursive(false);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [modal]);
+
+  // Keyboard shortcuts for selection (only when browser is visible, ignore inputs)
+  useEffect(() => {
+    if (!isBrowserVisible) return;
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target.isContentEditable
+      ) {
+        return;
+      }
       if (e.key === "a" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         handleSelectAll();
@@ -172,7 +199,7 @@ export function GameAssetsBrowserView() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleSelectAll, handleClearSelection, selectedPaths.size]);
+  }, [isBrowserVisible, handleSelectAll, handleClearSelection, selectedPaths.size]);
 
   // Clear selection when changing folders
   useEffect(() => {
@@ -200,11 +227,21 @@ export function GameAssetsBrowserView() {
       const category = parts[0] ?? "sfx";
       const subcategory = parts.slice(1).join("/");
 
-      for (const file of files) {
+      const fileArray = Array.from(files);
+      const uploads = fileArray.map(async (file) => {
         try {
           await upload.mutateAsync({ file, category, subcategory });
-          toast.success(`Uploaded ${file.name}`);
+          return { file, ok: true as const, err: null as unknown };
         } catch (err) {
+          return { file, ok: false as const, err };
+        }
+      });
+
+      const results = await Promise.all(uploads);
+      for (const { file, ok, err } of results) {
+        if (ok) {
+          toast.success(`Uploaded ${file.name}`);
+        } else {
           toast.error(getUploadErrorMessage(err, file, category));
         }
       }
@@ -249,7 +286,7 @@ export function GameAssetsBrowserView() {
 
   const handleDownload = useCallback((node: TreeNode) => {
     const a = document.createElement("a");
-    a.href = `/api/game-assets/file/${node.path}`;
+    a.href = `/api/game-assets/file/${encodeAssetPath(node.path)}`;
     a.download = node.name;
     document.body.appendChild(a);
     a.click();
@@ -339,10 +376,10 @@ export function GameAssetsBrowserView() {
         const result = await moveBulk.mutateAsync({ paths, targetFolder: modalValue });
         const succeeded = result.succeeded.length;
         const failed = result.failed.length;
-        if (failed === 0) {
+        if (succeeded > 0) {
           toast.success(`Moved ${succeeded} file${succeeded !== 1 ? "s" : ""}`);
-        } else {
-          toast.success(`Moved ${succeeded} file${succeeded !== 1 ? "s" : ""}`);
+        }
+        if (failed > 0) {
           toast.error(`${failed} file${failed !== 1 ? "s" : ""} failed to move`);
         }
         handleClearSelection();
@@ -351,10 +388,10 @@ export function GameAssetsBrowserView() {
         const result = await copyBulk.mutateAsync({ paths, targetFolder: modalValue });
         const succeeded = result.succeeded.length;
         const failed = result.failed.length;
-        if (failed === 0) {
+        if (succeeded > 0) {
           toast.success(`Copied ${succeeded} file${succeeded !== 1 ? "s" : ""}`);
-        } else {
-          toast.success(`Copied ${succeeded} file${succeeded !== 1 ? "s" : ""}`);
+        }
+        if (failed > 0) {
           toast.error(`${failed} file${failed !== 1 ? "s" : ""} failed to copy`);
         }
         handleClearSelection();
@@ -363,10 +400,10 @@ export function GameAssetsBrowserView() {
         const result = await deleteBulk.mutateAsync(paths);
         const succeeded = result.succeeded.length;
         const failed = result.failed.length;
-        if (failed === 0) {
+        if (succeeded > 0) {
           toast.success(`Deleted ${succeeded} file${succeeded !== 1 ? "s" : ""}`);
-        } else {
-          toast.success(`Deleted ${succeeded} file${succeeded !== 1 ? "s" : ""}`);
+        }
+        if (failed > 0) {
           toast.error(`${failed} file${failed !== 1 ? "s" : ""} failed to delete`);
         }
         handleClearSelection();
@@ -665,7 +702,11 @@ export function GameAssetsBrowserView() {
 
       {/* Modals */}
       {modal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+        >
           <div className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-xl">
             <h3 className="mb-3 text-sm font-semibold text-[var(--foreground)]">
               {modal.type === "create-folder" && "Create Folder"}
@@ -745,7 +786,7 @@ export function GameAssetsBrowserView() {
                 type="text"
                 value={modalValue}
                 onChange={(e) => setModalValue(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleModalConfirm()}
+                onKeyDown={(e) => e.key === "Enter" && modalValue.trim() && handleModalConfirm()}
                 placeholder={modal.type === "create-folder" ? "Folder name" : "New name"}
                 className="mb-4 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] outline-none transition-colors focus:border-[var(--primary)]/50 focus:ring-1 focus:ring-[var(--primary)]/20"
               />

@@ -39,9 +39,11 @@ export function FileIcon({
   return <File className={className} size={size} />;
 }
 
-/** Recursively count files inside a tree node (used for delete confirmation). */
+/** Recursively count files and folders inside a tree node (used for delete confirmation). */
 export function countItems(node: TreeNode): number {
   if (node.type === "file") return 1;
-  if (!node.children || node.children.length === 0) return 0;
-  return node.children.reduce((sum, child) => sum + countItems(child), 0);
+  // Count the folder itself plus all descendants
+  const self = 1;
+  if (!node.children || node.children.length === 0) return self;
+  return self + node.children.reduce((sum, child) => sum + countItems(child), 0);
 }

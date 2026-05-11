@@ -92,8 +92,8 @@ function MainPaneFallback() {
     <div className="flex flex-1 items-center justify-center text-sm text-[var(--muted-foreground)]">Loading...</div>
   );
 }
-/** Keeps BotBrowserView mounted (hidden via CSS) once it's been opened at least once, so state persists. */
-function BotBrowserPersistent({ open }: { open: boolean }) {
+/** Mounts children once `open` becomes true, then keeps them mounted (hidden via CSS) so state persists. */
+function MountOnceWhenOpened({ open, children }: { open: boolean; children: React.ReactNode }) {
   const [everOpened, setEverOpened] = useState(false);
   useEffect(() => {
     if (open && !everOpened) setEverOpened(true);
@@ -102,23 +102,7 @@ function BotBrowserPersistent({ open }: { open: boolean }) {
   return (
     <div className={open ? "flex flex-1 flex-col overflow-hidden" : "hidden"}>
       <Suspense fallback={<MainPaneFallback />}>
-        <BotBrowserView />
-      </Suspense>
-    </div>
-  );
-}
-
-/** Keeps GameAssetsBrowserView mounted (hidden via CSS) once it's been opened at least once, so state persists. */
-function GameAssetsBrowserPersistent({ open }: { open: boolean }) {
-  const [everOpened, setEverOpened] = useState(false);
-  useEffect(() => {
-    if (open && !everOpened) setEverOpened(true);
-  }, [open, everOpened]);
-  if (!everOpened) return null;
-  return (
-    <div className={open ? "flex flex-1 flex-col overflow-hidden" : "hidden"}>
-      <Suspense fallback={<MainPaneFallback />}>
-        <GameAssetsBrowserView />
+        {children}
       </Suspense>
     </div>
   );
@@ -815,9 +799,13 @@ export function AppShell() {
       >
         <TopBar />
         {/* Bot Browser — kept mounted once opened so state persists across close/reopen */}
-        <BotBrowserPersistent open={botBrowserOpen} />
+        <MountOnceWhenOpened open={botBrowserOpen}>
+          <BotBrowserView />
+        </MountOnceWhenOpened>
         {/* Game Assets Browser — kept mounted once opened so state persists across close/reopen */}
-        <GameAssetsBrowserPersistent open={gameAssetsBrowserOpen} />
+        <MountOnceWhenOpened open={gameAssetsBrowserOpen}>
+          <GameAssetsBrowserView />
+        </MountOnceWhenOpened>
         <div
           className={botBrowserOpen || gameAssetsBrowserOpen ? "hidden" : "flex flex-1 flex-col overflow-hidden"}
           style={

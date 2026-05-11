@@ -43,6 +43,9 @@ export function FolderTree({
       >
         {hasChildren ? (
           <button
+            type="button"
+            aria-label={isExpanded ? `Collapse ${isRoot ? "Game Assets" : node.name}` : `Expand ${isRoot ? "Game Assets" : node.name}`}
+            aria-expanded={isExpanded}
             onClick={() => onToggle(node.path)}
             className="flex shrink-0 items-center justify-center rounded p-0.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
           >
@@ -52,6 +55,7 @@ export function FolderTree({
           <span className="w-5" />
         )}
         <button
+          type="button"
           onClick={() => onSelect(node.path)}
           className="flex flex-1 items-center gap-1.5 overflow-hidden"
         >

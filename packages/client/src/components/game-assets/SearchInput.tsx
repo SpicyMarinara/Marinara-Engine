@@ -25,7 +25,7 @@ export function SearchInput({ search, onSearch }: { search: string; onSearch: (v
       {!expanded && (
         <button
           onClick={() => setExpanded(true)}
-          className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] sm:hidden"
+          className="rounded-lg border border-(--border) bg-(--background) p-1.5 text-(--muted-foreground) transition-colors hover:bg-(--accent) hover:text-(--foreground) sm:hidden"
           title="Search in folder"
         >
           <Search size="0.875rem" />
@@ -50,7 +50,7 @@ export function SearchInput({ search, onSearch }: { search: string; onSearch: (v
             }
           }}
           placeholder="Search in folder..."
-          className="h-8 w-48 rounded-lg border border-[var(--border)] bg-[var(--background)] pl-7 pr-7 text-sm text-[var(--foreground)] outline-none transition-colors focus:border-[var(--primary)]/50 focus:ring-1 focus:ring-[var(--primary)]/20 max-sm:absolute max-sm:right-0 max-sm:top-1/2 max-sm:w-48 max-sm:-translate-y-1/2"
+          className="h-8 w-48 rounded-lg border border-(--border) bg-(--background) pl-7 pr-7 text-sm text-(--foreground) outline-none transition-colors focus:border-(--primary)/50 focus:ring-1 focus:ring-(--primary)/20 max-sm:absolute max-sm:right-0 max-sm:top-1/2 max-sm:w-48 max-sm:-translate-y-1/2"
         />
         {expanded && (
           <button
@@ -58,7 +58,7 @@ export function SearchInput({ search, onSearch }: { search: string; onSearch: (v
               setExpanded(false);
               onSearch("");
             }}
-            className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)] sm:hidden"
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-(--muted-foreground) hover:bg-(--accent) hover:text-(--foreground) sm:hidden"
           >
             <X size="0.75rem" />
           </button>
