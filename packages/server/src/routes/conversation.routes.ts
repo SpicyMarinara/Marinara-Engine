@@ -55,8 +55,26 @@ function getEnabledConversationSchedules(meta: Record<string, unknown>): Charact
 
 type SummaryEntry = { summary: string; keyDetails: string[] };
 type CharacterMemoryEntry = { from?: string; summary?: string; createdAt?: string };
+type ConnectionsStorage = ReturnType<typeof createConnectionsStorage>;
 
 const SCHEDULE_CONTINUITY_MAX_CHARS = 6000;
+
+async function resolveConversationScheduleConnection(connections: ConnectionsStorage, chatConnectionId: string | null) {
+  if (chatConnectionId === "random") {
+    const pool = await connections.listRandomPool();
+    if (!pool.length) {
+      return { conn: null, error: "No connections marked for the random pool" };
+    }
+    return { conn: pool[Math.floor(Math.random() * pool.length)] ?? null, error: null };
+  }
+
+  const connId = chatConnectionId ?? (await connections.getDefault())?.id;
+  if (!connId) {
+    return { conn: null, error: "No connection configured" };
+  }
+
+  return { conn: await connections.getWithKey(connId), error: null };
+}
 
 function parseDateKeyMs(dateKey: string): number {
   const match = dateKey.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
@@ -209,11 +227,9 @@ export async function conversationRoutes(app: FastifyInstance) {
     if (!chat) return reply.status(404).send({ error: "Chat not found" });
     if (chat.mode !== "conversation") return reply.status(400).send({ error: "Not a conversation chat" });
 
-    // Resolve connection (need getWithKey for decrypted API key)
-    const connId = chat.connectionId ?? (await connections.getDefault())?.id;
-    if (!connId) return reply.status(400).send({ error: "No connection configured" });
-    const conn = await connections.getWithKey(connId);
-    if (!conn) return reply.status(400).send({ error: "No connection configured" });
+    // Resolve connection (need decrypted API key; "random" is a sentinel, not a persisted connection id)
+    const { conn, error: connectionError } = await resolveConversationScheduleConnection(connections, chat.connectionId);
+    if (!conn) return reply.status(400).send({ error: connectionError ?? "No connection configured" });
     const baseUrl = resolveBaseUrl(conn);
     if (!baseUrl) return reply.status(400).send({ error: "No base URL" });
 
