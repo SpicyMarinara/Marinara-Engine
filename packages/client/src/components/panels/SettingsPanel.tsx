@@ -2538,7 +2538,6 @@ function ImportSettings() {
       const head = file.size >= 4 ? new Uint8Array(await file.slice(0, 4).arrayBuffer()) : new Uint8Array();
       const isZip = head.length >= 2 && head[0] === 0x50 && head[1] === 0x4b;
       let res: Response;
-      let parseFailure = false;
       if (isZip) {
         const form = new FormData();
         form.append("file", file, file.name);
@@ -2548,7 +2547,6 @@ function ImportSettings() {
         try {
           envelope = JSON.parse(await file.text());
         } catch {
-          parseFailure = true;
           throw new Error("parse");
         }
         res = await fetch("/api/import/marinara", {
