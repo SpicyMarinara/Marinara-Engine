@@ -40,6 +40,14 @@ import { confirmEmbeddedLorebookImport, readEmbeddedLorebookFromCharacterPayload
 // Types
 // ════════════════════════════════════════════════
 
+type TagImportMode = "all" | "none" | "existing";
+
+const TAG_IMPORT_OPTIONS: Array<{ value: TagImportMode; label: string; description: string }> = [
+  { value: "all", label: "All tags", description: "Keep source tags." },
+  { value: "none", label: "No tags", description: "Skip source tags." },
+  { value: "existing", label: "Existing only", description: "Keep tags already in Marinara." },
+];
+
 interface BrowseCard {
   id: string;
   name: string;
@@ -1303,6 +1311,7 @@ export function BotBrowserView() {
   const [detail, setDetail] = useState<CardDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [tagImportMode, setTagImportMode] = useState<TagImportMode>("all");
 
   // ── Auth state ──
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -1521,6 +1530,7 @@ export function BotBrowserView() {
             _avatarDataUrl: imageDataUrl,
             _botBrowserSource: `${sourceId}:${card.id}`,
             importEmbeddedLorebook,
+            tagImportMode,
           }),
         });
         const data = await importRes.json();
@@ -1549,6 +1559,7 @@ export function BotBrowserView() {
           alternate_greetings: cardDetail?.alternateGreetings || [],
           extensions: { [`${sourceId}`]: { id: card.id } },
           _botBrowserSource: `${sourceId}:${card.id}`,
+          tagImportMode,
           importEmbeddedLorebook,
         };
         if (hasLorebookEntries(cardDetail?.embeddedLorebook)) {
@@ -1938,6 +1949,8 @@ export function BotBrowserView() {
                 setDetail(null);
               }}
               onImport={handleImport}
+              tagImportMode={tagImportMode}
+              onTagImportModeChange={setTagImportMode}
               onDetailUpdate={setDetail}
             />
           ) : (
@@ -2657,6 +2670,8 @@ function DetailView({
   provider,
   onBack,
   onImport,
+  tagImportMode,
+  onTagImportModeChange,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onDetailUpdate,
 }: {
@@ -2667,6 +2682,8 @@ function DetailView({
   provider: ProviderConfig;
   onBack: () => void;
   onImport: (card: BrowseCard) => void;
+  tagImportMode: TagImportMode;
+  onTagImportModeChange: (mode: TagImportMode) => void;
   onDetailUpdate?: (detail: CardDetail) => void;
 }) {
   const [imgError, setImgError] = useState(false);
@@ -2755,6 +2772,34 @@ function DetailView({
               )}
             </div>
             <div className="flex flex-col gap-2 max-md:flex-1">
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--secondary)]/60 p-2.5">
+                <p className="mb-2 text-[0.6875rem] font-semibold text-[var(--foreground)]">Imported tags</p>
+                <div className="flex flex-col gap-1.5">
+                  {TAG_IMPORT_OPTIONS.map((option) => (
+                    <label
+                      key={option.value}
+                      className={`cursor-pointer rounded-md border px-2 py-1.5 transition-colors ${
+                        tagImportMode === option.value
+                          ? "border-[var(--primary)] bg-[var(--primary)]/10"
+                          : "border-[var(--border)] hover:border-[var(--muted-foreground)]"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="botBrowserTagImportMode"
+                        value={option.value}
+                        checked={tagImportMode === option.value}
+                        onChange={() => onTagImportModeChange(option.value)}
+                        className="sr-only"
+                      />
+                      <span className="block text-[0.6875rem] font-medium">{option.label}</span>
+                      <span className="block text-[0.5625rem] leading-snug text-[var(--muted-foreground)]">
+                        {option.description}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
               <button
                 onClick={() => onImport(card)}
                 disabled={importing}

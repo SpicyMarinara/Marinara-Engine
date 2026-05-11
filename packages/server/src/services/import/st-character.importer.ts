@@ -2,6 +2,7 @@
 // Importer: SillyTavern Character (JSON / V2 Card / CharX)
 // ──────────────────────────────────────────────
 import type { DB } from "../../db/connection.js";
+import { characters as charactersTable } from "../../db/schema/index.js";
 import { logger } from "../../lib/logger.js";
 import { createCharactersStorage } from "../storage/characters.storage.js";
 import { importSTLorebook } from "./st-lorebook.importer.js";
@@ -43,12 +44,16 @@ export interface STCharacterImportPreview {
 export interface STCharacterImportOptions {
   timestampOverrides?: TimestampOverrides | null;
   importEmbeddedLorebook?: boolean;
+  tagImportMode?: STCharacterTagImportMode;
 }
+
+export type STCharacterTagImportMode = "all" | "none" | "existing";
 
 export async function importSTCharacter(raw: Record<string, unknown>, db: DB, options?: STCharacterImportOptions) {
   const storage = createCharactersStorage(db);
   const normalizedTimestamps = normalizeTimestampOverrides(options?.timestampOverrides);
   const shouldImportEmbeddedLorebook = options?.importEmbeddedLorebook ?? true;
+  const tagImportMode = options?.tagImportMode ?? "all";
 
   // Extract avatar data URL if present (from PNG import)
   const avatarDataUrl = raw._avatarDataUrl as string | null;
@@ -63,6 +68,7 @@ export async function importSTCharacter(raw: Record<string, unknown>, db: DB, op
   if (rawEmbeddedLorebook) {
     data.character_book = normalizeCharacterBook(rawEmbeddedLorebook);
   }
+  data.tags = await filterImportedTags(data.tags, db, tagImportMode);
 
   // Tag with browser source if imported from browser
   if (botBrowserSource) {
@@ -355,6 +361,37 @@ function buildCardSpecMetadata(raw: Record<string, unknown>) {
     ...(spec ? { spec } : {}),
     ...(specVersion ? { specVersion } : {}),
   };
+}
+
+function tagKey(value: string) {
+  return value.trim().toLocaleLowerCase();
+}
+
+async function getExistingCharacterTagKeys(db: DB) {
+  const tags = new Set<string>();
+  const rows = await db.select({ data: charactersTable.data }).from(charactersTable);
+  for (const row of rows) {
+    try {
+      const data = JSON.parse(row.data) as { tags?: unknown };
+      if (!Array.isArray(data.tags)) continue;
+      for (const tag of data.tags) {
+        if (typeof tag !== "string") continue;
+        const key = tagKey(tag);
+        if (key) tags.add(key);
+      }
+    } catch {
+      // Ignore malformed character records; import can still proceed.
+    }
+  }
+  return tags;
+}
+
+async function filterImportedTags(tags: string[], db: DB, mode: STCharacterTagImportMode) {
+  if (mode === "all") return tags;
+  if (mode === "none") return [];
+
+  const existingTags = await getExistingCharacterTagKeys(db);
+  return tags.filter((tag) => existingTags.has(tagKey(tag)));
 }
 
 /** Resolve an asset URI from a CharX zip to a data URL. */

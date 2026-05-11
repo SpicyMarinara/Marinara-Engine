@@ -13,6 +13,7 @@ import {
   inspectSTCharacter,
   inspectCharX,
   type STCharacterImportPreview,
+  type STCharacterTagImportMode,
 } from "../services/import/st-character.importer.js";
 import { importSTPreset } from "../services/import/st-prompt.importer.js";
 import { importSTLorebook } from "../services/import/st-lorebook.importer.js";
@@ -298,12 +299,26 @@ function readMultipartBooleanField(file: { fields?: Record<string, any> } | null
   return readBooleanOption(rawValue);
 }
 
+function readTagImportMode(value: unknown): STCharacterTagImportMode | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "all" || normalized === "none" || normalized === "existing") return normalized;
+  return undefined;
+}
+
+function readMultipartTagImportMode(file: { fields?: Record<string, any> } | null | undefined) {
+  const field = file?.fields?.tagImportMode;
+  const rawValue = Array.isArray(field) ? field.at(-1)?.value : field?.value;
+  return readTagImportMode(rawValue);
+}
+
 async function importCharacterBuffer(
   fileName: string,
   buffer: Buffer,
   db: FastifyInstance["db"],
   timestampOverrides?: ReturnType<typeof normalizeTimestampOverrides>,
   importEmbeddedLorebook?: boolean,
+  tagImportMode?: STCharacterTagImportMode,
 ) {
   if (fileName.toLowerCase().endsWith(".png")) {
     const charData = extractCharaFromPng(buffer);
@@ -316,16 +331,16 @@ async function importCharacterBuffer(
 
     const avatarB64 = buffer.toString("base64");
     charData._avatarDataUrl = `data:image/png;base64,${avatarB64}`;
-    return importSTCharacter(charData, db, { timestampOverrides, importEmbeddedLorebook });
+    return importSTCharacter(charData, db, { timestampOverrides, importEmbeddedLorebook, tagImportMode });
   }
 
   if (fileName.toLowerCase().endsWith(".charx")) {
-    return importCharX(buffer, db, { timestampOverrides, importEmbeddedLorebook });
+    return importCharX(buffer, db, { timestampOverrides, importEmbeddedLorebook, tagImportMode });
   }
 
   try {
     const json = JSON.parse(buffer.toString("utf-8"));
-    return importSTCharacter(json, db, { timestampOverrides, importEmbeddedLorebook });
+    return importSTCharacter(json, db, { timestampOverrides, importEmbeddedLorebook, tagImportMode });
   } catch {
     return {
       success: false,
@@ -450,22 +465,27 @@ export async function importRoutes(app: FastifyInstance) {
       if (!file) return { success: false, error: "No file uploaded" };
       const timestampOverrides = readTimestampOverridesFromMultipart(file as any);
       const importEmbeddedLorebook = readMultipartBooleanField(file as any, "importEmbeddedLorebook");
+      const tagImportMode = readMultipartTagImportMode(file as any);
       return importCharacterBuffer(
         file.filename ?? "",
         await file.toBuffer(),
         app.db,
         timestampOverrides,
         importEmbeddedLorebook,
+        tagImportMode,
       );
     }
 
     // Standard JSON body
     const body = { ...(req.body as Record<string, unknown>) };
     const importEmbeddedLorebook = readBooleanOption(body.importEmbeddedLorebook);
+    const tagImportMode = readTagImportMode(body.tagImportMode);
     delete body.importEmbeddedLorebook;
+    delete body.tagImportMode;
     return importSTCharacter(body, app.db, {
       timestampOverrides: readTimestampOverridesFromBody(body),
       importEmbeddedLorebook,
+      tagImportMode,
     });
   });
 
@@ -502,6 +522,7 @@ export async function importRoutes(app: FastifyInstance) {
     const files: Array<{ filename: string; buffer: Buffer }> = [];
     const timestampEntries: Array<{ name?: string; lastModified?: number | string }> = [];
     let importEmbeddedLorebook: boolean | undefined;
+    let tagImportMode: STCharacterTagImportMode | undefined;
 
     for await (const part of parts) {
       if (part.type === "file") {
@@ -525,6 +546,10 @@ export async function importRoutes(app: FastifyInstance) {
 
       if (part.fieldname === "importEmbeddedLorebook") {
         importEmbeddedLorebook = readBooleanOption(part.value);
+      }
+
+      if (part.fieldname === "tagImportMode") {
+        tagImportMode = readTagImportMode(part.value);
       }
     }
 
@@ -554,6 +579,7 @@ export async function importRoutes(app: FastifyInstance) {
           app.db,
           timestampOverrides,
           importEmbeddedLorebook,
+          tagImportMode,
         );
         results.push({ filename: file.filename, ...result });
       } catch (error) {

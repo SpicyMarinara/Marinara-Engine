@@ -77,6 +77,13 @@ interface ImportProgress {
 type Phase = "input" | "scanning" | "preview" | "importing" | "done";
 type CategoryKey = "characters" | "chats" | "groupChats" | "presets" | "lorebooks" | "backgrounds" | "personas";
 type SelectionState = Record<CategoryKey, string[]>;
+type TagImportMode = "all" | "none" | "existing";
+
+const TAG_IMPORT_OPTIONS: Array<{ value: TagImportMode; label: string; description: string }> = [
+  { value: "all", label: "All tags", description: "Keep source tags." },
+  { value: "none", label: "No tags", description: "Skip source tags." },
+  { value: "existing", label: "Existing only", description: "Keep tags already in Marinara." },
+];
 
 type ApiErrorPayload = {
   error?: unknown;
@@ -142,6 +149,7 @@ export function STBulkImportModal({ open, onClose }: Props) {
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
   const [error, setError] = useState("");
+  const [characterTagImportMode, setCharacterTagImportMode] = useState<TagImportMode>("all");
   const qc = useQueryClient();
 
   const reset = useCallback(() => {
@@ -160,6 +168,7 @@ export function STBulkImportModal({ open, onClose }: Props) {
     setImportResult(null);
     setProgress(null);
     setError("");
+    setCharacterTagImportMode("all");
   }, []);
 
   const handleClose = useCallback(() => {
@@ -297,7 +306,11 @@ export function STBulkImportModal({ open, onClose }: Props) {
           "Content-Type": "application/json",
           ...getAdminSecretHeader(),
         },
-        body: JSON.stringify({ folderPath: folderPath.trim(), folderToken, options: selection }),
+        body: JSON.stringify({
+          folderPath: folderPath.trim(),
+          folderToken,
+          options: { ...selection, characterTagImportMode },
+        }),
       });
 
       if (!res.ok) {
@@ -352,7 +365,7 @@ export function STBulkImportModal({ open, onClose }: Props) {
       setError(err instanceof Error ? `Import failed: ${err.message}` : "Import failed — server error");
       setPhase("preview");
     }
-  }, [folderPath, folderToken, qc, selection]);
+  }, [characterTagImportMode, folderPath, folderToken, qc, selection]);
 
   const hasAnySelected = Object.values(selection).some((ids) => ids.length > 0);
   const builtinPresetCount = scanResult?.presets.filter((item) => item.isBuiltin).length ?? 0;
@@ -536,6 +549,40 @@ export function STBulkImportModal({ open, onClose }: Props) {
                   );
                 }}
               />
+
+              {scanResult.characters.length > 0 && (
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--secondary)]/40 p-3">
+                  <p className="text-xs font-medium text-[var(--foreground)]">Imported character tags</p>
+                  <p className="mt-0.5 text-[0.6875rem] text-[var(--muted-foreground)]">
+                    Choose how source-site tags are applied to imported characters.
+                  </p>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                    {TAG_IMPORT_OPTIONS.map((option) => (
+                      <label
+                        key={option.value}
+                        className={`cursor-pointer rounded-lg border px-3 py-2 transition-colors ${
+                          characterTagImportMode === option.value
+                            ? "border-[var(--primary)] bg-[var(--primary)]/10"
+                            : "border-[var(--border)] bg-[var(--background)]/40 hover:border-[var(--muted-foreground)]"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="bulkCharacterTagImportMode"
+                          value={option.value}
+                          checked={characterTagImportMode === option.value}
+                          onChange={() => setCharacterTagImportMode(option.value)}
+                          className="sr-only"
+                        />
+                        <span className="block text-xs font-medium text-[var(--foreground)]">{option.label}</span>
+                        <span className="mt-1 block text-[0.625rem] leading-snug text-[var(--muted-foreground)]">
+                          {option.description}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <SelectableImportCategory
                 icon={<MessageSquare size="0.875rem" />}

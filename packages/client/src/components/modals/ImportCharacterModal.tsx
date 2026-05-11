@@ -24,6 +24,14 @@ type ImportResultRow = {
   message: string;
 };
 
+type TagImportMode = "all" | "none" | "existing";
+
+const TAG_IMPORT_OPTIONS: Array<{ value: TagImportMode; label: string; description: string }> = [
+  { value: "all", label: "All tags", description: "Keep source tags." },
+  { value: "none", label: "No tags", description: "Skip source tags." },
+  { value: "existing", label: "Existing only", description: "Keep tags already in Marinara." },
+];
+
 export function ImportCharacterModal({ open, onClose }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "done">("idle");
@@ -33,6 +41,7 @@ export function ImportCharacterModal({ open, onClose }: Props) {
     files: File[];
     previews: EmbeddedLorebookImportPreview[];
   } | null>(null);
+  const [tagImportMode, setTagImportMode] = useState<TagImportMode>("all");
   const qc = useQueryClient();
 
   const handleFiles = async (files: File[], importEmbeddedLorebook?: boolean) => {
@@ -91,6 +100,7 @@ export function ImportCharacterModal({ open, onClose }: Props) {
           ),
         );
         form.append("importEmbeddedLorebook", String(importEmbeddedLorebook ?? true));
+        form.append("tagImportMode", tagImportMode);
 
         const batchResult = await api.upload<{
           success: boolean;
@@ -181,6 +191,7 @@ export function ImportCharacterModal({ open, onClose }: Props) {
     setStatus("idle");
     setResults([]);
     setPendingLorebookChoice(null);
+    setTagImportMode("all");
   };
 
   return (
@@ -236,6 +247,42 @@ export function ImportCharacterModal({ open, onClose }: Props) {
             </div>
           </div>
         )}
+
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--secondary)]/40 p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold text-[var(--foreground)]">Imported card tags</p>
+              <p className="mt-0.5 text-[0.6875rem] text-[var(--muted-foreground)]">
+                Choose how source-site tags are applied to character cards.
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {TAG_IMPORT_OPTIONS.map((option) => (
+              <label
+                key={option.value}
+                className={`cursor-pointer rounded-lg border px-3 py-2 transition-colors ${
+                  tagImportMode === option.value
+                    ? "border-[var(--primary)] bg-[var(--primary)]/10"
+                    : "border-[var(--border)] bg-[var(--background)]/40 hover:border-[var(--muted-foreground)]"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="tagImportMode"
+                  value={option.value}
+                  checked={tagImportMode === option.value}
+                  onChange={() => setTagImportMode(option.value)}
+                  className="sr-only"
+                />
+                <span className="block text-xs font-medium text-[var(--foreground)]">{option.label}</span>
+                <span className="mt-1 block text-[0.625rem] leading-snug text-[var(--muted-foreground)]">
+                  {option.description}
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
 
         {/* Drop zone */}
         <div

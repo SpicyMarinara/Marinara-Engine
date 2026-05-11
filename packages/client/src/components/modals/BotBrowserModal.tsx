@@ -27,6 +27,14 @@ interface Props {
   onClose: () => void;
 }
 
+type TagImportMode = "all" | "none" | "existing";
+
+const TAG_IMPORT_OPTIONS: Array<{ value: TagImportMode; label: string; description: string }> = [
+  { value: "all", label: "All tags", description: "Keep source tags." },
+  { value: "none", label: "No tags", description: "Skip source tags." },
+  { value: "existing", label: "Existing only", description: "Keep tags already in Marinara." },
+];
+
 // ── Chub API types ──
 
 interface ChubCard {
@@ -114,6 +122,7 @@ export function BotBrowserModal({ open, onClose }: Props) {
 
   // Import
   const [importing, setImporting] = useState(false);
+  const [tagImportMode, setTagImportMode] = useState<TagImportMode>("all");
 
   // Search debounce
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -203,7 +212,7 @@ export function BotBrowserModal({ open, onClose }: Props) {
       const importRes = await fetch("/api/import/st-character", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...importJson, _avatarDataUrl: imageDataUrl, importEmbeddedLorebook }),
+        body: JSON.stringify({ ...importJson, _avatarDataUrl: imageDataUrl, importEmbeddedLorebook, tagImportMode }),
       });
       const data = await importRes.json();
 
@@ -250,6 +259,8 @@ export function BotBrowserModal({ open, onClose }: Props) {
               setDetail(null);
             }}
             onImport={handleImport}
+            tagImportMode={tagImportMode}
+            onTagImportModeChange={setTagImportMode}
           />
         ) : (
           <>
@@ -433,6 +444,8 @@ function DetailView({
   avatarUrl,
   onBack,
   onImport,
+  tagImportMode,
+  onTagImportModeChange,
 }: {
   card: ChubCard;
   detail: ChubDetailNode | null;
@@ -441,6 +454,8 @@ function DetailView({
   avatarUrl: (path: string) => string;
   onBack: () => void;
   onImport: (fullPath: string) => void;
+  tagImportMode: TagImportMode;
+  onTagImportModeChange: (mode: TagImportMode) => void;
 }) {
   const [imgError, setImgError] = useState(false);
   const creator = card.fullPath.split("/")[0] ?? "";
@@ -491,6 +506,35 @@ function DetailView({
             </div>
 
             <div className="flex flex-col gap-2 max-md:flex-1">
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--secondary)]/60 p-2.5">
+                <p className="mb-2 text-[0.6875rem] font-semibold text-[var(--foreground)]">Imported tags</p>
+                <div className="flex flex-col gap-1.5">
+                  {TAG_IMPORT_OPTIONS.map((option) => (
+                    <label
+                      key={option.value}
+                      className={`cursor-pointer rounded-md border px-2 py-1.5 transition-colors ${
+                        tagImportMode === option.value
+                          ? "border-[var(--primary)] bg-[var(--primary)]/10"
+                          : "border-[var(--border)] hover:border-[var(--muted-foreground)]"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="botBrowserTagImportMode"
+                        value={option.value}
+                        checked={tagImportMode === option.value}
+                        onChange={() => onTagImportModeChange(option.value)}
+                        className="sr-only"
+                      />
+                      <span className="block text-[0.6875rem] font-medium">{option.label}</span>
+                      <span className="block text-[0.5625rem] leading-snug text-[var(--muted-foreground)]">
+                        {option.description}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
               <button
                 onClick={() => onImport(card.fullPath)}
                 disabled={importing}
