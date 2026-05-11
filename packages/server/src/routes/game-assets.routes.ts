@@ -3,14 +3,46 @@
 // ──────────────────────────────────────────────
 import type { FastifyInstance } from "fastify";
 import { logger } from "../lib/logger.js";
-import { existsSync, mkdirSync, writeFileSync, createReadStream, createWriteStream } from "fs";
-import { join, extname, basename } from "path";
+import {
+  existsSync,
+  mkdirSync,
+  writeFileSync,
+  createReadStream,
+  createWriteStream,
+  readdirSync,
+  statSync,
+  rmdirSync,
+  renameSync,
+  copyFileSync,
+  readFileSync,
+} from "fs";
+import { join, extname, basename, dirname } from "path";
 import { execFile } from "child_process";
 import { platform } from "os";
 import { z } from "zod";
 import { pipeline } from "stream/promises";
 import { MUSIC_GENRES, MUSIC_INTENSITIES } from "@marinara-engine/shared";
 import { GAME_ASSETS_DIR, buildAssetManifest, getAssetManifest } from "../services/game/asset-manifest.service.js";
+import { assertInsideDir } from "../utils/security.js";
+
+const META_PATH = join(GAME_ASSETS_DIR, "meta.json");
+
+interface FolderMeta {
+  description?: string;
+}
+
+function loadMeta(): Record<string, FolderMeta> {
+  if (!existsSync(META_PATH)) return {};
+  try {
+    return JSON.parse(readFileSync(META_PATH, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+function saveMeta(meta: Record<string, FolderMeta>) {
+  writeFileSync(META_PATH, JSON.stringify(meta, null, 2), "utf-8");
+}
 
 const MIME_MAP: Record<string, string> = {
   // Audio
@@ -129,6 +161,57 @@ function finishAssetUpload(category: string, subcategory: string, filename: stri
   const rel = `${category}/${subcategory}/${filename}`;
   const tag = rel.replace(/\.[^.]+$/, "").replace(/\//g, ":");
   return { tag, path: rel, manifestCount: manifest.count };
+}
+
+// ════════════════════════════════════════════════
+// Tree helpers
+// ════════════════════════════════════════════════
+
+interface TreeNode {
+  name: string;
+  path: string;
+  type: "folder" | "file";
+  children?: TreeNode[];
+  ext?: string;
+  description?: string;
+}
+
+function buildTree(dir: string, relPrefix: string, meta: Record<string, FolderMeta>): TreeNode[] {
+  if (!existsSync(dir)) return [];
+  const entries = readdirSync(dir);
+  const nodes: TreeNode[] = [];
+
+  for (const entry of entries) {
+    if (entry.startsWith(".")) continue;
+    if (entry === "manifest.json" && relPrefix === "") continue;
+    if (entry === "meta.json" && relPrefix === "") continue;
+
+    const full = join(dir, entry);
+    const rel = relPrefix ? `${relPrefix}/${entry}` : entry;
+    const stat = statSync(full);
+
+    if (stat.isDirectory()) {
+      const children = buildTree(full, rel, meta);
+      nodes.push({
+        name: entry,
+        path: rel,
+        type: "folder",
+        children,
+        description: meta[rel]?.description,
+      });
+    } else {
+      const ext = extname(entry).toLowerCase();
+      nodes.push({ name: entry, path: rel, type: "file", ext });
+    }
+  }
+
+  // Sort: folders first, then alphabetically
+  nodes.sort((a, b) => {
+    if (a.type === b.type) return a.name.localeCompare(b.name);
+    return a.type === "folder" ? -1 : 1;
+  });
+
+  return nodes;
 }
 
 export async function gameAssetsRoutes(app: FastifyInstance) {
@@ -251,5 +334,240 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
       if (err) logger.warn(err, "Could not open game assets folder");
     });
     return reply.send({ ok: true, path: target });
+  });
+
+  // ── GET /game-assets/tree ──
+  app.get("/tree", async () => {
+    const meta = loadMeta();
+    const children = buildTree(GAME_ASSETS_DIR, "", meta);
+    return { name: "game-assets", path: "", type: "folder" as const, children, description: meta[""]?.description };
+  });
+
+  // ── PATCH /game-assets/folders/description ──
+  app.patch("/folders/description", async (req, reply) => {
+    const schema = z.object({
+      path: z.string().min(1).max(300),
+      description: z.string().max(500),
+    });
+    const { path: folderPath, description } = schema.parse(req.body);
+
+    if (!isSafePath(folderPath)) {
+      return reply.status(400).send({ error: "Invalid folder path" });
+    }
+
+    const target = join(GAME_ASSETS_DIR, folderPath);
+    try {
+      assertInsideDir(GAME_ASSETS_DIR, target);
+    } catch {
+      return reply.status(400).send({ error: "Path escapes game assets directory" });
+    }
+
+    if (!existsSync(target) || !statSync(target).isDirectory()) {
+      return reply.status(404).send({ error: "Folder not found" });
+    }
+
+    const meta = loadMeta();
+    if (description.trim()) {
+      meta[folderPath] = { ...meta[folderPath], description: description.trim() };
+    } else {
+      delete meta[folderPath]?.description;
+      if (meta[folderPath] && Object.keys(meta[folderPath]).length === 0) {
+        delete meta[folderPath];
+      }
+    }
+    saveMeta(meta);
+    return { path: folderPath, description: description.trim() || null };
+  });
+
+  // ── POST /game-assets/folders ──
+  app.post("/folders", async (req, reply) => {
+    const schema = z.object({
+      path: z.string().min(1).max(300),
+    });
+    const { path: folderPath } = schema.parse(req.body);
+
+    if (!isSafePath(folderPath)) {
+      return reply.status(400).send({ error: "Invalid folder path" });
+    }
+
+    const target = join(GAME_ASSETS_DIR, folderPath);
+    try {
+      assertInsideDir(GAME_ASSETS_DIR, target);
+    } catch {
+      return reply.status(400).send({ error: "Path escapes game assets directory" });
+    }
+
+    if (existsSync(target)) {
+      return reply.status(409).send({ error: "Folder already exists" });
+    }
+
+    mkdirSync(target, { recursive: true });
+    buildAssetManifest();
+    return { created: folderPath };
+  });
+
+  // ── DELETE /game-assets/folders/* ──
+  app.delete("/folders/*", async (req, reply) => {
+    const wildcard = (req.params as Record<string, string>)["*"];
+    if (!wildcard || !isSafePath(wildcard)) {
+      return reply.status(400).send({ error: "Invalid folder path" });
+    }
+
+    const target = join(GAME_ASSETS_DIR, wildcard);
+    try {
+      assertInsideDir(GAME_ASSETS_DIR, target);
+    } catch {
+      return reply.status(400).send({ error: "Path escapes game assets directory" });
+    }
+
+    if (!existsSync(target)) {
+      return reply.status(404).send({ error: "Folder not found" });
+    }
+
+    const stat = statSync(target);
+    if (!stat.isDirectory()) {
+      return reply.status(400).send({ error: "Not a directory" });
+    }
+
+    const entries = readdirSync(target);
+    const recursive = (req.query as { recursive?: string }).recursive === "true";
+
+    if (entries.length > 0 && !recursive) {
+      return reply.status(400).send({ error: "Folder is not empty", fileCount: entries.length });
+    }
+
+    if (recursive && entries.length > 0) {
+      const { rmSync } = await import("fs");
+      rmSync(target, { recursive: true, force: true });
+    } else {
+      rmdirSync(target);
+    }
+
+    buildAssetManifest();
+    return { deleted: wildcard, recursive };
+  });
+
+  // ── POST /game-assets/rename ──
+  app.post("/rename", async (req, reply) => {
+    const schema = z.object({
+      path: z.string().min(1).max(500),
+      newName: z.string().min(1).max(200),
+    });
+    const { path: filePath, newName } = schema.parse(req.body);
+
+    if (!isSafePath(filePath) || !isSafePath(newName)) {
+      return reply.status(400).send({ error: "Invalid path or name" });
+    }
+
+    const oldFull = join(GAME_ASSETS_DIR, filePath);
+    try {
+      assertInsideDir(GAME_ASSETS_DIR, oldFull);
+    } catch {
+      return reply.status(400).send({ error: "Path escapes game assets directory" });
+    }
+
+    if (!existsSync(oldFull)) {
+      return reply.status(404).send({ error: "File not found" });
+    }
+
+    const dir = dirname(oldFull);
+    const newFull = join(dir, sanitizeAssetFilename(newName));
+    try {
+      assertInsideDir(GAME_ASSETS_DIR, newFull);
+    } catch {
+      return reply.status(400).send({ error: "Path escapes game assets directory" });
+    }
+
+    if (existsSync(newFull)) {
+      return reply.status(409).send({ error: "A file with that name already exists" });
+    }
+
+    renameSync(oldFull, newFull);
+    buildAssetManifest();
+    const rel = filePath.replace(/\/[^/]+$/, "");
+    const newRel = rel ? `${rel}/${basename(newFull)}` : basename(newFull);
+    return { oldPath: filePath, newPath: newRel };
+  });
+
+  // ── POST /game-assets/move ──
+  app.post("/move", async (req, reply) => {
+    const schema = z.object({
+      path: z.string().min(1).max(500),
+      targetFolder: z.string().min(1).max(300),
+    });
+    const { path: filePath, targetFolder } = schema.parse(req.body);
+
+    if (!isSafePath(filePath) || !isSafePath(targetFolder)) {
+      return reply.status(400).send({ error: "Invalid path or target folder" });
+    }
+
+    const oldFull = join(GAME_ASSETS_DIR, filePath);
+    try {
+      assertInsideDir(GAME_ASSETS_DIR, oldFull);
+    } catch {
+      return reply.status(400).send({ error: "Path escapes game assets directory" });
+    }
+
+    if (!existsSync(oldFull)) {
+      return reply.status(404).send({ error: "File not found" });
+    }
+
+    const destDir = join(GAME_ASSETS_DIR, targetFolder);
+    try {
+      assertInsideDir(GAME_ASSETS_DIR, destDir);
+    } catch {
+      return reply.status(400).send({ error: "Target escapes game assets directory" });
+    }
+
+    if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true });
+
+    const safeName = uniqueFilename(destDir, basename(filePath));
+    const newFull = join(destDir, safeName);
+    renameSync(oldFull, newFull);
+    buildAssetManifest();
+
+    const newRel = `${targetFolder}/${safeName}`;
+    return { oldPath: filePath, newPath: newRel };
+  });
+
+  // ── POST /game-assets/copy ──
+  app.post("/copy", async (req, reply) => {
+    const schema = z.object({
+      path: z.string().min(1).max(500),
+      targetFolder: z.string().min(1).max(300),
+    });
+    const { path: filePath, targetFolder } = schema.parse(req.body);
+
+    if (!isSafePath(filePath) || !isSafePath(targetFolder)) {
+      return reply.status(400).send({ error: "Invalid path or target folder" });
+    }
+
+    const oldFull = join(GAME_ASSETS_DIR, filePath);
+    try {
+      assertInsideDir(GAME_ASSETS_DIR, oldFull);
+    } catch {
+      return reply.status(400).send({ error: "Path escapes game assets directory" });
+    }
+
+    if (!existsSync(oldFull)) {
+      return reply.status(404).send({ error: "File not found" });
+    }
+
+    const destDir = join(GAME_ASSETS_DIR, targetFolder);
+    try {
+      assertInsideDir(GAME_ASSETS_DIR, destDir);
+    } catch {
+      return reply.status(400).send({ error: "Target escapes game assets directory" });
+    }
+
+    if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true });
+
+    const safeName = uniqueFilename(destDir, basename(filePath));
+    const newFull = join(destDir, safeName);
+    copyFileSync(oldFull, newFull);
+    buildAssetManifest();
+
+    const newRel = `${targetFolder}/${safeName}`;
+    return { sourcePath: filePath, newPath: newRel };
   });
 }

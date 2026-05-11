@@ -59,6 +59,9 @@ const RegexScriptEditor = lazy(() =>
 const BotBrowserView = lazy(() =>
   import("../bot-browser/BotBrowserView").then((module) => ({ default: module.BotBrowserView })),
 );
+const GameAssetsBrowserView = lazy(() =>
+  import("../game-assets/GameAssetsBrowserView").then((module) => ({ default: module.GameAssetsBrowserView })),
+);
 const RightPanel = lazy(() => import("./RightPanel").then((module) => ({ default: module.RightPanel })));
 const TrackerDataSidebar = lazy(() =>
   import("./TrackerDataSidebar").then((module) => ({ default: module.TrackerDataSidebar })),
@@ -100,6 +103,22 @@ function BotBrowserPersistent({ open }: { open: boolean }) {
     <div className={open ? "flex flex-1 flex-col overflow-hidden" : "hidden"}>
       <Suspense fallback={<MainPaneFallback />}>
         <BotBrowserView />
+      </Suspense>
+    </div>
+  );
+}
+
+/** Keeps GameAssetsBrowserView mounted (hidden via CSS) once it's been opened at least once, so state persists. */
+function GameAssetsBrowserPersistent({ open }: { open: boolean }) {
+  const [everOpened, setEverOpened] = useState(false);
+  useEffect(() => {
+    if (open && !everOpened) setEverOpened(true);
+  }, [open, everOpened]);
+  if (!everOpened) return null;
+  return (
+    <div className={open ? "flex flex-1 flex-col overflow-hidden" : "hidden"}>
+      <Suspense fallback={<MainPaneFallback />}>
+        <GameAssetsBrowserView />
       </Suspense>
     </div>
   );
@@ -239,6 +258,7 @@ export function AppShell() {
   const personaDetailId = useUIStore((s) => s.personaDetailId);
   const regexDetailId = useUIStore((s) => s.regexDetailId);
   const botBrowserOpen = useUIStore((s) => s.botBrowserOpen);
+  const gameAssetsBrowserOpen = useUIStore((s) => s.gameAssetsBrowserOpen);
   const hasCompletedOnboarding = useUIStore((s) => s.hasCompletedOnboarding);
   const activeChatId = useChatStore((s) => s.activeChatId);
   const activeChat = useChatStore((s) => s.activeChat);
@@ -452,7 +472,7 @@ export function AppShell() {
     <LorebookEditor />
   ) : null;
 
-  const showAmbientDecor = isPageActive && !activeChatId && !detailView && !botBrowserOpen;
+  const showAmbientDecor = isPageActive && !activeChatId && !detailView && !botBrowserOpen && !gameAssetsBrowserOpen;
   const hasDetailView = detailView != null;
   const trackerPanelActive = trackerPanelEnabled && trackerPanelOpen;
   useEffect(() => {
@@ -514,7 +534,7 @@ export function AppShell() {
   }, [trackerPanelDockToEdge]);
 
   useLayoutEffect(() => {
-    if (isMobile || trackerPanelActive || botBrowserOpen || hasDetailView) return;
+    if (isMobile || trackerPanelActive || botBrowserOpen || gameAssetsBrowserOpen || hasDetailView) return;
 
     let frame = 0;
     let discoveryObserver: MutationObserver | null = null;
@@ -562,6 +582,7 @@ export function AppShell() {
     activeChat?.mode,
     activeChatId,
     botBrowserOpen,
+    gameAssetsBrowserOpen,
     centerCompact,
     hasDetailView,
     isMobile,
@@ -570,7 +591,7 @@ export function AppShell() {
   ]);
 
   useLayoutEffect(() => {
-    if (isMobile || !trackerPanelAnchoredForMotion || botBrowserOpen || hasDetailView) {
+    if (isMobile || !trackerPanelAnchoredForMotion || botBrowserOpen || gameAssetsBrowserOpen || hasDetailView) {
       setTrackerPanelTop(TRACKER_PANEL_EDGE_OFFSET);
       return;
     }
@@ -620,6 +641,7 @@ export function AppShell() {
     activeChat?.mode,
     activeChatId,
     botBrowserOpen,
+    gameAssetsBrowserOpen,
     centerCompact,
     hasDetailView,
     isMobile,
@@ -629,11 +651,11 @@ export function AppShell() {
   ]);
 
   const trackerPanelChatAvoidance =
-    !isMobile && trackerPanelAnchoredForMotion && !botBrowserOpen && !hasDetailView
+    !isMobile && trackerPanelAnchoredForMotion && !botBrowserOpen && !gameAssetsBrowserOpen && !hasDetailView
       ? Math.round(liveTrackerPanelWidth * 0.62)
       : 0;
   const trackerPanelHudClearance =
-    !isMobile && trackerPanelAnchoredForMotion && trackerPanelHideHudWidgets && !botBrowserOpen && !hasDetailView
+    !isMobile && trackerPanelAnchoredForMotion && trackerPanelHideHudWidgets && !botBrowserOpen && !gameAssetsBrowserOpen && !hasDetailView
       ? liveTrackerPanelWidth + TRACKER_PANEL_HUD_GAP
       : 0;
 
@@ -794,8 +816,10 @@ export function AppShell() {
         <TopBar />
         {/* Bot Browser — kept mounted once opened so state persists across close/reopen */}
         <BotBrowserPersistent open={botBrowserOpen} />
+        {/* Game Assets Browser — kept mounted once opened so state persists across close/reopen */}
+        <GameAssetsBrowserPersistent open={gameAssetsBrowserOpen} />
         <div
-          className={botBrowserOpen ? "hidden" : "flex flex-1 flex-col overflow-hidden"}
+          className={botBrowserOpen || gameAssetsBrowserOpen ? "hidden" : "flex flex-1 flex-col overflow-hidden"}
           style={
             {
               "--tracker-chat-avoid-left": `${trackerPanelSide === "left" ? trackerPanelChatAvoidance : 0}px`,
