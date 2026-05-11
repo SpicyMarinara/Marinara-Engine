@@ -7025,19 +7025,19 @@ export function GameSurface({
       ? lastResolvedBackgroundRef.current.url
       : undefined);
 
-  // ONLY gate on the first turn — once any assistant content has been received,
+  // ONLY gate on the first turn — once a playable GM turn has been received,
   // the game is in-progress and the "adventure begins" screen should never reappear.
-  const hasEverHadContent = useMemo(
-    () => messages.some((m) => (m.role === "assistant" || m.role === "narrator") && m.content),
+  const hasEverHadPlayableContent = useMemo(
+    () => messages.some((m) => m.role === "assistant" && m.content),
     [messages],
   );
 
   useEffect(() => {
     if (!startGameRequested) return;
-    if (sessionStatus !== "active" || !hasEverHadContent) return;
+    if (sessionStatus !== "active" || !hasEverHadPlayableContent) return;
     startGameGuardRef.current = false;
     setStartGameRequested(false);
-  }, [hasEverHadContent, sessionStatus, startGameRequested]);
+  }, [hasEverHadPlayableContent, sessionStatus, startGameRequested]);
 
   // Does this chat need initial game creation?
   const needsCreation = !chatMeta.gameId;
@@ -7117,7 +7117,8 @@ export function GameSurface({
   // (4) any in-flight image / NPC portrait generation has completed.
   // Once ALL conditions are met for the first time the screen never returns.
   // sceneProcessed is computed above (near scenePreparing).
-  const firstTurnFullyReady = hasEverHadContent && !isStreaming && sceneProcessed && !assetGenerationBlocksScene;
+  const firstTurnFullyReady =
+    hasEverHadPlayableContent && !isStreaming && sceneProcessed && !assetGenerationBlocksScene;
   const sidecarStartupFailed = sidecarConfig.useForGameScene && sidecarStatus === "server_error" && !sidecarReady;
   // Don't auto-dismiss: wait for user to click Continue after typewriter finishes.
 
@@ -7182,17 +7183,17 @@ export function GameSurface({
                       <div className="flex items-center gap-3 text-sm text-[var(--muted-foreground)] dark:text-white/60">
                         <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--muted)]/40 border-t-[var(--foreground)]/70 dark:border-white/20 dark:border-t-white/70" />
                         <span>
-                          {hasEverHadContent && !sceneProcessed
+                          {hasEverHadPlayableContent && !sceneProcessed
                             ? "Preparing the scene..."
-                            : hasEverHadContent && pendingAssetGeneration && !assetGenerationFailed
+                            : hasEverHadPlayableContent && pendingAssetGeneration && !assetGenerationFailed
                               ? "Generating images..."
-                              : hasEverHadContent && isStreaming
+                              : hasEverHadPlayableContent && isStreaming
                                 ? "The GM is narrating..."
                                 : "The adventure begins..."}
                         </span>
                       </div>
                       {/* Retry only when scene analysis actually failed */}
-                      {hasEverHadContent && !isStreaming && sceneAnalysisFailed && (
+                      {hasEverHadPlayableContent && !isStreaming && sceneAnalysisFailed && (
                         <div className="flex items-center gap-2">
                           <button onClick={() => retrySceneAnalysis()} className={SURFACE_BTN}>
                             <RefreshCw size={14} />
@@ -7204,7 +7205,7 @@ export function GameSurface({
                         </div>
                       )}
                       {/* Show skip only after stuck timeout — scene processing hung, not failed */}
-                      {hasEverHadContent &&
+                      {hasEverHadPlayableContent &&
                         !isStreaming &&
                         !sceneProcessed &&
                         sceneStuckVisible &&
@@ -7216,7 +7217,7 @@ export function GameSurface({
                     </>
                   )}
                   {/* Show retry when generation stopped but no content arrived. */}
-                  {!isStreaming && !latestAssistantMsg?.content && !startGame.isPending && (
+                  {!isStreaming && !hasEverHadPlayableContent && !startGame.isPending && (
                     <button onClick={generateInitialGameTurn} className={SURFACE_BTN}>
                       <RefreshCw size={14} />
                       Retry
