@@ -32,6 +32,7 @@ import {
   useRecruitPartyMember,
   useRemovePartyMember,
   gameKeys,
+  patchChatMetadata,
 } from "../../hooks/use-game";
 import {
   chatKeys,
@@ -79,6 +80,7 @@ import type {
   DiceRollResult,
   EncounterInitResponse,
   EncounterSettings,
+  HudWidget,
   SceneSpotifyTrackCandidate,
   SceneSpotifyTrackSelection,
 } from "@marinara-engine/shared";
@@ -100,7 +102,6 @@ import { GameTransitionManager } from "./GameTransitionManager";
 import { GameChoiceCards } from "./GameChoiceCards";
 import { GameQteOverlay } from "./GameQteOverlay";
 import { GameJournal } from "./GameJournal";
-import { GameCombatUI } from "./GameCombatUI";
 import { GameJsonRepairModal } from "./GameJsonRepairModal";
 import {
   GameImagePromptReviewModal,
@@ -878,6 +879,11 @@ function buildNpcAvatarLookup(
 const SpriteOverlay = lazy(async () => {
   const module = await import("../chat/SpriteOverlay");
   return { default: module.SpriteOverlay };
+});
+
+const GameCombatUI = lazy(async () => {
+  const module = await import("./GameCombatUI");
+  return { default: module.GameCombatUI };
 });
 
 import { Modal } from "../ui/Modal";
@@ -1827,6 +1833,24 @@ export function GameSurface({
 
   // Asset store
   const queryClient = useQueryClient();
+  const syncHudWidgetsToChatCache = useCallback(
+    (widgets: HudWidget[]) => {
+      const detailKey = chatKeys.detail(activeChatId);
+      const patchedChat = patchChatMetadata(queryClient.getQueryData<Chat>(detailKey), { gameWidgetState: widgets });
+      if (patchedChat) {
+        queryClient.setQueryData(detailKey, patchedChat);
+      }
+
+      const chatStore = useChatStore.getState();
+      if (chatStore.activeChatId === activeChatId) {
+        const patchedActiveChat = patchChatMetadata(chatStore.activeChat, { gameWidgetState: widgets });
+        if (patchedActiveChat) {
+          chatStore.setActiveChat(patchedActiveChat);
+        }
+      }
+    },
+    [activeChatId, queryClient],
+  );
   const assetManifest = useGameAssetStore((s) => s.manifest);
   const currentBackground = useGameAssetStore((s) => s.currentBackground);
   const audioMuted = useGameAssetStore((s) => s.audioMuted);
@@ -3479,8 +3503,12 @@ export function GameSurface({
 
     // Scene wrap-up: handle bg, music, sfx, ambient, widgets, state changes
     // Widget updates always come from the GM model (not sidecar), apply them immediately
+    let nextWidgetState: HudWidget[] | null = null;
     for (const wu of tags.widgetUpdates) {
-      applyWidgetUpdate(wu);
+      nextWidgetState = applyWidgetUpdate(wu);
+    }
+    if (nextWidgetState) {
+      syncHudWidgetsToChatCache(nextWidgetState);
     }
 
     // State change tags always come from the GM model — transition via server so
@@ -7904,27 +7932,35 @@ export function GameSurface({
 
                     return (
                       <div className="relative h-full min-h-0">
-                        <GameCombatUI
-                          chatId={activeChatId}
-                          party={combatParty}
-                          enemies={combatEnemies}
-                          inventoryItems={inventoryItems}
-                          onCombatEnd={handleCombatEnd}
-                          onInventoryItemUsed={handleUseCombatInventoryItem}
-                          onCombatantsChange={handleCombatantsChange}
-                          onOpenInventory={() => setInventoryOpen(true)}
-                          onCustomInstruction={handleCombatCustomInstruction}
-                          onSpriteSuggestionChange={setCombatSpriteSuggestion}
-                          _isStreaming={isStreaming}
-                          narration={combatStartNarration ?? "Combat starts!"}
-                          combatDialogue={combatDialogueLines}
-                          combatDialogueCues={combatDialogueCues}
-                          combatItemEffects={combatItemEffects}
-                          combatMechanics={combatMechanics}
-                          voicedCombatSpeakerNames={voicedCombatSpeakerNames}
-                          gameVoiceVolume={effectiveGameVoiceVolume}
-                          combatControlsSlot={combatControlsSlot}
-                        />
+                        <Suspense
+                          fallback={
+                            <div className="flex h-full items-center justify-center text-sm text-white/70">
+                              Loading combat...
+                            </div>
+                          }
+                        >
+                          <GameCombatUI
+                            chatId={activeChatId}
+                            party={combatParty}
+                            enemies={combatEnemies}
+                            inventoryItems={inventoryItems}
+                            onCombatEnd={handleCombatEnd}
+                            onInventoryItemUsed={handleUseCombatInventoryItem}
+                            onCombatantsChange={handleCombatantsChange}
+                            onOpenInventory={() => setInventoryOpen(true)}
+                            onCustomInstruction={handleCombatCustomInstruction}
+                            onSpriteSuggestionChange={setCombatSpriteSuggestion}
+                            _isStreaming={isStreaming}
+                            narration={combatStartNarration ?? "Combat starts!"}
+                            combatDialogue={combatDialogueLines}
+                            combatDialogueCues={combatDialogueCues}
+                            combatItemEffects={combatItemEffects}
+                            combatMechanics={combatMechanics}
+                            voicedCombatSpeakerNames={voicedCombatSpeakerNames}
+                            gameVoiceVolume={effectiveGameVoiceVolume}
+                            combatControlsSlot={combatControlsSlot}
+                          />
+                        </Suspense>
                       </div>
                     );
                   }

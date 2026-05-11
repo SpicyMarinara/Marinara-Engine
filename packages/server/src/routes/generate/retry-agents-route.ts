@@ -19,6 +19,7 @@ import { getLocalSidecarProvider, LOCAL_SIDECAR_MODEL } from "../../services/llm
 import { createLLMProvider } from "../../services/llm/provider-registry.js";
 import { sidecarModelService } from "../../services/sidecar/sidecar-model.service.js";
 import { resolveSpotifyCredentials } from "../../services/spotify/spotify.service.js";
+import { getAssetManifest } from "../../services/game/asset-manifest.service.js";
 import { createAgentsStorage } from "../../services/storage/agents.storage.js";
 import { createCharactersStorage } from "../../services/storage/characters.storage.js";
 import { createChatsStorage } from "../../services/storage/chats.storage.js";
@@ -353,6 +354,12 @@ async function buildRetryAgentContext(args: {
     try {
       const { readdirSync, readFileSync, existsSync } = await import("fs");
       const { join, extname } = await import("path");
+      const availableBackgrounds: Array<{
+        filename: string;
+        originalName?: string | null;
+        tags: string[];
+        source?: "user" | "game_asset";
+      }> = [];
       const bgDir = join(DATA_DIR, "backgrounds");
       if (existsSync(bgDir)) {
         const exts = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif"]);
@@ -366,13 +373,27 @@ async function buildRetryAgentContext(args: {
             /* */
           }
         }
-        agentContext.memory._availableBackgrounds = files.map((f: string) => ({
-          filename: f,
-          originalName: meta[f]?.originalName ?? null,
-          tags: meta[f]?.tags ?? [],
-        }));
-        agentContext.memory._currentBackground = chatMeta.background ?? null;
+        availableBackgrounds.push(
+          ...files.map((f: string) => ({
+            filename: f,
+            originalName: meta[f]?.originalName ?? null,
+            tags: meta[f]?.tags ?? [],
+            source: "user" as const,
+          })),
+        );
       }
+      availableBackgrounds.push(
+        ...(getAssetManifest().byCategory.backgrounds ?? [])
+          .filter((entry) => !entry.path.startsWith("__user_bg__/"))
+          .map((entry) => ({
+            filename: `gameAsset:${entry.path}`,
+            originalName: entry.tag,
+            tags: entry.subcategory ? [entry.subcategory] : [],
+            source: "game_asset" as const,
+          })),
+      );
+      agentContext.memory._availableBackgrounds = availableBackgrounds;
+      agentContext.memory._currentBackground = chatMeta.background ?? null;
     } catch (err) {
       logger.warn(err, "[retry-agents] Failed to load available backgrounds for retry");
     }

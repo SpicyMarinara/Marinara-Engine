@@ -108,7 +108,7 @@ function CrossfadeBackground({ url, className }: { url: string | null; className
     const currentUrl = activeSlot.current === "a" ? bgA : bgB;
     if (url === currentUrl) return;
 
-    if (url && url.startsWith("/api/backgrounds/")) {
+    if (url && (url.startsWith("/api/backgrounds/") || url.startsWith("/api/game-assets/"))) {
       fetch(url, { method: "HEAD" })
         .then((res) => {
           if (res.ok) {

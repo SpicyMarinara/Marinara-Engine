@@ -77,6 +77,7 @@ import {
 } from "../services/agents/agent-executor.js";
 import { buildSpriteExpressionChoices, listCharacterSprites } from "../services/game/sprite.service.js";
 import { generateChatBackground } from "../services/game/game-asset-generation.js";
+import { getAssetManifest } from "../services/game/asset-manifest.service.js";
 import { getLocalSidecarProvider, LOCAL_SIDECAR_MODEL } from "../services/llm/local-sidecar.js";
 import {
   parseCharacterCommands,
@@ -4002,6 +4003,12 @@ export async function generateRoutes(app: FastifyInstance) {
         try {
           const { readdirSync, readFileSync, existsSync } = await import("fs");
           const { join, extname } = await import("path");
+          const availableBackgrounds: Array<{
+            filename: string;
+            originalName?: string | null;
+            tags: string[];
+            source?: "user" | "game_asset";
+          }> = [];
           const bgDir = join(DATA_DIR, "backgrounds");
           if (existsSync(bgDir)) {
             const exts = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif"]);
@@ -4018,12 +4025,26 @@ export async function generateRoutes(app: FastifyInstance) {
               }
             }
 
-            agentContext.memory._availableBackgrounds = files.map((f: string) => ({
-              filename: f,
-              originalName: meta[f]?.originalName ?? null,
-              tags: meta[f]?.tags ?? [],
-            }));
+            availableBackgrounds.push(
+              ...files.map((f: string) => ({
+                filename: f,
+                originalName: meta[f]?.originalName ?? null,
+                tags: meta[f]?.tags ?? [],
+                source: "user" as const,
+              })),
+            );
           }
+          availableBackgrounds.push(
+            ...(getAssetManifest().byCategory.backgrounds ?? [])
+              .filter((entry) => !entry.path.startsWith("__user_bg__/"))
+              .map((entry) => ({
+                filename: `gameAsset:${entry.path}`,
+                originalName: entry.tag,
+                tags: entry.subcategory ? [entry.subcategory] : [],
+                source: "game_asset" as const,
+              })),
+          );
+          agentContext.memory._availableBackgrounds = availableBackgrounds;
         } catch {
           /* non-critical */
         }

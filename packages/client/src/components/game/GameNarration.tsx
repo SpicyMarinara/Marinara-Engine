@@ -233,6 +233,14 @@ interface NarrationSegment {
   readableContent?: string;
 }
 
+function narrationSegmentAnchorKey(segment: NarrationSegment): string {
+  if (segment.sourceMessageId && segment.sourceSegmentIndex != null) {
+    return `${segment.sourceMessageId}:${segment.sourceSegmentIndex}`;
+  }
+  if (segment.sourceMessageId) return `${segment.sourceMessageId}:${segment.id}`;
+  return segment.id;
+}
+
 type SpeakerAvatarInfo = {
   url: string;
   crop?: AvatarCrop | LegacyAvatarCrop | null;
@@ -924,6 +932,8 @@ export function GameNarration({
   const logEditTextareaRef = useRef<HTMLTextAreaElement>(null);
   const logEditDraftRef = useRef<{ content: string; speaker?: string }>({ content: "", speaker: undefined });
   const logScrolledRef = useRef(false);
+  const logScrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const pendingLogScrollAnchorRef = useRef<{ key: string; offsetTop: number; scrollTop: number } | null>(null);
   const stackedLogRef = useRef<HTMLDivElement | null>(null);
   const [stackedLogPinned, setStackedLogPinned] = useState(true);
   const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
@@ -1797,6 +1807,40 @@ export function GameNarration({
     segmentEditInfoRef.current[activeIndex] != null
   );
   const narrationComplete = !isStreaming && segments.length > 0 && activeIndex === segments.length - 1 && doneTyping;
+  const activeSegmentAnchor = active ? narrationSegmentAnchorKey(active) : null;
+  const segmentAnchorSignature = useMemo(() => segments.map(narrationSegmentAnchorKey).join("|"), [segments]);
+  const activeSegmentAnchorRef = useRef<{ key: string; index: number; sourceMessageId: string | null } | null>(null);
+
+  useLayoutEffect(() => {
+    const previous = activeSegmentAnchorRef.current;
+    if (!previous || segments.length === 0) return;
+
+    const matchingIndex = segments.findIndex((segment) => narrationSegmentAnchorKey(segment) === previous.key);
+    if (matchingIndex >= 0 && matchingIndex !== activeIndex) {
+      setActiveIndex(matchingIndex);
+      return;
+    }
+
+    const sameSourceStillVisible =
+      !!previous.sourceMessageId && segments.some((segment) => segment.sourceMessageId === previous.sourceMessageId);
+    if (matchingIndex < 0 && sameSourceStillVisible) {
+      const fallbackIndex = Math.min(previous.index, segments.length - 1);
+      if (fallbackIndex !== activeIndex) setActiveIndex(fallbackIndex);
+    }
+    // This should only react to segment-list mutations. Active-index changes from
+    // normal reading/navigation update the anchor in the next effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segmentAnchorSignature]);
+
+  useLayoutEffect(() => {
+    activeSegmentAnchorRef.current = activeSegmentAnchor
+      ? {
+          key: activeSegmentAnchor,
+          index: activeIndex,
+          sourceMessageId: active?.sourceMessageId ?? null,
+        }
+      : null;
+  }, [active?.sourceMessageId, activeIndex, activeSegmentAnchor]);
 
   // Notify parent about narration completion state. While reviewing the past via
   // wheel-nav, the past message will look "complete" — but it's not the present, so
@@ -2066,6 +2110,22 @@ export function GameNarration({
     [logEntries, visibleLogCount],
   );
   const hiddenLogCount = Math.max(0, logEntries.length - visibleLogEntries.length);
+  const captureLogScrollAnchor = useCallback(() => {
+    const container = logScrollContainerRef.current;
+    if (!container) return;
+    const containerTop = container.getBoundingClientRect().top;
+    const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-log-anchor-key]"));
+    const anchorRow = rows.find((row) => row.getBoundingClientRect().bottom >= containerTop + 8) ?? rows[0] ?? null;
+    const key = anchorRow?.dataset.logAnchorKey;
+    pendingLogScrollAnchorRef.current =
+      anchorRow && key
+        ? {
+            key,
+            offsetTop: anchorRow.getBoundingClientRect().top - containerTop,
+            scrollTop: container.scrollTop,
+          }
+        : { key: "", offsetTop: 0, scrollTop: container.scrollTop };
+  }, []);
   const sessionHistoryTokens = useMemo(() => estimateSessionHistoryTokens(messages), [messages]);
   const loadOlderLogs = useCallback(() => {
     setVisibleLogCount((current) => Math.min(logEntries.length, current + logPageSize));
@@ -2073,6 +2133,29 @@ export function GameNarration({
   const showAllLogs = useCallback(() => {
     setVisibleLogCount(logEntries.length);
   }, [logEntries.length]);
+
+  useLayoutEffect(() => {
+    if (!logsOpen) return;
+    const anchor = pendingLogScrollAnchorRef.current;
+    if (!anchor) return;
+    pendingLogScrollAnchorRef.current = null;
+    const container = logScrollContainerRef.current;
+    if (!container) return;
+
+    requestAnimationFrame(() => {
+      const currentContainer = logScrollContainerRef.current;
+      if (!currentContainer) return;
+      const containerTop = currentContainer.getBoundingClientRect().top;
+      const rows = Array.from(currentContainer.querySelectorAll<HTMLElement>("[data-log-anchor-key]"));
+      const row = anchor.key ? rows.find((candidate) => candidate.dataset.logAnchorKey === anchor.key) : null;
+      if (!row) {
+        currentContainer.scrollTop = Math.min(anchor.scrollTop, currentContainer.scrollHeight);
+        return;
+      }
+      currentContainer.scrollTop += row.getBoundingClientRect().top - containerTop - anchor.offsetTop;
+    });
+  }, [logsOpen, visibleLogEntries]);
+
   const stackedLogEntries = useMemo(() => {
     if (!useStackedLogDisplay) return [];
 
@@ -3729,6 +3812,7 @@ export function GameNarration({
                 if (e.currentTarget.scrollTop <= 8) loadOlderLogs();
               }}
               ref={(el) => {
+                logScrollContainerRef.current = el;
                 // Auto-scroll to bottom once so the user sees the most recent logs
                 if (el && !logScrolledRef.current) {
                   logScrolledRef.current = true;
@@ -3834,6 +3918,10 @@ export function GameNarration({
                           : sourceMessageId
                             ? `log:${sourceMessageId}`
                             : null;
+                      const logAnchorKey =
+                        sourceMessageId && hasSourceSegmentIndex
+                          ? `${sourceMessageId}:${sourceSegmentIndex}`
+                          : `${entry.messageId}:${seg.id}`;
                       const copyText = seg.readableContent ?? stripGmTagsKeepReadables(seg.content);
                       const copyButton = copyKey ? (
                         <button
@@ -3851,6 +3939,7 @@ export function GameNarration({
                         <button
                           type="button"
                           onClick={() => {
+                            captureLogScrollAnchor();
                             if (canDeleteMessage && sourceMessageId) {
                               onDeleteMessage?.(sourceMessageId);
                             } else if (canDeleteThisSegment && sourceMessageId) {
@@ -4028,6 +4117,7 @@ export function GameNarration({
                           <div
                             key={seg.id}
                             {...(jumpRowProps ?? {})}
+                            data-log-anchor-key={logAnchorKey}
                             className={cn(
                               "group/logseg relative flex gap-2 rounded-lg border px-3 py-2",
                               seg.partyType === "thought"
@@ -4136,6 +4226,7 @@ export function GameNarration({
                           <div
                             key={seg.id}
                             {...(jumpRowProps ?? {})}
+                            data-log-anchor-key={logAnchorKey}
                             className={cn(
                               "group/logseg relative rounded-lg border border-cyan-400/15 bg-cyan-950/15 px-3 py-2",
                               isActiveSeg && "ring-1 ring-[var(--primary)]/40",
@@ -4162,6 +4253,7 @@ export function GameNarration({
                           <div
                             key={seg.id}
                             {...(jumpRowProps ?? {})}
+                            data-log-anchor-key={logAnchorKey}
                             className={cn(
                               "group/logseg relative rounded-lg border border-amber-400/15 bg-amber-950/15 px-3 py-2",
                               isActiveSeg && "ring-1 ring-[var(--primary)]/40",
@@ -4193,6 +4285,7 @@ export function GameNarration({
                         <div
                           key={seg.id}
                           {...(jumpRowProps ?? {})}
+                          data-log-anchor-key={logAnchorKey}
                           className={cn(
                             "group/logseg relative rounded-lg border border-white/5 bg-black/20 px-3 py-2",
                             isActiveSeg && "ring-1 ring-[var(--primary)]/40",

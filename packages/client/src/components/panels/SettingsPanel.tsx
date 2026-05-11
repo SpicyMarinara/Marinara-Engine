@@ -14,6 +14,7 @@ import { cn } from "../../lib/utils";
 import { useExtensions, useCreateExtension, useDeleteExtension, useUpdateExtension } from "../../hooks/use-extensions";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ADMIN_SECRET_STORAGE_KEY, api, getAdminSecretHeader } from "../../lib/api-client";
+import { chatBackgroundUrlToMetadata } from "../../lib/backgrounds";
 import { forceRefreshSpa } from "@/lib/browser-runtime";
 import React, { useRef, useState, useCallback, useEffect } from "react";
 import { toast } from "sonner";
@@ -900,8 +901,7 @@ function AppearanceSettings() {
     (url: string | null) => {
       setChatBackgroundRaw(url);
       if (!activeChatId) return;
-      const filename = url ? decodeURIComponent(url.replace(/^\/api\/backgrounds\/file\//, "")) : null;
-      updateMeta.mutate({ id: activeChatId, background: filename });
+      updateMeta.mutate({ id: activeChatId, background: chatBackgroundUrlToMetadata(url) });
     },
     [setChatBackgroundRaw, activeChatId, updateMeta],
   );
@@ -1648,7 +1648,7 @@ function AppearanceSettings() {
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium inline-flex items-center gap-1">
             Chat Background{" "}
-            <HelpTooltip text="Upload a custom image to use as the background of the chat area. Supports JPG, PNG, and WebP. Remove to use the default background." />
+            <HelpTooltip text="Import one or more custom images, or choose from your game asset backgrounds. Supports JPG, PNG, GIF, WebP, and AVIF. Remove to use the default background." />
           </span>
           {chatBackground && (
             <button
@@ -1665,6 +1665,27 @@ function AppearanceSettings() {
   );
 }
 
+type BackgroundLibraryItem = {
+  id?: string;
+  filename: string;
+  url: string;
+  originalName: string | null;
+  tags: string[];
+  source?: "user" | "game_asset";
+  tag?: string;
+  editable?: boolean;
+  deletable?: boolean;
+  renameable?: boolean;
+};
+
+type BackgroundUploadResponse = {
+  success: boolean;
+  filename: string;
+  url: string;
+  originalName: string;
+  tags: string[];
+};
+
 function BackgroundPicker({ selected, onSelect }: { selected: string | null; onSelect: (url: string | null) => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -1672,12 +1693,12 @@ function BackgroundPicker({ selected, onSelect }: { selected: string | null; onS
   const [tagInput, setTagInput] = useState("");
   const [renamingFile, setRenamingFile] = useState<string | null>(null);
   const [renameInput, setRenameInput] = useState("");
+  const refreshGameAssetManifest = useGameAssetStore((s) => s.fetchManifest);
   const qc = useQueryClient();
 
   const { data: backgrounds } = useQuery({
     queryKey: ["backgrounds"],
-    queryFn: () =>
-      api.get<Array<{ filename: string; url: string; originalName: string | null; tags: string[] }>>("/backgrounds"),
+    queryFn: () => api.get<BackgroundLibraryItem[]>("/backgrounds"),
   });
 
   const { data: allTags } = useQuery({
@@ -1709,7 +1730,6 @@ function BackgroundPicker({ selected, onSelect }: { selected: string | null; onS
         { name },
       ),
     onSuccess: (data) => {
-      // If the renamed file was the selected background, update the selection
       const oldUrl = `/api/backgrounds/file/${encodeURIComponent(data.oldFilename)}`;
       if (selected === oldUrl) {
         onSelect(data.url);
@@ -1720,20 +1740,41 @@ function BackgroundPicker({ selected, onSelect }: { selected: string | null; onS
   });
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
     setUploading(true);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch("/api/backgrounds/upload", { method: "POST", body: formData });
-      const data = await res.json();
-      if (data.success) {
+      const uploads = await Promise.allSettled(
+        files.map((file) => {
+          const formData = new FormData();
+          formData.append("file", file);
+          return api.upload<BackgroundUploadResponse>("/backgrounds/upload", formData);
+        }),
+      );
+      const successfulUploads = uploads
+        .filter((result): result is PromiseFulfilledResult<BackgroundUploadResponse> => result.status === "fulfilled")
+        .map((result) => result.value)
+        .filter((result) => result.success);
+      const failed = uploads.length - successfulUploads.length;
+
+      if (successfulUploads.length > 0) {
         qc.invalidateQueries({ queryKey: ["backgrounds"] });
-        onSelect(data.url);
+        qc.invalidateQueries({ queryKey: ["background-tags"] });
+        void refreshGameAssetManifest().catch(() => undefined);
+        onSelect(successfulUploads[successfulUploads.length - 1]!.url);
+        toast.success(`Imported ${successfulUploads.length} background${successfulUploads.length === 1 ? "" : "s"}.`);
+      }
+
+      if (failed > 0) {
+        const rejected = uploads.find((result) => result.status === "rejected");
+        toast.error(
+          rejected?.status === "rejected" && rejected.reason instanceof Error
+            ? rejected.reason.message
+            : `${failed} background import${failed === 1 ? "" : "s"} failed.`,
+        );
       }
     } catch {
-      // ignore
+      toast.error("Background import failed.");
     } finally {
       setUploading(false);
       e.target.value = "";
@@ -1763,24 +1804,32 @@ function BackgroundPicker({ selected, onSelect }: { selected: string | null; onS
         className="flex items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-[var(--border)] p-3 text-xs text-[var(--muted-foreground)] transition-all hover:border-[var(--primary)]/40 hover:bg-[var(--secondary)]/50"
       >
         {uploading ? <Loader2 size="0.875rem" className="animate-spin" /> : <Upload size="0.875rem" />}
-        {uploading ? "Uploading..." : "Upload Background"}
+        {uploading ? "Importing..." : "Import Backgrounds"}
       </button>
-      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleUpload} />
+      <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={handleUpload} />
 
       {/* Background grid */}
       {backgrounds && backgrounds.length > 0 && (
         <div className="flex flex-col gap-2">
           {backgrounds.map((bg) => {
+            const itemKey = bg.id ?? bg.url;
             const isSelected = selected === bg.url;
-            const isEditing = editingTags === bg.filename;
+            const isUserBackground = bg.source !== "game_asset";
+            const isEditable = bg.editable !== false && isUserBackground;
+            const canRename = bg.renameable !== false && isUserBackground;
+            const canDelete = bg.deletable !== false && isUserBackground;
+            const isEditing = editingTags === itemKey;
+            const isRenaming = renamingFile === itemKey;
+            const title = bg.originalName ?? bg.tag ?? bg.filename;
+            const sourceLabel = bg.source === "game_asset" ? "Game asset" : "Library";
             return (
-              <div key={bg.filename} className="flex flex-col gap-1">
+              <div key={itemKey} className="flex flex-col gap-1">
                 {/* Thumbnail row */}
                 <div className="group relative flex gap-2">
                   <button
                     onClick={() => onSelect(isSelected ? null : bg.url)}
                     className={cn(
-                      "aspect-video w-24 shrink-0 overflow-hidden rounded-lg border-2 transition-all",
+                      "relative aspect-video w-24 shrink-0 overflow-hidden rounded-lg border-2 transition-all",
                       isSelected
                         ? "border-[var(--primary)] shadow-md shadow-[var(--primary)]/20"
                         : "border-transparent hover:border-[var(--muted-foreground)]/30",
@@ -1788,17 +1837,14 @@ function BackgroundPicker({ selected, onSelect }: { selected: string | null; onS
                   >
                     <img src={bg.url} alt="" className="h-full w-full object-cover" loading="lazy" />
                     {isSelected && (
-                      <div
-                        className="absolute inset-0 flex items-center justify-center bg-black/30"
-                        style={{ width: "6rem" }}
-                      >
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/30">
                         <Check size="0.875rem" className="text-white" />
                       </div>
                     )}
                   </button>
                   <div className="flex min-w-0 flex-1 flex-col gap-1 py-0.5">
                     <div className="flex items-center gap-1">
-                      {renamingFile === bg.filename ? (
+                      {isRenaming ? (
                         <form
                           className="flex min-w-0 flex-1 items-center gap-1"
                           onSubmit={(e) => {
@@ -1827,31 +1873,46 @@ function BackgroundPicker({ selected, onSelect }: { selected: string | null; onS
                         </form>
                       ) : (
                         <>
-                          <span className="truncate text-[0.625rem] text-[var(--muted-foreground)]">{bg.filename}</span>
-                          <button
-                            onClick={() => {
-                              // Pre-fill with filename without extension
-                              const nameWithoutExt = bg.filename.replace(/\.[^.]+$/, "");
-                              setRenameInput(nameWithoutExt);
-                              setRenamingFile(bg.filename);
-                            }}
-                            className="shrink-0 rounded-md p-0.5 text-[var(--muted-foreground)] opacity-0 transition-opacity hover:text-[var(--primary)] group-hover:opacity-100"
-                            title="Rename"
+                          <span className="truncate text-[0.625rem] text-[var(--muted-foreground)]" title={title}>
+                            {bg.filename}
+                          </span>
+                          <span
+                            className={cn(
+                              "shrink-0 rounded-full px-1.5 py-0 text-[0.5625rem]",
+                              bg.source === "game_asset"
+                                ? "bg-[var(--primary)]/10 text-[var(--primary)]"
+                                : "bg-[var(--secondary)] text-[var(--muted-foreground)]",
+                            )}
                           >
-                            <Pencil size="0.5625rem" />
-                          </button>
+                            {sourceLabel}
+                          </span>
+                          {canRename && (
+                            <button
+                              onClick={() => {
+                                const nameWithoutExt = bg.filename.replace(/\.[^.]+$/, "");
+                                setRenameInput(nameWithoutExt);
+                                setRenamingFile(itemKey);
+                              }}
+                              className="shrink-0 rounded-md p-0.5 text-[var(--muted-foreground)] opacity-0 transition-opacity hover:text-[var(--primary)] group-hover:opacity-100"
+                              title="Rename"
+                            >
+                              <Pencil size="0.5625rem" />
+                            </button>
+                          )}
                         </>
                       )}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (selected === bg.url) onSelect(null);
-                          deleteBg.mutate(bg.filename);
-                        }}
-                        className="ml-auto shrink-0 rounded-md p-0.5 text-[var(--muted-foreground)] opacity-0 transition-opacity hover:text-[var(--destructive)] group-hover:opacity-100"
-                      >
-                        <Trash2 size="0.625rem" />
-                      </button>
+                      {canDelete && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (selected === bg.url) onSelect(null);
+                            deleteBg.mutate(bg.filename);
+                          }}
+                          className="ml-auto shrink-0 rounded-md p-0.5 text-[var(--muted-foreground)] opacity-0 transition-opacity hover:text-[var(--destructive)] group-hover:opacity-100"
+                        >
+                          <Trash2 size="0.625rem" />
+                        </button>
+                      )}
                     </div>
                     {/* Tags */}
                     <div className="flex flex-wrap items-center gap-1">
@@ -1861,7 +1922,7 @@ function BackgroundPicker({ selected, onSelect }: { selected: string | null; onS
                           className="inline-flex items-center gap-0.5 rounded-full bg-[var(--secondary)] px-1.5 py-0 text-[0.5625rem] text-[var(--muted-foreground)]"
                         >
                           {tag}
-                          {isEditing && (
+                          {isEditing && isEditable && (
                             <button
                               onClick={() => removeTag(bg.filename, bg.tags, tag)}
                               className="ml-0.5 hover:text-[var(--destructive)]"
@@ -1871,24 +1932,26 @@ function BackgroundPicker({ selected, onSelect }: { selected: string | null; onS
                           )}
                         </span>
                       ))}
-                      <button
-                        onClick={() => {
-                          setEditingTags(isEditing ? null : bg.filename);
-                          setTagInput("");
-                        }}
-                        className={cn(
-                          "rounded-full p-0.5 transition-colors",
-                          isEditing
-                            ? "bg-[var(--primary)]/20 text-[var(--primary)]"
-                            : "text-[var(--muted-foreground)]/60 hover:text-[var(--primary)]",
-                        )}
-                        title="Edit tags"
-                      >
-                        <Tag size="0.5625rem" />
-                      </button>
+                      {isEditable && (
+                        <button
+                          onClick={() => {
+                            setEditingTags(isEditing ? null : itemKey);
+                            setTagInput("");
+                          }}
+                          className={cn(
+                            "rounded-full p-0.5 transition-colors",
+                            isEditing
+                              ? "bg-[var(--primary)]/20 text-[var(--primary)]"
+                              : "text-[var(--muted-foreground)]/60 hover:text-[var(--primary)]",
+                          )}
+                          title="Edit tags"
+                        >
+                          <Tag size="0.5625rem" />
+                        </button>
+                      )}
                     </div>
                     {/* Tag input */}
-                    {isEditing && (
+                    {isEditing && isEditable && (
                       <div className="flex items-center gap-1">
                         <input
                           type="text"
@@ -1904,9 +1967,9 @@ function BackgroundPicker({ selected, onSelect }: { selected: string | null; onS
                           placeholder="Add tag…"
                           className="w-full min-w-0 rounded border border-[var(--border)] bg-[var(--background)] px-1.5 py-0.5 text-[0.625rem] text-[var(--foreground)] outline-none focus:border-[var(--primary)]"
                           autoFocus
-                          list={`tag-suggestions-${bg.filename}`}
+                          list={`tag-suggestions-${itemKey}`}
                         />
-                        <datalist id={`tag-suggestions-${bg.filename}`}>
+                        <datalist id={`tag-suggestions-${itemKey}`}>
                           {(allTags ?? [])
                             .filter((t) => !bg.tags.includes(t))
                             .map((t) => (
@@ -1933,7 +1996,7 @@ function BackgroundPicker({ selected, onSelect }: { selected: string | null; onS
       {(!backgrounds || backgrounds.length === 0) && (
         <div className="flex flex-col items-center gap-1.5 py-4 text-center">
           <Image size="1.25rem" className="text-[var(--muted-foreground)]/40" />
-          <p className="text-[0.625rem] text-[var(--muted-foreground)]">No backgrounds uploaded yet</p>
+          <p className="text-[0.625rem] text-[var(--muted-foreground)]">No backgrounds available yet</p>
         </div>
       )}
     </div>

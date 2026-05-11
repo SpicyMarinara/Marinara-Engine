@@ -38,6 +38,7 @@ import { api } from "../../lib/api-client";
 import { getChatDisplayName, parseChatMetadata } from "../../lib/chat-display";
 import { parseCharacterDisplayData } from "../../lib/character-display";
 import { showConfirmDialog } from "../../lib/app-dialogs";
+import { chatBackgroundMetadataToUrl, chatBackgroundUrlToMetadata } from "../../lib/backgrounds";
 import { useGameStateStore } from "../../stores/game-state.store";
 import { toast } from "sonner";
 import { BookOpen, Check, HelpCircle, MessageSquare, Theater, X } from "lucide-react";
@@ -477,8 +478,7 @@ export function ChatArea() {
   });
   useEffect(() => {
     if (!chat?.id) return;
-    const bg = chatMeta.background as string | null | undefined;
-    const restoredUrl = bg ? `/api/backgrounds/file/${encodeURIComponent(bg)}` : null;
+    const restoredUrl = chatBackgroundMetadataToUrl(chatMeta.background);
     restoredChatBackgroundRef.current = { chatId: chat.id, url: restoredUrl, isSyncing: true };
     useUIStore.getState().setChatBackground(restoredUrl);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -494,7 +494,7 @@ export function ChatArea() {
   const bgPersistTimer = useRef<ReturnType<typeof setTimeout>>(null);
   useEffect(() => {
     if (!chat?.id) return;
-    const savedFilename = (chatMeta.background as string | null | undefined) ?? null;
+    const savedBackground = chatBackgroundUrlToMetadata(chatBackgroundMetadataToUrl(chatMeta.background));
     const restoredBackground = restoredChatBackgroundRef.current;
 
     if (
@@ -508,7 +508,7 @@ export function ChatArea() {
     }
 
     if (!chatBackground) {
-      if (savedFilename === null) return;
+      if (savedBackground === null) return;
       if (bgPersistTimer.current) clearTimeout(bgPersistTimer.current);
       bgPersistTimer.current = setTimeout(() => {
         updateMeta.mutate({ id: chat!.id, background: null });
@@ -516,11 +516,11 @@ export function ChatArea() {
       return;
     }
 
-    const filename = decodeURIComponent(chatBackground.replace(/^\/api\/backgrounds\/file\//, ""));
-    if (filename === savedFilename) return;
+    const nextBackground = chatBackgroundUrlToMetadata(chatBackground);
+    if (nextBackground === savedBackground) return;
     if (bgPersistTimer.current) clearTimeout(bgPersistTimer.current);
     bgPersistTimer.current = setTimeout(() => {
-      updateMeta.mutate({ id: chat!.id, background: filename });
+      updateMeta.mutate({ id: chat!.id, background: nextBackground });
     }, 500);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatBackground, chat?.id]);

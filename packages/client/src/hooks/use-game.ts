@@ -7,7 +7,11 @@ import { toast } from "sonner";
 import { api, isJsonRepairApiError } from "../lib/api-client";
 import { chatKeys } from "./use-chats";
 import { lorebookKeys } from "./use-lorebooks";
-import { useGameModeStore } from "../stores/game-mode.store";
+import {
+  getHudWidgetStateSignature,
+  getPendingHudWidgetPersistenceSignature,
+  useGameModeStore,
+} from "../stores/game-mode.store";
 import { useGameStateStore } from "../stores/game-state.store";
 import { useChatStore } from "../stores/chat.store";
 import { useUIStore } from "../stores/ui.store";
@@ -121,7 +125,7 @@ interface UpdateGameWidgetsResponse {
   ok: boolean;
 }
 
-function patchChatMetadata(chat: Chat | null | undefined, patch: Record<string, unknown>): Chat | null {
+export function patchChatMetadata(chat: Chat | null | undefined, patch: Record<string, unknown>): Chat | null {
   if (!chat) return null;
   const rawMetadata = chat.metadata as unknown;
   const metadata =
@@ -570,6 +574,14 @@ export function useUpdateGameWidgets() {
       api.put<UpdateGameWidgetsResponse>(`/game/${chatId}/widgets`, { widgets }),
     onSuccess: (_, variables) => {
       useGameModeStore.getState().setHudWidgets(variables.widgets);
+      const queryKey = chatKeys.detail(variables.chatId);
+      const patched = patchChatMetadata(qc.getQueryData<Chat>(queryKey), { gameWidgetState: variables.widgets });
+      if (patched) {
+        qc.setQueryData(queryKey, patched);
+        if (useChatStore.getState().activeChatId === variables.chatId) {
+          useChatStore.getState().setActiveChat(patched);
+        }
+      }
       qc.invalidateQueries({ queryKey: chatKeys.detail(variables.chatId) });
     },
     onError: (err) => {
@@ -667,6 +679,8 @@ export function useSyncGameState(activeChatId: string, chatMeta: Record<string, 
     if (chatMeta.gameWidgetState && Array.isArray(chatMeta.gameWidgetState)) {
       const persisted = chatMeta.gameWidgetState as import("@marinara-engine/shared").HudWidget[];
       if (persisted.length > 0) {
+        const pendingSignature = getPendingHudWidgetPersistenceSignature(activeChatId);
+        if (pendingSignature && pendingSignature !== getHudWidgetStateSignature(persisted)) return;
         useGameModeStore.getState().setHudWidgets(persisted);
       }
     }

@@ -65,7 +65,7 @@ interface GameModeStore {
   setPartyChatExpanded: (expanded: boolean) => void;
   setSessionNumber: (num: number) => void;
   setHudWidgets: (widgets: HudWidget[]) => void;
-  applyWidgetUpdate: (update: WidgetUpdate) => void;
+  applyWidgetUpdate: (update: WidgetUpdate) => HudWidget[];
   setBlueprint: (bp: GameBlueprint | null) => void;
   /** Patch avatarUrl on tracked NPCs after server-side image generation. */
   patchNpcAvatars: (avatars: Array<{ name: string; avatarUrl: string }>) => void;
@@ -74,12 +74,31 @@ interface GameModeStore {
 
 // Debounced widget persistence
 let widgetPersistTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingWidgetPersistence: { chatId: string; signature: string } | null = null;
+
+export function getHudWidgetStateSignature(widgets: readonly HudWidget[]): string {
+  return JSON.stringify(widgets);
+}
+
+export function getPendingHudWidgetPersistenceSignature(chatId: string): string | null {
+  return pendingWidgetPersistence?.chatId === chatId ? pendingWidgetPersistence.signature : null;
+}
+
 function debouncedPersistWidgets(chatId: string, widgets: HudWidget[]) {
+  const signature = getHudWidgetStateSignature(widgets);
+  pendingWidgetPersistence = { chatId, signature };
   if (widgetPersistTimer) clearTimeout(widgetPersistTimer);
   widgetPersistTimer = setTimeout(() => {
-    api.put(`/game/${chatId}/widgets`, { widgets }).catch(() => {
-      /* best-effort persistence */
-    });
+    api
+      .put(`/game/${chatId}/widgets`, { widgets })
+      .catch(() => {
+        /* best-effort persistence */
+      })
+      .finally(() => {
+        if (pendingWidgetPersistence?.chatId === chatId && pendingWidgetPersistence.signature === signature) {
+          pendingWidgetPersistence = null;
+        }
+      });
   }, 1000);
 }
 
@@ -307,7 +326,8 @@ export const useGameModeStore = create<GameModeStore>((set) => ({
   setPartyChatExpanded: (expanded) => set({ partyChatExpanded: expanded }),
   setSessionNumber: (num) => set({ sessionNumber: num }),
   setHudWidgets: (widgets) => set({ hudWidgets: widgets }),
-  applyWidgetUpdate: (update) =>
+  applyWidgetUpdate: (update) => {
+    let nextWidgets: HudWidget[] = [];
     set((s) => {
       const updatedWidgets = s.hudWidgets.map((w) => {
         if (w.id !== update.widgetId) return w;
@@ -353,8 +373,11 @@ export const useGameModeStore = create<GameModeStore>((set) => ({
       // Persist to server
       const chatId = s.activeSessionChatId;
       if (chatId) debouncedPersistWidgets(chatId, updatedWidgets);
+      nextWidgets = updatedWidgets;
       return { hudWidgets: updatedWidgets };
-    }),
+    });
+    return nextWidgets;
+  },
   setBlueprint: (bp) => set({ blueprint: bp }),
   reset: () => set(INITIAL_STATE),
 }));

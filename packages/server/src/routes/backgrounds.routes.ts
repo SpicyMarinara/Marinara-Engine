@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readdirSync, unlinkSync, readFileSync, writeFile
 import { writeFile } from "fs/promises";
 import { join, extname, basename, parse as parsePath } from "path";
 import { DATA_DIR } from "../utils/data-dir.js";
-import { buildAssetManifest } from "../services/game/asset-manifest.service.js";
+import { buildAssetManifest, getAssetManifest } from "../services/game/asset-manifest.service.js";
 import { assertInsideDir, isAllowedImageBuffer } from "../utils/security.js";
 
 const BG_DIR = join(DATA_DIR, "backgrounds");
@@ -57,6 +57,14 @@ function uniqueFilename(desired: string): string {
   return `${name}_${i}${ext}`;
 }
 
+function encodeAssetPath(path: string): string {
+  return path
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
 export async function backgroundsRoutes(app: FastifyInstance) {
   // List all backgrounds (includes tags)
   app.get("/", async () => {
@@ -66,12 +74,34 @@ export async function backgroundsRoutes(app: FastifyInstance) {
       const ext = extname(f).toLowerCase();
       return ALLOWED_EXTS.has(ext);
     });
-    return files.map((filename) => ({
+    const userBackgrounds = files.map((filename) => ({
+      id: `user:${filename}`,
       filename,
       url: `/api/backgrounds/file/${encodeURIComponent(filename)}`,
       originalName: meta[filename]?.originalName ?? null,
       tags: meta[filename]?.tags ?? [],
+      source: "user" as const,
+      editable: true,
+      deletable: true,
+      renameable: true,
     }));
+
+    const gameAssetBackgrounds = (getAssetManifest().byCategory.backgrounds ?? [])
+      .filter((entry) => !entry.path.startsWith("__user_bg__/"))
+      .map((entry) => ({
+        id: `game:${entry.tag}`,
+        filename: `${entry.name}${entry.ext}`,
+        url: `/api/game-assets/file/${encodeAssetPath(entry.path)}`,
+        originalName: entry.tag,
+        tags: entry.subcategory ? [entry.subcategory] : [],
+        source: "game_asset" as const,
+        tag: entry.tag,
+        editable: false,
+        deletable: false,
+        renameable: false,
+      }));
+
+    return [...userBackgrounds, ...gameAssetBackgrounds];
   });
 
   // List all unique tags (for autocomplete)

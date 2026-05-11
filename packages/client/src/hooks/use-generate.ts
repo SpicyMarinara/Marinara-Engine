@@ -6,6 +6,7 @@ import type { AvatarCropValue } from "../lib/utils";
 import { useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "../lib/api-client";
+import { chatBackgroundMetadataToUrl } from "../lib/backgrounds";
 import { agentKeys } from "./use-agents";
 import type { PendingCardUpdate } from "../stores/agent.store";
 import {
@@ -30,6 +31,21 @@ function showAgentWarning(raw: unknown) {
   if (shownAgentWarnings.has(warningKey)) return;
   shownAgentWarnings.add(warningKey);
   toast.warning(message, { duration: 20000 });
+}
+
+function applyAgentBackgroundChoice(chosen: string | null | undefined) {
+  const url = chatBackgroundMetadataToUrl(chosen);
+  if (!url) return;
+
+  fetch(url, { method: "HEAD" })
+    .then((res) => {
+      if (res.ok) {
+        useUIStore.getState().setChatBackground(url);
+      } else {
+        console.warn(`[Agent] Background "${chosen}" does not exist — skipping`);
+      }
+    })
+    .catch(() => {});
 }
 
 const editableCharacterCardFieldSet = new Set<string>(EDITABLE_CHARACTER_CARD_FIELDS);
@@ -967,22 +983,11 @@ export function useGenerate() {
                   .catch((err) => console.warn("[Agent] Failed to build card update entry:", err));
               }
 
-              // Apply background change — validate filename exists before applying
+              // Apply background change — validate the resolved background URL before applying
               if (result.success && result.resultType === "background_change" && result.data) {
                 const bg = result.data as { chosen?: string | null };
                 if (bg.chosen) {
-                  // Validate background exists before setting it (prevents 404s from hallucinated filenames)
-                  fetch(`/api/backgrounds/file/${encodeURIComponent(bg.chosen)}`, { method: "HEAD" })
-                    .then((res) => {
-                      if (res.ok) {
-                        useUIStore
-                          .getState()
-                          .setChatBackground(`/api/backgrounds/file/${encodeURIComponent(bg.chosen!)}`);
-                      } else {
-                        console.warn(`[Agent] Background "${bg.chosen}" does not exist — skipping`);
-                      }
-                    })
-                    .catch(() => {});
+                  applyAgentBackgroundChoice(bg.chosen);
                 }
               }
 
@@ -1798,17 +1803,7 @@ export function useGenerate() {
                 if (result.resultType === "background_change") {
                   const bg = result.data as { chosen?: string | null };
                   if (bg.chosen) {
-                    fetch(`/api/backgrounds/file/${encodeURIComponent(bg.chosen)}`, { method: "HEAD" })
-                      .then((res) => {
-                        if (res.ok) {
-                          useUIStore
-                            .getState()
-                            .setChatBackground(`/api/backgrounds/file/${encodeURIComponent(bg.chosen!)}`);
-                        } else {
-                          console.warn(`[Agent] Background "${bg.chosen}" does not exist — skipping`);
-                        }
-                      })
-                      .catch(() => {});
+                    applyAgentBackgroundChoice(bg.chosen);
                   }
                 }
                 // Apply quest updates directly so the widget updates immediately
