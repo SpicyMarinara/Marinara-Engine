@@ -1,13 +1,17 @@
 // ──────────────────────────────────────────────
 // View: File Browser (full-page overlay)
 // ──────────────────────────────────────────────
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import {
   Folder,
   Upload,
   Pencil,
   Info,
   FileText,
+  Move,
+  Copy,
+  Trash2,
+  X,
 } from "lucide-react";
 import {
   useGameAssetTree,
@@ -22,6 +26,9 @@ import {
   useUploadGameAsset,
   useUpdateFolderDescription,
   useSaveGameAssetFile,
+  useMoveGameAssetsBulk,
+  useCopyGameAssetsBulk,
+  useDeleteGameAssetsBulk,
   type TreeNode,
 } from "../../hooks/use-game-assets";
 import { ContextMenu, type ContextMenuItem } from "../ui/ContextMenu";
@@ -50,6 +57,9 @@ export function GameAssetsBrowserView() {
   const openFolder = useOpenGameAssetsFolder();
   const rescan = useRescanGameAssets();
   const upload = useUploadGameAsset();
+  const moveBulk = useMoveGameAssetsBulk();
+  const copyBulk = useCopyGameAssetsBulk();
+  const deleteBulk = useDeleteGameAssetsBulk();
 
   const [selectedPath, setSelectedPath] = useState("");
   const [search, setSearch] = useState("");
@@ -64,6 +74,9 @@ export function GameAssetsBrowserView() {
   const [dragOver, setDragOver] = useState(false);
   const [listColumns, setListColumns] = useState({ size: true, modified: false });
 
+  // Multi-select state (files only)
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+
   const [modal, setModal] = useState<
     | null
     | { type: "create-folder" }
@@ -72,6 +85,9 @@ export function GameAssetsBrowserView() {
     | { type: "delete"; node: TreeNode }
     | { type: "new-text-file" }
     | { type: "new-markdown-file" }
+    | { type: "bulk-move" }
+    | { type: "bulk-copy" }
+    | { type: "bulk-delete" }
   >(null);
   const [modalValue, setModalValue] = useState("");
   const [deleteRecursive, setDeleteRecursive] = useState(false);
@@ -102,6 +118,12 @@ export function GameAssetsBrowserView() {
     return children.filter((c) => c.name.toLowerCase().includes(q));
   }, [selectedNode, search]);
 
+  // Visible file nodes (for select-all)
+  const visibleFileNodes = useMemo(
+    () => currentChildren.filter((n) => n.type === "file"),
+    [currentChildren],
+  );
+
   const breadcrumb = useMemo(() => {
     if (!selectedPath) return ["Game Assets"];
     return ["Game Assets", ...selectedPath.split("/")];
@@ -115,6 +137,47 @@ export function GameAssetsBrowserView() {
       return next;
     });
   }, []);
+
+  // Selection handlers
+  const handleToggleSelect = useCallback((node: TreeNode) => {
+    if (node.type !== "file") return;
+    setSelectedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(node.path)) next.delete(node.path);
+      else next.add(node.path);
+      return next;
+    });
+  }, []);
+
+  const handleSelectAll = useCallback(() => {
+    const all = new Set(visibleFileNodes.map((n) => n.path));
+    setSelectedPaths(all);
+  }, [visibleFileNodes]);
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedPaths(new Set());
+  }, []);
+
+  // Keyboard shortcuts for selection
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "a" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        handleSelectAll();
+      }
+      if (e.key === "Escape" && selectedPaths.size > 0) {
+        e.preventDefault();
+        handleClearSelection();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [handleSelectAll, handleClearSelection, selectedPaths.size]);
+
+  // Clear selection when changing folders
+  useEffect(() => {
+    handleClearSelection();
+  }, [selectedPath, handleClearSelection]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent, node: TreeNode) => {
     e.preventDefault();
@@ -271,6 +334,42 @@ export function GameAssetsBrowserView() {
           await deleteAsset.mutateAsync(modal.node.path);
           toast.success("File deleted");
         }
+      } else if (modal.type === "bulk-move") {
+        const paths = Array.from(selectedPaths);
+        const result = await moveBulk.mutateAsync({ paths, targetFolder: modalValue });
+        const succeeded = result.succeeded.length;
+        const failed = result.failed.length;
+        if (failed === 0) {
+          toast.success(`Moved ${succeeded} file${succeeded !== 1 ? "s" : ""}`);
+        } else {
+          toast.success(`Moved ${succeeded} file${succeeded !== 1 ? "s" : ""}`);
+          toast.error(`${failed} file${failed !== 1 ? "s" : ""} failed to move`);
+        }
+        handleClearSelection();
+      } else if (modal.type === "bulk-copy") {
+        const paths = Array.from(selectedPaths);
+        const result = await copyBulk.mutateAsync({ paths, targetFolder: modalValue });
+        const succeeded = result.succeeded.length;
+        const failed = result.failed.length;
+        if (failed === 0) {
+          toast.success(`Copied ${succeeded} file${succeeded !== 1 ? "s" : ""}`);
+        } else {
+          toast.success(`Copied ${succeeded} file${succeeded !== 1 ? "s" : ""}`);
+          toast.error(`${failed} file${failed !== 1 ? "s" : ""} failed to copy`);
+        }
+        handleClearSelection();
+      } else if (modal.type === "bulk-delete") {
+        const paths = Array.from(selectedPaths);
+        const result = await deleteBulk.mutateAsync(paths);
+        const succeeded = result.succeeded.length;
+        const failed = result.failed.length;
+        if (failed === 0) {
+          toast.success(`Deleted ${succeeded} file${succeeded !== 1 ? "s" : ""}`);
+        } else {
+          toast.success(`Deleted ${succeeded} file${succeeded !== 1 ? "s" : ""}`);
+          toast.error(`${failed} file${failed !== 1 ? "s" : ""} failed to delete`);
+        }
+        handleClearSelection();
       }
     } catch (err) {
       toast.error(`Action failed: ${err instanceof Error ? err.message : "Unknown error"}`);
@@ -278,7 +377,7 @@ export function GameAssetsBrowserView() {
     setModal(null);
     setModalValue("");
     setDeleteRecursive(false);
-  }, [modal, modalValue, selectedPath, deleteRecursive, createFolder, saveFile, renameAsset, moveAsset, deleteFolder, deleteAsset]);
+  }, [modal, modalValue, selectedPath, deleteRecursive, selectedPaths, createFolder, saveFile, renameAsset, moveAsset, deleteFolder, deleteAsset, moveBulk, copyBulk, deleteBulk, handleClearSelection]);
 
   const moveTargetFolders = useMemo(() => {
     if (!tree) return [];
@@ -347,8 +446,8 @@ export function GameAssetsBrowserView() {
         onToggleColumn={(col) => setListColumns((prev) => ({ ...prev, [col]: !prev[col] }))}
       />
 
-      {/* Folder Description */}
-      {selectedNode?.type === "folder" && (
+      {/* Folder Description (hidden when selections exist) */}
+      {selectedPaths.size === 0 && selectedNode?.type === "folder" && (
         <div className="flex min-h-[28px] items-center border-b border-[var(--border)]/40 bg-[var(--card)]/30 px-4 py-1">
           {editingDescription ? (
             <div className="flex w-full items-center gap-2">
@@ -395,6 +494,53 @@ export function GameAssetsBrowserView() {
         </div>
       )}
 
+      {/* Bulk action bar */}
+      {selectedPaths.size > 0 && (
+        <div className="flex min-h-[36px] items-center gap-3 border-b border-[var(--border)]/40 bg-[var(--primary)]/5 px-4 py-1.5">
+          <span className="text-xs font-medium text-[var(--primary)]">
+            {selectedPaths.size} file{selectedPaths.size !== 1 ? "s" : ""} selected
+          </span>
+          <div className="ml-auto flex items-center gap-1.5">
+            <button
+              onClick={handleSelectAll}
+              className="rounded-md px-2 py-1 text-xs font-medium text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+            >
+              Select all
+            </button>
+            <div className="mx-1 h-3 w-px bg-[var(--border)]" />
+            <button
+              onClick={() => { setModal({ type: "bulk-move" }); setModalValue(""); }}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--accent)]"
+            >
+              <Move size="0.75rem" />
+              Move
+            </button>
+            <button
+              onClick={() => { setModal({ type: "bulk-copy" }); setModalValue(""); }}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--accent)]"
+            >
+              <Copy size="0.75rem" />
+              Copy
+            </button>
+            <button
+              onClick={() => setModal({ type: "bulk-delete" })}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-[var(--destructive)] transition-colors hover:bg-[var(--destructive)]/10"
+            >
+              <Trash2 size="0.75rem" />
+              Delete
+            </button>
+            <div className="mx-1 h-3 w-px bg-[var(--border)]" />
+            <button
+              onClick={handleClearSelection}
+              className="rounded-md p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+              title="Clear selection"
+            >
+              <X size="0.875rem" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Body */}
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar tree */}
@@ -430,6 +576,8 @@ export function GameAssetsBrowserView() {
               <AssetGrid
                 nodes={currentChildren}
                 viewMode={viewMode}
+                selectedPaths={selectedPaths}
+                onToggleSelect={handleToggleSelect}
                 onContextMenu={handleContextMenu}
                 onSelectFile={handleSelectFile}
                 onNavigateFolder={setSelectedPath}
@@ -526,6 +674,9 @@ export function GameAssetsBrowserView() {
               {modal.type === "rename" && "Rename"}
               {modal.type === "move" && "Move To Folder"}
               {modal.type === "delete" && `Delete ${modal.node.type === "folder" ? "Folder" : "File"}?`}
+              {modal.type === "bulk-move" && `Move ${selectedPaths.size} file${selectedPaths.size !== 1 ? "s" : ""}`}
+              {modal.type === "bulk-copy" && `Copy ${selectedPaths.size} file${selectedPaths.size !== 1 ? "s" : ""}`}
+              {modal.type === "bulk-delete" && `Delete ${selectedPaths.size} file${selectedPaths.size !== 1 ? "s" : ""}?`}
             </h3>
 
             {modal.type === "delete" ? (
@@ -565,7 +716,7 @@ export function GameAssetsBrowserView() {
                   </div>
                 )}
               </div>
-            ) : modal.type === "move" ? (
+            ) : modal.type === "move" || modal.type === "bulk-move" || modal.type === "bulk-copy" ? (
               <div className="mb-4 max-h-48 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--background)]">
                 {moveTargetFolders.map((f) => (
                   <button
@@ -580,6 +731,13 @@ export function GameAssetsBrowserView() {
                     {f.name || "Root"}
                   </button>
                 ))}
+              </div>
+            ) : modal.type === "bulk-delete" ? (
+              <div className="mb-4 text-sm text-[var(--muted-foreground)]">
+                <p>
+                  Are you sure you want to delete <strong className="text-[var(--foreground)]">{selectedPaths.size} file{selectedPaths.size !== 1 ? "s" : ""}</strong>?
+                </p>
+                <p className="mt-1 text-xs text-[var(--destructive)]">This action cannot be undone.</p>
               </div>
             ) : (
               <input
@@ -602,14 +760,17 @@ export function GameAssetsBrowserView() {
               </button>
               <button
                 onClick={handleModalConfirm}
-                disabled={modal.type === "delete" && modal.node.type === "folder" && countItems(modal.node) > 0 && !deleteRecursive}
+                disabled={
+                  (modal.type === "delete" && modal.node.type === "folder" && countItems(modal.node) > 0 && !deleteRecursive) ||
+                  ((modal.type === "move" || modal.type === "bulk-move" || modal.type === "bulk-copy") && !modalValue)
+                }
                 className={cn(
                   "rounded-lg px-4 py-2 text-xs font-medium transition-opacity hover:opacity-90",
-                  modal.type === "delete" ? "bg-[var(--destructive)] text-white" : "bg-[var(--primary)] text-white",
-                  modal.type === "delete" && modal.node.type === "folder" && countItems(modal.node) > 0 && !deleteRecursive && "cursor-not-allowed opacity-50",
+                  modal.type === "delete" || modal.type === "bulk-delete" ? "bg-[var(--destructive)] text-white" : "bg-[var(--primary)] text-white",
+                  (modal.type === "delete" && modal.node.type === "folder" && countItems(modal.node) > 0 && !deleteRecursive) && "cursor-not-allowed opacity-50",
                 )}
               >
-                {modal.type === "delete" ? "Delete" : "Confirm"}
+                {modal.type === "delete" || modal.type === "bulk-delete" ? "Delete" : "Confirm"}
               </button>
             </div>
           </div>

@@ -1,5 +1,5 @@
 // ──────────────────────────────────────────────
-// File Browser — Asset grid / list view
+// File Browser — Asset grid / list view (with multi-select checkboxes)
 // ──────────────────────────────────────────────
 import { Folder, FolderOpen, MoreHorizontal } from "lucide-react";
 import type { TreeNode } from "../../hooks/use-game-assets";
@@ -10,6 +10,8 @@ import { FileIcon, isImage } from "./utils";
 export interface AssetGridProps {
   nodes: TreeNode[];
   viewMode: "grid" | "list";
+  selectedPaths: Set<string>;
+  onToggleSelect: (node: TreeNode) => void;
   onContextMenu: (e: React.MouseEvent, node: TreeNode) => void;
   onSelectFile: (node: TreeNode) => void;
   onNavigateFolder: (path: string) => void;
@@ -20,6 +22,8 @@ export interface AssetGridProps {
 export function AssetGrid({
   nodes,
   viewMode,
+  selectedPaths,
+  onToggleSelect,
   onContextMenu,
   onSelectFile,
   onNavigateFolder,
@@ -39,48 +43,72 @@ export function AssetGrid({
   if (viewMode === "grid") {
     return (
       <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-        {nodes.map((node) => (
-          <div
-            key={node.path}
-            onContextMenu={(e) => onContextMenu(e, node)}
-            onClick={() => {
-              if (node.type === "folder") onNavigateFolder(node.path);
-              else onSelectFile(node);
-            }}
-            className="group relative flex flex-col items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 transition-all hover:border-[var(--primary)]/30 hover:shadow-sm"
-          >
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenActionMenu(node, e.currentTarget);
+        {nodes.map((node) => {
+          const isSelected = selectedPaths.has(node.path);
+          const isFile = node.type === "file";
+          return (
+            <div
+              key={node.path}
+              onContextMenu={(e) => onContextMenu(e, node)}
+              onClick={() => {
+                if (node.type === "folder") onNavigateFolder(node.path);
+                else onSelectFile(node);
               }}
-              className="absolute right-1.5 top-1.5 rounded-md p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+              className={
+                "group relative flex flex-col items-center gap-2 rounded-xl border bg-[var(--card)] p-3 transition-all hover:border-[var(--primary)]/30 hover:shadow-sm " +
+                (isSelected
+                  ? "border-[var(--primary)] ring-2 ring-[var(--primary)]/30"
+                  : "border-[var(--border)]")
+              }
             >
-              <MoreHorizontal size="0.875rem" />
-            </button>
-
-            <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--accent)]">
-              {node.type === "folder" ? (
-                (() => {
-                  const CategoryIcon = CATEGORY_ICONS[node.name] || Folder;
-                  return <CategoryIcon size="2.5rem" className="text-[var(--primary)]" />;
-                })()
-              ) : isImage(node.ext) ? (
-                <img
-                  src={`/api/game-assets/file/${node.path}`}
-                  alt={node.name}
-                  className="h-full w-full object-cover"
-                  loading="lazy"
-                />
-              ) : (
-                <FileIcon ext={node.ext} className="h-8 w-8 text-[var(--primary)]" />
+              {/* Checkbox — files only, always visible */}
+              {isFile && (
+                <label
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute left-1.5 top-1.5 z-10 flex h-5 w-5 cursor-pointer items-center justify-center rounded border border-[var(--border)] bg-[var(--background)] shadow-sm transition-colors hover:border-[var(--primary)]"
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => onToggleSelect(node)}
+                    className="h-3.5 w-3.5 accent-[var(--primary)]"
+                  />
+                </label>
               )}
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenActionMenu(node, e.currentTarget);
+                }}
+                className="absolute right-1.5 top-1.5 rounded-md p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+              >
+                <MoreHorizontal size="0.875rem" />
+              </button>
+
+              <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--accent)]">
+                {node.type === "folder" ? (
+                  (() => {
+                    const CategoryIcon = CATEGORY_ICONS[node.name] || Folder;
+                    return <CategoryIcon size="2.5rem" className="text-[var(--primary)]" />;
+                  })()
+                ) : isImage(node.ext) ? (
+                  <img
+                    src={`/api/game-assets/file/${node.path}`}
+                    alt={node.name}
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                  />
+                ) : (
+                  <FileIcon ext={node.ext} className="h-8 w-8 text-[var(--primary)]" />
+                )}
+              </div>
+              <span className="w-full truncate text-center text-xs text-[var(--foreground)]">
+                {node.name}
+              </span>
             </div>
-            <span className="w-full truncate text-center text-xs text-[var(--foreground)]">
-              {node.name}
-            </span>
-          </div>
-        ))}
+          );
+        })}
       </div>
     );
   }
@@ -88,61 +116,81 @@ export function AssetGrid({
   // List view
   return (
     <div className="flex flex-col">
-      <div className="grid grid-cols-[auto_1fr_80px_80px_40px] items-center gap-3 border-b border-[var(--border)]/40 px-3 py-1.5 text-xs font-medium text-[var(--muted-foreground)]">
+      <div className="grid grid-cols-[2rem_auto_1fr_80px_80px_40px] items-center gap-3 border-b border-[var(--border)]/40 px-3 py-1.5 text-xs font-medium text-[var(--muted-foreground)]">
+        <span></span>
         <span className="col-span-2">Name</span>
         {listColumns.size && <span className="text-right">Size</span>}
         {listColumns.modified && <span className="text-right">Modified</span>}
         <span></span>
       </div>
-      {nodes.map((node) => (
-        <div
-          key={node.path}
-          onContextMenu={(e) => onContextMenu(e, node)}
-          onClick={() => {
-            if (node.type === "folder") onNavigateFolder(node.path);
-            else onSelectFile(node);
-          }}
-          className="group grid grid-cols-[auto_1fr_80px_80px_40px] items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-[var(--accent)]"
-        >
-          {node.type === "folder" ? (
-            (() => {
-              const CategoryIcon = CATEGORY_ICONS[node.name] || Folder;
-              return <CategoryIcon size="1rem" className="shrink-0 text-[var(--primary)]" />;
-            })()
-          ) : isImage(node.ext) ? (
-            <div className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded bg-[var(--accent)]">
-              <img
-                src={`/api/game-assets/file/${node.path}`}
-                alt=""
-                className="h-full w-full object-cover"
-                loading="lazy"
-              />
-            </div>
-          ) : (
-            <FileIcon ext={node.ext} className="shrink-0 text-[var(--muted-foreground)]" size="1rem" />
-          )}
-          <span className="truncate text-sm text-[var(--foreground)]">{node.name}</span>
-          {listColumns.size && (
-            <span className="text-right text-xs text-[var(--muted-foreground)]">
-              {formatBytes(node.size)}
-            </span>
-          )}
-          {listColumns.modified && (
-            <span className="text-right text-xs text-[var(--muted-foreground)]">
-              {formatDate(node.modified)}
-            </span>
-          )}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenActionMenu(node, e.currentTarget);
+      {nodes.map((node) => {
+        const isSelected = selectedPaths.has(node.path);
+        const isFile = node.type === "file";
+        return (
+          <div
+            key={node.path}
+            onContextMenu={(e) => onContextMenu(e, node)}
+            onClick={() => {
+              if (node.type === "folder") onNavigateFolder(node.path);
+              else onSelectFile(node);
             }}
-            className="justify-self-end rounded-md p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+            className={
+              "group grid grid-cols-[2rem_auto_1fr_80px_80px_40px] items-center gap-3 rounded-lg px-3 py-2 transition-colors " +
+              (isSelected ? "bg-[var(--primary)]/10" : "hover:bg-[var(--accent)]")
+            }
           >
-            <MoreHorizontal size="0.875rem" />
-          </button>
-        </div>
-      ))}
+            {/* Checkbox — files only */}
+            <div onClick={(e) => e.stopPropagation()} className="flex items-center">
+              {isFile && (
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => onToggleSelect(node)}
+                  className="h-3.5 w-3.5 rounded border-[var(--border)] accent-[var(--primary)]"
+                />
+              )}
+            </div>
+
+            {node.type === "folder" ? (
+              (() => {
+                const CategoryIcon = CATEGORY_ICONS[node.name] || Folder;
+                return <CategoryIcon size="1rem" className="shrink-0 text-[var(--primary)]" />;
+              })()
+            ) : isImage(node.ext) ? (
+              <div className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded bg-[var(--accent)]">
+                <img
+                  src={`/api/game-assets/file/${node.path}`}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                />
+              </div>
+            ) : (
+              <FileIcon ext={node.ext} className="shrink-0 text-[var(--muted-foreground)]" size="1rem" />
+            )}
+            <span className="truncate text-sm text-[var(--foreground)]">{node.name}</span>
+            {listColumns.size && (
+              <span className="text-right text-xs text-[var(--muted-foreground)]">
+                {formatBytes(node.size)}
+              </span>
+            )}
+            {listColumns.modified && (
+              <span className="text-right text-xs text-[var(--muted-foreground)]">
+                {formatDate(node.modified)}
+              </span>
+            )}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenActionMenu(node, e.currentTarget);
+              }}
+              className="justify-self-end rounded-md p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+            >
+              <MoreHorizontal size="0.875rem" />
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }

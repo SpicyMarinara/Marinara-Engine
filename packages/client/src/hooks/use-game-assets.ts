@@ -156,3 +156,40 @@ export function useGameAssetFileInfo(path: string) {
     staleTime: 30000,
   });
 }
+
+// ── Bulk operations ──
+
+export function useMoveGameAssetsBulk() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ paths, targetFolder }: { paths: string[]; targetFolder: string }) =>
+      api.post<{ succeeded: string[]; failed: { path: string; error: string }[]; targetFolder: string }>(
+        "/game-assets/move-bulk",
+        { paths, targetFolder },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: gameAssetKeys.tree() }),
+  });
+}
+
+export function useCopyGameAssetsBulk() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ paths, targetFolder }: { paths: string[]; targetFolder: string }) =>
+      api.post<{ succeeded: string[]; failed: { path: string; error: string }[]; targetFolder: string }>(
+        "/game-assets/copy-bulk",
+        { paths, targetFolder },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: gameAssetKeys.tree() }),
+  });
+}
+
+export function useDeleteGameAssetsBulk() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (paths: string[]) =>
+      api.post<{ succeeded: string[]; failed: { path: string; error: string }[] }>("/game-assets/delete-bulk", {
+        paths,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: gameAssetKeys.tree() }),
+  });
+}
