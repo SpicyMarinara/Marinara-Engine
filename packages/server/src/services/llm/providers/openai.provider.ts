@@ -1299,7 +1299,7 @@ export class OpenAIProvider extends BaseLLMProvider {
     }
 
     const openrouterProvider = this.resolveOpenrouterProvider(options.openrouterProvider);
-    if (this.shouldApplyOpenRouterProviderOverride(openrouterProvider)) {
+    if (!isOpenAIChatGPT && this.shouldApplyOpenRouterProviderOverride(openrouterProvider)) {
       body.provider = { order: [openrouterProvider] };
     }
 
@@ -1514,7 +1514,8 @@ export class OpenAIProvider extends BaseLLMProvider {
    */
   private async chatCompleteResponses(messages: ChatMessage[], options: ChatOptions): Promise<ChatCompletionResult> {
     const url = `${this.baseUrl}/responses`;
-    const useStream = options.stream ?? !!options.onToken;
+    const callerWantsStream = options.stream ?? !!options.onToken;
+    const useStream = this.isOpenAIChatGPTProvider() || callerWantsStream;
     const body = this.buildResponsesBody(messages, { ...options, stream: useStream });
     logger.debug(
       "[OpenAI chatCompleteResponses] reasoning=%s onThinking=%s",

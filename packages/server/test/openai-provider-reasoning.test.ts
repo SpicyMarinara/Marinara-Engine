@@ -645,6 +645,54 @@ test("OpenAI ChatGPT responses requests omit unsupported Codex parameters", () =
   assert.equal("text" in body, false);
 });
 
+test("OpenAI ChatGPT chatComplete decodes SSE when caller requests non-streaming", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const originalFetch = globalThis.fetch;
+  const originalLocalUrls = process.env.PROVIDER_LOCAL_URLS_ENABLED;
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+    requests.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    return new Response(
+      [
+        'data: {"type":"response.output_text.delta","delta":"hel"}',
+        'data: {"type":"response.output_text.delta","delta":"lo"}',
+        'data: {"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]}]}}',
+        "data: [DONE]",
+        "",
+      ].join("\n"),
+      { status: 200, headers: { "Content-Type": "text/event-stream" } },
+    );
+  };
+
+  try {
+    process.env.PROVIDER_LOCAL_URLS_ENABLED = "true";
+    const provider = new OpenAIProvider(
+      "https://chatgpt.com/backend-api/codex",
+      "test-key",
+      undefined,
+      null,
+      null,
+      "openai-chatgpt",
+    );
+    const result = await provider.chatComplete([{ role: "user", content: "Hi" }], {
+      model: "gpt-5.2",
+      stream: false,
+      maxTokens: 128,
+    });
+
+    assert.equal(result.content, "hello");
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0]!.stream, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalLocalUrls === undefined) {
+      delete process.env.PROVIDER_LOCAL_URLS_ENABLED;
+    } else {
+      process.env.PROVIDER_LOCAL_URLS_ENABLED = originalLocalUrls;
+    }
+  }
+});
+
 test("responses requests translate responseFormat to text.format", () => {
   const provider = new OpenAIProvider("https://example.com/v1", "test-key") as any;
   const body = provider.buildResponsesBody([{ role: "user", content: "Return JSON." }], {
