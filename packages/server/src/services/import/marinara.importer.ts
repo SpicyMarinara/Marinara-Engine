@@ -63,13 +63,15 @@ async function restoreSprites(sprites: unknown, id: string): Promise<void> {
   if (!Array.isArray(sprites) || sprites.length === 0) return;
   const dir = join(DATA_DIR, "sprites", id);
   await mkdir(dir, { recursive: true });
+  // Track names we've already written this batch so two exported sprites
+  // whose stems sanitize to the same string (e.g. "happy!" and "happy?" both
+  // collapsing to "happy_") don't silently overwrite each other.
+  const usedNames = new Set<string>();
   for (const sprite of sprites) {
     if (!sprite || typeof sprite !== "object") continue;
     const entry = sprite as Record<string, unknown>;
     const decoded = decodeImageDataUrl(entry.data);
     if (!decoded) continue;
-    // Take the original filename's stem (e.g. "happy" from "happy.png"), drop
-    // any path segments or .. tricks, and pair it with the verified extension.
     const rawName = typeof entry.filename === "string" ? entry.filename : "";
     const stem =
       rawName
@@ -79,7 +81,13 @@ async function restoreSprites(sprites: unknown, id: string): Promise<void> {
         ?.replace(/\.[^.]+$/, "")
         ?.replace(/[^a-zA-Z0-9_\- ]/g, "_")
         ?.slice(0, 80) || `sprite-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const safeName = `${stem}.${decoded.ext}`;
+    let safeName = `${stem}.${decoded.ext}`;
+    let suffix = 1;
+    while (usedNames.has(safeName)) {
+      safeName = `${stem}-${suffix}.${decoded.ext}`;
+      suffix++;
+    }
+    usedNames.add(safeName);
     try {
       const filepath = assertInsideDir(dir, join(dir, safeName));
       await writeFile(filepath, decoded.buffer);

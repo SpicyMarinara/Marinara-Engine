@@ -458,9 +458,24 @@ export async function importRoutes(app: FastifyInstance) {
     } catch {
       return reply.status(400).send({ success: false, error: "Could not read .marinara package" });
     }
+    // Bounds checks before any getData() call — a legitimate .marinara package
+    // ships data.json plus at most one avatar.* entry, so anything way past
+    // that is either accidental cruft or a zip-bomb-style decompression
+    // attempt. Sizes are read off the entry headers, not the decompressed
+    // stream, so we reject before paying the memory cost.
+    const MAX_PACKAGE_ENTRIES = 8;
+    const MAX_DATA_JSON_BYTES = 5 * 1024 * 1024;
+    const MAX_AVATAR_BYTES = 20 * 1024 * 1024;
+    const entries = zip.getEntries();
+    if (entries.length > MAX_PACKAGE_ENTRIES) {
+      return reply.status(400).send({ success: false, error: ".marinara package has too many entries" });
+    }
     const dataEntry = zip.getEntry("data.json");
     if (!dataEntry) {
       return reply.status(400).send({ success: false, error: ".marinara package is missing data.json" });
+    }
+    if ((dataEntry.header.size ?? 0) > MAX_DATA_JSON_BYTES) {
+      return reply.status(400).send({ success: false, error: "data.json in package is too large" });
     }
     let envelope: Record<string, unknown>;
     try {
@@ -468,11 +483,10 @@ export async function importRoutes(app: FastifyInstance) {
     } catch {
       return reply.status(400).send({ success: false, error: "data.json is not valid JSON" });
     }
-    // Find an avatar.* entry (any image extension) and inject as data URL on
-    // envelope.data so the existing importer's avatar-handling kicks in.
-    const avatarEntry = zip
-      .getEntries()
-      .find((e) => /^avatar\.(png|jpe?g|webp|gif|avif)$/i.test(e.entryName));
+    const avatarEntry = entries.find((e) => /^avatar\.(png|jpe?g|webp|gif|avif)$/i.test(e.entryName));
+    if (avatarEntry && (avatarEntry.header.size ?? 0) > MAX_AVATAR_BYTES) {
+      return reply.status(400).send({ success: false, error: "Avatar image in package is too large" });
+    }
     if (avatarEntry && envelope.data && typeof envelope.data === "object") {
       const ext = avatarEntry.entryName.split(".").pop()!.toLowerCase();
       const mime =

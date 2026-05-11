@@ -2535,36 +2535,46 @@ function ImportSettings() {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      // Detect .marinara native packages (zip with data.json + avatar) by
-      // their PK signature so they get routed to the multipart endpoint that
-      // unpacks the avatar; fall back to JSON for legacy .marinara.json
-      // envelopes and other marinara_* exports.
       const head = file.size >= 4 ? new Uint8Array(await file.slice(0, 4).arrayBuffer()) : new Uint8Array();
       const isZip = head.length >= 2 && head[0] === 0x50 && head[1] === 0x4b;
-      let data: { success?: boolean; name?: string; type?: string; error?: string };
+      let res: Response;
+      let parseFailure = false;
       if (isZip) {
         const form = new FormData();
         form.append("file", file, file.name);
-        const res = await fetch("/api/import/marinara-package", { method: "POST", body: form });
-        data = await res.json();
+        res = await fetch("/api/import/marinara-package", { method: "POST", body: form });
       } else {
-        const text = await file.text();
-        const envelope = JSON.parse(text);
-        const res = await fetch("/api/import/marinara", {
+        let envelope: unknown;
+        try {
+          envelope = JSON.parse(await file.text());
+        } catch {
+          parseFailure = true;
+          throw new Error("parse");
+        }
+        res = await fetch("/api/import/marinara", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(envelope),
         });
-        data = await res.json();
       }
-      if (data.success) {
+      const data = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        name?: string;
+        type?: string;
+        error?: string;
+      };
+      if (res.ok && data.success) {
         qc.invalidateQueries();
         toast.success(`Imported ${data.name ?? data.type} successfully!`);
       } else {
-        toast.error(`Import failed: ${data.error ?? "Unknown error"}`);
+        toast.error(`Import failed: ${data.error ?? res.statusText ?? "Unknown error"}`);
       }
-    } catch {
-      toast.error("Import failed. Make sure this is a valid .marinara file.");
+    } catch (err) {
+      if (err instanceof Error && err.message === "parse") {
+        toast.error("Import failed. Make sure this is a valid .marinara or .json file.");
+      } else {
+        toast.error(`Import failed: ${err instanceof Error ? err.message : "network/server error"}`);
+      }
     }
     e.target.value = "";
   };
