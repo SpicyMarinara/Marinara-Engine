@@ -22,7 +22,9 @@ function withMockedRandom(values: number[], run: () => string): string {
   };
 
   try {
-    return run();
+    const output = run();
+    assert.equal(index, values.length, "test did not consume all expected random values");
+    return output;
   } finally {
     Math.random = originalRandom;
   }
