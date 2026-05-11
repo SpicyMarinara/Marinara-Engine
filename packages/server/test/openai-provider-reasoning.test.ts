@@ -614,6 +614,37 @@ test("responses requests include fallback input for system-only prompts", () => 
   assert.deepEqual(body.input, [{ role: "user", content: "Continue." }]);
 });
 
+test("OpenAI ChatGPT responses requests omit unsupported Codex parameters", () => {
+  const provider = new OpenAIProvider(
+    "https://chatgpt.com/backend-api/codex",
+    "test-key",
+    undefined,
+    null,
+    null,
+    "openai-chatgpt",
+  ) as any;
+  const body = provider.buildResponsesBody([{ role: "user", content: "Hello" }], {
+    model: "gpt-5.2",
+    stream: false,
+    maxTokens: 128,
+    temperature: 0.7,
+    topP: 0.9,
+    reasoningEffort: "high",
+    enableThinking: true,
+    verbosity: "medium",
+  } satisfies ChatOptions) as Record<string, unknown>;
+
+  assert.equal(body.stream, true);
+  assert.equal(body.instructions, "You are a helpful assistant.");
+  assert.equal("max_output_tokens" in body, false);
+  assert.equal(body.store, false);
+  assert.equal("include" in body, false);
+  assert.equal("temperature" in body, false);
+  assert.equal("top_p" in body, false);
+  assert.equal("reasoning" in body, false);
+  assert.equal("text" in body, false);
+});
+
 test("responses requests translate responseFormat to text.format", () => {
   const provider = new OpenAIProvider("https://example.com/v1", "test-key") as any;
   const body = provider.buildResponsesBody([{ role: "user", content: "Return JSON." }], {
