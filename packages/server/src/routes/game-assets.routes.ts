@@ -860,6 +860,11 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "Not a file" });
     }
 
+    const ext = extname(wildcard).toLowerCase();
+    if (!TEXT_EXTS.has(ext)) {
+      return reply.status(400).send({ error: "Not a text file" });
+    }
+
     const content = readFileSync(filePath, "utf-8");
     return { content };
   });
@@ -881,6 +886,14 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
     const body = req.body as { content?: string };
     if (typeof body.content !== "string") {
       return reply.status(400).send({ error: "Missing content" });
+    }
+    if (Buffer.byteLength(body.content, "utf-8") > MAX_TEXT_BYTES) {
+      return reply.status(413).send({ error: `File too large (max ${MAX_TEXT_BYTES} bytes)` });
+    }
+
+    const ext = extname(wildcard).toLowerCase();
+    if (!TEXT_EXTS.has(ext)) {
+      return reply.status(400).send({ error: "Not a text file" });
     }
 
     const parentDir = dirname(filePath);
