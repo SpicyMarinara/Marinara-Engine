@@ -45,6 +45,7 @@ export interface STCharacterImportOptions {
   timestampOverrides?: TimestampOverrides | null;
   importEmbeddedLorebook?: boolean;
   tagImportMode?: STCharacterTagImportMode;
+  existingTagKeys?: ReadonlySet<string>;
 }
 
 export type STCharacterTagImportMode = "all" | "none" | "existing";
@@ -68,7 +69,7 @@ export async function importSTCharacter(raw: Record<string, unknown>, db: DB, op
   if (rawEmbeddedLorebook) {
     data.character_book = normalizeCharacterBook(rawEmbeddedLorebook);
   }
-  data.tags = await filterImportedTags(data.tags, db, tagImportMode);
+  data.tags = await filterImportedTags(data.tags, db, tagImportMode, options?.existingTagKeys);
 
   // Tag with browser source if imported from browser
   if (botBrowserSource) {
@@ -367,7 +368,7 @@ function tagKey(value: string) {
   return value.trim().toLocaleLowerCase();
 }
 
-async function getExistingCharacterTagKeys(db: DB) {
+export async function getExistingCharacterTagKeys(db: DB) {
   const tags = new Set<string>();
   const rows = await db.select({ data: charactersTable.data }).from(charactersTable);
   for (const row of rows) {
@@ -386,11 +387,16 @@ async function getExistingCharacterTagKeys(db: DB) {
   return tags;
 }
 
-async function filterImportedTags(tags: string[], db: DB, mode: STCharacterTagImportMode) {
-  if (mode === "all") return tags;
+async function filterImportedTags(
+  tags: string[],
+  db: DB,
+  mode: STCharacterTagImportMode,
+  existingTagKeys?: ReadonlySet<string>,
+) {
+  if (mode === "all" || tags.length === 0) return tags;
   if (mode === "none") return [];
 
-  const existingTags = await getExistingCharacterTagKeys(db);
+  const existingTags = existingTagKeys ?? (await getExistingCharacterTagKeys(db));
   return tags.filter((tag) => existingTags.has(tagKey(tag)));
 }
 

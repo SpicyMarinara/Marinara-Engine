@@ -6,7 +6,11 @@ import { join, extname, basename, relative } from "path";
 import { existsSync, readdirSync } from "fs";
 import { randomUUID } from "crypto";
 import type { DB } from "../../db/connection.js";
-import { importSTCharacter, type STCharacterTagImportMode } from "./st-character.importer.js";
+import {
+  getExistingCharacterTagKeys,
+  importSTCharacter,
+  type STCharacterTagImportMode,
+} from "./st-character.importer.js";
 import { importSTChat } from "./st-chat.importer.js";
 import { importSTPreset } from "./st-prompt.importer.js";
 import { importSTLorebook } from "./st-lorebook.importer.js";
@@ -563,6 +567,10 @@ export async function runSTBulkImport(
   const selectedBackgrounds = resolveSelectedItems(scanResult.backgrounds, options.backgrounds);
   const selectedPersonas = resolveSelectedItems(scanResult.personas, options.personas);
   const tagImportMode = options.characterTagImportMode ?? "all";
+  const existingTagKeys =
+    tagImportMode === "existing" && selectedCharacters.length > 0
+      ? await getExistingCharacterTagKeys(db)
+      : undefined;
 
   // Import characters
   if (selectedCharacters.length > 0) {
@@ -582,12 +590,16 @@ export async function runSTBulkImport(
             const b64 = buf.toString("base64");
             const dataUrl = `data:image/png;base64,${b64}`;
             (card as Record<string, unknown>)._avatarDataUrl = dataUrl;
-            await importSTCharacter(card as Record<string, unknown>, db, { timestampOverrides, tagImportMode });
+            await importSTCharacter(card as Record<string, unknown>, db, {
+              timestampOverrides,
+              tagImportMode,
+              existingTagKeys,
+            });
             imported.characters++;
           }
         } else {
           const raw = JSON.parse(await readFile(ch.path, "utf-8"));
-          await importSTCharacter(raw, db, { timestampOverrides, tagImportMode });
+          await importSTCharacter(raw, db, { timestampOverrides, tagImportMode, existingTagKeys });
           imported.characters++;
         }
       } catch (err) {

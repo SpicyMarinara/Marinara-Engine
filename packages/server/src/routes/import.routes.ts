@@ -12,6 +12,7 @@ import {
   importCharX,
   inspectSTCharacter,
   inspectCharX,
+  getExistingCharacterTagKeys,
   type STCharacterImportPreview,
   type STCharacterTagImportMode,
 } from "../services/import/st-character.importer.js";
@@ -312,6 +313,13 @@ function readMultipartTagImportMode(file: { fields?: Record<string, any> } | nul
   return readTagImportMode(rawValue);
 }
 
+function invalidTagImportModeResponse() {
+  return {
+    success: false,
+    error: "Invalid tagImportMode. Expected one of: all, none, existing.",
+  };
+}
+
 async function importCharacterBuffer(
   fileName: string,
   buffer: Buffer,
@@ -319,6 +327,7 @@ async function importCharacterBuffer(
   timestampOverrides?: ReturnType<typeof normalizeTimestampOverrides>,
   importEmbeddedLorebook?: boolean,
   tagImportMode?: STCharacterTagImportMode,
+  existingTagKeys?: ReadonlySet<string>,
 ) {
   if (fileName.toLowerCase().endsWith(".png")) {
     const charData = extractCharaFromPng(buffer);
@@ -331,16 +340,16 @@ async function importCharacterBuffer(
 
     const avatarB64 = buffer.toString("base64");
     charData._avatarDataUrl = `data:image/png;base64,${avatarB64}`;
-    return importSTCharacter(charData, db, { timestampOverrides, importEmbeddedLorebook, tagImportMode });
+    return importSTCharacter(charData, db, { timestampOverrides, importEmbeddedLorebook, tagImportMode, existingTagKeys });
   }
 
   if (fileName.toLowerCase().endsWith(".charx")) {
-    return importCharX(buffer, db, { timestampOverrides, importEmbeddedLorebook, tagImportMode });
+    return importCharX(buffer, db, { timestampOverrides, importEmbeddedLorebook, tagImportMode, existingTagKeys });
   }
 
   try {
     const json = JSON.parse(buffer.toString("utf-8"));
-    return importSTCharacter(json, db, { timestampOverrides, importEmbeddedLorebook, tagImportMode });
+    return importSTCharacter(json, db, { timestampOverrides, importEmbeddedLorebook, tagImportMode, existingTagKeys });
   } catch {
     return {
       success: false,
@@ -465,7 +474,12 @@ export async function importRoutes(app: FastifyInstance) {
       if (!file) return { success: false, error: "No file uploaded" };
       const timestampOverrides = readTimestampOverridesFromMultipart(file as any);
       const importEmbeddedLorebook = readMultipartBooleanField(file as any, "importEmbeddedLorebook");
+      const rawTagImportModeField = (file as any)?.fields?.tagImportMode;
+      const rawTagImportMode = Array.isArray(rawTagImportModeField)
+        ? rawTagImportModeField.at(-1)?.value
+        : rawTagImportModeField?.value;
       const tagImportMode = readMultipartTagImportMode(file as any);
+      if (rawTagImportMode !== undefined && tagImportMode === undefined) return invalidTagImportModeResponse();
       return importCharacterBuffer(
         file.filename ?? "",
         await file.toBuffer(),
@@ -479,7 +493,9 @@ export async function importRoutes(app: FastifyInstance) {
     // Standard JSON body
     const body = { ...(req.body as Record<string, unknown>) };
     const importEmbeddedLorebook = readBooleanOption(body.importEmbeddedLorebook);
-    const tagImportMode = readTagImportMode(body.tagImportMode);
+    const rawTagImportMode = body.tagImportMode;
+    const tagImportMode = readTagImportMode(rawTagImportMode);
+    if (rawTagImportMode !== undefined && tagImportMode === undefined) return invalidTagImportModeResponse();
     delete body.importEmbeddedLorebook;
     delete body.tagImportMode;
     return importSTCharacter(body, app.db, {
@@ -523,6 +539,7 @@ export async function importRoutes(app: FastifyInstance) {
     const timestampEntries: Array<{ name?: string; lastModified?: number | string }> = [];
     let importEmbeddedLorebook: boolean | undefined;
     let tagImportMode: STCharacterTagImportMode | undefined;
+    let invalidTagImportMode = false;
 
     for await (const part of parts) {
       if (part.type === "file") {
@@ -550,8 +567,11 @@ export async function importRoutes(app: FastifyInstance) {
 
       if (part.fieldname === "tagImportMode") {
         tagImportMode = readTagImportMode(part.value);
+        invalidTagImportMode ||= part.value !== undefined && tagImportMode === undefined;
       }
     }
+
+    if (invalidTagImportMode) return { ...invalidTagImportModeResponse(), results: [] };
 
     if (files.length === 0) {
       return { success: false, error: "No files uploaded", results: [] };
@@ -566,6 +586,8 @@ export async function importRoutes(app: FastifyInstance) {
     }
 
     const results = [];
+    const existingTagKeys =
+      tagImportMode === "existing" && files.length > 0 ? await getExistingCharacterTagKeys(app.db) : undefined;
     for (const file of files) {
       const timestampEntry = timestampsByName.get(file.filename)?.shift();
       const timestampOverrides = normalizeTimestampOverrides({
@@ -580,6 +602,7 @@ export async function importRoutes(app: FastifyInstance) {
           timestampOverrides,
           importEmbeddedLorebook,
           tagImportMode,
+          existingTagKeys,
         );
         results.push({ filename: file.filename, ...result });
       } catch (error) {
@@ -636,6 +659,13 @@ export async function importRoutes(app: FastifyInstance) {
     };
     const resolved = resolveImportFolder(req.body as { folderPath?: unknown; folderToken?: unknown });
     if (!resolved.ok) return reply.send({ success: false, error: resolved.error });
+    const rawCharacterTagImportMode = (req.body as { options?: { characterTagImportMode?: unknown } }).options
+      ?.characterTagImportMode;
+    const characterTagImportMode = readTagImportMode(rawCharacterTagImportMode);
+    if (rawCharacterTagImportMode !== undefined && characterTagImportMode === undefined) {
+      return reply.send(invalidTagImportModeResponse());
+    }
+    if (characterTagImportMode) options.characterTagImportMode = characterTagImportMode;
 
     // Set up SSE headers
     reply.raw.writeHead(200, {
