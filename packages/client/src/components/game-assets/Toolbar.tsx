@@ -18,23 +18,45 @@ import {
 import { cn } from "../../lib/utils";
 import { SearchInput } from "./SearchInput";
 
+/**
+ * Props for the Toolbar component.
+ */
 export interface ToolbarProps {
+  /** Breadcrumb segments starting with "Game Assets" */
   breadcrumb: string[];
+  /** Current search query */
   search: string;
+  /** Callback when search changes */
   onSearch: (v: string) => void;
+  /** Current view mode */
   viewMode: "grid" | "list";
+  /** Switch view mode */
   onViewMode: (v: "grid" | "list") => void;
+  /** Trigger hidden file input click */
   onUploadClick: () => void;
+  /** Open "new folder" modal */
   onNewFolder: () => void;
+  /** Open "new text file" modal */
   onNewTextFile: () => void;
+  /** Open "new markdown file" modal */
   onNewMarkdownFile: () => void;
+  /** Rescan assets and rebuild manifest */
   onRescan: () => void;
+  /** Open current folder in OS file manager */
   onOpenFolder: () => void;
+  /** Navigate to a breadcrumb path */
   onBreadcrumbClick: (path: string) => void;
+  /** Which list columns are visible */
   listColumns: { size: boolean; modified: boolean };
+  /** Toggle a list column */
   onToggleColumn: (col: "size" | "modified") => void;
 }
 
+/**
+ * File browser toolbar: breadcrumb, search, view toggle, action buttons, dropdowns.
+ *
+ * @param props - See {@link ToolbarProps}
+ */
 export function Toolbar({
   breadcrumb,
   search,

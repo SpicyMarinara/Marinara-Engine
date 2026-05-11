@@ -9,6 +9,13 @@ import { cn } from "../../lib/utils";
 import { formatBytes, formatDate } from "../../lib/format";
 import { encodeAssetPath } from "./encode-asset-path";
 
+/**
+ * Full-screen image preview overlay with optional metadata side panel.
+ *
+ * Press Escape or click the backdrop to close.
+ * @param node - Image file node to preview
+ * @param onClose - Callback when modal should close
+ */
 export function ImagePreviewModal({
   node,
   onClose,

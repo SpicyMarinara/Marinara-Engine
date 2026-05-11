@@ -11,12 +11,27 @@ import { renderMarkdownBlocks, applyInlineMarkdown } from "../../lib/markdown";
 
 const MAX_TEXT_LENGTH = 10_000_000; // ~10 MB char limit
 
+/**
+ * Props for the FileEditorModal component.
+ */
 export interface FileEditorModalProps {
+  /** Text file node to edit */
   node: TreeNode;
+  /** Callback when modal should close */
   onClose: () => void;
+  /** Start in edit or preview mode (default: "edit") */
   initialMode?: "edit" | "preview";
 }
 
+/**
+ * Modal text editor with line numbers, tab-to-spaces, and Markdown preview.
+ *
+ * Keyboard shortcuts:
+ * - Ctrl/Cmd+S → save
+ * - Escape → close (with dirty-check confirm)
+ *
+ * @param props - See {@link FileEditorModalProps}
+ */
 export function FileEditorModal({
   node,
   onClose,

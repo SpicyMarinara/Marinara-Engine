@@ -8,18 +8,36 @@ import { CATEGORY_ICONS } from "./constants";
 import { FileIcon, isImage } from "./utils";
 import { encodeAssetPath } from "./encode-asset-path";
 
+/**
+ * Props for the AssetGrid component.
+ */
 export interface AssetGridProps {
+  /** Nodes to render in the current folder */
   nodes: TreeNode[];
+  /** Current display mode */
   viewMode: "grid" | "list";
+  /** Set of selected file paths */
   selectedPaths: Set<string>;
+  /** Toggle selection of a single node */
   onToggleSelect: (node: TreeNode) => void;
+  /** Open context menu on right-click */
   onContextMenu: (e: React.MouseEvent, node: TreeNode) => void;
+  /** Open/preview a file */
   onSelectFile: (node: TreeNode) => void;
+  /** Navigate into a folder */
   onNavigateFolder: (path: string) => void;
+  /** Open the 3-dot action menu */
   onOpenActionMenu: (node: TreeNode, anchorEl: HTMLElement) => void;
+  /** Which optional list columns are visible */
   listColumns: { size: boolean; modified: boolean };
 }
 
+/**
+ * Build a dynamic Tailwind grid-template-columns class for the list view.
+ *
+ * @param listColumns - Visibility flags for size and modified columns
+ * @returns Tailwind class like "grid-cols-[2rem_auto_1fr_80px_40px]"
+ */
 function listGridCols(listColumns: { size: boolean; modified: boolean }): string {
   // Base: checkbox + icon + name + actions = 4 columns minimum
   // Add size (80px) and/or modified (80px) when enabled
@@ -30,6 +48,11 @@ function listGridCols(listColumns: { size: boolean; modified: boolean }): string
   return `grid-cols-[${parts.join("_")}]`;
 }
 
+/**
+ * Render a grid or list of asset nodes with multi-select checkboxes.
+ *
+ * @param props - See {@link AssetGridProps}
+ */
 export function AssetGrid({
   nodes,
   viewMode,

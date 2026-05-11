@@ -17,7 +17,14 @@ export function isEditableText(ext?: string) {
   return TEXT_EXTS.has(ext ?? "");
 }
 
-/** Returns the appropriate lucide icon component for a file extension. */
+/**
+ * Return the appropriate Lucide icon for a file extension.
+ *
+ * @param ext - Lower-case extension including dot (e.g. ".png", ".mp3")
+ * @param className - Optional Tailwind class for styling
+ * @param size - Optional icon size
+ * @returns A Lucide icon component
+ */
 export function FileIcon({
   ext,
   className,
@@ -39,7 +46,15 @@ export function FileIcon({
   return <File className={className} size={size} />;
 }
 
-/** Recursively count files and folders inside a tree node (used for delete confirmation). */
+/**
+ * Recursively count files and folders inside a tree node.
+ *
+ * Used by the delete-confirmation modal to warn how many items
+ * a folder contains (including nested sub-folders).
+ *
+ * @param node - Tree node to count
+ * @returns Total number of files + folders under this node
+ */
 export function countItems(node: TreeNode): number {
   if (node.type === "file") return 1;
   // Count the folder itself plus all descendants

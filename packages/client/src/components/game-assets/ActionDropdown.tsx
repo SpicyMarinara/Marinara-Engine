@@ -5,6 +5,15 @@ import { useEffect, useRef } from "react";
 import type { ContextMenuItem } from "../ui/ContextMenu";
 import { cn } from "../../lib/utils";
 
+/**
+ * Fixed-position dropdown menu rendered via portal.
+ *
+ * Closes automatically on outside click or window scroll.
+ * @param items - Menu items to display
+ * @param x - Horizontal screen position (px)
+ * @param y - Vertical screen position (px)
+ * @param onClose - Callback when dropdown should close
+ */
 export function ActionDropdown({
   items,
   x,

@@ -6,8 +6,12 @@ import { Search, X } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 /**
+ * Responsive search input for the file browser.
+ *
  * Desktop: always-visible 192px input on the right.
  * Mobile: collapsed to a search-icon button; expands inline when tapped.
+ * @param search - Current query string
+ * @param onSearch - Callback when query changes
  */
 export function SearchInput({ search, onSearch }: { search: string; onSearch: (v: string) => void }) {
   const [expanded, setExpanded] = useState(false);

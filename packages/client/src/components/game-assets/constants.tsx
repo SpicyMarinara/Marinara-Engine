@@ -4,7 +4,13 @@
 import type { ElementType } from "react";
 import { Music, Image, Volume2, Wind, Smile } from "lucide-react";
 
-/** Category folder → lucide icon used in tree + grid. */
+/**
+ * Map of category folder names to Lucide icons.
+ *
+ * Used in the sidebar tree and grid/list views to give each
+ * top-level category (music, sfx, ambient, sprites, backgrounds)
+ * a distinct visual identity.
+ */
 export const CATEGORY_ICONS: Record<string, ElementType> = {
   music: Music,
   sfx: Volume2,
@@ -13,7 +19,13 @@ export const CATEGORY_ICONS: Record<string, ElementType> = {
   backgrounds: Image,
 };
 
-/** Default folder descriptions, keyed by `selectedPath`. Empty key = root. */
+/**
+ * Default folder descriptions keyed by relative path.
+ *
+ * The empty-string key represents the root "Game Assets" folder.
+ * These are shown as editable hints when a folder has no custom
+ * description stored in `meta.json`.
+ */
 export const DEFAULT_DESCRIPTIONS: Record<string, string> = {
   "": "Game assets folder — music, sfx, ambient audio, sprites, and backgrounds",
   music: "Background music for game states: exploration, dialogue, combat, travel/rest",

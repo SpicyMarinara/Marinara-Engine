@@ -5,6 +5,14 @@ import { useEffect, useState } from "react";
 import { AUDIO_MIME_MAP } from "@marinara-engine/shared";
 import { encodeAssetPath } from "./encode-asset-path";
 
+/**
+ * Audio player modal with MIME type hinting and download fallback.
+ *
+ * Press Escape or click the backdrop to close.
+ * @param path - Relative path to the audio asset
+ * @param name - File name (used for extension detection and display)
+ * @param onClose - Callback when modal should close
+ */
 export function AudioPlayerModal({
   path,
   name,

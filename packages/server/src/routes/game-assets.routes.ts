@@ -32,6 +32,10 @@ interface FolderMeta {
   description?: string;
 }
 
+/**
+ * Load folder metadata from `data/game-assets/meta.json`.
+ * @returns Map of folder paths to their metadata
+ */
 function loadMeta(): Record<string, FolderMeta> {
   if (!existsSync(META_PATH)) return {};
   try {
@@ -41,6 +45,10 @@ function loadMeta(): Record<string, FolderMeta> {
   }
 }
 
+/**
+ * Persist folder metadata back to `data/game-assets/meta.json`.
+ * @param meta - Map of folder paths to metadata
+ */
 function saveMeta(meta: Record<string, FolderMeta>) {
   writeFileSync(META_PATH, JSON.stringify(meta, null, 2), "utf-8");
 }
@@ -81,7 +89,11 @@ const MUSIC_STATE_SET = new Set<string>(MUSIC_STATES);
 const MUSIC_GENRE_SET = new Set<string>(MUSIC_GENRES);
 const MUSIC_INTENSITY_SET = new Set<string>(MUSIC_INTENSITIES);
 
-/** Reject path-traversal attempts. */
+/**
+ * Reject path-traversal attempts in a URL segment.
+ * @param segment - URL path segment to validate
+ * @returns true if the segment contains no `..`, backslashes, or leading slashes
+ */
 function isSafePath(segment: string): boolean {
   return !segment.includes("..") && !segment.includes("\\") && !/^\//.test(segment);
 }
@@ -102,6 +114,12 @@ function fieldValue(fields: unknown, name: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+/**
+ * Sanitize an uploaded filename for safe filesystem storage.
+ * Normalizes Unicode, removes special chars, collapses spaces to hyphens.
+ * @param filename - Raw filename from upload
+ * @returns Clean filename safe to write to disk
+ */
 function sanitizeAssetFilename(filename: string): string {
   const original = basename(filename).trim();
   const ext = extname(original).toLowerCase();
@@ -114,6 +132,13 @@ function sanitizeAssetFilename(filename: string): string {
   return `${stem || "asset"}${ext}`;
 }
 
+/**
+ * Generate a unique filename inside a directory by appending a counter
+ * if the base name already exists.
+ * @param dir - Target directory path
+ * @param filename - Desired filename
+ * @returns Unique filename (e.g. "asset.png" or "asset-1.png")
+ */
 function uniqueFilename(dir: string, filename: string): string {
   const ext = extname(filename);
   const stem = basename(filename, ext);
@@ -126,6 +151,20 @@ function uniqueFilename(dir: string, filename: string): string {
   return candidate;
 }
 
+/**
+ * Validate upload parameters and compute the safe target path on disk.
+ *
+ * Checks:
+ * - Path safety (no traversal)
+ * - Music folder structure (state/genre/intensity)
+ * - Extension matches category rules (or is a text file)
+ *
+ * @param category - Top-level category (music, sfx, sprites, etc.)
+ * @param subcategory - Subfolder path inside the category
+ * @param filename - Original uploaded filename
+ * @returns Object with safeName, targetPath, and targetDir
+ * @throws Error if validation fails
+ */
 function prepareAssetTarget(category: string, subcategory: string, filename: string) {
   if (!isSafePath(subcategory)) {
     throw new Error("Invalid subcategory");
@@ -167,6 +206,13 @@ function prepareAssetTarget(category: string, subcategory: string, filename: str
   return { safeName, targetPath, targetDir };
 }
 
+/**
+ * Finalize an upload by rebuilding the asset manifest.
+ * @param category - Top-level category
+ * @param subcategory - Subfolder path
+ * @param filename - Safe filename on disk
+ * @returns Object with tag, path, and manifest count
+ */
 function finishAssetUpload(category: string, subcategory: string, filename: string) {
   const manifest = buildAssetManifest();
   const rel = `${category}/${subcategory}/${filename}`;
@@ -189,6 +235,17 @@ interface TreeNode {
   modified?: string;
 }
 
+/**
+ * Recursively build a tree of folders and files under a directory.
+ *
+ * Skips hidden files, `manifest.json`, and `meta.json` at root.
+ * Sorts folders first, then alphabetically.
+ *
+ * @param dir - Absolute directory to scan
+ * @param relPrefix - Relative prefix for building node paths
+ * @param meta - Loaded folder metadata
+ * @returns Array of TreeNode objects
+ */
 function buildTree(dir: string, relPrefix: string, meta: Record<string, FolderMeta>): TreeNode[] {
   if (!existsSync(dir)) return [];
   const entries = readdirSync(dir);
@@ -234,6 +291,32 @@ function buildTree(dir: string, relPrefix: string, meta: Record<string, FolderMe
   return nodes;
 }
 
+/**
+ * Register all game-asset routes on the given Fastify instance.
+ *
+ * Endpoints:
+ * - GET  /manifest
+ * - POST /rescan
+ * - GET  /file/*
+ * - POST /upload
+ * - DELETE /file/*
+ * - POST /open-folder
+ * - GET  /tree
+ * - PATCH /folders/description
+ * - POST /folders
+ * - DELETE /folders/*
+ * - POST /rename
+ * - POST /move
+ * - POST /copy
+ * - POST /move-bulk
+ * - POST /copy-bulk
+ * - POST /delete-bulk
+ * - GET  /file-content/*
+ * - PUT  /file-content/*
+ * - GET  /file-info/*
+ *
+ * @param app - Fastify instance
+ */
 export async function gameAssetsRoutes(app: FastifyInstance) {
   // ── GET /game-assets/manifest ──
   app.get("/manifest", async () => {

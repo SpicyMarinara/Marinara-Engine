@@ -7,6 +7,14 @@ import type { TreeNode } from "../../hooks/use-game-assets";
 import { useGameAssetFileInfo } from "../../hooks/use-game-assets";
 import { formatBytes, formatDate } from "../../lib/format";
 
+/**
+ * Popover showing image metadata (dimensions, format, size, modified date).
+ *
+ * Renders as a desktop card or mobile bottom sheet.
+ * Press Escape or click outside to dismiss.
+ * @param node - Image file node to inspect
+ * @param onClose - Callback when popover should close
+ */
 export function ImageInfoPopover({
   node,
   onClose,

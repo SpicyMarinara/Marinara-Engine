@@ -6,15 +6,29 @@ import type { TreeNode } from "../../hooks/use-game-assets";
 import { cn } from "../../lib/utils";
 import { CATEGORY_ICONS } from "./constants";
 
+/**
+ * Props for the FolderTree component.
+ */
 export interface FolderTreeProps {
+  /** Tree node to render */
   node: TreeNode;
+  /** Current nesting depth (0 = root) */
   depth: number;
+  /** Currently selected folder path */
   selectedPath: string;
+  /** Set of expanded folder paths */
   expanded: Set<string>;
+  /** Toggle expand/collapse of a folder */
   onToggle: (path: string) => void;
+  /** Select/navigate to a folder */
   onSelect: (path: string) => void;
 }
 
+/**
+ * Recursive sidebar folder tree with chevron expand/collapse.
+ *
+ * @param props - See {@link FolderTreeProps}
+ */
 export function FolderTree({
   node,
   depth,

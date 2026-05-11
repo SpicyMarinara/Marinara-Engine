@@ -4,17 +4,29 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api-client";
 
+/**
+ * Single node in the game-assets folder tree.
+ */
 export interface TreeNode {
+  /** File or folder name */
   name: string;
+  /** Relative path from game-assets root */
   path: string;
+  /** "folder" or "file" */
   type: "folder" | "file";
+  /** Child nodes (folders only) */
   children?: TreeNode[];
+  /** Lower-case extension including dot (e.g. ".png") */
   ext?: string;
+  /** Optional user-edited description */
   description?: string;
+  /** File size in bytes */
   size?: number;
+  /** ISO 8601 modification timestamp */
   modified?: string;
 }
 
+/** TanStack Query key factory for game-assets queries. */
 export const gameAssetKeys = {
   all: ["game-assets"] as const,
   tree: () => [...gameAssetKeys.all, "tree"] as const,
@@ -22,6 +34,10 @@ export const gameAssetKeys = {
   info: (path: string) => [...gameAssetKeys.all, "info", path] as const,
 };
 
+/**
+ * Fetch the full game-assets folder tree.
+ * @returns TanStack Query result wrapping the root {@link TreeNode}
+ */
 export function useGameAssetTree() {
   return useQuery({
     queryKey: gameAssetKeys.tree(),
@@ -30,6 +46,10 @@ export function useGameAssetTree() {
   });
 }
 
+/**
+ * Create a new folder inside game-assets.
+ * Invalidates the tree query on success.
+ */
 export function useCreateGameAssetFolder() {
   const qc = useQueryClient();
   return useMutation({
@@ -38,6 +58,10 @@ export function useCreateGameAssetFolder() {
   });
 }
 
+/**
+ * Delete an empty folder (or recursively with `recursive: true`).
+ * Invalidates the tree query on success.
+ */
 export function useDeleteGameAssetFolder() {
   const qc = useQueryClient();
   return useMutation({
@@ -47,6 +71,10 @@ export function useDeleteGameAssetFolder() {
   });
 }
 
+/**
+ * Rename a file in place.
+ * Invalidates the tree query on success.
+ */
 export function useRenameGameAsset() {
   const qc = useQueryClient();
   return useMutation({
@@ -56,6 +84,10 @@ export function useRenameGameAsset() {
   });
 }
 
+/**
+ * Move a single file to a different folder.
+ * Invalidates the tree query on success.
+ */
 export function useMoveGameAsset() {
   const qc = useQueryClient();
   return useMutation({
@@ -65,6 +97,10 @@ export function useMoveGameAsset() {
   });
 }
 
+/**
+ * Copy a single file to a different folder.
+ * Invalidates the tree query on success.
+ */
 export function useCopyGameAsset() {
   const qc = useQueryClient();
   return useMutation({
@@ -74,6 +110,10 @@ export function useCopyGameAsset() {
   });
 }
 
+/**
+ * Delete a single file.
+ * Invalidates the tree query on success.
+ */
 export function useDeleteGameAsset() {
   const qc = useQueryClient();
   return useMutation({
@@ -82,12 +122,19 @@ export function useDeleteGameAsset() {
   });
 }
 
+/**
+ * Open the game-assets directory (or a subfolder) in the OS file manager.
+ */
 export function useOpenGameAssetsFolder() {
   return useMutation({
     mutationFn: (subfolder?: string) => api.post("/game-assets/open-folder", { subfolder }),
   });
 }
 
+/**
+ * Trigger a server-side rescan of the game-assets directory.
+ * Invalidates the tree query on success.
+ */
 export function useRescanGameAssets() {
   const qc = useQueryClient();
   return useMutation({
@@ -96,6 +143,15 @@ export function useRescanGameAssets() {
   });
 }
 
+/**
+ * Upload a file via multipart form-data.
+ *
+ * `category` and `subcategory` must be appended before `file`
+ * in the FormData because the server multipart parser expects
+ * them in that order.
+ *
+ * Invalidates the tree query on success.
+ */
 export function useUploadGameAsset() {
   const qc = useQueryClient();
   return useMutation({
@@ -110,6 +166,10 @@ export function useUploadGameAsset() {
   });
 }
 
+/**
+ * Update the description stored in `meta.json` for a folder.
+ * Invalidates the tree query on success.
+ */
 export function useUpdateFolderDescription() {
   const qc = useQueryClient();
   return useMutation({
@@ -119,6 +179,11 @@ export function useUpdateFolderDescription() {
   });
 }
 
+/**
+ * Fetch the text content of an editable file.
+ * @param path - Relative file path
+ * @returns TanStack Query result wrapping `{ content: string }`
+ */
 export function useGameAssetFileContent(path: string) {
   return useQuery({
     queryKey: gameAssetKeys.content(path),
@@ -127,6 +192,10 @@ export function useGameAssetFileContent(path: string) {
   });
 }
 
+/**
+ * Save text content back to a file.
+ * Invalidates both the content query and the tree query on success.
+ */
 export function useSaveGameAssetFile() {
   const qc = useQueryClient();
   return useMutation({
@@ -139,6 +208,11 @@ export function useSaveGameAssetFile() {
   });
 }
 
+/**
+ * Fetch metadata (size, dimensions, format, dates) for a file.
+ * @param path - Relative file path
+ * @returns TanStack Query result wrapping file info object
+ */
 export function useGameAssetFileInfo(path: string) {
   return useQuery({
     queryKey: gameAssetKeys.info(path),
@@ -159,6 +233,12 @@ export function useGameAssetFileInfo(path: string) {
 
 // ── Bulk operations ──
 
+/**
+ * Move multiple files to a target folder in a single request.
+ * Returns `{ succeeded, failed, targetFolder }` so the UI can report
+ * per-file success or failure.
+ * Invalidates the tree query on success.
+ */
 export function useMoveGameAssetsBulk() {
   const qc = useQueryClient();
   return useMutation({
@@ -171,6 +251,11 @@ export function useMoveGameAssetsBulk() {
   });
 }
 
+/**
+ * Copy multiple files to a target folder in a single request.
+ * Returns `{ succeeded, failed, targetFolder }`.
+ * Invalidates the tree query on success.
+ */
 export function useCopyGameAssetsBulk() {
   const qc = useQueryClient();
   return useMutation({
@@ -183,6 +268,11 @@ export function useCopyGameAssetsBulk() {
   });
 }
 
+/**
+ * Delete multiple files in a single request.
+ * Returns `{ succeeded, failed }`.
+ * Invalidates the tree query on success.
+ */
 export function useDeleteGameAssetsBulk() {
   const qc = useQueryClient();
   return useMutation({

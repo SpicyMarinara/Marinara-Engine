@@ -48,6 +48,19 @@ import { isImage, isAudio, isEditableText, countItems } from "./utils";
 import { encodeAssetPath } from "./encode-asset-path";
 import { useUIStore } from "../../stores/ui.store";
 
+/**
+ * Full-screen overlay for browsing, previewing, and managing game assets.
+ *
+ * Features:
+ * - Folder tree sidebar with expand/collapse
+ * - Grid or list view with inline thumbnails
+ * - Multi-select via always-visible checkboxes (files only)
+ * - Bulk move/copy/delete via action bar
+ * - Drag-and-drop upload
+ * - Image/audio/text file previews
+ * - Inline folder description editing
+ * - Keyboard shortcuts: Ctrl+A (select all), Esc (clear selection)
+ */
 export function GameAssetsBrowserView() {
   const { data: tree, isLoading } = useGameAssetTree();
   const createFolder = useCreateGameAssetFolder();
