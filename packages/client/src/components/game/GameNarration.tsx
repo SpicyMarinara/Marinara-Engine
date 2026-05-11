@@ -31,6 +31,7 @@ import {
   VolumeX,
   Loader2,
   Wand2,
+  RotateCcw,
 } from "lucide-react";
 import { cn, copyToClipboard, getAvatarCropStyle, type AvatarCrop, type LegacyAvatarCrop } from "../../lib/utils";
 import { findNamedMapValue } from "../../lib/game-character-name-match";
@@ -942,6 +943,7 @@ export function GameNarration({
   const { data: ttsConfig } = useTTSConfig();
   const [gameVoiceVersion, setGameVoiceVersion] = useState(0);
   const [gameVoicePlayingKey, setGameVoicePlayingKey] = useState<string | null>(null);
+  const [gameVoicePausedKey, setGameVoicePausedKey] = useState<string | null>(null);
   const gameVoiceCacheRef = useRef<Map<string, GameSegmentVoiceEntry>>(new Map());
   const gameVoicePendingRef = useRef<Map<string, AbortController>>(new Map());
   const gameVoiceAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -1644,6 +1646,7 @@ export function GameNarration({
       gameVoiceAudioRef.current = null;
     }
     setGameVoicePlayingKey(null);
+    setGameVoicePausedKey(null);
   }, []);
 
   const playGameVoiceKeys = useCallback(
@@ -1664,6 +1667,7 @@ export function GameNarration({
         const key = playableKeys[keyIndex];
         if (!key) {
           setGameVoicePlayingKey(null);
+          setGameVoicePausedKey(null);
           gameVoiceAudioRef.current = null;
           return;
         }
@@ -1685,6 +1689,7 @@ export function GameNarration({
         }
 
         setGameVoicePlayingKey(key);
+        setGameVoicePausedKey(null);
         const audio = new Audio(url);
         audio.volume = normalizedGameVoiceVolume;
         audio.muted = normalizedGameVoiceVolume <= 0;
@@ -1697,11 +1702,13 @@ export function GameNarration({
         audio.onerror = () => {
           if (gameVoiceSequenceRef.current !== sequence || gameVoiceAudioRef.current !== audio) return;
           setGameVoicePlayingKey(null);
+          setGameVoicePausedKey(null);
           gameVoiceAudioRef.current = null;
         };
         audio.play().catch(() => {
           if (gameVoiceSequenceRef.current !== sequence || gameVoiceAudioRef.current !== audio) return;
           setGameVoicePlayingKey(null);
+          setGameVoicePausedKey(null);
           gameVoiceAudioRef.current = null;
         });
       };
@@ -1713,6 +1720,24 @@ export function GameNarration({
 
   const playGameVoiceKey = useCallback((key: string) => playGameVoiceKeys([key]), [playGameVoiceKeys]);
 
+  const pauseGameVoicePlayback = useCallback(() => {
+    if (!gameVoiceAudioRef.current || !gameVoicePlayingKey || gameVoicePausedKey === gameVoicePlayingKey) return;
+    gameVoiceAudioRef.current.pause();
+    setGameVoicePausedKey(gameVoicePlayingKey);
+  }, [gameVoicePausedKey, gameVoicePlayingKey]);
+
+  const resumeGameVoicePlayback = useCallback(() => {
+    const audio = gameVoiceAudioRef.current;
+    if (!audio || !gameVoicePlayingKey || gameVoicePausedKey !== gameVoicePlayingKey) return;
+    setGameVoicePausedKey(null);
+    void audio.play().catch(() => {
+      if (gameVoiceAudioRef.current !== audio) return;
+      setGameVoicePlayingKey(null);
+      setGameVoicePausedKey(null);
+      gameVoiceAudioRef.current = null;
+    });
+  }, [gameVoicePausedKey, gameVoicePlayingKey]);
+
   useEffect(() => {
     if (!gameVoiceAudioRef.current) return;
     gameVoiceAudioRef.current.volume = normalizedGameVoiceVolume;
@@ -1722,13 +1747,19 @@ export function GameNarration({
   const toggleGameVoiceKey = useCallback(
     (key: string) => {
       if (gameVoicePlayingKey === key) {
-        stopGameVoicePlayback();
+        if (gameVoicePausedKey === key) {
+          resumeGameVoicePlayback();
+        } else {
+          pauseGameVoicePlayback();
+        }
         return;
       }
       playGameVoiceKey(key);
     },
-    [gameVoicePlayingKey, playGameVoiceKey, stopGameVoicePlayback],
+    [gameVoicePausedKey, gameVoicePlayingKey, pauseGameVoicePlayback, playGameVoiceKey, resumeGameVoicePlayback],
   );
+
+  const restartGameVoiceKey = useCallback((key: string) => playGameVoiceKey(key), [playGameVoiceKey]);
 
   const getVoiceRequestsForSegment = useCallback(
     (segment: NarrationSegment): GameSegmentVoiceRequest[] => {
@@ -3036,32 +3067,62 @@ export function GameNarration({
 
     const voiceKey = getVoiceKeyForSegment(seg);
     const voiceEntry = voiceKey ? gameVoiceCacheRef.current.get(voiceKey) : undefined;
+    const voicePaused = gameVoicePausedKey === voiceKey;
+    const voiceActive = gameVoicePlayingKey === voiceKey;
     const voiceButton =
       voiceKey && voiceEntry && voiceEntry.status !== "error" ? (
-        <button
-          type="button"
-          onClick={() => toggleGameVoiceKey(voiceKey)}
-          disabled={voiceEntry.status === "loading"}
-          className={cn(
-            "ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full text-[var(--foreground)]/45 transition-colors hover:bg-[var(--muted)]/40 hover:text-sky-200 disabled:cursor-wait disabled:opacity-60 dark:text-white/45 dark:hover:bg-white/10",
-            gameVoicePlayingKey === voiceKey && "bg-sky-400/15 text-sky-200 dark:text-sky-200",
+        <span className="ml-1 inline-flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => toggleGameVoiceKey(voiceKey)}
+            disabled={voiceEntry.status === "loading"}
+            className={cn(
+              "inline-flex h-5 w-5 items-center justify-center rounded-full text-[var(--foreground)]/45 transition-colors hover:bg-[var(--muted)]/40 hover:text-sky-200 disabled:cursor-wait disabled:opacity-60 dark:text-white/45 dark:hover:bg-white/10",
+              voiceActive && "bg-sky-400/15 text-sky-200 dark:text-sky-200",
+            )}
+            title={
+              voiceEntry.status === "loading"
+                ? "Generating voice-over"
+                : voiceActive
+                  ? voicePaused
+                    ? "Resume voice-over"
+                    : "Pause voice-over"
+                  : "Play voice-over"
+            }
+          >
+            {voiceEntry.status === "loading" ? (
+              <Loader2 size={11} className="animate-spin" />
+            ) : voiceActive ? (
+              voicePaused ? (
+                <Play size={11} />
+              ) : (
+                <Pause size={11} />
+              )
+            ) : (
+              <Volume2 size={11} />
+            )}
+          </button>
+          {voiceActive && voiceEntry.status === "ready" && (
+            <>
+              <button
+                type="button"
+                onClick={() => restartGameVoiceKey(voiceKey)}
+                className="inline-flex h-5 w-5 items-center justify-center rounded-full text-sky-200 transition-colors hover:bg-[var(--muted)]/40 dark:hover:bg-white/10"
+                title="Restart voice-over"
+              >
+                <RotateCcw size={11} />
+              </button>
+              <button
+                type="button"
+                onClick={stopGameVoicePlayback}
+                className="inline-flex h-5 w-5 items-center justify-center rounded-full text-sky-200 transition-colors hover:bg-[var(--muted)]/40 dark:hover:bg-white/10"
+                title="Stop voice-over"
+              >
+                <VolumeX size={11} />
+              </button>
+            </>
           )}
-          title={
-            voiceEntry.status === "loading"
-              ? "Generating voice-over"
-              : gameVoicePlayingKey === voiceKey
-                ? "Stop voice-over"
-                : "Play voice-over"
-          }
-        >
-          {voiceEntry.status === "loading" ? (
-            <Loader2 size={11} className="animate-spin" />
-          ) : gameVoicePlayingKey === voiceKey ? (
-            <VolumeX size={11} />
-          ) : (
-            <Volume2 size={11} />
-          )}
-        </button>
+        </span>
       ) : null;
 
     if (seg.type === "dialogue") {
@@ -3973,32 +4034,62 @@ export function GameNarration({
 
                       const voiceKey = getVoiceKeyForSegment(seg);
                       const voiceEntry = voiceKey ? gameVoiceCacheRef.current.get(voiceKey) : undefined;
+                      const voicePaused = gameVoicePausedKey === voiceKey;
+                      const voiceActive = gameVoicePlayingKey === voiceKey;
                       const voiceButton =
                         voiceKey && voiceEntry && voiceEntry.status !== "error" ? (
-                          <button
-                            type="button"
-                            onClick={() => toggleGameVoiceKey(voiceKey)}
-                            disabled={voiceEntry.status === "loading"}
-                            className={cn(
-                              "ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full text-white/45 transition-colors hover:bg-white/10 hover:text-sky-200 disabled:cursor-wait disabled:opacity-60",
-                              gameVoicePlayingKey === voiceKey && "bg-sky-400/15 text-sky-200",
+                          <span className="ml-1 inline-flex items-center gap-0.5">
+                            <button
+                              type="button"
+                              onClick={() => toggleGameVoiceKey(voiceKey)}
+                              disabled={voiceEntry.status === "loading"}
+                              className={cn(
+                                "inline-flex h-5 w-5 items-center justify-center rounded-full text-white/45 transition-colors hover:bg-white/10 hover:text-sky-200 disabled:cursor-wait disabled:opacity-60",
+                                voiceActive && "bg-sky-400/15 text-sky-200",
+                              )}
+                              title={
+                                voiceEntry.status === "loading"
+                                  ? "Generating voice-over"
+                                  : voiceActive
+                                    ? voicePaused
+                                      ? "Resume voice-over"
+                                      : "Pause voice-over"
+                                    : "Play voice-over"
+                              }
+                            >
+                              {voiceEntry.status === "loading" ? (
+                                <Loader2 size={11} className="animate-spin" />
+                              ) : voiceActive ? (
+                                voicePaused ? (
+                                  <Play size={11} />
+                                ) : (
+                                  <Pause size={11} />
+                                )
+                              ) : (
+                                <Volume2 size={11} />
+                              )}
+                            </button>
+                            {voiceActive && voiceEntry.status === "ready" && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => restartGameVoiceKey(voiceKey)}
+                                  className="inline-flex h-5 w-5 items-center justify-center rounded-full text-sky-200 transition-colors hover:bg-white/10"
+                                  title="Restart voice-over"
+                                >
+                                  <RotateCcw size={11} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={stopGameVoicePlayback}
+                                  className="inline-flex h-5 w-5 items-center justify-center rounded-full text-sky-200 transition-colors hover:bg-white/10"
+                                  title="Stop voice-over"
+                                >
+                                  <VolumeX size={11} />
+                                </button>
+                              </>
                             )}
-                            title={
-                              voiceEntry.status === "loading"
-                                ? "Generating voice-over"
-                                : gameVoicePlayingKey === voiceKey
-                                  ? "Stop voice-over"
-                                  : "Play voice-over"
-                            }
-                          >
-                            {voiceEntry.status === "loading" ? (
-                              <Loader2 size={11} className="animate-spin" />
-                            ) : gameVoicePlayingKey === voiceKey ? (
-                              <VolumeX size={11} />
-                            ) : (
-                              <Volume2 size={11} />
-                            )}
-                          </button>
+                          </span>
                         ) : null;
 
                       const editButtons = canEdit && (

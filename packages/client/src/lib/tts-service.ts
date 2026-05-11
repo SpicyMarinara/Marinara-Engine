@@ -2,7 +2,7 @@
 // TTS Service — Server-proxied audio playback
 // ──────────────────────────────────────────────
 
-export type TTSState = "idle" | "loading" | "playing" | "error";
+export type TTSState = "idle" | "loading" | "playing" | "paused" | "error";
 
 type StateListener = (state: TTSState, activeId: string | null) => void;
 
@@ -173,6 +173,42 @@ class TTSService {
     this.cleanup();
     this.lastError = null;
     this.setState("idle");
+  }
+
+  /** Pause the current generated audio without clearing it. */
+  pause(): void {
+    if (this.state !== "playing" || !this.audio) return;
+    this.audio.pause();
+    this.setState("paused");
+  }
+
+  /** Resume paused generated audio. */
+  resume(): void {
+    if (this.state !== "paused" || !this.audio) return;
+    const audio = this.audio;
+    this.setState("playing");
+    void audio.play().catch((err) => {
+      if (this.audio !== audio) return;
+      this.cleanup();
+      const error = err instanceof Error ? err : new Error("Browser blocked audio playback");
+      this.lastError = error.message;
+      this.setState("error");
+    });
+  }
+
+  /** Restart the current generated audio from the beginning. */
+  restart(): void {
+    if (!this.audio || (this.state !== "playing" && this.state !== "paused")) return;
+    const audio = this.audio;
+    audio.currentTime = 0;
+    this.setState("playing");
+    void audio.play().catch((err) => {
+      if (this.audio !== audio) return;
+      this.cleanup();
+      const error = err instanceof Error ? err : new Error("Browser blocked audio playback");
+      this.lastError = error.message;
+      this.setState("error");
+    });
   }
 
   private cleanup(): void {

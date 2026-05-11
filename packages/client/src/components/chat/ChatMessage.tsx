@@ -30,6 +30,8 @@ import {
   Volume2,
   VolumeX,
   Loader2,
+  Pause,
+  Play,
 } from "lucide-react";
 import type { Message } from "@marinara-engine/shared";
 import { memo, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback, type ReactNode } from "react";
@@ -746,15 +748,16 @@ export const ChatMessage = memo(function ChatMessage({
       }),
     [],
   );
-  const ttsBusy = ttsState === "loading" || ttsState === "playing";
+  const ttsBusy = ttsState === "loading" || ttsState === "playing" || ttsState === "paused";
   const isSpeakingThis = ttsActiveId === message.id;
   const isLoadingThis = isSpeakingThis && ttsState === "loading";
+  const isPausedThis = isSpeakingThis && ttsState === "paused";
 
   const handleSpeak = useCallback(() => {
     // Read directly from the singleton so we never act on stale React state
     const liveState = ttsService.getState();
     const liveActiveId = ttsService.getActiveId();
-    const liveBusy = liveState === "loading" || liveState === "playing";
+    const liveBusy = liveState === "loading" || liveState === "playing" || liveState === "paused";
     const liveIsThis = liveActiveId === message.id;
     if (liveBusy && !liveIsThis) return;
     if (liveIsThis) {
@@ -764,6 +767,21 @@ export const ChatMessage = memo(function ChatMessage({
       void ttsService.speak(ttsSpeakText, message.id, { speaker: ttsSpeakerName, voice: ttsVoice });
     }
   }, [message.id, ttsSpeakText, ttsSpeakerName, ttsVoice]);
+
+  const handlePauseResumeTTS = useCallback(() => {
+    if (ttsService.getActiveId() !== message.id) return;
+    if (ttsService.getState() === "paused") {
+      ttsService.resume();
+    } else {
+      ttsService.pause();
+    }
+  }, [message.id]);
+
+  const handleRestartTTS = useCallback(() => {
+    if (ttsService.getActiveId() === message.id) {
+      ttsService.restart();
+    }
+  }, [message.id]);
 
   // Dismiss actions when tapping outside on mobile
   useEffect(() => {
@@ -1425,7 +1443,10 @@ export const ChatMessage = memo(function ChatMessage({
                 <div className={cn(!isUser && "rpg-avatar-glow")}>
                   <button
                     type="button"
-                    className={cn("relative cursor-pointer overflow-hidden ring-2 ring-white/10", compactAvatarFrameClass)}
+                    className={cn(
+                      "relative cursor-pointer overflow-hidden ring-2 ring-white/10",
+                      compactAvatarFrameClass,
+                    )}
                     onClick={() => openImageLightbox(avatarUrl)}
                     aria-label={`Open ${displayName} avatar`}
                   >
@@ -1775,30 +1796,56 @@ export const ChatMessage = memo(function ChatMessage({
                 dark
               />
               {ttsEnabled && (
-                <ActionBtn
-                  icon={
-                    isLoadingThis ? (
-                      <Loader2 size={MESSAGE_ACTION_ICON_SIZE} className="animate-spin" />
-                    ) : isSpeakingThis ? (
-                      <VolumeX size={MESSAGE_ACTION_ICON_SIZE} />
-                    ) : (
-                      <Volume2 size={MESSAGE_ACTION_ICON_SIZE} />
-                    )
-                  }
-                  onClick={handleSpeak}
-                  title={
-                    !ttsSpeakText
-                      ? "No dialogue to speak"
-                      : isLoadingThis
-                        ? "Loading…"
-                        : isSpeakingThis
-                          ? "Stop speaking"
-                          : "Speak"
-                  }
-                  className={isSpeakingThis ? "text-sky-400 hover:text-sky-300" : undefined}
-                  disabled={!ttsSpeakText || (ttsBusy && !isSpeakingThis)}
-                  dark
-                />
+                <>
+                  {isSpeakingThis && !isLoadingThis && (
+                    <>
+                      <ActionBtn
+                        icon={
+                          isPausedThis ? (
+                            <Play size={MESSAGE_ACTION_ICON_SIZE} />
+                          ) : (
+                            <Pause size={MESSAGE_ACTION_ICON_SIZE} />
+                          )
+                        }
+                        onClick={handlePauseResumeTTS}
+                        title={isPausedThis ? "Resume speaking" : "Pause speaking"}
+                        className="text-sky-400 hover:text-sky-300"
+                        dark
+                      />
+                      <ActionBtn
+                        icon={<RefreshCw size={MESSAGE_ACTION_ICON_SIZE} />}
+                        onClick={handleRestartTTS}
+                        title="Restart speaking"
+                        className="text-sky-400 hover:text-sky-300"
+                        dark
+                      />
+                    </>
+                  )}
+                  <ActionBtn
+                    icon={
+                      isLoadingThis ? (
+                        <Loader2 size={MESSAGE_ACTION_ICON_SIZE} className="animate-spin" />
+                      ) : isSpeakingThis ? (
+                        <VolumeX size={MESSAGE_ACTION_ICON_SIZE} />
+                      ) : (
+                        <Volume2 size={MESSAGE_ACTION_ICON_SIZE} />
+                      )
+                    }
+                    onClick={handleSpeak}
+                    title={
+                      !ttsSpeakText
+                        ? "No dialogue to speak"
+                        : isLoadingThis
+                          ? "Loading…"
+                          : isSpeakingThis
+                            ? "Stop speaking"
+                            : "Speak"
+                    }
+                    className={isSpeakingThis ? "text-sky-400 hover:text-sky-300" : undefined}
+                    disabled={!ttsSpeakText || (ttsBusy && !isSpeakingThis)}
+                    dark
+                  />
+                </>
               )}
             </div>
           </div>
@@ -2159,29 +2206,53 @@ export const ChatMessage = memo(function ChatMessage({
               className="hover:text-[var(--destructive)]"
             />
             {ttsEnabled && (
-              <ActionBtn
-                icon={
-                  isLoadingThis ? (
-                    <Loader2 size={MESSAGE_ACTION_ICON_SIZE} className="animate-spin" />
-                  ) : isSpeakingThis ? (
-                    <VolumeX size={MESSAGE_ACTION_ICON_SIZE} />
-                  ) : (
-                    <Volume2 size={MESSAGE_ACTION_ICON_SIZE} />
-                  )
-                }
-                onClick={handleSpeak}
-                title={
-                  !ttsSpeakText
-                    ? "No dialogue to speak"
-                    : isLoadingThis
-                      ? "Loading…"
-                      : isSpeakingThis
-                        ? "Stop speaking"
-                        : "Speak"
-                }
-                className={isSpeakingThis ? "text-sky-500" : undefined}
-                disabled={!ttsSpeakText || (ttsBusy && !isSpeakingThis)}
-              />
+              <>
+                {isSpeakingThis && !isLoadingThis && (
+                  <>
+                    <ActionBtn
+                      icon={
+                        isPausedThis ? (
+                          <Play size={MESSAGE_ACTION_ICON_SIZE} />
+                        ) : (
+                          <Pause size={MESSAGE_ACTION_ICON_SIZE} />
+                        )
+                      }
+                      onClick={handlePauseResumeTTS}
+                      title={isPausedThis ? "Resume speaking" : "Pause speaking"}
+                      className="text-sky-500"
+                    />
+                    <ActionBtn
+                      icon={<RefreshCw size={MESSAGE_ACTION_ICON_SIZE} />}
+                      onClick={handleRestartTTS}
+                      title="Restart speaking"
+                      className="text-sky-500"
+                    />
+                  </>
+                )}
+                <ActionBtn
+                  icon={
+                    isLoadingThis ? (
+                      <Loader2 size={MESSAGE_ACTION_ICON_SIZE} className="animate-spin" />
+                    ) : isSpeakingThis ? (
+                      <VolumeX size={MESSAGE_ACTION_ICON_SIZE} />
+                    ) : (
+                      <Volume2 size={MESSAGE_ACTION_ICON_SIZE} />
+                    )
+                  }
+                  onClick={handleSpeak}
+                  title={
+                    !ttsSpeakText
+                      ? "No dialogue to speak"
+                      : isLoadingThis
+                        ? "Loading…"
+                        : isSpeakingThis
+                          ? "Stop speaking"
+                          : "Speak"
+                  }
+                  className={isSpeakingThis ? "text-sky-500" : undefined}
+                  disabled={!ttsSpeakText || (ttsBusy && !isSpeakingThis)}
+                />
+              </>
             )}
           </div>
         </div>

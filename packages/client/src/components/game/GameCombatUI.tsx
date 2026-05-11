@@ -49,6 +49,10 @@ import {
   SkullIcon,
   ScrollText,
   X,
+  Pause,
+  Play,
+  RotateCcw,
+  VolumeX,
 } from "lucide-react";
 
 // `combatant.sprite` is populated either from a real avatar URL (player party,
@@ -614,6 +618,9 @@ export function GameCombatUI({
     narration ? [{ id: "combat-start", text: narration, tone: "system" }] : [],
   );
   const [combatVoiceVersion, setCombatVoiceVersion] = useState(0);
+  const [combatVoicePlaying, setCombatVoicePlaying] = useState(false);
+  const [combatVoicePaused, setCombatVoicePaused] = useState(false);
+  const [lastCombatVoiceKeys, setLastCombatVoiceKeys] = useState<string[]>([]);
 
   const combatRound = useCombatRound();
   const { data: ttsConfig } = useTTSConfig();
@@ -727,6 +734,8 @@ export function GameCombatUI({
       combatVoiceAudioRef.current.onerror = null;
       combatVoiceAudioRef.current = null;
     }
+    setCombatVoicePlaying(false);
+    setCombatVoicePaused(false);
   }, []);
 
   const playCombatVoiceKeys = useCallback(
@@ -739,6 +748,8 @@ export function GameCombatUI({
 
       stopCombatVoicePlayback();
       const sequence = ++combatVoiceSequenceRef.current;
+      setLastCombatVoiceKeys(playableKeys);
+      setCombatVoicePaused(false);
       let keyIndex = 0;
       let urlIndex = 0;
 
@@ -747,6 +758,8 @@ export function GameCombatUI({
         const key = playableKeys[keyIndex];
         if (!key) {
           combatVoiceAudioRef.current = null;
+          setCombatVoicePlaying(false);
+          setCombatVoicePaused(false);
           return;
         }
 
@@ -770,6 +783,8 @@ export function GameCombatUI({
         audio.volume = normalizedGameVoiceVolume;
         audio.muted = normalizedGameVoiceVolume <= 0;
         combatVoiceAudioRef.current = audio;
+        setCombatVoicePlaying(true);
+        setCombatVoicePaused(false);
         audio.onended = () => {
           if (combatVoiceSequenceRef.current !== sequence || combatVoiceAudioRef.current !== audio) return;
           urlIndex += 1;
@@ -778,10 +793,14 @@ export function GameCombatUI({
         audio.onerror = () => {
           if (combatVoiceSequenceRef.current !== sequence || combatVoiceAudioRef.current !== audio) return;
           combatVoiceAudioRef.current = null;
+          setCombatVoicePlaying(false);
+          setCombatVoicePaused(false);
         };
         audio.play().catch(() => {
           if (combatVoiceSequenceRef.current !== sequence || combatVoiceAudioRef.current !== audio) return;
           combatVoiceAudioRef.current = null;
+          setCombatVoicePlaying(false);
+          setCombatVoicePaused(false);
         });
       };
 
@@ -789,6 +808,36 @@ export function GameCombatUI({
     },
     [normalizedGameVoiceVolume, stopCombatVoicePlayback],
   );
+
+  const playableCombatVoiceKeys = combatVoiceLines
+    .filter((line) => {
+      const entry = combatVoiceCacheRef.current.get(line.voiceKey);
+      return entry?.status === "ready" && entry.urls.length > 0;
+    })
+    .map((line) => line.voiceKey);
+
+  const pauseCombatVoicePlayback = useCallback(() => {
+    if (!combatVoiceAudioRef.current || !combatVoicePlaying || combatVoicePaused) return;
+    combatVoiceAudioRef.current.pause();
+    setCombatVoicePaused(true);
+  }, [combatVoicePaused, combatVoicePlaying]);
+
+  const resumeCombatVoicePlayback = useCallback(() => {
+    const audio = combatVoiceAudioRef.current;
+    if (!audio || !combatVoicePlaying || !combatVoicePaused) return;
+    setCombatVoicePaused(false);
+    void audio.play().catch(() => {
+      if (combatVoiceAudioRef.current !== audio) return;
+      combatVoiceAudioRef.current = null;
+      setCombatVoicePlaying(false);
+      setCombatVoicePaused(false);
+    });
+  }, [combatVoicePaused, combatVoicePlaying]);
+
+  const restartCombatVoicePlayback = useCallback(() => {
+    const keys = lastCombatVoiceKeys.length > 0 ? lastCombatVoiceKeys : playableCombatVoiceKeys;
+    if (keys.length > 0) playCombatVoiceKeys(keys);
+  }, [lastCombatVoiceKeys, playableCombatVoiceKeys, playCombatVoiceKeys]);
 
   useEffect(() => {
     if (!combatVoiceAudioRef.current) return;
@@ -888,6 +937,54 @@ export function GameCombatUI({
       cached.clear();
     };
   }, [stopCombatVoicePlayback]);
+
+  const combatVoiceControls =
+    playableCombatVoiceKeys.length > 0 || combatVoicePlaying ? (
+      <div className="inline-flex items-center gap-0.5 rounded-full border border-white/10 bg-black/45 p-0.5 shadow-lg backdrop-blur-md">
+        {combatVoicePlaying ? (
+          <>
+            <button
+              type="button"
+              onClick={combatVoicePaused ? resumeCombatVoicePlayback : pauseCombatVoicePlayback}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-sky-100 transition-colors hover:bg-white/10"
+              title={combatVoicePaused ? "Resume combat voice-over" : "Pause combat voice-over"}
+              aria-label={combatVoicePaused ? "Resume combat voice-over" : "Pause combat voice-over"}
+            >
+              {combatVoicePaused ? <Play size={12} /> : <Pause size={12} />}
+            </button>
+            <button
+              type="button"
+              onClick={restartCombatVoicePlayback}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-sky-100 transition-colors hover:bg-white/10"
+              title="Restart combat voice-over"
+              aria-label="Restart combat voice-over"
+            >
+              <RotateCcw size={12} />
+            </button>
+            <button
+              type="button"
+              onClick={stopCombatVoicePlayback}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-sky-100 transition-colors hover:bg-white/10"
+              title="Stop combat voice-over"
+              aria-label="Stop combat voice-over"
+            >
+              <VolumeX size={12} />
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => playCombatVoiceKeys(playableCombatVoiceKeys)}
+            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-sky-100 disabled:cursor-not-allowed disabled:opacity-40"
+            title="Play combat voice-over"
+            aria-label="Play combat voice-over"
+            disabled={playableCombatVoiceKeys.length === 0}
+          >
+            <Play size={12} />
+          </button>
+        )}
+      </div>
+    ) : null;
 
   useEffect(() => {
     setParty(initialParty);
@@ -1931,7 +2028,11 @@ export function GameCombatUI({
               )}
               {openDrawer === "mechanics" && <CombatMechanicsPanel mechanics={combatMechanics} round={round} />}
               {openDrawer === "cues" && (
-                <CombatDialoguePanel lines={visibleCombatDialogue} voiceableSpeakers={voicedCombatSpeakerSet} />
+                <CombatDialoguePanel
+                  lines={visibleCombatDialogue}
+                  voiceableSpeakers={voicedCombatSpeakerSet}
+                  voiceControls={combatVoiceControls}
+                />
               )}
               {openDrawer === "log" && (
                 <div className="space-y-1 pr-1">
@@ -2036,7 +2137,11 @@ export function GameCombatUI({
       </div>
 
       {visibleCombatDialogue.length > 0 && phase !== "intro" && (
-        <CombatDialoguePanel lines={visibleCombatDialogue} voiceableSpeakers={voicedCombatSpeakerSet} />
+        <CombatDialoguePanel
+          lines={visibleCombatDialogue}
+          voiceableSpeakers={voicedCombatSpeakerSet}
+          voiceControls={combatVoiceControls}
+        />
       )}
 
       {combatMechanics.length > 0 && phase !== "intro" && (
@@ -2486,12 +2591,15 @@ export function GameCombatUI({
 function CombatDialoguePanel({
   lines,
   voiceableSpeakers,
+  voiceControls,
 }: {
   lines: PartyDialogueLine[];
   voiceableSpeakers: Set<string>;
+  voiceControls?: ReactNode;
 }) {
   return (
     <div className="relative z-30 shrink-0 px-3 pb-1.5 sm:px-4 sm:pb-2">
+      {voiceControls && <div className="mb-1 flex justify-end">{voiceControls}</div>}
       <div className="max-h-[18svh] space-y-1.5 overflow-y-auto pr-1 sm:max-h-28">
         {lines.map((line, index) => {
           const isEnemyLine = !voiceableSpeakers.has(normalizeTTSCharacterName(line.character));
