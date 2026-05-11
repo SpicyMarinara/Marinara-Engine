@@ -11,11 +11,23 @@ async function captureChatRequestBody(
   baseUrl = "https://example.com/v1",
   provider = new OpenAIProvider(baseUrl, "test-key"),
 ) {
+  const request = await captureChatRequest(model, overrides, baseUrl, provider);
+  return request.body;
+}
+
+async function captureChatRequest(
+  model: string,
+  overrides: Partial<ChatOptions> = {},
+  baseUrl = "https://example.com/v1",
+  provider = new OpenAIProvider(baseUrl, "test-key"),
+) {
   const requests: Array<Record<string, unknown>> = [];
+  const urls: string[] = [];
   const originalFetch = globalThis.fetch;
   const originalLocalUrls = process.env.PROVIDER_LOCAL_URLS_ENABLED;
 
-  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+  globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => {
+    urls.push(String(input));
     requests.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
     return new Response(
       JSON.stringify({
@@ -52,7 +64,8 @@ async function captureChatRequestBody(
   }
 
   assert.equal(requests.length, 1);
-  return requests[0]!;
+  assert.equal(urls.length, 1);
+  return { url: urls[0]!, body: requests[0]! };
 }
 
 async function captureChatRequestBodyForMessages(
@@ -240,24 +253,27 @@ test("custom compatible endpoints keep OpenAI reasoning model names on a standar
   assert.equal("enable_thinking" in body, false);
 });
 
-test("custom compatible GPT-5.5 endpoints route through Responses without Chat Completions streaming extras", async () => {
+test("custom compatible GPT-5.5 endpoints stay on Chat Completions", async () => {
   const provider = createLLMProvider("custom", "https://example.com/v1", "test-key");
-  const body = await captureChatRequestBody(
+  const request = await captureChatRequest(
     "gpt-5.5",
     { reasoningEffort: "xhigh", verbosity: "high", temperature: 0.7, topP: 0.9 },
     "https://example.com/v1",
     provider,
   );
+  const body = request.body;
 
+  assert.equal(request.url, "https://example.com/v1/chat/completions");
   assert.equal(body.stream, false);
-  assert.equal(body.max_output_tokens, 512);
-  assert.deepEqual(body.input, [{ role: "user", content: "Hello" }]);
-  assert.deepEqual(body.reasoning, { effort: "xhigh" });
-  assert.deepEqual(body.text, { verbosity: "high" });
+  assert.equal(body.max_completion_tokens, 512);
+  assert.deepEqual(body.messages, [{ role: "user", content: "Hello" }]);
   assert.equal("stream_options" in body, false);
-  assert.equal("messages" in body, false);
   assert.equal("max_tokens" in body, false);
-  assert.equal("reasoning_effort" in body, false);
+  assert.equal("max_output_tokens" in body, false);
+  assert.equal("input" in body, false);
+  assert.equal("reasoning" in body, false);
+  assert.equal("text" in body, false);
+  assert.equal(body.reasoning_effort, "xhigh");
   assert.equal("temperature" in body, false);
   assert.equal("top_p" in body, false);
 });
