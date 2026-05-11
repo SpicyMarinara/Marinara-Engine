@@ -184,6 +184,98 @@ function expandBracketedCharacterBlocks(template: string, ctx: MacroContext): st
   return changed ? expandedLines.join("\n") : template;
 }
 
+function findBalancedMacroEnd(input: string, start: number): number {
+  let depth = 0;
+
+  for (let index = start; index < input.length - 1; index++) {
+    if (input[index] === "{" && input[index + 1] === "{") {
+      depth += 1;
+      index += 1;
+      continue;
+    }
+
+    if (input[index] === "}" && input[index + 1] === "}") {
+      depth -= 1;
+      index += 1;
+      if (depth === 0) return index + 1;
+    }
+  }
+
+  return -1;
+}
+
+function replaceBalancedMacros(
+  input: string,
+  replacer: (body: string, original: string) => string | undefined,
+): string {
+  let result = "";
+  let index = 0;
+
+  while (index < input.length) {
+    const start = input.indexOf("{{", index);
+    if (start === -1) {
+      result += input.slice(index);
+      break;
+    }
+
+    result += input.slice(index, start);
+
+    const end = findBalancedMacroEnd(input, start);
+    if (end === -1) {
+      result += input.slice(start);
+      break;
+    }
+
+    const original = input.slice(start, end);
+    const body = input.slice(start + 2, end - 2);
+    const replacement = replacer(body, original);
+
+    if (replacement !== undefined) {
+      result += replacement;
+      index = end;
+    } else {
+      result += "{{";
+      index = start + 2;
+    }
+  }
+
+  return result;
+}
+
+function splitTopLevelDoubleColon(input: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  let depth = 0;
+
+  for (let index = 0; index < input.length; index++) {
+    if (input[index] === "{" && input[index + 1] === "{") {
+      depth += 1;
+      current += "{{";
+      index += 1;
+      continue;
+    }
+
+    if (input[index] === "}" && input[index + 1] === "}" && depth > 0) {
+      depth -= 1;
+      current += "}}";
+      index += 1;
+      continue;
+    }
+
+    if (depth === 0 && input[index] === ":" && input[index + 1] === ":") {
+      parts.push(current);
+      current = "";
+      index += 1;
+      continue;
+    }
+
+    current += input[index];
+  }
+
+  parts.push(current);
+  return parts;
+}
+
 /**
  * Replace macros in a prompt string with their values.
  *
@@ -271,13 +363,16 @@ export function resolveMacros(template: string, ctx: MacroContext, options: Reso
 
   // ── Random values ──
   result = result.replace(/\{\{random\}\}/gi, () => String(Math.floor(Math.random() * 101)));
-  result = result.replace(/\{\{random::([^}]*)\}\}/gi, (_, body) => {
-    const choices = String(body)
-      .split("::")
+  result = replaceBalancedMacros(result, (body) => {
+    const match = body.match(/^random::([\s\S]*)$/i);
+    if (!match) return undefined;
+
+    const choices = splitTopLevelDoubleColon(match[1] ?? "")
       .map((choice) => choice.trim())
       .filter(Boolean);
     if (choices.length === 0) return "";
-    return choices[Math.floor(Math.random() * choices.length)] ?? "";
+    const choice = choices[Math.floor(Math.random() * choices.length)] ?? "";
+    return resolveMacros(choice, ctx, { ...options, trimResult: false });
   });
   result = result.replace(/\{\{random:(\d+):(\d+)\}\}/gi, (_, min, max) => {
     const lo = parseInt(min, 10);
@@ -295,31 +390,33 @@ export function resolveMacros(template: string, ctx: MacroContext, options: Reso
   });
 
   // ── Variable operations — resolve left-to-right so lorebook entries can set values for later entries. ──
-  result = result.replace(
-    /\{\{(?:(getvar|incvar|decvar)::([\w.-]+)|(setvar|addvar)::([\w.-]+)::([^}]*))\}\}/gi,
-    (_, readOp, readName, writeOp, writeName, val) => {
-      const op = String(readOp ?? writeOp).toLowerCase();
-      const name = String(readName ?? writeName);
-      switch (op) {
-        case "getvar":
-          return ctx.variables[name] ?? "";
-        case "setvar":
-          ctx.variables[name] = val ?? "";
-          return "";
-        case "addvar":
-          ctx.variables[name] = (ctx.variables[name] ?? "") + (val ?? "");
-          return "";
-        case "incvar":
-          ctx.variables[name] = String((parseInt(ctx.variables[name] ?? "0", 10) || 0) + 1);
-          return "";
-        case "decvar":
-          ctx.variables[name] = String((parseInt(ctx.variables[name] ?? "0", 10) || 0) - 1);
-          return "";
-        default:
-          return "";
-      }
-    },
-  );
+  result = replaceBalancedMacros(result, (body) => {
+    const readMatch = body.match(/^(getvar|incvar|decvar)::([\w.-]+)$/i);
+    const writeMatch = body.match(/^(setvar|addvar)::([\w.-]+)::([\s\S]*)$/i);
+    const op = String(readMatch?.[1] ?? writeMatch?.[1] ?? "").toLowerCase();
+    const name = readMatch?.[2] ?? writeMatch?.[2];
+    if (!op || !name) return undefined;
+
+    switch (op) {
+      case "getvar":
+        return ctx.variables[name] ?? "";
+      case "setvar":
+        ctx.variables[name] = resolveMacros(writeMatch?.[3] ?? "", ctx, { ...options, trimResult: false });
+        return "";
+      case "addvar":
+        ctx.variables[name] =
+          (ctx.variables[name] ?? "") + resolveMacros(writeMatch?.[3] ?? "", ctx, { ...options, trimResult: false });
+        return "";
+      case "incvar":
+        ctx.variables[name] = String((parseInt(ctx.variables[name] ?? "0", 10) || 0) + 1);
+        return "";
+      case "decvar":
+        ctx.variables[name] = String((parseInt(ctx.variables[name] ?? "0", 10) || 0) - 1);
+        return "";
+      default:
+        return "";
+    }
+  });
 
   // ── Case transforms ──
   result = result.replace(/\{\{uppercase\}\}([\s\S]*?)\{\{\/uppercase\}\}/gi, (_, inner) =>
