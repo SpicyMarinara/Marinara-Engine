@@ -11,11 +11,15 @@ export interface TreeNode {
   children?: TreeNode[];
   ext?: string;
   description?: string;
+  size?: number;
+  modified?: string;
 }
 
 export const gameAssetKeys = {
   all: ["game-assets"] as const,
   tree: () => [...gameAssetKeys.all, "tree"] as const,
+  content: (path: string) => [...gameAssetKeys.all, "content", path] as const,
+  info: (path: string) => [...gameAssetKeys.all, "info", path] as const,
 };
 
 export function useGameAssetTree() {
@@ -112,5 +116,43 @@ export function useUpdateFolderDescription() {
     mutationFn: ({ path, description }: { path: string; description: string }) =>
       api.patch("/game-assets/folders/description", { path, description }),
     onSuccess: () => qc.invalidateQueries({ queryKey: gameAssetKeys.tree() }),
+  });
+}
+
+export function useGameAssetFileContent(path: string) {
+  return useQuery({
+    queryKey: gameAssetKeys.content(path),
+    queryFn: () => api.get<{ content: string }>(`/game-assets/file-content/${path}`),
+    enabled: !!path,
+  });
+}
+
+export function useSaveGameAssetFile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ path, content }: { path: string; content: string }) =>
+      api.put(`/game-assets/file-content/${path}`, { content }),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: gameAssetKeys.content(vars.path) });
+      qc.invalidateQueries({ queryKey: gameAssetKeys.tree() });
+    },
+  });
+}
+
+export function useGameAssetFileInfo(path: string) {
+  return useQuery({
+    queryKey: gameAssetKeys.info(path),
+    queryFn: () =>
+      api.get<{
+        name: string;
+        size: number;
+        width?: number;
+        height?: number;
+        format?: string;
+        modified: string;
+        created: string;
+      }>(`/game-assets/file-info/${path}`),
+    enabled: !!path,
+    staleTime: 30000,
   });
 }

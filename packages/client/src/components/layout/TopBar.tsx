@@ -141,7 +141,7 @@ export function TopBar() {
               ? "bg-[var(--accent)] text-[var(--primary)] shadow-sm"
               : "text-[var(--muted-foreground)] hover:text-[var(--primary)]",
           )}
-          title="Game Assets"
+          title="Assets"
         >
           <Folder size="0.9375rem" />
           {gameAssetsBrowserOpen && (

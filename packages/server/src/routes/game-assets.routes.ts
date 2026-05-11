@@ -21,6 +21,7 @@ import { execFile } from "child_process";
 import { platform } from "os";
 import { z } from "zod";
 import { pipeline } from "stream/promises";
+import sharp from "sharp";
 import { MUSIC_GENRES, MUSIC_INTENSITIES } from "@marinara-engine/shared";
 import { GAME_ASSETS_DIR, buildAssetManifest, getAssetManifest } from "../services/game/asset-manifest.service.js";
 import { assertInsideDir } from "../utils/security.js";
@@ -70,8 +71,11 @@ const CATEGORY_EXTENSIONS: Record<string, Set<string>> = {
   sprites: new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".svg"]),
   backgrounds: new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif"]),
 };
+const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".svg"]);
+const TEXT_EXTS = new Set([".txt", ".md", ".json", ".yaml", ".yml", ".js", ".ts", ".tsx", ".css", ".html"]);
 const VALID_CATEGORIES = new Set(Object.keys(CATEGORY_EXTENSIONS));
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+const MAX_TEXT_BYTES = 10 * 1024 * 1024;
 const MUSIC_STATES = ["exploration", "dialogue", "combat", "travel_rest"] as const;
 const MUSIC_STATE_SET = new Set<string>(MUSIC_STATES);
 const MUSIC_GENRE_SET = new Set<string>(MUSIC_GENRES);
@@ -86,7 +90,7 @@ const uploadSchema = z.object({
   /** Category: music, ambient, sfx, sprites, backgrounds */
   category: z.string().refine((c) => VALID_CATEGORIES.has(c), "Invalid category"),
   /** Sub-category folder, e.g. "combat", "custom", "generic-fantasy" */
-  subcategory: z.string().min(1).max(100),
+  subcategory: z.string().max(100),
   /** Filename (including extension) */
   filename: z.string().min(1).max(200),
   /** Base64-encoded file data (with or without data URL prefix) */
@@ -143,9 +147,16 @@ function prepareAssetTarget(category: string, subcategory: string, filename: str
   }
 
   const ext = extname(filename).toLowerCase();
+  const isTextFile = TEXT_EXTS.has(ext);
   const allowedExts = CATEGORY_EXTENSIONS[category];
-  if (!allowedExts?.has(ext)) {
-    throw new Error(`Unsupported ${category} file type: ${ext || "(none)"}`);
+  if (!isTextFile && !allowedExts?.has(ext)) {
+    const typeLabel = category === "music" || category === "sfx" || category === "ambient"
+      ? "audio files"
+      : category === "sprites" || category === "backgrounds"
+        ? "images"
+        : "files";
+    const extList = allowedExts ? Array.from(allowedExts).join(", ") : "";
+    throw new Error(`Can't upload ${ext} to ${category}. This folder only accepts ${typeLabel} (${extList})`);
   }
 
   const targetDir = join(GAME_ASSETS_DIR, category, subcategory);
@@ -174,6 +185,8 @@ interface TreeNode {
   children?: TreeNode[];
   ext?: string;
   description?: string;
+  size?: number;
+  modified?: string;
 }
 
 function buildTree(dir: string, relPrefix: string, meta: Record<string, FolderMeta>): TreeNode[] {
@@ -201,7 +214,14 @@ function buildTree(dir: string, relPrefix: string, meta: Record<string, FolderMe
       });
     } else {
       const ext = extname(entry).toLowerCase();
-      nodes.push({ name: entry, path: rel, type: "file", ext });
+      nodes.push({
+        name: entry,
+        path: rel,
+        type: "file",
+        ext,
+        size: stat.size,
+        modified: stat.mtime.toISOString(),
+      });
     }
   }
 
@@ -268,6 +288,19 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
       }
 
       await pipeline(file.file, createWriteStream(target.targetPath));
+
+      const writtenSize = statSync(target.targetPath).size;
+      const ext = extname(file.filename).toLowerCase();
+      const isTextFile = TEXT_EXTS.has(ext);
+      const maxBytes = isTextFile ? MAX_TEXT_BYTES : MAX_UPLOAD_BYTES;
+      const maxLabel = isTextFile ? "10MB" : "50MB";
+
+      if (writtenSize > maxBytes) {
+        const { unlinkSync } = await import("fs");
+        unlinkSync(target.targetPath);
+        return reply.status(400).send({ error: `File too large: ${file.filename} is ${(writtenSize / 1024 / 1024).toFixed(1)} MB. Max size: ${maxLabel}.` });
+      }
+
       return finishAssetUpload(category, subcategory, target.safeName);
     }
 
@@ -289,9 +322,13 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
     const rawBase64 = base64Match ? base64Match[1]! : data;
     const buffer = Buffer.from(rawBase64, "base64");
 
-    // Size limit: 50MB
-    if (buffer.length > MAX_UPLOAD_BYTES) {
-      return reply.status(400).send({ error: "File too large (max 50MB)" });
+    const ext = extname(filename).toLowerCase();
+    const isTextFile = TEXT_EXTS.has(ext);
+    const maxBytes = isTextFile ? MAX_TEXT_BYTES : MAX_UPLOAD_BYTES;
+    const maxLabel = isTextFile ? "10MB" : "50MB";
+
+    if (buffer.length > maxBytes) {
+      return reply.status(400).send({ error: `File too large: ${filename} is ${(buffer.length / 1024 / 1024).toFixed(1)} MB. Max size: ${maxLabel}.` });
     }
 
     writeFileSync(target.targetPath, buffer);
@@ -569,5 +606,91 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
 
     const newRel = `${targetFolder}/${safeName}`;
     return { sourcePath: filePath, newPath: newRel };
+  });
+
+  // ── GET /game-assets/file-content/* ──
+  app.get("/file-content/*", async (req, reply) => {
+    const wildcard = (req.params as Record<string, string>)["*"];
+    if (!wildcard || !isSafePath(wildcard)) {
+      return reply.status(400).send({ error: "Invalid path" });
+    }
+
+    const filePath = join(GAME_ASSETS_DIR, wildcard);
+    if (!existsSync(filePath)) {
+      return reply.status(404).send({ error: "File not found" });
+    }
+
+    const stat = statSync(filePath);
+    if (!stat.isFile()) {
+      return reply.status(400).send({ error: "Not a file" });
+    }
+
+    const content = readFileSync(filePath, "utf-8");
+    return { content };
+  });
+
+  // ── PUT /game-assets/file-content/* ──
+  app.put("/file-content/*", async (req, reply) => {
+    const wildcard = (req.params as Record<string, string>)["*"];
+    if (!wildcard || !isSafePath(wildcard)) {
+      return reply.status(400).send({ error: "Invalid path" });
+    }
+
+    const filePath = join(GAME_ASSETS_DIR, wildcard);
+    try {
+      assertInsideDir(GAME_ASSETS_DIR, filePath);
+    } catch {
+      return reply.status(400).send({ error: "Path escapes game assets directory" });
+    }
+
+    const body = req.body as { content?: string };
+    if (typeof body.content !== "string") {
+      return reply.status(400).send({ error: "Missing content" });
+    }
+
+    const parentDir = dirname(filePath);
+    if (!existsSync(parentDir)) {
+      mkdirSync(parentDir, { recursive: true });
+    }
+
+    writeFileSync(filePath, body.content, "utf-8");
+    return { saved: wildcard };
+  });
+
+  // ── GET /game-assets/file-info/* ──
+  app.get("/file-info/*", async (req, reply) => {
+    const wildcard = (req.params as Record<string, string>)["*"];
+    if (!wildcard || !isSafePath(wildcard)) {
+      return reply.status(400).send({ error: "Invalid path" });
+    }
+
+    const filePath = join(GAME_ASSETS_DIR, wildcard);
+    if (!existsSync(filePath)) {
+      return reply.status(404).send({ error: "File not found" });
+    }
+
+    const stat = statSync(filePath);
+    const info: Record<string, unknown> = {
+      name: basename(filePath),
+      size: stat.size,
+      modified: stat.mtime.toISOString(),
+      created: stat.birthtime.toISOString(),
+    };
+
+    if (stat.isFile()) {
+      const ext = extname(wildcard).toLowerCase();
+      if (IMAGE_EXTS.has(ext)) {
+        try {
+          const metadata = await sharp(filePath).metadata();
+          info.width = metadata.width;
+          info.height = metadata.height;
+          info.format = metadata.format;
+        } catch {
+          // ignore sharp errors
+        }
+      }
+    }
+
+    return info;
   });
 }
