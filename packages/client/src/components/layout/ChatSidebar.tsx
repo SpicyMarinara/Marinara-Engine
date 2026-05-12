@@ -41,7 +41,7 @@ import { useCharacters } from "../../hooks/use-characters";
 import { useChatStore } from "../../stores/chat.store";
 import { showConfirmDialog } from "../../lib/app-dialogs";
 import { useUIStore, type UserStatus } from "../../stores/ui.store";
-import { cn, getAvatarCropStyle, type AvatarCropValue } from "../../lib/utils";
+import { cn, getAvatarCropStyle } from "../../lib/utils";
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import type { Chat, ChatFolder, ChatMode } from "@marinara-engine/shared";
 import { Modal } from "../ui/Modal";
@@ -142,7 +142,7 @@ export function ChatSidebar() {
       {
         name: string;
         avatarUrl: string | null;
-        avatarCrop?: AvatarCropValue | null;
+        avatarCrop?: { zoom: number; offsetX: number; offsetY: number } | null;
         conversationStatus?: string;
       }
     >();
@@ -161,7 +161,7 @@ export function ChatSidebar() {
         map.set(char.id, {
           name,
           avatarUrl: char.avatarPath ?? null,
-          avatarCrop: (extensions.avatarCrop as AvatarCropValue | undefined) ?? null,
+          avatarCrop: (extensions.avatarCrop as { zoom: number; offsetX: number; offsetY: number } | undefined) ?? null,
           conversationStatus,
         });
       } catch {
@@ -624,7 +624,7 @@ export function ChatSidebar() {
               .filter(Boolean) as {
               name: string;
               avatarUrl: string | null;
-              avatarCrop?: AvatarCropValue | null;
+              avatarCrop?: { zoom: number; offsetX: number; offsetY: number } | null;
               conversationStatus?: string;
             }[];
 
@@ -665,7 +665,7 @@ export function ChatSidebar() {
               const a = avatars[0]!;
               return a.avatarUrl ? (
                 <div className="relative h-7 w-7 flex-shrink-0 transition-transform group-active:scale-90">
-                  <span className="relative block h-7 w-7 overflow-hidden rounded-full">
+                  <span className="block h-7 w-7 overflow-hidden rounded-full">
                     <img
                       src={a.avatarUrl}
                       alt={a.name}
@@ -1249,53 +1249,60 @@ function FolderRow({
   return (
     <Reorder.Item value={folder.id} dragListener={false} dragControls={dragControls} as="div" className="flex flex-col">
       {/* Folder header */}
-      <div
-        onClick={() => onToggleCollapse(folder)}
-        className="group relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 hover:bg-[var(--sidebar-accent)]/40"
-      >
+      <div className="group relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 hover:bg-[var(--sidebar-accent)]/40">
         <div
           onPointerDown={(e) => dragControls.start(e)}
           className="cursor-grab touch-none opacity-0 transition-opacity active:cursor-grabbing group-hover:opacity-100 max-md:opacity-100"
         >
           <GripVertical size="0.625rem" className="text-[var(--muted-foreground)]" />
         </div>
-        <ChevronRight
-          size="0.75rem"
-          className={cn("text-[var(--muted-foreground)] transition-transform", !folder.collapsed && "rotate-90")}
-        />
         <div
-          className="h-2 w-2 rounded-full flex-shrink-0 cursor-pointer"
-          style={{ backgroundColor: folder.color || "#6b7280" }}
-          title={folder.name}
-        />
-        {renaming ? (
-          <input
-            autoFocus
-            value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleCollapse(folder);
+          }}
+          className="flex flex-1 items-center gap-1.5 min-w-0"
+        >
+          <ChevronRight
+            size="0.75rem"
+            className={cn("text-[var(--muted-foreground)] transition-transform shrink-0", !folder.collapsed && "rotate-90")}
+          />
+          <div
+            className="h-2 w-2 rounded-full flex-shrink-0 cursor-pointer"
+            style={{ backgroundColor: folder.color || "#6b7280" }}
+            title={folder.name}
+          />
+          {renaming ? (
+            <input
+              autoFocus
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") {
+                  onRename(folder.id, renameValue);
+                  setRenaming(false);
+                }
+                if (e.key === "Escape") {
+                  setRenaming(false);
+                  setRenameValue(folder.name);
+                }
+              }}
+              onBlur={(e) => {
+                e.stopPropagation();
                 onRename(folder.id, renameValue);
                 setRenaming(false);
-              }
-              if (e.key === "Escape") {
-                setRenaming(false);
-                setRenameValue(folder.name);
-              }
-            }}
-            onBlur={() => {
-              onRename(folder.id, renameValue);
-              setRenaming(false);
-            }}
-            className="flex-1 bg-transparent text-xs font-medium text-[var(--foreground)] outline-none"
-          />
-        ) : (
-          <span className="flex-1 cursor-pointer truncate text-xs font-medium text-[var(--muted-foreground)]">
-            {folder.name}
-          </span>
-        )}
+              }}
+              className="flex-1 bg-transparent text-xs font-medium text-[var(--foreground)] outline-none min-w-0"
+            />
+          ) : (
+            <span className="flex-1 cursor-pointer truncate text-xs font-medium text-[var(--muted-foreground)] min-w-0">
+              {folder.name}
+            </span>
+          )}
+        </div>
         {entries.length > 0 && (
-          <span className="text-[0.5625rem] text-[var(--muted-foreground)]">{entries.length}</span>
+          <span className="text-[0.5625rem] text-[var(--muted-foreground)] shrink-0">{entries.length}</span>
         )}
         <button
           onClick={(e) => {
