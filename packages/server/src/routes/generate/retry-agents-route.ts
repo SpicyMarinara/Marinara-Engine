@@ -1653,6 +1653,8 @@ async function applyRetryResultEffects(args: {
           const illustratorAgent = resolvedAgents.find(
             (a) => a.resolved.id === result.agentId || a.resolved.type === "illustrator",
           );
+          const imagePositivePrompt = ((illustratorAgent?.resolved.settings?.imagePositivePrompt as string) ?? "").trim();
+          const savedNegativePrompt = ((illustratorAgent?.resolved.settings?.imageNegativePrompt as string) ?? "").trim();
           let imgConnId = (illustratorAgent?.resolved.settings?.imageConnectionId as string) ?? null;
           if (!imgConnId) {
             const defaultImageConn = (await conns.list()).find(
@@ -1692,6 +1694,10 @@ async function applyRetryResultEffects(args: {
               }
 
               let fullPrompt = style ? `${style}, ${imagePrompt}` : imagePrompt;
+              if (imagePositivePrompt) {
+                fullPrompt = `${fullPrompt}, ${imagePositivePrompt}`;
+              }
+              const finalNegativePrompt = [negativePrompt, savedNegativePrompt].filter(Boolean).join(", ");
 
               // Collect character avatar references when enabled
               const useAvatarRefs = illustratorAgent?.resolved.settings?.useAvatarReferences === true;
@@ -1745,7 +1751,7 @@ async function applyRetryResultEffects(args: {
 
               const imageResult = await generateImage(imgModel, imgBaseUrl, imgApiKey, imgServiceHint, {
                 prompt: fullPrompt,
-                negativePrompt: negativePrompt || undefined,
+                negativePrompt: finalNegativePrompt || undefined,
                 model: imgModel,
                 width: imgWidth,
                 height: imgHeight,

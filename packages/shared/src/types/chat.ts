@@ -167,6 +167,10 @@ export interface ChatMetadata {
   characterSchedules?: Record<string, unknown>;
   /** Week start timestamp for the current generated conversation schedules. */
   scheduleWeekStart?: string;
+  /** Extra positive prompt/tags appended to generated conversation selfie prompts. */
+  selfiePositivePrompt?: string;
+  /** Extra negative prompt/tags sent with generated conversation selfies. */
+  selfieNegativePrompt?: string;
 
   // ── Game Mode Fields ──
   /** UUID linking all sessions of one game */

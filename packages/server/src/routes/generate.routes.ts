@@ -7617,6 +7617,8 @@ export async function generateRoutes(app: FastifyInstance) {
             if (shouldGenerate && imagePrompt) {
               // Resolve connections: text LLM = connectionId, image gen = settings.imageConnectionId
               const illustratorAgent = resolvedAgents.find((a) => a.id === result.agentId || a.type === "illustrator");
+              const imagePositivePrompt = ((illustratorAgent?.settings?.imagePositivePrompt as string) ?? "").trim();
+              const savedNegativePrompt = ((illustratorAgent?.settings?.imageNegativePrompt as string) ?? "").trim();
               let imgConnId = (illustratorAgent?.settings?.imageConnectionId as string) ?? null;
               if (!imgConnId) {
                 const defaultImageConn = (await connections.list()).find(
@@ -7662,6 +7664,10 @@ export async function generateRoutes(app: FastifyInstance) {
 
                     // Prepend style to the prompt for better results
                     let fullPrompt = style ? `${style}, ${imagePrompt}` : imagePrompt;
+                    if (imagePositivePrompt) {
+                      fullPrompt = `${fullPrompt}, ${imagePositivePrompt}`;
+                    }
+                    const finalNegativePrompt = [negativePrompt, savedNegativePrompt].filter(Boolean).join(", ");
 
                     logger.debug(`[illustrator] Starting image generation (${imgWidth}x${imgHeight})...`);
 
@@ -7734,7 +7740,7 @@ export async function generateRoutes(app: FastifyInstance) {
 
                     const imageResult = await generateImage(imgModel, imgBaseUrl, imgApiKey, imgServiceHint, {
                       prompt: fullPrompt,
-                      negativePrompt: negativePrompt || undefined,
+                      negativePrompt: finalNegativePrompt || undefined,
                       model: imgModel,
                       width: imgWidth,
                       height: imgHeight,
@@ -8092,6 +8098,11 @@ export async function generateRoutes(app: FastifyInstance) {
                     const selfieTags: string[] = Array.isArray(chatMeta.selfieTags)
                       ? (chatMeta.selfieTags as string[])
                       : [];
+                    const selfiePositivePrompt =
+                      typeof chatMeta.selfiePositivePrompt === "string"
+                        ? chatMeta.selfiePositivePrompt.trim()
+                        : selfieTags.join(", ").trim();
+                    const selfieNegativePrompt = ((chatMeta.selfieNegativePrompt as string) ?? "").trim();
                     const promptBuilder = createLLMProvider(
                       conn.provider,
                       baseUrl,
@@ -8106,10 +8117,7 @@ export async function generateRoutes(app: FastifyInstance) {
                       {
                         appearance,
                         charName,
-                        selfieTagsBlock:
-                          selfieTags.length > 0
-                            ? `\n\nAlways include these tags/modifiers in the prompt: ${selfieTags.join(", ")}`
-                            : "",
+                        selfieTagsBlock: "",
                       },
                     );
                     const promptResult = await promptBuilder.chatComplete(
@@ -8130,6 +8138,9 @@ export async function generateRoutes(app: FastifyInstance) {
 
                     const imagePrompt = (promptResult.content ?? "").trim();
                     if (imagePrompt) {
+                      const finalSelfiePrompt = selfiePositivePrompt
+                        ? `${imagePrompt}, ${selfiePositivePrompt}`
+                        : imagePrompt;
                       const { generateImage, saveImageToDisk } = await import("../services/image/image-generation.js");
                       const { createGalleryStorage } = await import("../services/storage/gallery.storage.js");
                       const galleryStore = createGalleryStorage(app.db);
@@ -8152,7 +8163,8 @@ export async function generateRoutes(app: FastifyInstance) {
                         imgApiKey,
                         serviceHint || imgSource,
                         {
-                          prompt: imagePrompt,
+                          prompt: finalSelfiePrompt,
+                          negativePrompt: selfieNegativePrompt || undefined,
                           model: imgModel,
                           width: selfieW || imageSettings.selfie.width,
                           height: selfieH || imageSettings.selfie.height,
@@ -8166,7 +8178,7 @@ export async function generateRoutes(app: FastifyInstance) {
                       const galleryEntry = await galleryStore.create({
                         chatId: input.chatId,
                         filePath,
-                        prompt: imagePrompt,
+                        prompt: finalSelfiePrompt,
                         provider: imgConnFull.provider ?? "image_generation",
                         model: imgModel || "unknown",
                         width: selfieW || imageSettings.selfie.width,
@@ -8182,7 +8194,7 @@ export async function generateRoutes(app: FastifyInstance) {
                           type: "image",
                           url: imageUrl,
                           filename: `selfie_${charName.toLowerCase().replace(/\s+/g, "_")}.${imageResult.ext}`,
-                          prompt: imagePrompt,
+                          prompt: finalSelfiePrompt,
                           galleryId: (galleryEntry as any)?.id,
                         };
                         await chats.appendSwipeAttachment(messageId, generationSwipeIndex, attachment);
@@ -8202,12 +8214,12 @@ export async function generateRoutes(app: FastifyInstance) {
                             characterName: charName,
                             messageId,
                             imageUrl,
-                            prompt: imagePrompt,
+                            prompt: finalSelfiePrompt,
                             galleryId: (galleryEntry as any)?.id,
                           },
                         })}\n\n`,
                       );
-                      logger.info(`[commands] Selfie generated for ${charName}: ${imagePrompt.slice(0, 80)}...`);
+                      logger.info(`[commands] Selfie generated for ${charName}: ${finalSelfiePrompt.slice(0, 80)}...`);
                     }
                   } catch (imgErr) {
                     logger.error(imgErr, "[commands] Selfie generation failed");
