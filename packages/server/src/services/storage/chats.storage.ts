@@ -757,8 +757,8 @@ export function createChatsStorage(db: DB) {
     },
 
     /** Remove the bidirectional link for a chat (and its partner). Only nulls
-     *  the partner row when it actually reciprocates — leaves dangling pointers
-     *  to other chats alone so we don't sever an unrelated link. */
+     *  the partner row when it points back to this chat, otherwise we would 
+     *  sever an unrelated link. */
     async disconnectChat(chatId: string) {
       const chat = await this.getById(chatId);
       if (!chat) return;

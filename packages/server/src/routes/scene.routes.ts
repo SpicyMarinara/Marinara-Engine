@@ -293,9 +293,11 @@ export async function sceneRoutes(app: FastifyInstance) {
       sceneBusyCharIds: initiatorCharId ? [initiatorCharId] : finalParticipantIds,
     });
 
-    // Scene→origin navigation is driven by sceneOriginChatId in metadata, so we
-    // deliberately do NOT call connectChats here — that would clobber any
-    // pre-existing Conv↔RP link on the origin chat.
+    // Navigation to the connected chat is driven by sceneOriginChatId in metadata,
+    // so for scenes we do not call connectChats, which would overwrite any
+    // pre-existing connection to an RP from the origin chat.
+
+    console.log(`Creating scene. Origin chat ${originChatId} → scene chat ${sceneChat.id}`);
 
     // 1. Inject participation guide as a narrator message (visible to user, OOC guidance)
     if (plan.participationGuide) {

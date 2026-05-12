@@ -664,9 +664,9 @@ export function ChatRoleplaySurface({
   onSelectAllBelowSelection,
   isGrouped,
 }: RoleplaySurfaceProps) {
-  // Scene chats use sceneOriginChatId from metadata for "switch to" navigation
-  // instead of connectedChatId — scenes deliberately don't establish a
-  // connection so they can't displace a pre-existing Conv↔RP link.
+  // Scenes do not make a connection to their origin chat, so use the value of
+  // sceneOriginChatId to navigate back to the chat conversation. For normal RP
+  // chats, use the connectedChatId.
   const sceneOriginChatId =
     typeof chatMeta?.sceneOriginChatId === "string" ? chatMeta.sceneOriginChatId : null;
   const linkedChatId = sceneOriginChatId ?? chat?.connectedChatId ?? null;
