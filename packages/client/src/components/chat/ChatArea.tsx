@@ -35,7 +35,7 @@ import { useCharacters, usePersonas } from "../../hooks/use-characters";
 import { useConnections } from "../../hooks/use-connections";
 import { usePageActivity } from "../../hooks/use-page-activity";
 import { api } from "../../lib/api-client";
-import { getChatDisplayName, parseChatMetadata } from "../../lib/chat-display";
+import { getChatDisplayName, getConnectedChatDisplayName, parseChatMetadata } from "../../lib/chat-display";
 import { parseCharacterDisplayData } from "../../lib/character-display";
 import { showConfirmDialog } from "../../lib/app-dialogs";
 import { chatBackgroundMetadataToUrl, chatBackgroundUrlToMetadata } from "../../lib/backgrounds";
@@ -1552,7 +1552,7 @@ export function ChatArea() {
   const chatList =
     (allChats as Array<{ id: string; name: string; metadata?: string | Record<string, unknown> }> | undefined) ?? [];
   const connectedChatName = chat?.connectedChatId
-    ? getChatDisplayName(chatList.find((item) => item.id === chat.connectedChatId))
+    ? getConnectedChatDisplayName(chatList.find((item) => item.id === chat.connectedChatId))
     : undefined;
   const activeSceneChat = chatMeta.activeSceneChatId
     ? chatList.find((item) => item.id === chatMeta.activeSceneChatId)
