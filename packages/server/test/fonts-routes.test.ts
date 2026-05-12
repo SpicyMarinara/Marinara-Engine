@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fontDisplayName, parseGoogleFontFaces } from "../src/routes/fonts.routes.js";
+import { fontDisplayName, isLegacyManagedGoogleFilename, parseGoogleFontFaces } from "../src/routes/fonts.routes.js";
 
 test("parseGoogleFontFaces keeps unicode-range shards for CJK fonts", () => {
   const css = `
@@ -39,4 +39,12 @@ test("parseGoogleFontFaces keeps unicode-range shards for CJK fonts", () => {
 test("fontDisplayName collapses Google font shard filenames to one family", () => {
   assert.equal(fontDisplayName("NotoSansSC-Regular-001.woff2"), "Noto Sans SC");
   assert.equal(fontDisplayName("NotoSansSC-Regular-099.woff2"), "Noto Sans SC");
+});
+
+test("isLegacyManagedGoogleFilename matches app-generated Google font filenames", () => {
+  assert.equal(isLegacyManagedGoogleFilename("NotoSansSC-Regular.woff2", "NotoSansSC"), true);
+  assert.equal(isLegacyManagedGoogleFilename("NotoSansSC-Regular-001.woff2", "NotoSansSC"), true);
+  assert.equal(isLegacyManagedGoogleFilename("NotoSansSC-Regular-abc.woff2", "NotoSansSC"), false);
+  assert.equal(isLegacyManagedGoogleFilename("NotoSansSC-Bold.woff2", "NotoSansSC"), false);
+  assert.equal(isLegacyManagedGoogleFilename("Other-Regular.woff2", "NotoSansSC"), false);
 });

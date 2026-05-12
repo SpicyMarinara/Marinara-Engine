@@ -230,12 +230,23 @@ async function loadGoogleFontFaces(
   };
 }
 
+export function isLegacyManagedGoogleFilename(filename: string, safeName: string) {
+  const ext = extname(filename).toLowerCase();
+  if (ext !== ".woff2") return false;
+
+  const base = basename(filename, ext).toLowerCase();
+  const legacyBase = `${safeName}-Regular`.toLowerCase();
+  if (base === legacyBase) return true;
+  if (!base.startsWith(`${legacyBase}-`)) return false;
+  return /^\d{3}$/.test(base.slice(legacyBase.length + 1));
+}
+
 function isManagedGoogleFamilyFile(filename: string, safeName: string, metadata: Record<string, FontMetadataEntry>) {
   const ext = extname(filename).toLowerCase();
   return (
     FONT_EXTS.has(ext) &&
-    metadata[filename]?.source === "google" &&
-    (filename === `${safeName}-Regular.woff2` || filename.startsWith(`${safeName}-Regular-`))
+    isLegacyManagedGoogleFilename(filename, safeName) &&
+    (metadata[filename]?.source === "google" || !metadata[filename])
   );
 }
 
@@ -410,7 +421,8 @@ export async function fontsRoutes(app: FastifyInstance) {
         return { face, filename: `${safeName}-Regular${suffix}.woff2` };
       });
       const unmanagedConflict = faceTargets.find(
-        ({ filename }) => existsSync(join(FONTS_DIR, filename)) && metadata[filename]?.source !== "google",
+        ({ filename }) =>
+          existsSync(join(FONTS_DIR, filename)) && metadata[filename] && metadata[filename].source !== "google",
       );
       if (unmanagedConflict) {
         return reply.status(409).send({ error: `"${sanitized}" is already installed` });
