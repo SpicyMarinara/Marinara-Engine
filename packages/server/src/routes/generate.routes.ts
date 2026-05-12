@@ -885,8 +885,11 @@ export async function generateRoutes(app: FastifyInstance) {
 
       // ── Regeneration as swipe: exclude the target message from context ──
       if (input.regenerateMessageId) {
-        regenMsg = chatMessages.find((m: any) => m.id === input.regenerateMessageId);
-        if (!regenMsg) return reply.code(404).send({ error: "Regenerated message not found" });
+        regenMsg = scopedMessages.find((m: any) => m.id === input.regenerateMessageId);
+        if (!regenMsg) {
+          sendSseEvent(reply, { type: "error", data: "Regenerated message not found" });
+          return;
+        }
         chatMessages = chatMessages.filter((m: any) => m.id !== input.regenerateMessageId);
         lorebookKeeperMessages = lorebookKeeperMessages.filter((m: any) => m.id !== input.regenerateMessageId);
       }
@@ -6547,10 +6550,14 @@ export async function generateRoutes(app: FastifyInstance) {
         }
 
         if (regenGroupChatIndividual) {
-          if (regenMsg?.chatId !== input.chatId)
-            return reply.code(400).send({ error: "Regenerated message does not belong to this chat" });
-          if (!regenMsg?.characterId)
-            return reply.code(400).send({ error: "Regenerated message is missing character" });
+          if (regenMsg?.chatId !== input.chatId) {
+            sendSseEvent(reply, { type: "error", data: "Regenerated message does not belong to this chat" });
+            return;
+          }
+          if (!regenMsg?.characterId) {
+            sendSseEvent(reply, { type: "error", data: "Regenerated message is missing character" });
+            return;
+          }
 
           // Get character of regenerated message and append "Respond ONLY as [name]" instruction
           targetCharId = regenMsg?.characterId ?? null;
