@@ -21,7 +21,6 @@ import { execFile } from "child_process";
 import { platform } from "os";
 import { z } from "zod";
 import { pipeline } from "stream/promises";
-import sharp from "sharp";
 import { MUSIC_GENRES, MUSIC_INTENSITIES } from "@marinara-engine/shared";
 import { GAME_ASSETS_DIR, buildAssetManifest, getAssetManifest } from "../services/game/asset-manifest.service.js";
 import { assertInsideDir } from "../utils/security.js";
@@ -51,6 +50,30 @@ function loadMeta(): Record<string, FolderMeta> {
  */
 function saveMeta(meta: Record<string, FolderMeta>) {
   writeFileSync(META_PATH, JSON.stringify(meta, null, 2), "utf-8");
+}
+
+// sharp can fail to load on Android/Termux because it has no native Android
+// prebuild. Lazy-load it so metadata enrichment can degrade without blocking
+// server startup.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SharpFn = any;
+let cachedSharp: SharpFn | null = null;
+let sharpLoadFailed = false;
+async function getSharp(): Promise<SharpFn | null> {
+  if (cachedSharp) return cachedSharp;
+  if (sharpLoadFailed) return null;
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore - optional native dep, may not load on some platforms
+    const mod = await import("sharp");
+    cachedSharp = (mod.default ?? mod) as SharpFn;
+    return cachedSharp;
+  } catch (error) {
+    sharpLoadFailed = true;
+    logger.debug(error, "[game-assets] Image metadata unavailable because sharp could not be loaded");
+    return null;
+  }
 }
 
 const MIME_MAP: Record<string, string> = {
@@ -950,13 +973,16 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
     if (stat.isFile()) {
       const ext = extname(wildcard).toLowerCase();
       if (IMAGE_EXTS.has(ext)) {
-        try {
-          const metadata = await sharp(filePath).metadata();
-          info.width = metadata.width;
-          info.height = metadata.height;
-          info.format = metadata.format;
-        } catch {
-          // ignore sharp errors
+        const sharp = await getSharp();
+        if (sharp) {
+          try {
+            const metadata = await sharp(filePath).metadata();
+            info.width = metadata.width;
+            info.height = metadata.height;
+            info.format = metadata.format;
+          } catch {
+            // ignore sharp errors
+          }
         }
       }
     }
