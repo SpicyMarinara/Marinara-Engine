@@ -21,7 +21,11 @@ import { wrapContent, wrapGroup } from "./format-engine.js";
 import { expandMarker, type MarkerContext } from "./marker-expander.js";
 import { mergeAdjacentMessages, squashLeadingSystemMessages } from "./merger.js";
 import { injectAtDepth } from "../lorebook/prompt-injector.js";
-import { buildPromptMacroContext, collectCharacterDepthPromptEntries } from "./macro-context.js";
+import {
+  buildPromptMacroContext,
+  collectCharacterDepthPromptEntries,
+  resolveMacrosWithVariableSnapshot,
+} from "./macro-context.js";
 
 // ═══════════════════════════════════════════════
 //  Public Interface
@@ -244,6 +248,12 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
     gameState: input.gameState ?? null,
     generationTriggers: input.generationTriggers ?? ["chat"],
     previewOnly: input.previewOnly === true,
+    resolveLorebookContent: (value) => resolveMacrosWithVariableSnapshot(value, macroCtx),
+    resolveLorebookContentForScan: (value) =>
+      resolveMacros(value, {
+        ...macroCtx,
+        variables: { ...macroCtx.variables },
+      }),
     groupScenarioOverrideText: input.groupScenarioOverrideText ?? null,
   };
 
@@ -383,12 +393,7 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
   }
 
   if (markerCtx.lorebookDepthEntries && markerCtx.lorebookDepthEntries.length > 0) {
-    allDepthEntries.push(
-      markerCtx.lorebookDepthEntries.map((entry) => ({
-        ...entry,
-        content: resolveMacros(entry.content, macroCtx),
-      })),
-    );
+    allDepthEntries.push(markerCtx.lorebookDepthEntries);
   }
 
   const characterDepthEntries = await collectCharacterDepthPromptEntries(input.db, input.characterIds, macroCtx);
@@ -470,6 +475,7 @@ async function resolveSection(
   const role = section.role as "system" | "user" | "assistant";
 
   let content = section.content;
+  let contentMacrosResolved = false;
 
   // Handle marker sections
   if (section.isMarker === "true" && section.markerConfig) {
@@ -503,12 +509,16 @@ async function resolveSection(
     } else {
       // Other markers return content to be wrapped
       content = expanded.content;
+      contentMacrosResolved =
+        markerConfig.type === "world_info_before" ||
+        markerConfig.type === "world_info_after" ||
+        markerConfig.type === "lorebook";
       if (!content.trim()) return null;
     }
   }
 
   // Resolve macros
-  content = resolveMacros(content, ctx.macroCtx);
+  content = contentMacrosResolved ? content : resolveMacros(content, ctx.macroCtx);
   if (!content.trim()) return null;
 
   // Auto-wrap in the preset's format

@@ -1,18 +1,34 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { Lorebook, LorebookEntry } from "@marinara-engine/shared";
+import { createClient } from "@libsql/client";
+import { drizzle } from "drizzle-orm/libsql";
+import {
+  DEFAULT_GENERATION_PARAMS,
+  resolveMacros,
+  type Lorebook,
+  type LorebookEntry,
+  type MacroContext,
+} from "@marinara-engine/shared";
+import type { DB } from "../src/db/connection.js";
+import { runMigrations } from "../src/db/migrate.js";
+import { lorebookEntries, lorebooks } from "../src/db/schema/index.js";
 import {
   applyLorebookDefaults,
   applyPerLorebookTokenBudgets,
   enforceMaxActivatedEntries,
   filterRelevantLorebooks,
+  resolveAndBudgetActivatedLorebookEntries,
+  resolveActivatedLorebookEntryContent,
+  resolveBudgetAndRecursivelyActivateLorebookEntries,
   serializeTimingStateMap,
 } from "../src/services/lorebook/index.js";
+import { processActivatedEntries } from "../src/services/lorebook/prompt-injector.js";
 import {
   scanForActivatedEntries,
   updateTimingStatesForScan,
   type ActivatedEntry,
 } from "../src/services/lorebook/keyword-scanner.js";
+import { assemblePrompt } from "../src/services/prompt/assembler.js";
 
 function makeLorebook(overrides: Partial<Lorebook> = {}): Lorebook {
   return {
@@ -92,6 +108,477 @@ function makeEntry(overrides: Partial<LorebookEntry> = {}): LorebookEntry {
 function tokenContent(tokens: number): string {
   return "x".repeat(tokens * 4);
 }
+
+function dbLorebookEntry(id: string, overrides: Partial<ReturnType<typeof lorebookEntryRow>> = {}) {
+  return {
+    ...lorebookEntryRow(id),
+    ...overrides,
+  };
+}
+
+function lorebookEntryRow(id: string) {
+  return {
+    id,
+    lorebookId: "book-1",
+    folderId: null,
+    name: id,
+    content: "Lore entry",
+    description: "",
+    keys: JSON.stringify(["marker-key"]),
+    secondaryKeys: "[]",
+    enabled: "true",
+    constant: "false",
+    selective: "false",
+    selectiveLogic: "and" as const,
+    probability: null,
+    scanDepth: null,
+    matchWholeWords: "false",
+    caseSensitive: "false",
+    useRegex: "false",
+    characterFilterMode: "any" as const,
+    characterFilterIds: "[]",
+    characterTagFilterMode: "any" as const,
+    characterTagFilters: "[]",
+    generationTriggerFilterMode: "any" as const,
+    generationTriggerFilters: "[]",
+    additionalMatchingSources: "[]",
+    position: 0,
+    depth: 4,
+    order: 100,
+    role: "system" as const,
+    sticky: null,
+    cooldown: null,
+    delay: null,
+    ephemeral: null,
+    group: "",
+    groupWeight: null,
+    locked: "false",
+    tag: "",
+    relationships: "{}",
+    dynamicState: "{}",
+    activationConditions: "[]",
+    schedule: null,
+    preventRecursion: "false",
+    embedding: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+}
+
+test("macro-expanded lorebook content is budgeted and estimated after expansion", () => {
+  const expandedContent = tokenContent(20);
+  const activated = resolveActivatedLorebookEntryContent(
+    [{ entry: makeEntry({ content: "{{description}}" }), matchedKeys: ["keyword"], injectionOrder: 100 }],
+    (value) => value.replace("{{description}}", expandedContent),
+  );
+  const budgetedOut = applyPerLorebookTokenBudgets(activated, new Map([["book-1", makeLorebook({ tokenBudget: 5 })]]));
+  const processed = processActivatedEntries(activated, 0);
+
+  assert.deepEqual(budgetedOut, []);
+  assert.equal(processed.worldInfoBefore, expandedContent);
+  assert.equal(processed.totalTokensEstimate, 20);
+});
+
+test("lorebook final budgets use resolved variable macro content and roll back skipped side effects", () => {
+  const longPayload = tokenContent(20);
+  const macroContext: MacroContext = {
+    user: "User",
+    char: "Char",
+    characters: ["Char"],
+    variables: {},
+  };
+  const resolveActual = (value: string) => {
+    const before = { ...macroContext.variables };
+    const content = resolveMacros(value, macroContext, { trimResult: false });
+    let settled = false;
+    return {
+      content,
+      commit: () => {
+        settled = true;
+      },
+      rollback: () => {
+        if (settled) return;
+        macroContext.variables = before;
+        settled = true;
+      },
+    };
+  };
+  const resolveIsolated = (value: string) =>
+    resolveMacros(
+      value,
+      {
+        ...macroContext,
+        variables: { ...macroContext.variables },
+      },
+      { trimResult: false },
+    );
+  const activated: ActivatedEntry[] = [
+    {
+      entry: makeEntry({
+        id: "setter",
+        content: `{{setvar::payload::${longPayload}}}`,
+        order: 100,
+      }),
+      matchedKeys: ["keyword"],
+      injectionOrder: 100,
+    },
+    {
+      entry: makeEntry({
+        id: "reader",
+        content: "{{getvar::payload}}",
+        order: 200,
+      }),
+      matchedKeys: ["keyword"],
+      injectionOrder: 200,
+    },
+  ];
+
+  const previewResolved = resolveActivatedLorebookEntryContent(activated, resolveIsolated);
+  assert.equal(macroContext.variables.payload, undefined);
+  assert.equal(previewResolved[1]?.entry.content, "");
+  const selected = resolveAndBudgetActivatedLorebookEntries(
+    previewResolved,
+    new Map([["book-1", makeLorebook({ tokenBudget: 100 })]]),
+    5,
+    10,
+    resolveActual,
+  );
+
+  assert.deepEqual(
+    selected.map((entry) => entry.entry.id),
+    ["setter"],
+  );
+  assert.equal(macroContext.variables.payload, longPayload);
+  assert.equal(selected[0]?.entry.content, "");
+});
+
+test("lorebook macro side effects resolve in final injection order", () => {
+  const macroContext: MacroContext = {
+    user: "User",
+    char: "Char",
+    characters: ["Char"],
+    variables: {},
+  };
+  const resolveActual = (value: string) => {
+    const before = { ...macroContext.variables };
+    const content = resolveMacros(value, macroContext, { trimResult: false });
+    let settled = false;
+    return {
+      content,
+      commit: () => {
+        settled = true;
+      },
+      rollback: () => {
+        if (settled) return;
+        macroContext.variables = before;
+        settled = true;
+      },
+    };
+  };
+  const activated: ActivatedEntry[] = [
+    {
+      entry: makeEntry({
+        id: "reader",
+        constant: true,
+        content: "Reader sees {{getvar::tone}}",
+        order: 20,
+      }),
+      matchedKeys: ["[constant]"],
+      injectionOrder: 20,
+    },
+    {
+      entry: makeEntry({
+        id: "setter",
+        content: "{{setvar::tone::scarlet}}",
+        order: 10,
+      }),
+      matchedKeys: ["keyword"],
+      injectionOrder: 10,
+    },
+  ];
+
+  const selected = resolveAndBudgetActivatedLorebookEntries(
+    activated,
+    new Map([["book-1", makeLorebook({ tokenBudget: 100 })]]),
+    100,
+    10,
+    resolveActual,
+  );
+
+  assert.deepEqual(
+    selected.map((entry) => entry.entry.id),
+    ["setter", "reader"],
+  );
+  assert.equal(selected[1]?.entry.content, "Reader sees scarlet");
+  assert.equal(macroContext.variables.tone, "scarlet");
+});
+
+test("constant lorebook entries keep selection priority while macros resolve in injection order", () => {
+  const macroContext: MacroContext = {
+    user: "User",
+    char: "Char",
+    characters: ["Char"],
+    variables: {},
+  };
+  const resolveActual = (value: string) => {
+    const before = { ...macroContext.variables };
+    const content = resolveMacros(value, macroContext, { trimResult: false });
+    let settled = false;
+    return {
+      content,
+      commit: () => {
+        settled = true;
+      },
+      rollback: () => {
+        if (settled) return;
+        macroContext.variables = before;
+        settled = true;
+      },
+    };
+  };
+  const activated: ActivatedEntry[] = [
+    {
+      entry: makeEntry({
+        id: "setter",
+        content: "{{setvar::tone::scarlet}}",
+        order: 10,
+      }),
+      matchedKeys: ["keyword"],
+      injectionOrder: 10,
+    },
+    {
+      entry: makeEntry({
+        id: "reader",
+        constant: true,
+        content: "Reader sees {{getvar::tone}}",
+        order: 20,
+      }),
+      matchedKeys: ["[constant]"],
+      injectionOrder: 20,
+    },
+    {
+      entry: makeEntry({
+        id: "extra",
+        content: "Extra keyword lore",
+        order: 30,
+      }),
+      matchedKeys: ["keyword"],
+      injectionOrder: 30,
+    },
+  ];
+
+  const selected = resolveAndBudgetActivatedLorebookEntries(
+    activated,
+    new Map([["book-1", makeLorebook({ tokenBudget: 100 })]]),
+    100,
+    2,
+    resolveActual,
+  );
+
+  assert.deepEqual(
+    selected.map((entry) => entry.entry.id),
+    ["setter", "reader"],
+  );
+  assert.equal(selected[1]?.entry.content, "Reader sees scarlet");
+  assert.equal(macroContext.variables.tone, "scarlet");
+});
+
+test("macro-aware lorebook max-entry selection keeps constants before lower-order keywords", () => {
+  const activated: ActivatedEntry[] = [
+    {
+      entry: makeEntry({
+        id: "keyword",
+        content: "Keyword lore",
+        order: 10,
+      }),
+      matchedKeys: ["keyword"],
+      injectionOrder: 10,
+    },
+    {
+      entry: makeEntry({
+        id: "constant",
+        constant: true,
+        content: "Constant lore",
+        order: 20,
+      }),
+      matchedKeys: ["[constant]"],
+      injectionOrder: 20,
+    },
+  ];
+
+  const selected = resolveAndBudgetActivatedLorebookEntries(
+    activated,
+    new Map([["book-1", makeLorebook({ tokenBudget: 100 })]]),
+    100,
+    1,
+  );
+
+  assert.deepEqual(
+    selected.map((entry) => entry.entry.id),
+    ["constant"],
+  );
+});
+
+test("recursive lorebook scans use macro-expanded activated entry content", () => {
+  const activated = resolveBudgetAndRecursivelyActivateLorebookEntries(
+    [{ role: "user", content: "first-key" }],
+    [
+      makeEntry({ id: "entry-a", keys: ["first-key"], content: "{{description}}" }),
+      makeEntry({ id: "entry-b", keys: ["nested-key"], content: "Nested lore" }),
+    ],
+    {},
+    3,
+    new Map([["book-1", makeLorebook({ tokenBudget: 100 })]]),
+    100,
+    10,
+    (value) => value.replace("{{description}}", "nested-key"),
+  );
+
+  assert.deepEqual(
+    activated.map((entry) => entry.entry.id),
+    ["entry-a", "entry-b"],
+  );
+  assert.equal(activated[0]?.entry.content, "nested-key");
+});
+
+test("recursive lorebook scans reuse the selected final macro content", () => {
+  let randomMacroResolutions = 0;
+  const activated = resolveBudgetAndRecursivelyActivateLorebookEntries(
+    [{ role: "user", content: "first-key" }],
+    [
+      makeEntry({ id: "entry-a", keys: ["first-key"], content: "{{random::dragon::castle}}", order: 100 }),
+      makeEntry({ id: "entry-b", keys: ["dragon"], content: "Dragon lore", order: 200 }),
+      makeEntry({ id: "entry-c", keys: ["castle"], content: "Castle lore", order: 300 }),
+    ],
+    {},
+    3,
+    new Map([["book-1", makeLorebook({ tokenBudget: 100 })]]),
+    100,
+    10,
+    (value) => {
+      if (value !== "{{random::dragon::castle}}") return value;
+      randomMacroResolutions++;
+      return {
+        content: randomMacroResolutions === 1 ? "dragon" : "castle",
+        commit: () => {},
+        rollback: () => {},
+      };
+    },
+  );
+
+  assert.deepEqual(
+    activated.map((entry) => entry.entry.id),
+    ["entry-a", "entry-b"],
+  );
+  assert.equal(activated[0]?.entry.content, "dragon");
+  assert.equal(randomMacroResolutions, 1);
+});
+
+test("multiple lorebook markers share one macro side-effect pass per prompt assembly", async () => {
+  const client = createClient({ url: "file::memory:" });
+  const db = drizzle(client) as unknown as DB;
+
+  try {
+    await runMigrations(db);
+
+    await db.insert(lorebooks).values({
+      id: "book-1",
+      name: "World Info",
+      description: "",
+      category: "world",
+      scanDepth: 2,
+      tokenBudget: 2048,
+      recursiveScanning: "false",
+      maxRecursionDepth: 3,
+      characterId: null,
+      personaId: null,
+      chatId: null,
+      isGlobal: "true",
+      enabled: "true",
+      tags: "[]",
+      generatedBy: null,
+      sourceAgentId: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    await db.insert(lorebookEntries).values([
+      dbLorebookEntry("before-entry", {
+        content: "Before {{incvar::markerSmoke}}{{getvar::markerSmoke}}",
+        position: 0,
+        order: 10,
+      }),
+      dbLorebookEntry("after-entry", {
+        content: "After {{incvar::markerSmoke}}{{getvar::markerSmoke}}",
+        position: 1,
+        order: 20,
+      }),
+    ]);
+
+    const result = await assemblePrompt({
+      db,
+      preset: {
+        id: "preset-1",
+        name: "Preset",
+        sectionOrder: JSON.stringify(["before-section", "after-section"]),
+        groupOrder: "[]",
+        wrapFormat: "none",
+        parameters: JSON.stringify(DEFAULT_GENERATION_PARAMS),
+        variableGroups: "[]",
+        variableValues: "{}",
+      },
+      sections: [
+        {
+          id: "before-section",
+          presetId: "preset-1",
+          identifier: "before",
+          name: "Before",
+          content: "",
+          role: "system",
+          enabled: "true",
+          isMarker: "true",
+          groupId: null,
+          markerConfig: JSON.stringify({ type: "world_info_before" }),
+          injectionPosition: "ordered",
+          injectionDepth: 0,
+          injectionOrder: 0,
+          forbidOverrides: "false",
+        },
+        {
+          id: "after-section",
+          presetId: "preset-1",
+          identifier: "after",
+          name: "After",
+          content: "",
+          role: "system",
+          enabled: "true",
+          isMarker: "true",
+          groupId: null,
+          markerConfig: JSON.stringify({ type: "world_info_after" }),
+          injectionPosition: "ordered",
+          injectionDepth: 0,
+          injectionOrder: 1,
+          forbidOverrides: "false",
+        },
+      ],
+      groups: [],
+      choiceBlocks: [],
+      chatChoices: {},
+      chatId: "chat-1",
+      characterIds: [],
+      personaName: "User",
+      personaDescription: "",
+      chatMessages: [{ role: "user", content: "marker-key" }],
+      activeLorebookIds: [],
+    });
+
+    const content = result.messages.map((message) => message.content).join("\n");
+    assert.match(content, /Before 1/);
+    assert.match(content, /After 2/);
+    assert.doesNotMatch(content, /After 4/);
+  } finally {
+    client.close();
+  }
+});
 
 test("entries inherit their lorebook scan depth when no per-entry override is set", () => {
   const entry = makeEntry();

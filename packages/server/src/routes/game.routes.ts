@@ -29,7 +29,11 @@ import {
   type GmPromptContext,
 } from "../services/game/gm-prompts.js";
 import { buildPartySystemPrompt } from "../services/game/party-prompts.js";
-import { buildPromptMacroContext, getCharacterDescriptionWithExtensions } from "../services/prompt/index.js";
+import {
+  buildPromptMacroContext,
+  getCharacterDescriptionWithExtensions,
+  resolveMacrosWithVariableSnapshot,
+} from "../services/prompt/index.js";
 import { listPartySprites, readPreferredFullBodySpriteBase64 } from "../services/game/sprite.service.js";
 import {
   buildSceneAnalyzerSystemPrompt,
@@ -3152,18 +3156,25 @@ export async function gameRoutes(app: FastifyInstance) {
       }
     }
 
+    const setupPersonaId = chat.personaId || setupConfig.personaId || null;
+    const setupPersona = setupPersonaId ? await characters.getPersona(setupPersonaId) : null;
+
     // Load persona info so the GM can tailor the experience
     let personaCard: string | null = null;
-    if (chat.personaId || setupConfig.personaId) {
-      const persona = await characters.getPersona(chat.personaId || setupConfig.personaId!);
-      if (persona) {
-        const parts = [`Name: ${persona.name}`];
-        if (persona.description) parts.push(`Description: ${persona.description}`);
-        if (persona.personality) parts.push(`Personality: ${persona.personality}`);
-        if (persona.backstory) parts.push(`Backstory: ${persona.backstory}`);
-        if (persona.appearance) parts.push(`Appearance: ${persona.appearance}`);
-        personaCard = parts.join("\n");
-      }
+    const setupPersonaFields = {
+      description: setupPersona?.description ?? "",
+      personality: setupPersona?.personality ?? "",
+      backstory: setupPersona?.backstory ?? "",
+      appearance: setupPersona?.appearance ?? "",
+      scenario: setupPersona?.scenario ?? "",
+    };
+    if (setupPersona) {
+      const parts = [`Name: ${setupPersona.name}`];
+      if (setupPersona.description) parts.push(`Description: ${setupPersona.description}`);
+      if (setupPersona.personality) parts.push(`Personality: ${setupPersona.personality}`);
+      if (setupPersona.backstory) parts.push(`Backstory: ${setupPersona.backstory}`);
+      if (setupPersona.appearance) parts.push(`Appearance: ${setupPersona.appearance}`);
+      personaCard = parts.join("\n");
     }
 
     // Load party character cards for context (full detail)
@@ -3202,29 +3213,43 @@ export async function gameRoutes(app: FastifyInstance) {
       attributes: Array<{ name: string; value: number }>;
       hp: { value: number; max: number };
     } | null = null;
-    let personaName: string | null = null;
-    if (chat.personaId || setupConfig.personaId) {
-      const persona = await characters.getPersona(chat.personaId || setupConfig.personaId!);
-      if (persona) {
-        personaName = persona.name;
-        try {
-          const statsData = persona.personaStats ? JSON.parse(persona.personaStats) : null;
-          if (statsData?.rpgStats?.enabled) {
-            personaRpgStats = statsData.rpgStats;
-          }
-        } catch {
-          /* skip */
+    const personaName: string | null = setupPersona?.name ?? null;
+    if (setupPersona) {
+      try {
+        const statsData = setupPersona.personaStats ? JSON.parse(setupPersona.personaStats) : null;
+        if (statsData?.rpgStats?.enabled) {
+          personaRpgStats = statsData.rpgStats;
         }
+      } catch {
+        /* skip */
       }
     }
 
     let setupLorebookContext: string | undefined;
     if ((setupConfig.activeLorebookIds?.length ?? 0) > 0) {
+      const setupPromptMacroContext = await buildPromptMacroContext({
+        db: app.db,
+        characterIds: setupConfig.partyCharacterIds,
+        personaName: personaName ?? "User",
+        personaDescription: setupPersonaFields.description,
+        personaFields: setupPersonaFields,
+        variables: {},
+        chatId,
+      });
+      const resolveSetupLorebookMacrosForFinal = (value: string) =>
+        resolveMacrosWithVariableSnapshot(value, setupPromptMacroContext);
+      const resolveSetupLorebookMacrosForScan = (value: string) =>
+        resolveMacros(value, {
+          ...setupPromptMacroContext,
+          variables: { ...setupPromptMacroContext.variables },
+        });
       const lorebookResult = await processLorebooks(app.db, [], null, {
         characterIds: setupConfig.partyCharacterIds,
-        personaId: setupConfig.personaId ?? null,
+        personaId: setupPersonaId,
         activeLorebookIds: setupConfig.activeLorebookIds,
         generationTriggers: ["game_setup", "game"],
+        resolveContent: resolveSetupLorebookMacrosForFinal,
+        resolveContentForScan: resolveSetupLorebookMacrosForScan,
       });
       const combinedLore = [
         lorebookResult.worldInfoBefore,

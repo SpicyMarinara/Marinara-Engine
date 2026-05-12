@@ -34,7 +34,7 @@ import {
   type SlashCommand,
   type SlashCommandContext,
 } from "../../lib/slash-commands";
-import { isPromptPreviewMacro, resolveInputMacrosForChat } from "../../lib/chat-macros";
+import { createInputMacroResolverForChat, isPromptPreviewMacro } from "../../lib/chat-macros";
 import { cn, getAvatarCropStyle, type AvatarCropValue } from "../../lib/utils";
 import { translateDraftText } from "../../lib/draft-translation";
 import { QuickConnectionSwitcher } from "./QuickConnectionSwitcher";
@@ -530,9 +530,12 @@ export function ConversationInput({
     // triggering another generation — the in-progress generation will see
     // it (server re-reads messages after any busy delay).
     if (isStreaming) {
-      let message = applyToUserInput(raw);
-      // Input translation for streaming path too
       const activeChatData = useChatStore.getState().activeChat;
+      const cachedCharacters = qc.getQueryData<Array<{ id: string; data: unknown }>>(characterKeys.list());
+      const cachedPersonas = qc.getQueryData<Array<Record<string, unknown>>>(characterKeys.personas);
+      const resolveInputMacros = createInputMacroResolverForChat(activeChatData, cachedCharacters, cachedPersonas, raw);
+      let message = applyToUserInput(raw, { resolveMacros: resolveInputMacros });
+      // Input translation for streaming path too
       const streamMeta = activeChatData?.metadata
         ? typeof activeChatData.metadata === "string"
           ? JSON.parse(activeChatData.metadata)
@@ -547,9 +550,7 @@ export function ConversationInput({
           toast.error("Failed to translate message — sending original");
         }
       }
-      const cachedCharacters = qc.getQueryData<Array<{ id: string; data: unknown }>>(characterKeys.list());
-      const cachedPersonas = qc.getQueryData<Array<Record<string, unknown>>>(characterKeys.personas);
-      message = resolveInputMacrosForChat(message, activeChatData, cachedCharacters, cachedPersonas);
+      message = resolveInputMacros(message);
       if (textareaRef.current) {
         textareaRef.current.value = "";
         textareaRef.current.style.height = "auto";
@@ -598,10 +599,13 @@ export function ConversationInput({
       return;
     }
 
-    let message = applyToUserInput(raw);
+    const activeChat = useChatStore.getState().activeChat;
+    const cachedCharacters = qc.getQueryData<Array<{ id: string; data: unknown }>>(characterKeys.list());
+    const cachedPersonas = qc.getQueryData<Array<Record<string, unknown>>>(characterKeys.personas);
+    const resolveInputMacros = createInputMacroResolverForChat(activeChat, cachedCharacters, cachedPersonas, raw);
+    let message = applyToUserInput(raw, { resolveMacros: resolveInputMacros });
 
     // Input translation: translate user's message before sending
-    const activeChat = useChatStore.getState().activeChat;
     const chatMeta = activeChat?.metadata
       ? typeof activeChat.metadata === "string"
         ? JSON.parse(activeChat.metadata)
@@ -617,9 +621,7 @@ export function ConversationInput({
       }
     }
 
-    const cachedCharacters = qc.getQueryData<Array<{ id: string; data: unknown }>>(characterKeys.list());
-    const cachedPersonas = qc.getQueryData<Array<Record<string, unknown>>>(characterKeys.personas);
-    message = resolveInputMacrosForChat(message, activeChat, cachedCharacters, cachedPersonas);
+    message = resolveInputMacros(message);
 
     if (textareaRef.current) {
       textareaRef.current.value = "";

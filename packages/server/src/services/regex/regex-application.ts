@@ -21,6 +21,12 @@ export type RegexMessageLike = {
   content: string;
 };
 
+type RegexMacroResolver = (value: string) => string;
+
+type ApplyRegexScriptOptions = {
+  resolveMacros?: RegexMacroResolver;
+};
+
 function isEnabled(value: unknown): boolean {
   return value === true || value === "true";
 }
@@ -53,11 +59,16 @@ function depthValue(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function resolveScriptString(value: string, options: ApplyRegexScriptOptions | undefined): string {
+  return options?.resolveMacros ? options.resolveMacros(value) : value;
+}
+
 export function applyRegexScriptsToPromptText(
   text: string,
   scripts: RegexScriptLike[],
   placement: RegexPlacement,
   depth: number,
+  options?: ApplyRegexScriptOptions,
 ): string {
   let result = text;
   for (const script of scripts) {
@@ -69,16 +80,17 @@ export function applyRegexScriptsToPromptText(
     if (minDepth != null && depth < minDepth) continue;
     if (maxDepth != null && depth > maxDepth) continue;
 
-    const findRegex = typeof script.findRegex === "string" ? script.findRegex : "";
+    const findRegex = typeof script.findRegex === "string" ? resolveScriptString(script.findRegex, options) : "";
     if (!findRegex) continue;
 
     try {
       const flags = typeof script.flags === "string" ? script.flags : "";
-      const replacement = typeof script.replaceString === "string" ? script.replaceString : "";
       const re = new RegExp(findRegex, flags);
-      result = applyRegexReplacement(result, re, replacement);
+      const replacement = typeof script.replaceString === "string" ? script.replaceString : "";
+      result = applyRegexReplacement(result, re, replacement, (value) => resolveScriptString(value, options));
       for (const trim of parseTrimStrings(script.trimStrings)) {
-        if (trim) result = result.split(trim).join("");
+        const resolvedTrim = resolveScriptString(trim, options);
+        if (resolvedTrim) result = result.split(resolvedTrim).join("");
       }
     } catch {
       /* invalid regex — skip */
@@ -90,6 +102,7 @@ export function applyRegexScriptsToPromptText(
 export function applyRegexScriptsToPromptMessages<T extends RegexMessageLike>(
   messages: T[],
   scripts: RegexScriptLike[],
+  options?: ApplyRegexScriptOptions,
 ): void {
   if (scripts.length === 0 || messages.length === 0) return;
   const totalMessages = messages.length;
@@ -97,6 +110,6 @@ export function applyRegexScriptsToPromptMessages<T extends RegexMessageLike>(
     const message = messages[index]!;
     const placement = message.role === "user" ? "user_input" : "ai_output";
     const depth = totalMessages - 1 - index;
-    message.content = applyRegexScriptsToPromptText(message.content, scripts, placement, depth);
+    message.content = applyRegexScriptsToPromptText(message.content, scripts, placement, depth, options);
   }
 }

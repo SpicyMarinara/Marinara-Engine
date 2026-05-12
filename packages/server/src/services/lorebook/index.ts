@@ -15,7 +15,6 @@ import { createCharactersStorage } from "../storage/characters.storage.js";
 import { createLorebooksStorage } from "../storage/lorebooks.storage.js";
 import {
   scanForActivatedEntries,
-  recursiveScan,
   type ScanMessage,
   type ScanOptions,
   type GameStateForScanning,
@@ -32,6 +31,7 @@ export interface LorebookScanResult {
   totalEntries: number;
   totalTokensEstimate: number;
   activatedEntryIds: string[];
+  activatedEntries: Array<{ id: string; content: string }>;
   /** Updated per-chat entry state overrides (ephemeral countdown). Caller should persist to chat metadata. */
   updatedEntryStateOverrides?: Record<string, { ephemeral?: number | null; enabled?: boolean }>;
   /** Updated per-chat timing states for sticky/cooldown/delay. Caller should persist to chat metadata. */
@@ -263,6 +263,282 @@ export function applyPerLorebookTokenBudgets(
   return budgeted.sort((a, b) => a.injectionOrder - b.injectionOrder);
 }
 
+export interface LorebookContentResolution {
+  content: string;
+  commit?: () => void;
+  rollback?: () => void;
+}
+
+export type LorebookFinalContentResolver = (value: string) => string | LorebookContentResolution;
+
+export function resolveActivatedLorebookEntryContent(
+  activatedEntries: ActivatedEntry[],
+  resolveContent?: (value: string) => string,
+  options: { useRawContent?: boolean } = {},
+): ActivatedEntry[] {
+  if (!resolveContent) return activatedEntries;
+  return activatedEntries.map((entry) => ({
+    ...entry,
+    rawContent: entry.rawContent ?? entry.entry.content,
+    entry: {
+      ...entry.entry,
+      content: resolveContent(options.useRawContent ? (entry.rawContent ?? entry.entry.content) : entry.entry.content),
+    },
+  }));
+}
+
+function resolveFinalLorebookContent(
+  activatedEntry: ActivatedEntry,
+  resolveContent?: LorebookFinalContentResolver,
+): LorebookContentResolution {
+  const rawContent = activatedEntry.rawContent ?? activatedEntry.entry.content;
+  if (!resolveContent) return { content: rawContent };
+  const result = resolveContent(rawContent);
+  return typeof result === "string" ? { content: result } : result;
+}
+
+function lorebookSelectionOrder(a: ActivatedEntry, b: ActivatedEntry): number {
+  if (a.entry.constant && !b.entry.constant) return -1;
+  if (!a.entry.constant && b.entry.constant) return 1;
+  return a.injectionOrder - b.injectionOrder;
+}
+
+function lorebookInjectionOrder(a: ActivatedEntry, b: ActivatedEntry): number {
+  return a.injectionOrder - b.injectionOrder;
+}
+
+function estimateLorebookTokens(content: string): number {
+  return Math.ceil(content.length / 4);
+}
+
+type LorebookBudgetSelectionState = {
+  selected: ActivatedEntry[];
+  selectedIds: Set<string>;
+  perLorebookTokens: Map<string, number>;
+  totalTokens: number;
+};
+
+function createLorebookBudgetSelectionState(): LorebookBudgetSelectionState {
+  return {
+    selected: [],
+    selectedIds: new Set(),
+    perLorebookTokens: new Map(),
+    totalTokens: 0,
+  };
+}
+
+function cloneLorebookBudgetSelectionState(state: LorebookBudgetSelectionState): LorebookBudgetSelectionState {
+  return {
+    selected: [...state.selected],
+    selectedIds: new Set(state.selectedIds),
+    perLorebookTokens: new Map(state.perLorebookTokens),
+    totalTokens: state.totalTokens,
+  };
+}
+
+type LorebookResolutionPass = {
+  entries: ActivatedEntry[];
+  resolutions: LorebookContentResolution[];
+};
+
+function resolveLorebookResolutionPass(
+  candidates: ActivatedEntry[],
+  resolveContent?: LorebookFinalContentResolver,
+): LorebookResolutionPass {
+  const entries: ActivatedEntry[] = [];
+  const resolutions: LorebookContentResolution[] = [];
+
+  for (const candidate of [...candidates].sort(lorebookInjectionOrder)) {
+    const resolved = resolveFinalLorebookContent(candidate, resolveContent);
+    resolutions.push(resolved);
+    entries.push({
+      ...candidate,
+      rawContent: candidate.rawContent ?? candidate.entry.content,
+      entry: {
+        ...candidate.entry,
+        content: resolved.content,
+      },
+    });
+  }
+
+  return { entries, resolutions };
+}
+
+function commitLorebookResolutionPass(pass: LorebookResolutionPass): void {
+  for (const resolution of pass.resolutions) {
+    resolution.commit?.();
+  }
+}
+
+function rollbackLorebookResolutionPass(pass: LorebookResolutionPass): void {
+  for (const resolution of [...pass.resolutions].reverse()) {
+    resolution.rollback?.();
+  }
+}
+
+function sameActivatedEntrySet(a: ActivatedEntry[], b: ActivatedEntry[]): boolean {
+  if (a.length !== b.length) return false;
+  const bIds = new Set(b.map((entry) => entry.entry.id));
+  return a.every((entry) => bIds.has(entry.entry.id));
+}
+
+function trySelectBudgetedLorebookEntry(
+  candidate: ActivatedEntry,
+  state: LorebookBudgetSelectionState,
+  lorebooksById: ReadonlyMap<string, Pick<Lorebook, "tokenBudget">>,
+  tokenBudget: number,
+  maxEntries: number,
+): ActivatedEntry | null {
+  if (state.selectedIds.has(candidate.entry.id)) return null;
+  if (maxEntries > 0 && state.selected.length >= maxEntries) return null;
+
+  const entryTokens = estimateLorebookTokens(candidate.entry.content);
+  const lorebookBudget = lorebooksById.get(candidate.entry.lorebookId)?.tokenBudget ?? 0;
+  const lorebookTokens = state.perLorebookTokens.get(candidate.entry.lorebookId) ?? 0;
+  const exceedsLorebookBudget = lorebookBudget > 0 && lorebookTokens + entryTokens > lorebookBudget;
+  const exceedsGlobalBudget = tokenBudget > 0 && state.totalTokens + entryTokens > tokenBudget;
+
+  if (exceedsLorebookBudget || exceedsGlobalBudget) return null;
+
+  state.selected.push(candidate);
+  state.selectedIds.add(candidate.entry.id);
+  state.perLorebookTokens.set(candidate.entry.lorebookId, lorebookTokens + entryTokens);
+  state.totalTokens += entryTokens;
+
+  return candidate;
+}
+
+function selectBudgetedLorebookEntryBatch(
+  candidates: ActivatedEntry[],
+  baseState: LorebookBudgetSelectionState,
+  lorebooksById: ReadonlyMap<string, Pick<Lorebook, "tokenBudget">>,
+  tokenBudget: number,
+  maxEntries: number,
+  resolveContent?: LorebookFinalContentResolver,
+): { selectedFromCandidates: ActivatedEntry[]; state: LorebookBudgetSelectionState } {
+  let pool = candidates;
+  const maxPasses = Math.max(1, candidates.length + 1);
+
+  for (let passIndex = 0; passIndex < maxPasses; passIndex++) {
+    const pass = resolveLorebookResolutionPass(pool, resolveContent);
+    const nextState = cloneLorebookBudgetSelectionState(baseState);
+    const selectedFromCandidates: ActivatedEntry[] = [];
+
+    for (const candidate of [...pass.entries].sort(lorebookSelectionOrder)) {
+      if (maxEntries > 0 && nextState.selected.length >= maxEntries) break;
+      const selected = trySelectBudgetedLorebookEntry(
+        candidate,
+        nextState,
+        lorebooksById,
+        tokenBudget,
+        maxEntries,
+      );
+      if (selected) selectedFromCandidates.push(selected);
+    }
+
+    selectedFromCandidates.sort(lorebookInjectionOrder);
+
+    if (sameActivatedEntrySet(pool, selectedFromCandidates)) {
+      commitLorebookResolutionPass(pass);
+      return { selectedFromCandidates, state: nextState };
+    }
+
+    rollbackLorebookResolutionPass(pass);
+    pool = selectedFromCandidates;
+  }
+
+  const pass = resolveLorebookResolutionPass(pool, resolveContent);
+  const nextState = cloneLorebookBudgetSelectionState(baseState);
+  const selectedFromCandidates: ActivatedEntry[] = [];
+
+  for (const candidate of [...pass.entries].sort(lorebookSelectionOrder)) {
+    if (maxEntries > 0 && nextState.selected.length >= maxEntries) break;
+    const selected = trySelectBudgetedLorebookEntry(candidate, nextState, lorebooksById, tokenBudget, maxEntries);
+    if (selected) selectedFromCandidates.push(selected);
+  }
+
+  selectedFromCandidates.sort(lorebookInjectionOrder);
+  if (sameActivatedEntrySet(pool, selectedFromCandidates)) {
+    commitLorebookResolutionPass(pass);
+    return { selectedFromCandidates, state: nextState };
+  }
+
+  rollbackLorebookResolutionPass(pass);
+  return { selectedFromCandidates: [], state: cloneLorebookBudgetSelectionState(baseState) };
+}
+
+export function resolveAndBudgetActivatedLorebookEntries(
+  activatedEntries: ActivatedEntry[],
+  lorebooksById: ReadonlyMap<string, Pick<Lorebook, "tokenBudget">>,
+  tokenBudget: number,
+  maxEntries: number,
+  resolveContent?: LorebookFinalContentResolver,
+): ActivatedEntry[] {
+  if (activatedEntries.length === 0) return [];
+
+  const { state } = selectBudgetedLorebookEntryBatch(
+    activatedEntries,
+    createLorebookBudgetSelectionState(),
+    lorebooksById,
+    tokenBudget,
+    maxEntries,
+    resolveContent,
+  );
+
+  return state.selected.sort(lorebookInjectionOrder);
+}
+
+export function resolveBudgetAndRecursivelyActivateLorebookEntries(
+  messages: ScanMessage[],
+  entries: LorebookEntry[],
+  options: ScanOptions,
+  maxDepth: number,
+  lorebooksById: ReadonlyMap<string, Pick<Lorebook, "tokenBudget">>,
+  tokenBudget: number,
+  maxEntries: number,
+  resolveContent?: LorebookFinalContentResolver,
+): ActivatedEntry[] {
+  let state = createLorebookBudgetSelectionState();
+  const processedIds = new Set<string>();
+  let frontier = scanForActivatedEntries(messages, entries, options);
+
+  for (let depth = 0; frontier.length > 0; depth++) {
+    const candidates = frontier.filter(
+      (candidate) => !processedIds.has(candidate.entry.id) && !state.selectedIds.has(candidate.entry.id),
+    );
+    for (const candidate of candidates) {
+      processedIds.add(candidate.entry.id);
+    }
+
+    const selectedBatch = selectBudgetedLorebookEntryBatch(
+      candidates,
+      state,
+      lorebooksById,
+      tokenBudget,
+      maxEntries,
+      resolveContent,
+    );
+    state = selectedBatch.state;
+
+    const recursiveContentParts = selectedBatch.selectedFromCandidates
+      .filter((selected) => !selected.entry.preventRecursion)
+      .map((selected) => selected.entry.content);
+
+    if (depth >= maxDepth) break;
+    if (maxEntries > 0 && state.selected.length >= maxEntries) break;
+
+    const recursiveContent = recursiveContentParts.join("\n");
+    if (!recursiveContent) break;
+
+    const remaining = entries.filter((entry) => !processedIds.has(entry.id) && !state.selectedIds.has(entry.id));
+    if (remaining.length === 0) break;
+
+    frontier = scanForActivatedEntries([{ role: "system", content: recursiveContent }], remaining, options);
+  }
+
+  return state.selected.sort(lorebookInjectionOrder);
+}
+
 /**
  * Main lorebook processing for a generation request.
  * 1. Fetch all active entries from enabled lorebooks
@@ -295,6 +571,10 @@ export async function processLorebooks(
     previewOnly?: boolean;
     /** Generation trigger labels used by per-entry include/exclude filters. */
     generationTriggers?: string[];
+    /** Resolves prompt macros for final included lorebook entries. May apply macro side effects. */
+    resolveContent?: LorebookFinalContentResolver;
+    /** @deprecated Macro-aware budgeting and recursion now use resolveContent so scan/final text stays identical. */
+    resolveContentForScan?: (value: string) => string;
   },
 ): Promise<LorebookScanResult> {
   const storage = createLorebooksStorage(db);
@@ -356,6 +636,7 @@ export async function processLorebooks(
       totalEntries: 0,
       totalTokensEstimate: 0,
       activatedEntryIds: [],
+      activatedEntries: [],
       ...(!previewOnly && hasSerializedTimingStates(options?.entryTimingStates)
         ? { updatedEntryTimingStates: {} }
         : {}),
@@ -397,15 +678,24 @@ export async function processLorebooks(
     3,
   );
 
-  let activated: ActivatedEntry[];
-  if (anyRecursive) {
-    activated = recursiveScan(messages, allEntries, scanOpts, maxRecursionDepth);
-  } else {
-    activated = scanForActivatedEntries(messages, allEntries, scanOpts);
-  }
-
-  const perLorebookBudgeted = applyPerLorebookTokenBudgets(activated, relevantLorebooksById);
-  const cappedActivated = enforceMaxActivatedEntries(perLorebookBudgeted);
+  const finalActivated = anyRecursive
+    ? resolveBudgetAndRecursivelyActivateLorebookEntries(
+        messages,
+        allEntries,
+        scanOpts,
+        maxRecursionDepth,
+        relevantLorebooksById,
+        tokenBudget,
+        LIMITS.MAX_LOREBOOK_ENTRIES,
+        options?.resolveContent,
+      )
+    : resolveAndBudgetActivatedLorebookEntries(
+        scanForActivatedEntries(messages, allEntries, scanOpts),
+        relevantLorebooksById,
+        tokenBudget,
+        LIMITS.MAX_LOREBOOK_ENTRIES,
+        options?.resolveContent,
+      );
 
   // Decrement ephemeral counters for activated entries.
   // When per-chat overrides are provided, track the countdown in those overrides
@@ -419,7 +709,7 @@ export async function processLorebooks(
   } else if (overrides) {
     // Per-chat tracking: write to overrides, leave global entry untouched
     updatedOverrides = { ...overrides };
-    for (const a of cappedActivated) {
+    for (const a of finalActivated) {
       if (a.entry.ephemeral !== null && a.entry.ephemeral > 0) {
         const remaining = a.entry.ephemeral - 1;
         updatedOverrides[a.entry.id] = {
@@ -432,7 +722,7 @@ export async function processLorebooks(
   } else if (options?.chatId) {
     // Legacy path: first call for this chat (no overrides yet) — initialise per-chat overrides
     updatedOverrides = {};
-    for (const a of cappedActivated) {
+    for (const a of finalActivated) {
       if (a.entry.ephemeral !== null && a.entry.ephemeral > 0) {
         const remaining = a.entry.ephemeral - 1;
         updatedOverrides[a.entry.id] = {
@@ -448,17 +738,18 @@ export async function processLorebooks(
   // Process into injectable content
   const updatedTimingMap = previewOnly
     ? undefined
-    : updateTimingStatesForScan(allEntries, cappedActivated, timingStates, currentMessageIndex);
+    : updateTimingStatesForScan(allEntries, finalActivated, timingStates, currentMessageIndex);
   const updatedEntryTimingStates =
     updatedTimingMap && (timingStates.size > 0 || updatedTimingMap.size > 0)
       ? serializeTimingStateMap(updatedTimingMap)
       : undefined;
 
-  const result = processActivatedEntries(cappedActivated, tokenBudget);
+  const result = processActivatedEntries(finalActivated, 0);
 
   return {
     ...result,
-    activatedEntryIds: cappedActivated.map((a) => a.entry.id),
+    activatedEntryIds: finalActivated.map((a) => a.entry.id),
+    activatedEntries: finalActivated.map((a) => ({ id: a.entry.id, content: a.entry.content })),
     ...(updatedOverrides ? { updatedEntryStateOverrides: updatedOverrides } : {}),
     ...(updatedEntryTimingStates ? { updatedEntryTimingStates } : {}),
   };

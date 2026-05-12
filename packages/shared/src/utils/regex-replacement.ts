@@ -129,7 +129,12 @@ export function expandRegexReplacement(replacement: string, ctx: RegexReplaceMat
   return result;
 }
 
-export function applyRegexReplacement(text: string, regex: RegExp, replacement: string): string {
+export function applyRegexReplacement(
+  text: string,
+  regex: RegExp,
+  replacement: string,
+  resolveReplacement?: (replacement: string) => string,
+): string {
   return text.replace(regex, (...args: unknown[]) => {
     const hasGroups = typeof args.at(-1) === "object" && args.at(-1) !== null;
     const groups = hasGroups ? (args.at(-1) as Record<string, string>) : undefined;
@@ -137,6 +142,12 @@ export function applyRegexReplacement(text: string, regex: RegExp, replacement: 
     const offset = args.at(hasGroups ? -3 : -2) as number;
     const match = args[0] as string;
     const captures = args.slice(1, hasGroups ? -3 : -2).map((capture) => (capture == null ? "" : String(capture)));
-    return expandRegexReplacement(replacement, { match, captures, offset, input, groups });
+    return expandRegexReplacement(resolveReplacement ? resolveReplacement(replacement) : replacement, {
+      match,
+      captures,
+      offset,
+      input,
+      groups,
+    });
   });
 }

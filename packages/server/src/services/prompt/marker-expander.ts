@@ -13,7 +13,11 @@ import type {
 } from "@marinara-engine/shared";
 import { createCharactersStorage } from "../storage/characters.storage.js";
 import { createAgentsStorage } from "../storage/agents.storage.js";
-import { processLorebooks } from "../lorebook/index.js";
+import {
+  processLorebooks,
+  type LorebookFinalContentResolver,
+  type LorebookScanResult,
+} from "../lorebook/index.js";
 import { wrapContent } from "./format-engine.js";
 import { getCharacterDescriptionWithExtensions } from "./character-description-extensions.js";
 import { agentRuns } from "../../db/schema/index.js";
@@ -65,12 +69,20 @@ export interface MarkerContext {
   generationTriggers?: string[];
   /** Preview/debug expansion: lorebook markers should not consume timing or ephemeral state. */
   previewOnly?: boolean;
+  /** Resolves prompt macros for final included lorebook entries. May apply macro side effects. */
+  resolveLorebookContent?: LorebookFinalContentResolver;
+  /** Resolves prompt macros for scan/budget estimates with isolated macro side effects. */
+  resolveLorebookContentForScan?: (value: string) => string;
   /** Collector for lorebook depth entries — populated during expansion, consumed by the assembler. */
   lorebookDepthEntries?: Array<{ content: string; role: "system" | "user" | "assistant"; depth: number }>;
   /** Collector for updated entry state overrides after ephemeral processing — saved to chat metadata by caller. */
   updatedEntryStateOverrides?: Record<string, { ephemeral?: number | null; enabled?: boolean }>;
   /** Collector for updated sticky/cooldown/delay timing state — saved to chat metadata by caller. */
   updatedEntryTimingStates?: Record<string, LorebookEntryTimingState>;
+  /** Cached lorebook scan for all lorebook marker sections in this prompt build. */
+  lorebookScanResult?: LorebookScanResult;
+  /** True once cached lorebook state/depth side effects have been applied to this marker context. */
+  lorebookScanResultApplied?: boolean;
   /** When set, replaces all individual character scenario fields with this shared group scenario. */
   groupScenarioOverrideText?: string | null;
 }
@@ -250,36 +262,44 @@ async function expandPersona(_config: MarkerConfig, ctx: MarkerContext): Promise
 async function expandLorebook(config: MarkerConfig, ctx: MarkerContext): Promise<ExpandedMarker> {
   if (ctx.disableLorebooks === true) return { content: "" };
 
-  const result = await processLorebooks(ctx.db, ctx.chatMessages, ctx.gameState ?? null, {
-    chatId: ctx.chatId,
-    characterIds: ctx.characterIds,
-    personaId: ctx.personaId ?? null,
-    activeLorebookIds: ctx.activeLorebookIds,
-    excludedLorebookIds: ctx.excludedLorebookIds,
-    excludedSourceAgentIds: ctx.excludedLorebookSourceAgentIds,
-    tokenBudget: ctx.lorebookTokenBudget,
-    chatEmbedding: ctx.chatEmbedding ?? null,
-    entryStateOverrides: ctx.entryStateOverrides,
-    entryTimingStates: ctx.entryTimingStates,
-    generationTriggers: ctx.generationTriggers ?? ["chat"],
-    previewOnly: ctx.previewOnly === true,
-  });
+  const result =
+    ctx.lorebookScanResult ??
+    (ctx.lorebookScanResult = await processLorebooks(ctx.db, ctx.chatMessages, ctx.gameState ?? null, {
+      chatId: ctx.chatId,
+      characterIds: ctx.characterIds,
+      personaId: ctx.personaId ?? null,
+      activeLorebookIds: ctx.activeLorebookIds,
+      excludedLorebookIds: ctx.excludedLorebookIds,
+      excludedSourceAgentIds: ctx.excludedLorebookSourceAgentIds,
+      tokenBudget: ctx.lorebookTokenBudget,
+      chatEmbedding: ctx.chatEmbedding ?? null,
+      entryStateOverrides: ctx.entryStateOverrides,
+      entryTimingStates: ctx.entryTimingStates,
+      generationTriggers: ctx.generationTriggers ?? ["chat"],
+      previewOnly: ctx.previewOnly === true,
+      resolveContent: ctx.resolveLorebookContent,
+      resolveContentForScan: ctx.resolveLorebookContentForScan,
+    }));
 
-  // Collect updated per-chat entry state overrides for the caller to persist
-  if (result.updatedEntryStateOverrides) {
-    ctx.updatedEntryStateOverrides = result.updatedEntryStateOverrides;
-    ctx.entryStateOverrides = result.updatedEntryStateOverrides;
-  }
-  if (result.updatedEntryTimingStates !== undefined) {
-    ctx.updatedEntryTimingStates = result.updatedEntryTimingStates;
-    ctx.entryTimingStates = result.updatedEntryTimingStates;
-  }
+  if (ctx.lorebookScanResultApplied !== true) {
+    ctx.lorebookScanResultApplied = true;
 
-  // Collect depth entries for the assembler to inject later
-  if (result.depthEntries.length > 0) {
-    ctx.lorebookDepthEntries ??= [];
-    for (const de of result.depthEntries) {
-      ctx.lorebookDepthEntries.push({ content: de.content, role: de.role, depth: de.depth });
+    // Collect updated per-chat entry state overrides for the caller to persist.
+    if (result.updatedEntryStateOverrides) {
+      ctx.updatedEntryStateOverrides = result.updatedEntryStateOverrides;
+      ctx.entryStateOverrides = result.updatedEntryStateOverrides;
+    }
+    if (result.updatedEntryTimingStates !== undefined) {
+      ctx.updatedEntryTimingStates = result.updatedEntryTimingStates;
+      ctx.entryTimingStates = result.updatedEntryTimingStates;
+    }
+
+    // Collect depth entries for the assembler to inject later.
+    if (result.depthEntries.length > 0) {
+      ctx.lorebookDepthEntries ??= [];
+      for (const de of result.depthEntries) {
+        ctx.lorebookDepthEntries.push({ content: de.content, role: de.role, depth: de.depth });
+      }
     }
   }
 

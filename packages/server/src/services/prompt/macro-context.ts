@@ -5,8 +5,12 @@
 // assembler. Keeps card macros and depth prompts consistent everywhere.
 // ──────────────────────────────────────────────
 
-import type { CharacterData, MacroContext } from "@marinara-engine/shared";
-import { resolveMacros } from "@marinara-engine/shared";
+import {
+  resolveMacros,
+  type CharacterData,
+  type MacroContext,
+  type ResolveMacroOptions,
+} from "@marinara-engine/shared";
 import type { DB } from "../../db/connection.js";
 import { createCharactersStorage } from "../storage/characters.storage.js";
 import { getCharacterDescriptionWithExtensions } from "./character-description-extensions.js";
@@ -30,6 +34,34 @@ export interface CharacterMacroData {
   names: string[];
   profiles: NonNullable<MacroContext["characterProfiles"]>;
   primaryFields?: NonNullable<MacroContext["characterFields"]>;
+}
+
+export interface MacroResolutionTransaction {
+  content: string;
+  commit: () => void;
+  rollback: () => void;
+}
+
+export function resolveMacrosWithVariableSnapshot(
+  template: string,
+  macroCtx: MacroContext,
+  options?: ResolveMacroOptions,
+): MacroResolutionTransaction {
+  const before = { ...macroCtx.variables };
+  const content = resolveMacros(template, macroCtx, options);
+  let settled = false;
+
+  const rollback = () => {
+    if (settled) return;
+    macroCtx.variables = before;
+    settled = true;
+  };
+
+  const commit = () => {
+    settled = true;
+  };
+
+  return { content, commit, rollback };
 }
 
 export type PromptDepthEntry = {

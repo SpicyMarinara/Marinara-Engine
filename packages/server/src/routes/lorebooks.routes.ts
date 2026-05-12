@@ -9,6 +9,7 @@ import {
   updateLorebookEntrySchema,
   createLorebookFolderSchema,
   updateLorebookFolderSchema,
+  resolveMacros,
   type CreateLorebookEntryInput,
   type LorebookEntryTimingState,
   type LorebookEntry,
@@ -20,6 +21,7 @@ import { createCharactersStorage } from "../services/storage/characters.storage.
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
 import { processLorebooks } from "../services/lorebook/index.js";
 import { resolveGameLorebookScopeExclusions } from "../services/lorebook/game-lorebook-scope.js";
+import { buildPromptMacroContext, resolveMacrosWithVariableSnapshot } from "../services/prompt/index.js";
 import {
   syncCharacterBookFromLorebook,
   clearCharacterEmbeddedLorebook,
@@ -577,6 +579,47 @@ export async function lorebooksRoutes(app: FastifyInstance) {
       content: typeof m.content === "string" ? m.content : "",
     }));
 
+    const lorebookMacroResolvers = await (async () => {
+      try {
+        const charactersStorage = createCharactersStorage(app.db);
+        let personaName = "User";
+        let personaDescription = "";
+        let personaFields: { personality?: string; scenario?: string; backstory?: string; appearance?: string } = {};
+        if (personaId) {
+          const persona = await charactersStorage.getPersona(personaId);
+          if (persona) {
+            personaName = persona.name || personaName;
+            personaDescription = persona.description ?? "";
+            personaFields = {
+              personality: persona.personality ?? "",
+              scenario: persona.scenario ?? "",
+              backstory: persona.backstory ?? "",
+              appearance: persona.appearance ?? "",
+            };
+          }
+        }
+        const macroContext = await buildPromptMacroContext({
+          db: app.db,
+          characterIds,
+          personaName,
+          personaDescription,
+          personaFields,
+          variables: {},
+          chatId,
+        });
+        return {
+          resolveContent: (value: string) => resolveMacrosWithVariableSnapshot(value, macroContext),
+          resolveContentForScan: (value: string) =>
+            resolveMacros(value, {
+              ...macroContext,
+              variables: { ...macroContext.variables },
+            }),
+        };
+      } catch {
+        return undefined;
+      }
+    })();
+
     const result = await processLorebooks(app.db, scanMessages, null, {
       chatId,
       characterIds,
@@ -603,7 +646,11 @@ export async function lorebooksRoutes(app: FastifyInstance) {
           : undefined,
       previewOnly: true,
       generationTriggers: resolveScanGenerationTriggers(chat?.mode),
+      resolveContent: lorebookMacroResolvers?.resolveContent,
+      resolveContentForScan: lorebookMacroResolvers?.resolveContentForScan,
     });
+
+    const resolvedContentById = new Map(result.activatedEntries.map((entry) => [entry.id, entry.content]));
 
     // Fetch full entry data for the activated IDs
     const activeEntries =
@@ -617,7 +664,8 @@ export async function lorebooksRoutes(app: FastifyInstance) {
       entries: activeEntries.map((e) => ({
         id: (e as Record<string, unknown>).id,
         name: (e as Record<string, unknown>).name,
-        content: (e as Record<string, unknown>).content,
+        content:
+          resolvedContentById.get(String((e as Record<string, unknown>).id)) ?? (e as Record<string, unknown>).content,
         keys: (e as Record<string, unknown>).keys,
         lorebookId: (e as Record<string, unknown>).lorebookId,
         order: (e as Record<string, unknown>).order,

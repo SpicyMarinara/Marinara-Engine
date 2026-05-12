@@ -50,7 +50,7 @@ import { useApplyRegex } from "../../hooks/use-apply-regex";
 import { useGameAssetStore } from "../../stores/game-asset.store";
 import { useGameModeStore } from "../../stores/game-mode.store";
 import { useUIStore } from "../../stores/ui.store";
-import { findCharacterByName, resolveMessageMacros } from "../../lib/chat-macros";
+import { createMessageMacroResolver, findCharacterByName } from "../../lib/chat-macros";
 import { animateTextHtml } from "./AnimatedText";
 import { ttsService } from "../../lib/tts-service";
 import { getOrCreateCachedTTSAudioBlob } from "../../lib/tts-audio-cache";
@@ -1249,9 +1249,17 @@ export function GameNarration({
   );
 
   const applyOutputRegexForSource = useCallback(
-    (text: string, sourceMessageId: string | null | undefined, sourceRole: Message["role"] | null | undefined) => {
+    (
+      text: string,
+      sourceMessageId: string | null | undefined,
+      sourceRole: Message["role"] | null | undefined,
+      resolveMacrosForText: (value: string) => string,
+    ) => {
       if (sourceRole !== "assistant" && sourceRole !== "narrator") return text;
-      return applyToAIOutput(text, sourceMessageId ? messageDepthById.get(sourceMessageId) : undefined);
+      return applyToAIOutput(text, {
+        depth: sourceMessageId ? messageDepthById.get(sourceMessageId) : undefined,
+        resolveMacros: resolveMacrosForText,
+      });
     },
     [applyToAIOutput, messageDepthById],
   );
@@ -1263,13 +1271,15 @@ export function GameNarration({
       sourceMessageId: string | null | undefined,
       sourceRole: Message["role"] | null | undefined,
     ) => {
-      const regexApplied = applyOutputRegexForSource(text, sourceMessageId, sourceRole);
-      return resolveMessageMacros(regexApplied, {
+      const macroContext = {
         userName: personaInfo?.name || "You",
         persona: personaInfo,
         primaryCharacter: resolveMacroCharacter(speaker),
         characters: macroCharacters,
-      });
+      };
+      const resolveMacrosForText = createMessageMacroResolver(macroContext);
+      const regexApplied = applyOutputRegexForSource(text, sourceMessageId, sourceRole, resolveMacrosForText);
+      return resolveMacrosForText(regexApplied);
     },
     [applyOutputRegexForSource, macroCharacters, personaInfo, resolveMacroCharacter],
   );

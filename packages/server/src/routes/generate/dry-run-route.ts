@@ -24,6 +24,7 @@ import {
   buildPromptMacroContext,
   collectCharacterDepthPromptEntries,
   getCharacterDescriptionWithExtensions,
+  resolveMacrosWithVariableSnapshot,
   type AssemblerInput,
 } from "../../services/prompt/index.js";
 import { mergeAdjacentMessages } from "../../services/prompt/merger.js";
@@ -707,13 +708,6 @@ export async function registerDryRunRoute(app: FastifyInstance) {
       applyAllSegmentEdits(mappedMessages, chatMeta, chatMessages);
     }
 
-    // Apply regex scripts to prompt messages (mirrors main /generate, but stays read-only).
-    applyRegexScriptsToPromptMessages(mappedMessages, await regexScriptsStore.list());
-
-    for (const msg of mappedMessages) {
-      msg.content = msg.content.replace(/\n([ \t]*\n){2,}/g, "\n\n");
-    }
-
     // Build prompt messages
     let finalMessages: Array<{ role: "system" | "user" | "assistant"; content: string; images?: string[] }> = [];
     let wrapFormat: WrapFormat = "xml";
@@ -839,6 +833,23 @@ export async function registerDryRunRoute(app: FastifyInstance) {
       chatId,
     });
     const resolvePromptMacros = (value: string) => resolveMacros(value, promptMacroContext);
+    const resolvePromptMacrosForLorebook = (value: string) =>
+      resolveMacrosWithVariableSnapshot(value, promptMacroContext);
+    const resolvePromptMacrosForLorebookScan = (value: string) =>
+      resolveMacros(value, {
+        ...promptMacroContext,
+        variables: { ...promptMacroContext.variables },
+      });
+
+    // Apply regex scripts to prompt messages (mirrors main /generate, but stays read-only).
+    applyRegexScriptsToPromptMessages(mappedMessages, await regexScriptsStore.list(), {
+      resolveMacros: (value) => resolveMacros(value, promptMacroContext, { trimResult: false }),
+    });
+
+    for (const msg of mappedMessages) {
+      msg.content = msg.content.replace(/\n([ \t]*\n){2,}/g, "\n\n");
+    }
+    promptMacroContext.lastInput = [...mappedMessages].reverse().find((message) => message.role === "user")?.content;
 
     const usePromptParts = !!promptParts;
     if (usePromptParts) {
@@ -1037,10 +1048,11 @@ export async function registerDryRunRoute(app: FastifyInstance) {
                   : undefined,
               generationTriggers: lorebookGenerationTriggers,
               previewOnly: true,
+              resolveContent: resolvePromptMacrosForLorebook,
+              resolveContentForScan: resolvePromptMacrosForLorebookScan,
             });
             const loreContent = [lorebookResult.worldInfoBefore, lorebookResult.worldInfoAfter]
               .filter((content): content is string => typeof content === "string" && content.length > 0)
-              .map((content) => resolvePromptMacros(content))
               .join("\n");
             const loreBlock = loreContent ? `<lore>\n${loreContent}\n</lore>` : "";
             return { loreBlock, depthEntries: lorebookResult.depthEntries };
@@ -1159,13 +1171,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
             lorebookPayload.depthEntries.length > 0 &&
             finalMessages.some((m) => m.role === "user" || m.role === "assistant")
           ) {
-            finalMessages = injectAtDepth(
-              finalMessages as any,
-              lorebookPayload.depthEntries.map((entry) => ({
-                ...entry,
-                content: resolvePromptMacros(entry.content),
-              })),
-            ) as any;
+            finalMessages = injectAtDepth(finalMessages as any, lorebookPayload.depthEntries) as any;
           }
           continue;
         }
@@ -1336,10 +1342,11 @@ export async function registerDryRunRoute(app: FastifyInstance) {
             : undefined,
         generationTriggers: lorebookGenerationTriggers,
         previewOnly: true,
+        resolveContent: resolvePromptMacrosForLorebook,
+        resolveContentForScan: resolvePromptMacrosForLorebookScan,
       });
       const loreContent = [lorebookResult.worldInfoBefore, lorebookResult.worldInfoAfter]
         .filter((content): content is string => typeof content === "string" && content.length > 0)
-        .map((content) => resolvePromptMacros(content))
         .join("\n");
       if (loreContent) {
         const loreBlock = `<lore>\n${loreContent}\n</lore>`;
@@ -1348,13 +1355,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
         finalMessages.splice(insertAt, 0, { role: "system", content: loreBlock });
       }
       if (lorebookResult.depthEntries.length > 0) {
-        finalMessages = injectAtDepth(
-          finalMessages as any,
-          lorebookResult.depthEntries.map((entry) => ({
-            ...entry,
-            content: resolvePromptMacros(entry.content),
-          })),
-        ) as any;
+        finalMessages = injectAtDepth(finalMessages as any, lorebookResult.depthEntries) as any;
       }
     }
 

@@ -39,7 +39,7 @@ import { createPortal } from "react-dom";
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { chatKeys } from "../../hooks/use-chats";
 import { useShallow } from "zustand/react/shallow";
-import { resolveMessageMacros } from "../../lib/chat-macros";
+import { createMessageMacroResolver } from "../../lib/chat-macros";
 import { useApplyRegex } from "../../hooks/use-apply-regex";
 import { useUIStore } from "../../stores/ui.store";
 import { useChatStore } from "../../stores/chat.store";
@@ -957,8 +957,7 @@ export const ChatMessage = memo(function ChatMessage({
   }, [charName, scopedCharacterMap]);
 
   const displayContent = useMemo(() => {
-    const text = isUser || isSystem ? message.content : applyToAIOutput(message.content, messageDepth);
-    return resolveMessageMacros(text, {
+    const macroContext = {
       userName,
       persona: {
         name: userName,
@@ -970,7 +969,13 @@ export const ChatMessage = memo(function ChatMessage({
       },
       primaryCharacter: primaryCharInfo ?? { name: charName },
       characters: macroCharacters,
-    });
+    };
+    const resolveDisplayMacros = createMessageMacroResolver(macroContext);
+    const text =
+      isUser || isSystem
+        ? message.content
+        : applyToAIOutput(message.content, { depth: messageDepth, resolveMacros: resolveDisplayMacros });
+    return resolveDisplayMacros(text);
   }, [
     applyToAIOutput,
     charName,

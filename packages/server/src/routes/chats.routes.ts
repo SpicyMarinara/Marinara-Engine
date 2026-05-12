@@ -1000,10 +1000,6 @@ export async function chatsRoutes(app: FastifyInstance) {
             mappedMessages.pop();
           }
 
-          // Apply regex scripts to prompt context (mirrors generate.routes.ts).
-          const regexStore = createRegexScriptsStorage(app.db);
-          applyRegexScriptsToPromptMessages(mappedMessages, await regexStore.list());
-
           const [sections, groups, choiceBlocks] = await Promise.all([
             presetStore.listSections(presetId),
             presetStore.listGroups(presetId),
@@ -1082,6 +1078,14 @@ export async function chatsRoutes(app: FastifyInstance) {
             chatId: req.params.id,
           });
           const resolvePromptMacros = (value: string) => resolveMacros(value, promptMacroContext);
+          // Apply regex scripts to prompt context (mirrors generate.routes.ts).
+          const regexStore = createRegexScriptsStorage(app.db);
+          applyRegexScriptsToPromptMessages(mappedMessages, await regexStore.list(), {
+            resolveMacros: (value) => resolveMacros(value, promptMacroContext, { trimResult: false }),
+          });
+          promptMacroContext.lastInput = [...mappedMessages]
+            .reverse()
+            .find((message) => message.role === "user")?.content;
           const entryStateOverrides = resolveEntryStateOverrides(chatMeta.entryStateOverrides);
           const chatMode = (chat.mode as string) ?? "roleplay";
           const lorebookScopeExclusions = resolveGameLorebookScopeExclusions(chatMode, chatMeta);

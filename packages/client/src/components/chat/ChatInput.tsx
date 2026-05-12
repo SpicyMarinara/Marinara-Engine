@@ -19,7 +19,7 @@ import {
   type SlashCommand,
   type SlashCommandContext,
 } from "../../lib/slash-commands";
-import { isPromptPreviewMacro, resolveInputMacrosForChat } from "../../lib/chat-macros";
+import { createInputMacroResolverForChat, isPromptPreviewMacro } from "../../lib/chat-macros";
 import { cn, getAvatarCropStyle, type AvatarCropValue } from "../../lib/utils";
 import { translateDraftText } from "../../lib/draft-translation";
 import { EmojiPicker } from "../ui/EmojiPicker";
@@ -459,7 +459,10 @@ export const ChatInput = memo(function ChatInput({
       return;
     }
 
-    let message = applyToUserInput(normalized);
+    const cachedCharacters = qc.getQueryData<Array<{ id: string; data: unknown }>>(characterKeys.list());
+    const cachedPersonas = qc.getQueryData<Array<Record<string, unknown>>>(characterKeys.personas);
+    const resolveInputMacros = createInputMacroResolverForChat(chat, cachedCharacters, cachedPersonas, normalized);
+    let message = applyToUserInput(normalized, { resolveMacros: resolveInputMacros });
 
     // Input translation: translate user's message before sending
     const chatMeta = chat?.metadata
@@ -477,9 +480,7 @@ export const ChatInput = memo(function ChatInput({
       }
     }
 
-    const cachedCharacters = qc.getQueryData<Array<{ id: string; data: unknown }>>(characterKeys.list());
-    const cachedPersonas = qc.getQueryData<Array<Record<string, unknown>>>(characterKeys.personas);
-    message = resolveInputMacrosForChat(message, chat, cachedCharacters, cachedPersonas);
+    message = resolveInputMacros(message);
 
     if (textareaRef.current) {
       textareaRef.current.value = "";

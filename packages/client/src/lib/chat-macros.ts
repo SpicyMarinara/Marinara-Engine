@@ -210,7 +210,12 @@ export function resolveMessageMacros(
   template: string,
   context: Parameters<typeof buildMessageMacroContext>[0],
 ): string {
-  return resolveMacros(template, buildMessageMacroContext(context), { trimResult: false });
+  return createMessageMacroResolver(context)(template);
+}
+
+export function createMessageMacroResolver(context: Parameters<typeof buildMessageMacroContext>[0]) {
+  const macroContext = buildMessageMacroContext(context);
+  return (template: string) => resolveMacros(template, macroContext, { trimResult: false });
 }
 
 export function isPromptPreviewMacro(input: string): boolean {
@@ -222,12 +227,23 @@ export function resolveInputMacrosForChat(
   chat: { characterIds?: unknown; personaId?: string | null; mode?: string | null } | null | undefined,
   characters: Array<{ id: string; data: unknown }> | undefined,
   personas: Array<Record<string, unknown>> | undefined,
+  lastInput?: string,
 ): string {
+  return createInputMacroResolverForChat(chat, characters, personas, lastInput)(template);
+}
+
+export function createInputMacroResolverForChat(
+  chat: { characterIds?: unknown; personaId?: string | null; mode?: string | null } | null | undefined,
+  characters: Array<{ id: string; data: unknown }> | undefined,
+  personas: Array<Record<string, unknown>> | undefined,
+  lastInput?: string,
+) {
   const chatCharacters = selectChatCharacters(chat, characters);
   const activePersona = selectActivePersona(chat, personas);
-  return resolveMessageMacros(template, {
+  return createMessageMacroResolver({
     persona: activePersona,
     primaryCharacter: chatCharacters[0] ?? null,
     characters: chatCharacters,
+    lastInput,
   });
 }

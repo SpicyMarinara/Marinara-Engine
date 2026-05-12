@@ -37,6 +37,8 @@ export interface ScanMessage {
 /** Result of scanning: an activated entry plus metadata. */
 export interface ActivatedEntry {
   entry: LorebookEntry;
+  /** Original stored content when entry.content has been macro-expanded for scanning or budgeting. */
+  rawContent?: string;
   /** Which key(s) matched */
   matchedKeys: string[];
   /** Priority order for injection */
@@ -602,13 +604,14 @@ export function recursiveScan(
   options: ScanOptions = {},
   maxDepth: number = 3,
 ): ActivatedEntry[] {
-  let allActivated = scanForActivatedEntries(messages, entries, options);
+  const allActivated = scanForActivatedEntries(messages, entries, options);
   const activatedIds = new Set(allActivated.map((a) => a.entry.id));
+  let newlyActivated = allActivated;
 
   for (let depth = 0; depth < maxDepth; depth++) {
     // Build text from newly activated entries, excluding those with preventRecursion
-    const newContent = allActivated
-      .filter((a) => (!activatedIds.has(a.entry.id) || depth === 0) && !a.entry.preventRecursion)
+    const newContent = newlyActivated
+      .filter((a) => !a.entry.preventRecursion)
       .map((a) => a.entry.content)
       .join("\n");
 
@@ -621,9 +624,11 @@ export function recursiveScan(
 
     if (newActivated.length === 0) break;
 
+    newlyActivated = [];
     for (const a of newActivated) {
       activatedIds.add(a.entry.id);
       allActivated.push(a);
+      newlyActivated.push(a);
     }
   }
 

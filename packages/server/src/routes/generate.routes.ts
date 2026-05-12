@@ -55,6 +55,7 @@ import {
   buildPromptMacroContext,
   collectCharacterDepthPromptEntries,
   getCharacterDescriptionWithExtensions,
+  resolveMacrosWithVariableSnapshot,
   type AssemblerInput,
 } from "../services/prompt/index.js";
 import { mergeAdjacentMessages } from "../services/prompt/merger.js";
@@ -957,18 +958,6 @@ export async function generateRoutes(app: FastifyInstance) {
         applyAllSegmentEdits(mappedMessages, chatMeta as Record<string, unknown>, chatMessages);
       }
 
-      // ── Apply regex scripts to prompt message content ──
-      // Normal scripts apply to both prompt context and display; Prompt Only
-      // scripts are excluded only from display by the client.
-      applyRegexScriptsToPromptMessages(mappedMessages, await regexScriptsStore.list());
-
-      // Always collapse 3+ consecutive blank lines into a double newline —
-      // these waste tokens and produce messy logs regardless of user regex settings.
-      // Matches pure newlines AND lines that contain only whitespace.
-      for (const msg of mappedMessages) {
-        msg.content = msg.content.replace(/\n([ \t]*\n){2,}/g, "\n\n");
-      }
-
       // Resolve persona — prefer per-chat personaId, fall back to globally active persona
       // (Game mode skips the fallback — persona must be explicitly selected in the setup wizard)
       let personaId: string | null = null;
@@ -1128,6 +1117,27 @@ export async function generateRoutes(app: FastifyInstance) {
         model: conn.model,
       });
       const resolvePromptMacros = (value: string) => resolveMacros(value, promptMacroContext);
+      const resolvePromptMacrosForLorebook = (value: string) =>
+        resolveMacrosWithVariableSnapshot(value, promptMacroContext);
+      const resolvePromptMacrosForLorebookScan = (value: string) =>
+        resolveMacros(value, {
+          ...promptMacroContext,
+          variables: { ...promptMacroContext.variables },
+        });
+
+      // ── Apply regex scripts to prompt message content ──
+      // Macro context is available now, so regex find/replace/trim fields can use prompt macros.
+      applyRegexScriptsToPromptMessages(mappedMessages, await regexScriptsStore.list(), {
+        resolveMacros: (value) => resolveMacros(value, promptMacroContext, { trimResult: false }),
+      });
+
+      // Always collapse 3+ consecutive blank lines into a double newline —
+      // these waste tokens and produce messy logs regardless of user regex settings.
+      // Matches pure newlines AND lines that contain only whitespace.
+      for (const msg of mappedMessages) {
+        msg.content = msg.content.replace(/\n([ \t]*\n){2,}/g, "\n\n");
+      }
+      promptMacroContext.lastInput = [...mappedMessages].reverse().find((message) => message.role === "user")?.content;
 
       // ── Compute chat embedding for semantic lorebook matching (if any entries are vectorized) ──
       sendProgress("embedding");
@@ -2332,6 +2342,8 @@ export async function generateRoutes(app: FastifyInstance) {
               undefined,
             entryTimingStates: (chatMeta.entryTimingStates as Record<string, LorebookEntryTimingState>) ?? undefined,
             generationTriggers: lorebookGenerationTriggers,
+            resolveContent: resolvePromptMacrosForLorebook,
+            resolveContentForScan: resolvePromptMacrosForLorebookScan,
           });
 
           if (lorebookResult.updatedEntryStateOverrides)
@@ -2357,13 +2369,7 @@ export async function generateRoutes(app: FastifyInstance) {
           }
           // Inject depth-based lorebook entries into the message array
           if (lorebookResult.depthEntries.length > 0) {
-            finalMessages = injectAtDepth(
-              finalMessages,
-              lorebookResult.depthEntries.map((entry) => ({
-                ...entry,
-                content: resolvePromptMacros(entry.content),
-              })),
-            );
+            finalMessages = injectAtDepth(finalMessages, lorebookResult.depthEntries);
           }
         }
       }
@@ -2391,6 +2397,8 @@ export async function generateRoutes(app: FastifyInstance) {
             undefined,
           entryTimingStates: (chatMeta.entryTimingStates as Record<string, LorebookEntryTimingState>) ?? undefined,
           generationTriggers: lorebookGenerationTriggers,
+          resolveContent: resolvePromptMacrosForLorebook,
+          resolveContentForScan: resolvePromptMacrosForLorebookScan,
         });
 
         if (lorebookResult.updatedEntryStateOverrides)
@@ -2412,13 +2420,7 @@ export async function generateRoutes(app: FastifyInstance) {
           finalMessages.splice(insertAt, 0, { role: "system" as const, content: loreBlock });
         }
         if (lorebookResult.depthEntries.length > 0) {
-          finalMessages = injectAtDepth(
-            finalMessages,
-            lorebookResult.depthEntries.map((entry) => ({
-              ...entry,
-              content: resolvePromptMacros(entry.content),
-            })),
-          );
+          finalMessages = injectAtDepth(finalMessages, lorebookResult.depthEntries);
         }
       }
 
@@ -3468,6 +3470,8 @@ export async function generateRoutes(app: FastifyInstance) {
                 undefined,
               entryTimingStates: (chatMeta.entryTimingStates as Record<string, LorebookEntryTimingState>) ?? undefined,
               generationTriggers: lorebookGenerationTriggers,
+              resolveContent: resolvePromptMacrosForLorebook,
+              resolveContentForScan: resolvePromptMacrosForLorebookScan,
             },
           );
 
@@ -3484,7 +3488,6 @@ export async function generateRoutes(app: FastifyInstance) {
           });
           const loreContent = [lorebookResult.worldInfoBefore, lorebookResult.worldInfoAfter]
             .filter(Boolean)
-            .map((content) => resolvePromptMacros(content))
             .join("\n");
           if (loreContent) {
             const loreBlock = `<lore>\n${loreContent}\n</lore>`;
@@ -3497,13 +3500,7 @@ export async function generateRoutes(app: FastifyInstance) {
             }
           }
           if (lorebookResult.depthEntries.length > 0) {
-            finalMessages = injectAtDepth(
-              finalMessages,
-              lorebookResult.depthEntries.map((entry) => ({
-                ...entry,
-                content: resolvePromptMacros(entry.content),
-              })),
-            );
+            finalMessages = injectAtDepth(finalMessages, lorebookResult.depthEntries);
           }
         }
 

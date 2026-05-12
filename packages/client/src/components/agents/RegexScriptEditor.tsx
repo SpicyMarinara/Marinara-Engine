@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { HelpTooltip } from "../ui/HelpTooltip";
-import { applyRegexReplacement, type RegexPlacement } from "@marinara-engine/shared";
+import { applyRegexReplacement, resolveMacros, type MacroContext, type RegexPlacement } from "@marinara-engine/shared";
 
 // ═══════════════════════════════════════════════
 //  Placement metadata
@@ -43,6 +43,35 @@ const PLACEMENT_META: Record<RegexPlacement, { label: string; description: strin
     description: "Applied to your messages before they are sent.",
   },
 };
+
+function createLiveTestMacroContext(input: string): MacroContext {
+  return {
+    user: "User",
+    char: "Character",
+    characters: ["Character"],
+    variables: {},
+    lastInput: input || "Sample input",
+    characterFields: {
+      description: "Character description",
+      personality: "Character personality",
+      backstory: "Character backstory",
+      appearance: "Character appearance",
+      scenario: "Character scenario",
+      example: "Character example",
+    },
+    personaFields: {
+      description: "Persona description",
+      personality: "Persona personality",
+      backstory: "Persona backstory",
+      appearance: "Persona appearance",
+      scenario: "Persona scenario",
+    },
+  };
+}
+
+function resolveLiveTestMacros(value: string, context: MacroContext): string {
+  return resolveMacros(value, context, { trimResult: false });
+}
 
 // ═══════════════════════════════════════════════
 //  Main Editor
@@ -136,22 +165,29 @@ export function RegexScriptEditor() {
   const regexError = useMemo(() => {
     if (!localFindRegex) return null;
     try {
-      new RegExp(localFindRegex, localFlags);
+      const findRegex = resolveLiveTestMacros(localFindRegex, createLiveTestMacroContext(testInput));
+      if (!findRegex) return null;
+      new RegExp(findRegex, localFlags);
       return null;
     } catch (e) {
       return (e as Error).message;
     }
-  }, [localFindRegex, localFlags]);
+  }, [localFindRegex, localFlags, testInput]);
 
   // Test result
   const testResult = useMemo(() => {
     if (!testInput || !localFindRegex || regexError) return testInput;
     try {
-      const re = new RegExp(localFindRegex, localFlags);
-      let result = applyRegexReplacement(testInput, re, localReplaceString);
+      const macroContext = createLiveTestMacroContext(testInput);
+      const resolveTestMacros = (value: string) => resolveLiveTestMacros(value, macroContext);
+      const findRegex = resolveTestMacros(localFindRegex);
+      if (!findRegex) return testInput;
+      const re = new RegExp(findRegex, localFlags);
+      let result = applyRegexReplacement(testInput, re, localReplaceString, resolveTestMacros);
       // Apply trim strings
       for (const trim of localTrimStrings) {
-        if (trim) result = result.split(trim).join("");
+        const resolvedTrim = resolveTestMacros(trim);
+        if (resolvedTrim) result = result.split(resolvedTrim).join("");
       }
       return result;
     } catch {
@@ -374,7 +410,7 @@ export function RegexScriptEditor() {
           <FieldGroup
             label="Find Pattern (Regex)"
             icon={<Regex size="0.875rem" className="text-orange-400" />}
-            help="The regular expression pattern to search for. Written without delimiters — e.g. \\*([^*]+)\\* to match text between asterisks."
+            help="The regular expression pattern to search for. Written without delimiters. Macros resolve with sample values in Live Test and chat values at runtime."
           >
             <div className="relative">
               <input
@@ -596,7 +632,7 @@ export function RegexScriptEditor() {
           <FieldGroup
             label="Live Test"
             icon={<Play size="0.875rem" className="text-orange-400" />}
-            help="Test your regex pattern against sample text. The result updates in real-time."
+            help="Test your regex pattern against sample text. Macros use sample User and Character values here."
           >
             <div className="space-y-2">
               <textarea

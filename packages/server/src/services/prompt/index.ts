@@ -7,8 +7,10 @@ export { expandMarker, type MarkerContext, type ExpandedMarker } from "./marker-
 export {
   buildPromptMacroContext,
   collectCharacterDepthPromptEntries,
+  resolveMacrosWithVariableSnapshot,
   resolveCharacterMacroData,
   type CharacterMacroData,
+  type MacroResolutionTransaction,
   type PromptDepthEntry,
 } from "./macro-context.js";
 export { mergeAdjacentMessages, squashLeadingSystemMessages } from "./merger.js";
