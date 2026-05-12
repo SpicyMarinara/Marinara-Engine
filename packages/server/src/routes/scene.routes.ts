@@ -18,7 +18,6 @@ import { createLLMProvider } from "../services/llm/provider-registry.js";
 import { stripConversationPromptTimestamps } from "../services/conversation/transcript-sanitize.js";
 import { getCharacterDescriptionWithExtensions } from "../services/prompt/index.js";
 import { DATA_DIR } from "../utils/data-dir.js";
-import { resolveSceneSummaryMaxTokens } from "./scene/scene-route-utils.js";
 import type { ChatCompletionResult, ChatMessage } from "../services/llm/base-provider.js";
 import type {
   SceneCreateRequest,
@@ -404,11 +403,12 @@ export async function sceneRoutes(app: FastifyInstance) {
     ];
 
     let result: ChatCompletionResult;
+    const summaryMaxTokens = provider.maxTokensOverrideValue ?? 1024;
     try {
       result = await provider.chatComplete(summaryPrompt, {
         model: conn.model,
         temperature: 0.8,
-        maxTokens: resolveSceneSummaryMaxTokens(provider.maxTokensOverrideValue),
+        maxTokens: summaryMaxTokens,
       });
     } catch (error) {
       logger.error(
