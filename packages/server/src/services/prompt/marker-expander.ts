@@ -71,8 +71,6 @@ export interface MarkerContext {
   previewOnly?: boolean;
   /** Resolves prompt macros for final included lorebook entries. May apply macro side effects. */
   resolveLorebookContent?: LorebookFinalContentResolver;
-  /** Resolves prompt macros for scan/budget estimates with isolated macro side effects. */
-  resolveLorebookContentForScan?: (value: string) => string;
   /** Collector for lorebook depth entries — populated during expansion, consumed by the assembler. */
   lorebookDepthEntries?: Array<{ content: string; role: "system" | "user" | "assistant"; depth: number }>;
   /** Collector for updated entry state overrides after ephemeral processing — saved to chat metadata by caller. */
@@ -278,7 +276,6 @@ async function expandLorebook(config: MarkerConfig, ctx: MarkerContext): Promise
       generationTriggers: ctx.generationTriggers ?? ["chat"],
       previewOnly: ctx.previewOnly === true,
       resolveContent: ctx.resolveLorebookContent,
-      resolveContentForScan: ctx.resolveLorebookContentForScan,
     }));
 
   if (ctx.lorebookScanResultApplied !== true) {

@@ -534,6 +534,7 @@ export function ConversationInput({
       const cachedCharacters = qc.getQueryData<Array<{ id: string; data: unknown }>>(characterKeys.list());
       const cachedPersonas = qc.getQueryData<Array<Record<string, unknown>>>(characterKeys.personas);
       const resolveInputMacros = createInputMacroResolverForChat(activeChatData, cachedCharacters, cachedPersonas, raw);
+      // First pass: resolve macros against raw input, so {{input}} uses the pre-translation text.
       let message = applyToUserInput(raw, { resolveMacros: resolveInputMacros });
       // Input translation for streaming path too
       const streamMeta = activeChatData?.metadata
@@ -550,6 +551,7 @@ export function ConversationInput({
           toast.error("Failed to translate message — sending original");
         }
       }
+      // Final pass: resolve macros introduced by translation while {{input}} still points to raw.
       message = resolveInputMacros(message);
       if (textareaRef.current) {
         textareaRef.current.value = "";
@@ -603,6 +605,7 @@ export function ConversationInput({
     const cachedCharacters = qc.getQueryData<Array<{ id: string; data: unknown }>>(characterKeys.list());
     const cachedPersonas = qc.getQueryData<Array<Record<string, unknown>>>(characterKeys.personas);
     const resolveInputMacros = createInputMacroResolverForChat(activeChat, cachedCharacters, cachedPersonas, raw);
+    // First pass: resolve macros against raw input, so {{input}} uses the pre-translation text.
     let message = applyToUserInput(raw, { resolveMacros: resolveInputMacros });
 
     // Input translation: translate user's message before sending
@@ -621,6 +624,7 @@ export function ConversationInput({
       }
     }
 
+    // Final pass: resolve macros introduced by translation while {{input}} still points to raw.
     message = resolveInputMacros(message);
 
     if (textareaRef.current) {

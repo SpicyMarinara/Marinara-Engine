@@ -3238,18 +3238,12 @@ export async function gameRoutes(app: FastifyInstance) {
       });
       const resolveSetupLorebookMacrosForFinal = (value: string) =>
         resolveMacrosWithVariableSnapshot(value, setupPromptMacroContext);
-      const resolveSetupLorebookMacrosForScan = (value: string) =>
-        resolveMacros(value, {
-          ...setupPromptMacroContext,
-          variables: { ...setupPromptMacroContext.variables },
-        });
       const lorebookResult = await processLorebooks(app.db, [], null, {
         characterIds: setupConfig.partyCharacterIds,
         personaId: setupPersonaId,
         activeLorebookIds: setupConfig.activeLorebookIds,
         generationTriggers: ["game_setup", "game"],
         resolveContent: resolveSetupLorebookMacrosForFinal,
-        resolveContentForScan: resolveSetupLorebookMacrosForScan,
       });
       const combinedLore = [
         lorebookResult.worldInfoBefore,

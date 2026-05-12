@@ -109,6 +109,11 @@ function tokenContent(tokens: number): string {
   return "x".repeat(tokens * 4);
 }
 
+function snapshotMacroVariables(variables: MacroContext["variables"]): MacroContext["variables"] {
+  // Macro variables are string-only, so a shallow clone is a complete rollback snapshot.
+  return { ...variables };
+}
+
 function dbLorebookEntry(id: string, overrides: Partial<ReturnType<typeof lorebookEntryRow>> = {}) {
   return {
     ...lorebookEntryRow(id),
@@ -188,7 +193,7 @@ test("lorebook final budgets use resolved variable macro content and roll back s
     variables: {},
   };
   const resolveActual = (value: string) => {
-    const before = { ...macroContext.variables };
+    const before = snapshotMacroVariables(macroContext.variables);
     const content = resolveMacros(value, macroContext, { trimResult: false });
     let settled = false;
     return {
@@ -260,7 +265,7 @@ test("lorebook macro side effects resolve in final injection order", () => {
     variables: {},
   };
   const resolveActual = (value: string) => {
-    const before = { ...macroContext.variables };
+    const before = snapshotMacroVariables(macroContext.variables);
     const content = resolveMacros(value, macroContext, { trimResult: false });
     let settled = false;
     return {
@@ -321,7 +326,7 @@ test("constant lorebook entries keep selection priority while macros resolve in 
     variables: {},
   };
   const resolveActual = (value: string) => {
-    const before = { ...macroContext.variables };
+    const before = snapshotMacroVariables(macroContext.variables);
     const content = resolveMacros(value, macroContext, { trimResult: false });
     let settled = false;
     return {

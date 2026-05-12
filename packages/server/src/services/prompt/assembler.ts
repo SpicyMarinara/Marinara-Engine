@@ -249,11 +249,6 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
     generationTriggers: input.generationTriggers ?? ["chat"],
     previewOnly: input.previewOnly === true,
     resolveLorebookContent: (value) => resolveMacrosWithVariableSnapshot(value, macroCtx),
-    resolveLorebookContentForScan: (value) =>
-      resolveMacros(value, {
-        ...macroCtx,
-        variables: { ...macroCtx.variables },
-      }),
     groupScenarioOverrideText: input.groupScenarioOverrideText ?? null,
   };
 

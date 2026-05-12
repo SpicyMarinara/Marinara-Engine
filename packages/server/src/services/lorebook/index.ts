@@ -4,6 +4,7 @@
 // ──────────────────────────────────────────────
 import type { DB } from "../../db/connection.js";
 import { LIMITS } from "@marinara-engine/shared";
+import { logger } from "../../lib/logger.js";
 import type {
   CharacterData,
   Lorebook,
@@ -307,6 +308,8 @@ function lorebookInjectionOrder(a: ActivatedEntry, b: ActivatedEntry): number {
   return a.injectionOrder - b.injectionOrder;
 }
 
+// Lorebook budgets currently use the project-wide chars/4 approximation.
+// This can drift for CJK, emoji, and long-tail vocabulary until a canonical tokenizer is available here.
 function estimateLorebookTokens(content: string): number {
   return Math.ceil(content.length / 4);
 }
@@ -418,9 +421,13 @@ function selectBudgetedLorebookEntryBatch(
 ): { selectedFromCandidates: ActivatedEntry[]; state: LorebookBudgetSelectionState } {
   let pool = candidates;
   const maxPasses = Math.max(1, candidates.length + 1);
+  let resolutionPasses = 0;
+  let resolvedEntryCount = 0;
 
   for (let passIndex = 0; passIndex < maxPasses; passIndex++) {
     const pass = resolveLorebookResolutionPass(pool, resolveContent);
+    resolutionPasses += 1;
+    resolvedEntryCount += pass.resolutions.length;
     const nextState = cloneLorebookBudgetSelectionState(baseState);
     const selectedFromCandidates: ActivatedEntry[] = [];
 
@@ -448,6 +455,8 @@ function selectBudgetedLorebookEntryBatch(
   }
 
   const pass = resolveLorebookResolutionPass(pool, resolveContent);
+  resolutionPasses += 1;
+  resolvedEntryCount += pass.resolutions.length;
   const nextState = cloneLorebookBudgetSelectionState(baseState);
   const selectedFromCandidates: ActivatedEntry[] = [];
 
@@ -464,6 +473,14 @@ function selectBudgetedLorebookEntryBatch(
   }
 
   rollbackLorebookResolutionPass(pass);
+  logger.warn(
+    "[lorebook] Budgeted selection failed to converge after %d passes (maxPasses=%d candidates=%d pool=%d resolved=%d); dropping batch",
+    resolutionPasses,
+    maxPasses,
+    candidates.length,
+    pool.length,
+    resolvedEntryCount,
+  );
   return { selectedFromCandidates: [], state: cloneLorebookBudgetSelectionState(baseState) };
 }
 
@@ -573,8 +590,6 @@ export async function processLorebooks(
     generationTriggers?: string[];
     /** Resolves prompt macros for final included lorebook entries. May apply macro side effects. */
     resolveContent?: LorebookFinalContentResolver;
-    /** @deprecated Macro-aware budgeting and recursion now use resolveContent so scan/final text stays identical. */
-    resolveContentForScan?: (value: string) => string;
   },
 ): Promise<LorebookScanResult> {
   const storage = createLorebooksStorage(db);

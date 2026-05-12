@@ -1119,11 +1119,6 @@ export async function generateRoutes(app: FastifyInstance) {
       const resolvePromptMacros = (value: string) => resolveMacros(value, promptMacroContext);
       const resolvePromptMacrosForLorebook = (value: string) =>
         resolveMacrosWithVariableSnapshot(value, promptMacroContext);
-      const resolvePromptMacrosForLorebookScan = (value: string) =>
-        resolveMacros(value, {
-          ...promptMacroContext,
-          variables: { ...promptMacroContext.variables },
-        });
 
       // ── Apply regex scripts to prompt message content ──
       // Macro context is available now, so regex find/replace/trim fields can use prompt macros.
@@ -2343,7 +2338,6 @@ export async function generateRoutes(app: FastifyInstance) {
             entryTimingStates: (chatMeta.entryTimingStates as Record<string, LorebookEntryTimingState>) ?? undefined,
             generationTriggers: lorebookGenerationTriggers,
             resolveContent: resolvePromptMacrosForLorebook,
-            resolveContentForScan: resolvePromptMacrosForLorebookScan,
           });
 
           if (lorebookResult.updatedEntryStateOverrides)
@@ -2398,7 +2392,6 @@ export async function generateRoutes(app: FastifyInstance) {
           entryTimingStates: (chatMeta.entryTimingStates as Record<string, LorebookEntryTimingState>) ?? undefined,
           generationTriggers: lorebookGenerationTriggers,
           resolveContent: resolvePromptMacrosForLorebook,
-          resolveContentForScan: resolvePromptMacrosForLorebookScan,
         });
 
         if (lorebookResult.updatedEntryStateOverrides)
@@ -3471,7 +3464,6 @@ export async function generateRoutes(app: FastifyInstance) {
               entryTimingStates: (chatMeta.entryTimingStates as Record<string, LorebookEntryTimingState>) ?? undefined,
               generationTriggers: lorebookGenerationTriggers,
               resolveContent: resolvePromptMacrosForLorebook,
-              resolveContentForScan: resolvePromptMacrosForLorebookScan,
             },
           );
 

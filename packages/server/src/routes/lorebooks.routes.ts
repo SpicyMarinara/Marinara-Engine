@@ -9,7 +9,6 @@ import {
   updateLorebookEntrySchema,
   createLorebookFolderSchema,
   updateLorebookFolderSchema,
-  resolveMacros,
   type CreateLorebookEntryInput,
   type LorebookEntryTimingState,
   type LorebookEntry,
@@ -578,6 +577,7 @@ export async function lorebooksRoutes(app: FastifyInstance) {
       role: (m.role === "narrator" ? "system" : m.role) as string,
       content: typeof m.content === "string" ? m.content : "",
     }));
+    const lastInput = [...scanMessages].reverse().find((message) => message.role === "user")?.content;
 
     const lorebookMacroResolvers = await (async () => {
       try {
@@ -605,15 +605,11 @@ export async function lorebooksRoutes(app: FastifyInstance) {
           personaDescription,
           personaFields,
           variables: {},
+          lastInput,
           chatId,
         });
         return {
           resolveContent: (value: string) => resolveMacrosWithVariableSnapshot(value, macroContext),
-          resolveContentForScan: (value: string) =>
-            resolveMacros(value, {
-              ...macroContext,
-              variables: { ...macroContext.variables },
-            }),
         };
       } catch {
         return undefined;
@@ -647,7 +643,6 @@ export async function lorebooksRoutes(app: FastifyInstance) {
       previewOnly: true,
       generationTriggers: resolveScanGenerationTriggers(chat?.mode),
       resolveContent: lorebookMacroResolvers?.resolveContent,
-      resolveContentForScan: lorebookMacroResolvers?.resolveContentForScan,
     });
 
     const resolvedContentById = new Map(result.activatedEntries.map((entry) => [entry.id, entry.content]));

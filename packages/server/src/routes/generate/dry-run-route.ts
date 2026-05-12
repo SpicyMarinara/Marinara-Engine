@@ -835,11 +835,6 @@ export async function registerDryRunRoute(app: FastifyInstance) {
     const resolvePromptMacros = (value: string) => resolveMacros(value, promptMacroContext);
     const resolvePromptMacrosForLorebook = (value: string) =>
       resolveMacrosWithVariableSnapshot(value, promptMacroContext);
-    const resolvePromptMacrosForLorebookScan = (value: string) =>
-      resolveMacros(value, {
-        ...promptMacroContext,
-        variables: { ...promptMacroContext.variables },
-      });
 
     // Apply regex scripts to prompt messages (mirrors main /generate, but stays read-only).
     applyRegexScriptsToPromptMessages(mappedMessages, await regexScriptsStore.list(), {
@@ -1049,7 +1044,6 @@ export async function registerDryRunRoute(app: FastifyInstance) {
               generationTriggers: lorebookGenerationTriggers,
               previewOnly: true,
               resolveContent: resolvePromptMacrosForLorebook,
-              resolveContentForScan: resolvePromptMacrosForLorebookScan,
             });
             const loreContent = [lorebookResult.worldInfoBefore, lorebookResult.worldInfoAfter]
               .filter((content): content is string => typeof content === "string" && content.length > 0)
@@ -1343,7 +1337,6 @@ export async function registerDryRunRoute(app: FastifyInstance) {
         generationTriggers: lorebookGenerationTriggers,
         previewOnly: true,
         resolveContent: resolvePromptMacrosForLorebook,
-        resolveContentForScan: resolvePromptMacrosForLorebookScan,
       });
       const loreContent = [lorebookResult.worldInfoBefore, lorebookResult.worldInfoAfter]
         .filter((content): content is string => typeof content === "string" && content.length > 0)
