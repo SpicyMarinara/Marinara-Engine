@@ -25,8 +25,11 @@ const SESSION_DISMISS_KEY = "marinara:csrf-origin-warning-dismissed";
 function extractEnvLine(hint: string): string | null {
   // Hint format: "Add 'http://…' to CSRF_TRUSTED_ORIGINS in your .env — comma-separated if you already have entries,
   //               e.g. CSRF_TRUSTED_ORIGINS=http://existing.example,http://…. No restart needed (takes effect within ~2s)."
-  const match = hint.match(/CSRF_TRUSTED_ORIGINS=[^.\s][^.]*?(?=\.\s|$)/);
-  return match ? match[0].trim().replace(/\.$/, "") : null;
+  // [^\s]+ spans dots — required for IP literals like 71.175.221.189 — and the trailing period in the hint
+  // sentence is stripped afterwards. \b anchors to "CSRF_TRUSTED_ORIGINS=" so the bare mention earlier in the
+  // hint ("…to CSRF_TRUSTED_ORIGINS in your .env…") doesn't match.
+  const match = hint.match(/\bCSRF_TRUSTED_ORIGINS=[^\s]+/);
+  return match ? match[0].replace(/\.$/, "") : null;
 }
 
 export function CsrfOriginWarningBanner() {
