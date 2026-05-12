@@ -59,21 +59,29 @@ function saveMeta(meta: Record<string, FolderMeta>) {
 type SharpFn = any;
 let cachedSharp: SharpFn | null = null;
 let sharpLoadFailed = false;
+let sharpLoadPromise: Promise<SharpFn | null> | null = null;
 async function getSharp(): Promise<SharpFn | null> {
   if (cachedSharp) return cachedSharp;
   if (sharpLoadFailed) return null;
+  if (sharpLoadPromise) return sharpLoadPromise;
 
-  try {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore - optional native dep, may not load on some platforms
-    const mod = await import("sharp");
-    cachedSharp = (mod.default ?? mod) as SharpFn;
-    return cachedSharp;
-  } catch (error) {
-    sharpLoadFailed = true;
-    logger.debug(error, "[game-assets] Image metadata unavailable because sharp could not be loaded");
-    return null;
-  }
+  sharpLoadPromise = (async () => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore - optional native dep, may not load on some platforms
+      const mod = await import("sharp");
+      cachedSharp = (mod.default ?? mod) as SharpFn;
+      return cachedSharp;
+    } catch (error) {
+      sharpLoadFailed = true;
+      logger.debug(error, "[game-assets] Image metadata unavailable because sharp could not be loaded");
+      return null;
+    } finally {
+      sharpLoadPromise = null;
+    }
+  })();
+
+  return sharpLoadPromise;
 }
 
 const MIME_MAP: Record<string, string> = {
@@ -980,8 +988,8 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
             info.width = metadata.width;
             info.height = metadata.height;
             info.format = metadata.format;
-          } catch {
-            // ignore sharp errors
+          } catch (error) {
+            logger.debug(error, "[game-assets] Could not extract image metadata for %s", wildcard);
           }
         }
       }
