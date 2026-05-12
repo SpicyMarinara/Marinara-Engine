@@ -45,7 +45,7 @@ export function GamePartyBar({
   if (partyMembers.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="scrollbar-hide flex max-w-full touch-pan-x items-center gap-1.5 overflow-x-auto px-0.5 py-1 [-webkit-overflow-scrolling:touch]">
       {partyMembers.map((member) => {
         const card = partyCards[member.id];
         const avatarSrc = card?.avatarUrl ?? member.avatarUrl;
@@ -56,7 +56,7 @@ export function GamePartyBar({
             <button
               type="button"
               onClick={() => openCharacterSheet(member.id)}
-              className="block"
+              className="block rounded-full focus:outline-none focus:ring-2 focus:ring-white/45"
               title={`${member.name} - Click to open character sheet`}
             >
               {avatarSrc ? (

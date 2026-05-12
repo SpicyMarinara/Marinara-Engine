@@ -7743,7 +7743,7 @@ export function GameSurface({
                 {/* Top-left: Map + Party portraits side by side */}
                 <div
                   className={cn(
-                    "pointer-events-auto absolute left-3 z-20 flex items-start gap-2",
+                    "pointer-events-auto absolute left-3 right-14 z-20 flex min-w-0 items-start gap-2 md:right-auto",
                     topOverlayOffsetClass,
                   )}
                 >
@@ -7790,7 +7790,7 @@ export function GameSurface({
 
                   {/* Party portraits — right of map */}
                   {partyMembers.length > 0 && (
-                    <div data-tour="game-party">
+                    <div data-tour="game-party" className="min-w-0 flex-1 md:flex-none">
                       <GamePartyBar
                         partyMembers={partyMembers}
                         partyCards={partyCards}
