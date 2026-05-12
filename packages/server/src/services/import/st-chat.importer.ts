@@ -39,6 +39,8 @@ interface ParsedSTChatMessageInput {
 export interface ImportSTChatOptions {
   /** Link chat to this character ID */
   characterId?: string | null;
+  /** Multi-character override; takes precedence over characterId when provided */
+  characterIds?: string[];
   /** Override mode (defaults to roleplay) */
   mode?: ChatMode;
   /** Explicitly set the chat name instead of deriving from header */
@@ -49,6 +51,12 @@ export interface ImportSTChatOptions {
   speakerMap?: Record<string, string>;
   /** Group ID to associate this chat with (for grouping branches) */
   groupId?: string | null;
+  /** Persona to attach to the imported chat */
+  personaId?: string | null;
+  /** Connection to attach to the imported chat */
+  connectionId?: string | null;
+  /** Prompt preset to attach to the imported chat */
+  promptPresetId?: string | null;
   /** Source file timestamps to preserve when trustworthy */
   timestampOverrides?: TimestampOverrides | null;
 }
@@ -116,9 +124,15 @@ export async function importSTChat(jsonlContent: string, db: DB, opts?: ImportST
   const characterName = header.character_name ?? "Unknown";
   const userName = header.user_name ?? "User";
 
-  // Build characterIds array
+  // Build characterIds array. Caller-supplied list wins so an import-into-group
+  // can fully inherit the existing chat's roster instead of being limited to a
+  // single matched character.
   const characterIds: string[] = [];
-  if (opts?.characterId) {
+  if (opts?.characterIds?.length) {
+    for (const cid of opts.characterIds) {
+      if (cid && !characterIds.includes(cid)) characterIds.push(cid);
+    }
+  } else if (opts?.characterId) {
     characterIds.push(opts.characterId);
   }
   // For group chats, collect all unique character IDs from speakerMap
@@ -185,9 +199,9 @@ export async function importSTChat(jsonlContent: string, db: DB, opts?: ImportST
       mode: (opts?.mode ?? "roleplay") as ChatMode,
       characterIds,
       groupId: opts?.groupId ?? null,
-      personaId: null,
-      promptPresetId: null,
-      connectionId: null,
+      personaId: opts?.personaId ?? null,
+      promptPresetId: opts?.promptPresetId ?? null,
+      connectionId: opts?.connectionId ?? null,
     },
     chatTimestamps,
   );

@@ -21,6 +21,8 @@ import { importSTLorebook } from "../services/import/st-lorebook.importer.js";
 import { importMarinara } from "../services/import/marinara.importer.js";
 import { scanSTFolder, runSTBulkImport, type STBulkImportOptions } from "../services/import/st-bulk.importer.js";
 import { characters as charactersTable } from "../db/schema/index.js";
+import { createChatsStorage } from "../services/storage/chats.storage.js";
+import { newId } from "../utils/id-generator.js";
 import { normalizeTimestampOverrides } from "../services/import/import-timestamps.js";
 import { getImportAllowedRoots } from "../config/runtime-config.js";
 import { requirePrivilegedAccess } from "../middleware/privileged-gate.js";
@@ -439,6 +441,95 @@ export async function importRoutes(app: FastifyInstance) {
       ...(characterId ? { characterId } : {}),
       ...(timestampOverrides ? { timestampOverrides } : {}),
     });
+  });
+
+  /**
+   * Import a SillyTavern JSONL chat file as a new branch of an existing chat.
+   * Inherits the target chat's group, character roster, persona, connection,
+   * and prompt preset so the imported transcript shows up as a sibling
+   * "chat file" instead of spawning a new character entry.
+   */
+  app.post("/st-chat-into-group", async (req, reply) => {
+    const data = await req.file();
+    if (!data) return reply.status(400).send({ success: false, error: "No file uploaded" });
+
+    const targetChatField = (data as any).fields?.chatId;
+    const targetChatId =
+      (Array.isArray(targetChatField) ? targetChatField.at(-1)?.value : targetChatField?.value) ?? null;
+    if (!targetChatId || typeof targetChatId !== "string") {
+      return reply.status(400).send({ success: false, error: "Missing chatId" });
+    }
+
+    const storage = createChatsStorage(app.db);
+    const targetChat = await storage.getById(targetChatId);
+    if (!targetChat) return reply.status(404).send({ success: false, error: "Target chat not found" });
+
+    const content = await data.toBuffer();
+    const text = content.toString("utf-8");
+    const timestampOverrides = readTimestampOverridesFromMultipart(data as any);
+
+    // Auto-create a groupId on the target chat if it isn't already in one, so
+    // the imported transcript can sit alongside it as a branch (mirrors the
+    // behavior of POST /chats/:id/branch).
+    let groupId = (targetChat.groupId as string | null) ?? null;
+    if (!groupId) {
+      groupId = newId();
+      await storage.update(targetChatId, { groupId });
+    }
+
+    // Inherit the existing chat's character roster instead of trying to match
+    // characters out of the JSONL header — that path creates new characters
+    // when no match is found, which is exactly what we want to avoid here.
+    let inheritedCharacterIds: string[] = [];
+    try {
+      const parsed = JSON.parse(targetChat.characterIds as string);
+      if (Array.isArray(parsed)) inheritedCharacterIds = parsed.filter((cid): cid is string => typeof cid === "string");
+    } catch {
+      inheritedCharacterIds = [];
+    }
+
+    // For multi-character chats, map each speaker name in the JSONL to one of
+    // the existing characters so per-message attribution survives the import.
+    let speakerMap: Record<string, string> | undefined;
+    if (inheritedCharacterIds.length > 1) {
+      speakerMap = {};
+      const allChars = await app.db.select().from(charactersTable);
+      const byId = new Map(allChars.map((ch) => [ch.id, ch] as const));
+      for (const cid of inheritedCharacterIds) {
+        const ch = byId.get(cid);
+        if (!ch) continue;
+        try {
+          const charData = JSON.parse(ch.data);
+          const charName = typeof charData?.name === "string" ? charData.name.trim() : "";
+          if (charName) speakerMap[charName] = cid;
+        } catch {
+          // skip
+        }
+      }
+    }
+
+    const rawName = data.filename ?? "";
+    const branchName =
+      rawName
+        .replace(/\.jsonl$/i, "")
+        .replace(/_/g, " ")
+        .trim() || "Imported";
+
+    const result = await importSTChat(text, app.db, {
+      groupId,
+      chatName: targetChat.name,
+      branchName,
+      mode: targetChat.mode as any,
+      ...(inheritedCharacterIds.length === 1 ? { characterId: inheritedCharacterIds[0] } : {}),
+      ...(inheritedCharacterIds.length > 0 ? { characterIds: inheritedCharacterIds } : {}),
+      ...(speakerMap ? { speakerMap } : {}),
+      personaId: targetChat.personaId ?? null,
+      connectionId: targetChat.connectionId ?? null,
+      promptPresetId: targetChat.promptPresetId ?? null,
+      ...(timestampOverrides ? { timestampOverrides } : {}),
+    });
+
+    return { ...result, groupId };
   });
 
   /** Import a Marinara Engine export (.marinara.json). */
