@@ -33,19 +33,19 @@ export interface AssetGridProps {
 }
 
 /**
- * Build a dynamic Tailwind grid-template-columns class for the list view.
+ * Select a static Tailwind grid-template-columns class for the list view.
  *
  * @param listColumns - Visibility flags for size and modified columns
  * @returns Tailwind class like "grid-cols-[2rem_auto_1fr_80px_40px]"
  */
 function listGridCols(listColumns: { size: boolean; modified: boolean }): string {
-  // Base: checkbox + icon + name + actions = 4 columns minimum
-  // Add size (80px) and/or modified (80px) when enabled
-  const parts = ["2rem", "auto", "1fr"];
-  if (listColumns.size) parts.push("80px");
-  if (listColumns.modified) parts.push("80px");
-  parts.push("40px");
-  return `grid-cols-[${parts.join("_")}]`;
+  if (listColumns.size && listColumns.modified) {
+    return "grid-cols-[2rem_auto_1fr_80px_80px_40px]";
+  }
+  if (listColumns.size || listColumns.modified) {
+    return "grid-cols-[2rem_auto_1fr_80px_40px]";
+  }
+  return "grid-cols-[2rem_auto_1fr_40px]";
 }
 
 /**

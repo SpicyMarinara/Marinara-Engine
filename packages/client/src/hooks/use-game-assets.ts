@@ -3,6 +3,7 @@
 // ──────────────────────────────────────────────
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api-client";
+import { encodeAssetPath } from "../components/game-assets/encode-asset-path";
 
 /**
  * Single node in the game-assets folder tree.
@@ -68,7 +69,7 @@ export function useDeleteGameAssetFolder() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ path, recursive }: { path: string; recursive?: boolean }) =>
-      api.delete(`/game-assets/folders/${path}${recursive ? "?recursive=true" : ""}`),
+      api.delete(`/game-assets/folders/${encodeAssetPath(path)}${recursive ? "?recursive=true" : ""}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: gameAssetKeys.tree() }),
   });
 }
@@ -119,7 +120,7 @@ export function useCopyGameAsset() {
 export function useDeleteGameAsset() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (path: string) => api.delete(`/game-assets/file/${path}`),
+    mutationFn: (path: string) => api.delete(`/game-assets/file/${encodeAssetPath(path)}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: gameAssetKeys.tree() }),
   });
 }
@@ -189,7 +190,7 @@ export function useUpdateFolderDescription() {
 export function useGameAssetFileContent(path: string) {
   return useQuery({
     queryKey: gameAssetKeys.content(path),
-    queryFn: () => api.get<{ content: string }>(`/game-assets/file-content/${path}`),
+    queryFn: () => api.get<{ content: string }>(`/game-assets/file-content/${encodeAssetPath(path)}`),
     enabled: !!path,
   });
 }
@@ -202,7 +203,7 @@ export function useSaveGameAssetFile() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ path, content }: { path: string; content: string }) =>
-      api.put(`/game-assets/file-content/${path}`, { content }),
+      api.put(`/game-assets/file-content/${encodeAssetPath(path)}`, { content }),
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: gameAssetKeys.content(vars.path) });
       qc.invalidateQueries({ queryKey: gameAssetKeys.tree() });
@@ -227,7 +228,7 @@ export function useGameAssetFileInfo(path: string) {
         format?: string;
         modified: string;
         created: string;
-      }>(`/game-assets/file-info/${path}`),
+      }>(`/game-assets/file-info/${encodeAssetPath(path)}`),
     enabled: !!path,
     staleTime: 30000,
   });
