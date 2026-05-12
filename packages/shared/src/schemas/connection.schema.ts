@@ -37,6 +37,7 @@ export const createConnectionSchema = z.object({
   imageGenerationSource: z.string().nullable().default(null),
   comfyuiWorkflow: z.string().nullable().default(null),
   imageService: z.string().nullable().default(null),
+  promptPresetId: z.string().nullable().default(null),
   maxTokensOverride: z.number().int().min(1).nullable().default(null),
   maxParallelJobs: z.number().int().min(1).max(16).default(1),
   claudeFastMode: z.boolean().default(false),

@@ -257,6 +257,7 @@ const CREATE_TABLES: string[] = [
     use_for_random TEXT NOT NULL DEFAULT 'false',
     enable_caching TEXT NOT NULL DEFAULT 'false',
     caching_at_depth INTEGER NOT NULL DEFAULT 5,
+    prompt_preset_id TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
@@ -626,6 +627,11 @@ const COLUMN_MIGRATIONS: ColumnMigration[] = [
   {
     table: "api_connections",
     column: "default_parameters",
+    definition: "TEXT",
+  },
+  {
+    table: "api_connections",
+    column: "prompt_preset_id",
     definition: "TEXT",
   },
   {

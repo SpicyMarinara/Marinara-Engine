@@ -43,6 +43,7 @@ import {
   resolveBaseUrl,
   type PromptAttachment,
 } from "../generate/generate-route-utils.js";
+import { buildGenerationPromptPresetCandidates, type PromptPresetCandidateSource } from "./prompt-preset-selection.js";
 import { gameStateSnapshots as gameStateSnapshotsTable } from "../../db/schema/index.js";
 import { and, desc, eq } from "drizzle-orm";
 import { logger } from "../../lib/logger.js";
@@ -556,10 +557,6 @@ export async function registerDryRunRoute(app: FastifyInstance) {
     const resolvedInjectTrackers = body.injectTrackers === true || body.injectTrackerMetadata === true;
     const resolvedInjectChatSummary = body.injectChatSummary === true || body.injectChatSummaryInjection === true;
 
-    // Extensions sometimes send presetId as a number or `{id}`; accept these to avoid
-    // silently falling back to the chat's default preset.
-    const presetIdOverride =
-      (impersonate ? asNonEmptyString(body.impersonatePresetId) : null) || asNonEmptyString(body.presetId);
     const skipPreset = body.skipPreset === true;
     const presetText = typeof body.presetText === "string" ? body.presetText : "";
 
@@ -775,33 +772,55 @@ export async function registerDryRunRoute(app: FastifyInstance) {
       /* non-critical */
     }
 
-    const effectivePresetId =
-      skipPreset || chatMode === "conversation"
-        ? null
-        : (presetIdOverride ?? (chat.promptPresetId as string | null) ?? null);
+    const promptPresetCandidates = skipPreset
+      ? []
+      : buildGenerationPromptPresetCandidates({
+          chatMode,
+          chatPromptPresetId: chat.promptPresetId,
+          connectionPromptPresetId: conn.promptPresetId,
+          impersonate,
+          impersonatePromptPresetId: body.impersonatePresetId,
+          requestPromptPresetId: body.presetId,
+        });
+    let effectivePresetId: string | null = null;
+    let effectivePresetSource: PromptPresetCandidateSource | null = null;
+    for (const candidate of promptPresetCandidates) {
+      const candidatePreset = await presets.getById(candidate.id);
+      if (candidatePreset) {
+        effectivePresetId = candidate.id;
+        effectivePresetSource = candidate.source;
+        break;
+      }
+      if (candidate.source !== "chat") {
+        logger.warn(
+          "[dryRun] %s prompt preset override %s was not found; falling back to the next preset candidate",
+          candidate.source,
+          candidate.id,
+        );
+      }
+    }
 
     // Choice selections are stored per-chat (chat metadata), not per prompt preset.
-    // If an extension overrides the prompt preset, reusing the chat's stored selections can make it
+    // If a request or connection overrides the prompt preset, reusing the chat's stored selections can make it
     // *look* like the wrong preset is being used (because variables like {{role}} resolve to values
     // picked under a different preset).
     //
     // Dry-run-only behavior:
     // - If the request explicitly provides presetChoices, use those.
-    // - Else if the request overrides presetId to something different than the chat's promptPresetId,
+    // - Else if the effective preset differs from the chat's promptPresetId,
     //   start with empty choices so the assembler falls back to the preset's default/first options.
     // - Else fall back to the chat's stored selections.
     const requestChoices = parsePresetChoices((body as any).presetChoices);
 
     const chatChoicesFromMeta = (chatMeta.presetChoices ?? {}) as Record<string, string | string[]>;
     const isDifferentPresetOverride =
-      chatMode !== "conversation" &&
-      !!presetIdOverride &&
-      presetIdOverride !== ((chat.promptPresetId as string | null) ?? null);
-    const presetDefaultChoices = isDifferentPresetOverride
-      ? skipPreset
-        ? null
-        : parsePresetChoices((await presets.getById(presetIdOverride))?.defaultChoices)
-      : null;
+      !!effectivePresetId &&
+      effectivePresetSource !== "chat" &&
+      effectivePresetId !== ((chat.promptPresetId as string | null) ?? null);
+    const presetDefaultChoices =
+      isDifferentPresetOverride && effectivePresetId
+        ? parsePresetChoices((await presets.getById(effectivePresetId))?.defaultChoices)
+        : null;
 
     const chatChoices: Record<string, string | string[]> =
       requestChoices ?? (isDifferentPresetOverride ? (presetDefaultChoices ?? {}) : chatChoicesFromMeta);

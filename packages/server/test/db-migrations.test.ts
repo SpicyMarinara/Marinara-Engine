@@ -276,3 +276,49 @@ test("startup migrations add max parallel jobs to existing connections", async (
     client.close();
   }
 });
+
+test("startup migrations add prompt preset override to existing connections", async () => {
+  const client = createClient({ url: "file::memory:" });
+  const db = drizzle(client) as unknown as DB;
+
+  try {
+    await db.run(
+      sql.raw(`CREATE TABLE api_connections (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        base_url TEXT NOT NULL DEFAULT '',
+        api_key_encrypted TEXT NOT NULL DEFAULT '',
+        model TEXT NOT NULL DEFAULT '',
+        max_context INTEGER NOT NULL DEFAULT 128000,
+        is_default TEXT NOT NULL DEFAULT 'false',
+        use_for_random TEXT NOT NULL DEFAULT 'false',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`),
+    );
+    await db.run(
+      sql.raw(`INSERT INTO api_connections (
+        id, name, provider, base_url, api_key_encrypted, model, max_context,
+        is_default, use_for_random, created_at, updated_at
+      ) VALUES (
+        'legacy-preset-override', 'Legacy Preset Override', 'openai', 'https://api.openai.com/v1', '',
+        'gpt-5.1', 128000, 'false', 'false',
+        '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+      )`),
+    );
+
+    await runMigrations(db);
+    await runMigrations(db);
+
+    const columns = await db.all<{ name: string }>(sql.raw("PRAGMA table_info(api_connections)"));
+    const rows = await db.all<{ id: string; prompt_preset_id: string | null }>(
+      sql.raw(`SELECT id, prompt_preset_id FROM api_connections WHERE id = 'legacy-preset-override'`),
+    );
+
+    assert.ok(columns.some((column) => column.name === "prompt_preset_id"));
+    assert.deepEqual(rows, [{ id: "legacy-preset-override", prompt_preset_id: null }]);
+  } finally {
+    client.close();
+  }
+});

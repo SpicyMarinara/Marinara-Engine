@@ -52,6 +52,8 @@ export const apiConnections = sqliteTable("api_connections", {
   imageService: text("image_service"),
   /** Default generation parameters (stored as JSON) for new chats using this connection */
   defaultParameters: text("default_parameters"),
+  /** Optional prompt preset override for roleplay/visual-novel chats using this connection */
+  promptPresetId: text("prompt_preset_id"),
   /** Optional hard cap on max_tokens for the API response (for providers like DeepSeek that have lower limits). */
   maxTokensOverride: integer("max_tokens_override"),
   /** Maximum number of agent LLM jobs Marinara may run at once for this connection. */

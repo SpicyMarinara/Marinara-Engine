@@ -17,6 +17,7 @@ import {
   useSaveConnectionDefaults,
   type ClaudeSubscriptionDiagnosis,
 } from "../../hooks/use-connections";
+import { usePresets } from "../../hooks/use-presets";
 import {
   ArrowLeft,
   Save,
@@ -24,6 +25,7 @@ import {
   Link,
   Wifi,
   MessageSquare,
+  FileText,
   Search,
   Tag,
   Check,
@@ -119,6 +121,7 @@ export function ConnectionEditor() {
   const fetchModels = useFetchModels();
   const saveConnectionDefaults = useSaveConnectionDefaults();
   const { data: allConnections } = useConnections();
+  const { data: allPresets } = usePresets();
 
   const [dirty, setDirty] = useState(false);
   const setEditorDirty = useUIStore((s) => s.setEditorDirty);
@@ -143,6 +146,7 @@ export function ConnectionEditor() {
   const [localEmbeddingModel, setLocalEmbeddingModel] = useState("");
   const [localEmbeddingBaseUrl, setLocalEmbeddingBaseUrl] = useState("");
   const [localEmbeddingConnectionId, setLocalEmbeddingConnectionId] = useState("");
+  const [localPromptPresetId, setLocalPromptPresetId] = useState("");
   const [localOpenrouterProvider, setLocalOpenrouterProvider] = useState("");
   const [localImageGenerationSource, setLocalImageGenerationSource] = useState("");
   const [localComfyuiWorkflow, setLocalComfyuiWorkflow] = useState("");
@@ -240,6 +244,7 @@ export function ConnectionEditor() {
     setLocalEmbeddingModel((c.embeddingModel as string) ?? "");
     setLocalEmbeddingBaseUrl((c.embeddingBaseUrl as string) ?? "");
     setLocalEmbeddingConnectionId((c.embeddingConnectionId as string) ?? "");
+    setLocalPromptPresetId((c.promptPresetId as string) ?? "");
     setLocalOpenrouterProvider((c.openrouterProvider as string) ?? "");
     const imageGenerationSource =
       (c.provider as APIProvider) === "image_generation"
@@ -391,6 +396,7 @@ export function ConnectionEditor() {
       embeddingModel: localEmbeddingModel,
       embeddingBaseUrl: localEmbeddingBaseUrl,
       embeddingConnectionId: localEmbeddingConnectionId || null,
+      promptPresetId: localProvider !== "image_generation" ? localPromptPresetId || null : null,
       openrouterProvider: localOpenrouterProvider || null,
       imageGenerationSource:
         localProvider === "image_generation" ? localImageGenerationSource || localImageService || null : null,
@@ -445,6 +451,7 @@ export function ConnectionEditor() {
     localEmbeddingModel,
     localEmbeddingBaseUrl,
     localEmbeddingConnectionId,
+    localPromptPresetId,
     localOpenrouterProvider,
     localImageGenerationSource,
     localComfyuiWorkflow,
@@ -1471,6 +1478,35 @@ export function ConnectionEditor() {
               <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
                 Agent batches for the same connection can be split across this many parallel jobs. Set to 1 for the
                 safest provider behavior.
+              </p>
+            </FieldGroup>
+          )}
+
+          {/* ── Prompt Preset Override ── */}
+          {localProvider !== "image_generation" && (
+            <FieldGroup
+              label="Prompt Preset Override"
+              icon={<FileText size="0.875rem" className="text-violet-400" />}
+              help="Optional. When roleplay or visual novel chats use this connection, Marinara assembles this prompt preset instead of the chat's selected prompt preset. Conversation and game mode keep their built-in prompt flows."
+            >
+              <select
+                value={localPromptPresetId}
+                onChange={(e) => {
+                  setLocalPromptPresetId(e.target.value);
+                  markDirty();
+                }}
+                className="w-full rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+              >
+                <option value="">Use chat&apos;s prompt preset</option>
+                {(allPresets ?? []).map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.name}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
+                Use this for models that need a different prompt structure. If this preset has variables, Marinara uses
+                the preset&apos;s saved defaults unless the chat already uses the same preset.
               </p>
             </FieldGroup>
           )}

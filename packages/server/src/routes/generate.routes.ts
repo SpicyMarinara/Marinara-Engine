@@ -177,6 +177,10 @@ import {
   normalizeStringArray,
 } from "./generate/agent-normalizers.js";
 import {
+  buildGenerationPromptPresetCandidates,
+  type PromptPresetCandidateSource,
+} from "./generate/prompt-preset-selection.js";
+import {
   createJournal,
   addLocationEntry,
   addEventEntry,
@@ -218,6 +222,16 @@ function bumpCharacterVersion(value: unknown): string {
 
 function hasConversationSchedules(value: unknown): value is Record<string, any> {
   return !!value && typeof value === "object" && Object.keys(value as Record<string, unknown>).length > 0;
+}
+
+function parsePromptPresetChoices(value: unknown): Record<string, string | string[]> | null {
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) : value;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as Record<string, string | string[]>;
+  } catch {
+    return null;
+  }
 }
 
 function areConversationSchedulesEnabled(meta: Record<string, any>): boolean {
@@ -1000,38 +1014,41 @@ export async function generateRoutes(app: FastifyInstance) {
         postToDiscordWebhook(discordWebhookUrl, { content: pendingUserDiscordMsg, username: personaName });
       }
 
-      // ── Assembler path: use preset if the chat has one ──
-      let presetId =
-        chatMode === "conversation"
-          ? undefined
-          : input.impersonate && input.impersonatePresetId
-            ? input.impersonatePresetId
-            : ((chat.promptPresetId as string | null) ?? undefined);
-      let resolvedPreset = presetId ? await presets.getById(presetId) : null;
-      const usingImpersonatePreset = !!(input.impersonate && input.impersonatePresetId);
-      if (usingImpersonatePreset && !resolvedPreset) {
-        presetId = (chat.promptPresetId as string | null) ?? undefined;
-        resolvedPreset = presetId ? await presets.getById(presetId) : null;
+      // ── Assembler path: use the highest-priority prompt preset for this generation ──
+      const chatPromptPresetId = (chat.promptPresetId as string | null) ?? null;
+      const presetCandidates = buildGenerationPromptPresetCandidates({
+        chatMode,
+        chatPromptPresetId,
+        connectionPromptPresetId: conn.promptPresetId,
+        impersonate: input.impersonate,
+        impersonatePromptPresetId: input.impersonatePresetId,
+      });
+      let presetId: string | undefined;
+      let resolvedPreset: Awaited<ReturnType<typeof presets.getById>> | null = null;
+      let presetSource: PromptPresetCandidateSource | null = null;
+      for (const candidate of presetCandidates) {
+        const candidatePreset = await presets.getById(candidate.id);
+        if (candidatePreset) {
+          presetId = candidate.id;
+          resolvedPreset = candidatePreset;
+          presetSource = candidate.source;
+          break;
+        }
+        if (candidate.source !== "chat") {
+          logger.warn(
+            "[generate] %s prompt preset override %s was not found; falling back to the next preset candidate",
+            candidate.source,
+            candidate.id,
+          );
+        }
       }
-      const usingResolvedImpersonatePreset =
-        usingImpersonatePreset && !!resolvedPreset && presetId === input.impersonatePresetId;
-      const impersonatePresetDiffers =
-        usingResolvedImpersonatePreset && input.impersonatePresetId !== chat.promptPresetId;
-      const impersonateDefaultChoices = impersonatePresetDiffers
-        ? (() => {
-            try {
-              const raw = resolvedPreset?.defaultChoices as string | undefined;
-              if (!raw) return {};
-              const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-              if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-              return parsed as Record<string, string | string[]>;
-            } catch {
-              return {};
-            }
-          })()
-        : null;
+      const selectedPresetDiffersFromChat = !!resolvedPreset && !!presetId && presetId !== chatPromptPresetId;
+      const overrideDefaultChoices =
+        selectedPresetDiffersFromChat && presetSource !== "chat"
+          ? (parsePromptPresetChoices((resolvedPreset as { defaultChoices?: unknown }).defaultChoices) ?? {})
+          : null;
       const chatChoices: Record<string, string | string[]> =
-        impersonateDefaultChoices ?? ((chatMeta.presetChoices ?? {}) as Record<string, string | string[]>);
+        overrideDefaultChoices ?? ((chatMeta.presetChoices ?? {}) as Record<string, string | string[]>);
 
       let finalMessages: Array<{
         role: "system" | "user" | "assistant";
