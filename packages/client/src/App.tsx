@@ -9,6 +9,7 @@ import { CustomThemeInjector } from "./components/layout/CustomThemeInjector";
 import { ModelDownloadModal } from "./components/modals/ModelDownloadModal";
 import { AppDialogRenderer } from "./components/ui/AppDialogRenderer";
 import { ChibiProfessorMariEasterEgg } from "./components/ui/ChibiProfessorMariEasterEgg";
+import { CsrfOriginWarningBanner } from "./components/diagnostics/CsrfOriginWarningBanner";
 import { Toaster } from "sonner";
 import { useUIStore } from "./stores/ui.store";
 import { useSidecarStore } from "./stores/sidecar.store";
@@ -272,6 +273,7 @@ export function App() {
         </Suspense>
       )}
       <AppDialogRenderer />
+      <CsrfOriginWarningBanner />
       <Toaster
         position="bottom-right"
         theme={theme}

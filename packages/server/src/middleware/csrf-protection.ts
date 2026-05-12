@@ -160,6 +160,110 @@ function appendOriginHint(origin: string): string {
   );
 }
 
+/**
+ * Summary of which origins the CSRF hook will accept without an entry in
+ * CSRF_TRUSTED_ORIGINS. Used for the startup diagnostic so operators can see
+ * the auto-trust scope at a glance and not paste duplicate entries into .env.
+ */
+export interface CsrfTrustSummary {
+  loopback: string[];
+  host: string | null;
+  configured: string[];
+  wildcard: boolean;
+  privateLiteralPattern: string;
+}
+
+export function getCsrfTrustSummary(): CsrfTrustSummary {
+  const port = getPort();
+  const loopback = [`http://127.0.0.1:${port}`, `http://localhost:${port}`];
+  const configuredHost = getHost();
+  const host =
+    configuredHost !== "0.0.0.0" && configuredHost !== "::"
+      ? `${getServerProtocol()}://${configuredHost}:${port}`
+      : null;
+  const configured = getCsrfTrustedOrigins().filter((entry) => entry !== "*");
+  const wildcard = hasWildcardTrustedOrigin();
+  // Auto-trust also covers any RFC 1918 / CGNAT (Tailscale) / Docker bridge /
+  // link-local IP literal where the browser's Origin matches the Host header,
+  // on any port. Operators don't need to enumerate those in CSRF_TRUSTED_ORIGINS.
+  const privateLiteralPattern =
+    "any RFC 1918 / CGNAT (Tailscale) / Docker / link-local IP literal where Origin matches Host";
+  return { loopback, host, configured, wildcard, privateLiteralPattern };
+}
+
+export interface OriginTrustVerdict {
+  trusted: boolean;
+  /** Resolved origin string the verdict applies to (Origin or fallback Referer). null if neither was present. */
+  origin: string | null;
+  /** Where the origin came from. "host" means no Origin/Referer was sent and we derived from the Host header. */
+  source: "origin" | "referer" | "host" | "none";
+  /** Stable reject-code (matches the 403 body codes) when not trusted. null when trusted. */
+  code: "CSRF_ORIGIN_NOT_TRUSTED" | "CSRF_REFERER_NOT_TRUSTED" | "CSRF_NO_ORIGIN" | null;
+  /** Operator-facing hint with the exact .env line to add. null when trusted. */
+  hint: string | null;
+}
+
+/**
+ * Pure (no logging, no side effects) version of the CSRF hook's origin check.
+ * Used by the /api/csrf/origin-status diagnostic so the client can show a
+ * "your origin is not trusted" warning on page load BEFORE the user tries to
+ * save anything. The hook itself stays the gatekeeper; this is read-only.
+ */
+export function evaluateRequestOriginTrust(request: FastifyRequest): OriginTrustVerdict {
+  const origin = firstHeader(request.headers.origin);
+  const referer = firstHeader(request.headers.referer);
+
+  if (origin) {
+    const trusted = isAllowedOrigin(origin, request);
+    return {
+      trusted,
+      origin,
+      source: "origin",
+      code: trusted ? null : "CSRF_ORIGIN_NOT_TRUSTED",
+      hint: trusted ? null : appendOriginHint(origin),
+    };
+  }
+
+  if (referer) {
+    const trusted = isAllowedOrigin(referer, request);
+    const normalized = normalizeOrigin(referer) ?? referer;
+    return {
+      trusted,
+      origin: normalized,
+      source: "referer",
+      code: trusted ? null : "CSRF_REFERER_NOT_TRUSTED",
+      hint: trusted ? null : appendOriginHint(referer),
+    };
+  }
+
+  // Neither Origin nor Referer was sent. Browsers will always send at least
+  // one of these for same-origin XHR/fetch, so a request landing here is
+  // either a non-browser client or a stripped request. Treat it as "no
+  // signal" rather than untrusted — the unsafe-method hook still gates
+  // mutations on its own.
+  const hostOrigin = getRequestHostOrigin(request);
+  return {
+    trusted: true,
+    origin: hostOrigin,
+    source: hostOrigin ? "host" : "none",
+    code: null,
+    hint: null,
+  };
+}
+
+export function logCsrfTrustSummary(log: { info(message: string): void; warn(message: string): void } = logger) {
+  const summary = getCsrfTrustSummary();
+  log.info(`[csrf] Auto-trusted (loopback): ${summary.loopback.join(", ")}`);
+  if (summary.host) log.info(`[csrf] Auto-trusted (HOST): ${summary.host}`);
+  log.info(`[csrf] Auto-trusted (pattern): ${summary.privateLiteralPattern}`);
+  if (summary.configured.length > 0) {
+    log.info(`[csrf] CSRF_TRUSTED_ORIGINS: ${summary.configured.join(", ")}`);
+  }
+  if (summary.wildcard) {
+    log.warn("[csrf] CSRF_TRUSTED_ORIGINS contains '*' — every browser origin can reach unsafe API routes");
+  }
+}
+
 export function csrfProtectionHook(request: FastifyRequest, reply: FastifyReply, done: () => void) {
   if (!UNSAFE_METHODS.has(request.method.toUpperCase())) return done();
   if (!request.url.startsWith("/api/")) return done();
@@ -177,6 +281,7 @@ export function csrfProtectionHook(request: FastifyRequest, reply: FastifyReply,
     const offender = origin ?? referer ?? "(unknown)";
     if (origin || referer) announceRejectedOrigin(origin ? "Origin" : "Referer", offender, appendOriginHint(offender));
     reply.status(403).send({
+      code: "CSRF_CROSS_SITE",
       error: "Cross-site unsafe requests are not allowed",
       origin: offender,
       hint:
@@ -190,6 +295,7 @@ export function csrfProtectionHook(request: FastifyRequest, reply: FastifyReply,
   if (origin && !originTrusted) {
     announceRejectedOrigin("Origin", origin, appendOriginHint(origin));
     reply.status(403).send({
+      code: "CSRF_ORIGIN_NOT_TRUSTED",
       error: `Origin '${origin}' is not in the trusted list (CSRF_TRUSTED_ORIGINS).`,
       origin,
       hint: appendOriginHint(origin),
@@ -204,6 +310,7 @@ export function csrfProtectionHook(request: FastifyRequest, reply: FastifyReply,
     // parsing 403 bodies; the error string still names "Referer" so the
     // operator knows which header carried the offending value.
     reply.status(403).send({
+      code: "CSRF_REFERER_NOT_TRUSTED",
       error: `Referer '${referer}' is not in the trusted list (CSRF_TRUSTED_ORIGINS).`,
       origin: referer,
       hint: appendOriginHint(referer),
@@ -214,6 +321,7 @@ export function csrfProtectionHook(request: FastifyRequest, reply: FastifyReply,
   if ((origin || referer || secFetchSite) && !hasCsrfHeader(request)) {
     if (canUseSameOriginCompatibility(request, origin, referer, originTrusted, secFetchSite)) return done();
     reply.status(403).send({
+      code: "CSRF_MISSING_HEADER",
       error: `Missing ${CSRF_HEADER} header`,
       hint: `Marinara's frontend sends this header automatically. If you're calling the API from a script, set ${CSRF_HEADER}: ${CSRF_HEADER_VALUE}.`,
     });

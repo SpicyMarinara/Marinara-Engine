@@ -48,6 +48,7 @@ import { gameAssetsRoutes } from "./game-assets.routes.js";
 import { sidecarRoutes } from "./sidecar.routes.js";
 import { ttsRoutes } from "./tts.routes.js";
 import { promptOverridesRoutes } from "./prompt-overrides.routes.js";
+import { csrfDiagnosticsRoutes } from "./csrf-diagnostics.routes.js";
 
 export async function registerRoutes(app: FastifyInstance) {
   await app.register(chatsRoutes, { prefix: "/api/chats" });
@@ -95,6 +96,7 @@ export async function registerRoutes(app: FastifyInstance) {
   await app.register(gameAssetsRoutes, { prefix: "/api/game-assets" });
   await app.register(ttsRoutes, { prefix: "/api/tts" });
   await app.register(promptOverridesRoutes, { prefix: "/api/prompt-overrides" });
+  await app.register(csrfDiagnosticsRoutes, { prefix: "/api/csrf" });
   if (process.env.MARINARA_LITE !== "true" && process.env.MARINARA_LITE !== "1") {
     await app.register(sidecarRoutes, { prefix: "/api/sidecar" });
   }

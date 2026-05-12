@@ -164,10 +164,171 @@ test("CSRF protection blocks cross-site unsafe API requests", async () =>
         },
       });
       assert.equal(res.statusCode, 403);
+      const body = JSON.parse(res.body) as { code?: string };
+      assert.equal(body.code, "CSRF_CROSS_SITE");
     } finally {
       await app.close();
     }
   }));
+
+test("CSRF 403 body carries a stable code field clients can detect", async () =>
+  withEnv({ CSRF_TRUSTED_ORIGINS: undefined }, async () => {
+    const app = await buildHookApp();
+    try {
+      const originReject = await app.inject({
+        method: "POST",
+        url: "/api/mutate",
+        remoteAddress: "127.0.0.1",
+        headers: {
+          host: "127.0.0.1:7860",
+          origin: "http://71.175.221.189:7831",
+          [CSRF_HEADER]: CSRF_HEADER_VALUE,
+        },
+      });
+      assert.equal(originReject.statusCode, 403);
+      const originBody = JSON.parse(originReject.body) as { code?: string; origin?: string; hint?: string };
+      assert.equal(originBody.code, "CSRF_ORIGIN_NOT_TRUSTED");
+      assert.equal(originBody.origin, "http://71.175.221.189:7831");
+      assert.match(originBody.hint ?? "", /CSRF_TRUSTED_ORIGINS/);
+
+      const refererReject = await app.inject({
+        method: "POST",
+        url: "/api/mutate",
+        remoteAddress: "127.0.0.1",
+        headers: {
+          host: "127.0.0.1:7860",
+          referer: "http://71.175.221.189:7831/chat",
+          [CSRF_HEADER]: CSRF_HEADER_VALUE,
+        },
+      });
+      assert.equal(refererReject.statusCode, 403);
+      const refererBody = JSON.parse(refererReject.body) as { code?: string };
+      assert.equal(refererBody.code, "CSRF_REFERER_NOT_TRUSTED");
+
+      const missingHeader = await app.inject({
+        method: "POST",
+        url: "/api/mutate",
+        remoteAddress: "127.0.0.1",
+        headers: {
+          host: "127.0.0.1:7860",
+          origin: "http://127.0.0.1:7860",
+          "sec-fetch-site": "same-site",
+        },
+      });
+      assert.equal(missingHeader.statusCode, 403);
+      const missingBody = JSON.parse(missingHeader.body) as { code?: string };
+      assert.equal(missingBody.code, "CSRF_MISSING_HEADER");
+    } finally {
+      await app.close();
+    }
+  }));
+
+test("/api/csrf/origin-status reports loopback as trusted", async () =>
+  withEnv({}, async () => {
+    const Fastify = (await import("fastify")).default;
+    const { csrfDiagnosticsRoutes } = await import("../src/routes/csrf-diagnostics.routes.js");
+    const app = Fastify({ logger: false });
+    await app.register(csrfDiagnosticsRoutes, { prefix: "/api/csrf" });
+    try {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/csrf/origin-status",
+        remoteAddress: "127.0.0.1",
+        headers: { host: "127.0.0.1:7860", origin: "http://127.0.0.1:7860" },
+      });
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.body) as { trusted: boolean; code: string | null };
+      assert.equal(body.trusted, true);
+      assert.equal(body.code, null);
+    } finally {
+      await app.close();
+    }
+  }));
+
+test("/api/csrf/origin-status reports public-IP origins as untrusted with a hint", async () =>
+  withEnv({ CSRF_TRUSTED_ORIGINS: undefined }, async () => {
+    const Fastify = (await import("fastify")).default;
+    const { csrfDiagnosticsRoutes } = await import("../src/routes/csrf-diagnostics.routes.js");
+    const app = Fastify({ logger: false });
+    await app.register(csrfDiagnosticsRoutes, { prefix: "/api/csrf" });
+    try {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/csrf/origin-status",
+        remoteAddress: "127.0.0.1",
+        headers: { host: "127.0.0.1:7860", origin: "http://71.175.221.189:7831" },
+      });
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.body) as {
+        trusted: boolean;
+        origin: string;
+        source: string;
+        code: string | null;
+        hint: string | null;
+      };
+      assert.equal(body.trusted, false);
+      assert.equal(body.origin, "http://71.175.221.189:7831");
+      assert.equal(body.source, "origin");
+      assert.equal(body.code, "CSRF_ORIGIN_NOT_TRUSTED");
+      assert.match(body.hint ?? "", /CSRF_TRUSTED_ORIGINS=.*71\.175\.221\.189:7831/);
+    } finally {
+      await app.close();
+    }
+  }));
+
+test("/api/csrf/origin-status reports trusted once the origin is in CSRF_TRUSTED_ORIGINS", async () =>
+  withEnv({ CSRF_TRUSTED_ORIGINS: "http://71.175.221.189:7831" }, async () => {
+    const Fastify = (await import("fastify")).default;
+    const { csrfDiagnosticsRoutes } = await import("../src/routes/csrf-diagnostics.routes.js");
+    const app = Fastify({ logger: false });
+    await app.register(csrfDiagnosticsRoutes, { prefix: "/api/csrf" });
+    try {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/csrf/origin-status",
+        remoteAddress: "127.0.0.1",
+        headers: { host: "71.175.221.189:7831", origin: "http://71.175.221.189:7831" },
+      });
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.body) as { trusted: boolean; code: string | null };
+      assert.equal(body.trusted, true);
+      assert.equal(body.code, null);
+    } finally {
+      await app.close();
+    }
+  }));
+
+test("CSRF_TRUSTED_ORIGINS accepts a comma-separated list of origins", async () =>
+  withEnv(
+    {
+      CSRF_TRUSTED_ORIGINS: "http://71.175.221.189:7831, https://chat.example.test, http://my-host.tail-scale.ts.net:7860",
+    },
+    async () => {
+      const app = await buildHookApp();
+      try {
+        for (const origin of [
+          "http://71.175.221.189:7831",
+          "https://chat.example.test",
+          "http://my-host.tail-scale.ts.net:7860",
+        ]) {
+          const res = await app.inject({
+            method: "POST",
+            url: "/api/mutate",
+            remoteAddress: "127.0.0.1",
+            headers: {
+              host: new URL(origin).host,
+              origin,
+              "x-forwarded-proto": new URL(origin).protocol === "https:" ? "https" : "http",
+              [CSRF_HEADER]: CSRF_HEADER_VALUE,
+            },
+          });
+          assert.equal(res.statusCode, 200, `origin ${origin} should be accepted`);
+        }
+      } finally {
+        await app.close();
+      }
+    },
+  ));
 
 test("same-origin unsafe API requests allow stale clients without the CSRF header", async () =>
   withEnv({}, async () => {

@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import { buildApp } from "./app.js";
 import { logger } from "./lib/logger.js";
 import { getHost, getPort, getServerProtocol, loadTlsOptions, logStorageDiagnostics } from "./config/runtime-config.js";
+import { logCsrfTrustSummary } from "./middleware/csrf-protection.js";
 import { startEnvWatcher } from "./config/env-watcher.js";
 import { migrateTaskbarShortcuts } from "./services/setup/taskbar-shortcut-migration.js";
 
@@ -59,6 +60,7 @@ async function main() {
   try {
     await app.listen({ port, host });
     logger.info(`Marinara Engine server listening on ${protocol}://${host}:${port}`);
+    logCsrfTrustSummary();
     scheduleTaskbarShortcutMigration();
   } catch (err) {
     if (isShuttingDown) {
