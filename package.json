@@ -33,9 +33,6 @@
     "release:notes": "node ./scripts/render-release-notes.mjs",
     "clean": "pnpm -r --if-present run clean && node ./scripts/clean-workspace.mjs"
   },
-  "dependencies": {
-    "@img/sharp-wasm32": "^0.34.5"
-  },
   "devDependencies": {
     "esbuild": "^0.27.7",
     "prettier": "^3.8.3"

@@ -39,9 +39,13 @@ if [ "$NODE_PLAT" = "android" ]; then
             echo "supportedArchitectures.os[]=linux"
             echo "supportedArchitectures.cpu[]=current"
             [ -n "$NODE_ARCH" ] && echo "supportedArchitectures.cpu[]=$NODE_ARCH"
-            echo "supportedArchitectures.cpu[]=wasm32"
         } >> .npmrc
         # Force pnpm to re-resolve optional deps on next install
+        TERMUX_FORCE_INSTALL=1
+    fi
+    # Ensure wasm32 is supported (required for sharp fallback on some Android devices)
+    if ! grep -q "supportedArchitectures.cpu\[\]=wasm32" .npmrc 2>/dev/null; then
+        echo "supportedArchitectures.cpu[]=wasm32" >> .npmrc
         TERMUX_FORCE_INSTALL=1
     fi
 fi
