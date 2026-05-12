@@ -5,22 +5,49 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useGenerateSummary, useUpdateChatMetadata } from "../../hooks/use-chats";
-import { ScrollText, Sparkles, X, Save, Loader2, Info } from "lucide-react";
+import { ChevronDown, Info, Loader2, Save, ScrollText, Sparkles, X } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 interface SummaryPopoverProps {
   chatId: string;
   summary: string | null;
   contextSize: number;
-  onContextSizeChange: (size: number) => void;
+  totalMessageCount: number;
+  messageIdByOrderIndex: Map<number, string>;
   onClose: () => void;
 }
 
-export function SummaryPopover({ chatId, summary, contextSize, onContextSizeChange, onClose }: SummaryPopoverProps) {
+type SummarySourceMode = "last" | "range";
+
+const MIN_SUMMARY_MESSAGES = 5;
+const MAX_SUMMARY_MESSAGES = 200;
+
+function clampSummaryCount(value: number): number {
+  return Math.max(MIN_SUMMARY_MESSAGES, Math.min(MAX_SUMMARY_MESSAGES, value));
+}
+
+function parsePositiveInteger(value: string): number | null {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+export function SummaryPopover({
+  chatId,
+  summary,
+  contextSize,
+  totalMessageCount,
+  messageIdByOrderIndex,
+  onClose,
+}: SummaryPopoverProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(summary ?? "");
   const [localSize, setLocalSize] = useState(String(contextSize || ""));
+  const [sourceMode, setSourceMode] = useState<SummarySourceMode>("last");
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const [rangeStart, setRangeStart] = useState(() => String(Math.max(1, totalMessageCount - contextSize + 1)));
+  const [rangeEnd, setRangeEnd] = useState(() => String(Math.max(1, totalMessageCount)));
   const sizeInputFocused = useRef(false);
+  const rangeInputFocused = useRef(false);
   const generateSummary = useGenerateSummary();
   const updateMeta = useUpdateChatMetadata();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -65,6 +92,13 @@ export function SummaryPopover({ chatId, summary, contextSize, onContextSizeChan
     }
   }, [contextSize]);
 
+  // Keep the default custom range aligned to the currently selected "last" window.
+  useEffect(() => {
+    if (rangeInputFocused.current || sourceMode === "range") return;
+    setRangeStart(String(Math.max(1, totalMessageCount - contextSize + 1)));
+    setRangeEnd(String(Math.max(1, totalMessageCount)));
+  }, [contextSize, sourceMode, totalMessageCount]);
+
   // Focus textarea when entering edit mode
   useEffect(() => {
     if (editing) {
@@ -72,9 +106,68 @@ export function SummaryPopover({ chatId, summary, contextSize, onContextSizeChan
     }
   }, [editing]);
 
+  const normalizedLastSize = clampSummaryCount(parsePositiveInteger(localSize) ?? contextSize ?? 50);
+  const normalizedRangeStart = Math.max(1, Math.min(totalMessageCount || 1, parsePositiveInteger(rangeStart) ?? 1));
+  const normalizedRangeEnd = Math.max(
+    1,
+    Math.min(totalMessageCount || 1, parsePositiveInteger(rangeEnd) ?? (totalMessageCount || 1)),
+  );
+  const rangeLow = Math.min(normalizedRangeStart, normalizedRangeEnd);
+  const rangeHigh = Math.max(normalizedRangeStart, normalizedRangeEnd);
+  const selectedRangeCount = rangeHigh - rangeLow + 1;
+  const hasMessages = totalMessageCount > 0;
+  const rangeTooLarge = sourceMode === "range" && selectedRangeCount > MAX_SUMMARY_MESSAGES;
+  const rangeStartMessageId = messageIdByOrderIndex.get(rangeLow - 1);
+  const rangeEndMessageId = messageIdByOrderIndex.get(rangeHigh - 1);
+  const rangeMessagesLoaded = sourceMode !== "range" || (!!rangeStartMessageId && !!rangeEndMessageId);
+  const canGenerate = hasMessages && !rangeTooLarge && rangeMessagesLoaded;
+  const sourceSummary =
+    sourceMode === "range"
+      ? `Messages ${rangeLow}-${rangeHigh}`
+      : `Last ${normalizedLastSize} ${normalizedLastSize === 1 ? "message" : "messages"}`;
+  const sourceDetail =
+    sourceMode === "range"
+      ? `${selectedRangeCount} ${selectedRangeCount === 1 ? "message" : "messages"} selected`
+      : totalMessageCount > 0
+        ? `Using ${Math.min(normalizedLastSize, totalMessageCount)} of ${totalMessageCount} messages`
+        : "No messages yet";
+  const rangeStatusText = !rangeMessagesLoaded
+    ? "Load this range in the chat before generating."
+    : rangeTooLarge
+      ? `Choose ${MAX_SUMMARY_MESSAGES} messages or fewer.`
+      : `${selectedRangeCount} ${selectedRangeCount === 1 ? "message" : "messages"} selected.`;
+
+  const handleSourceModeChange = useCallback(
+    (mode: SummarySourceMode) => {
+      setSourceMode(mode);
+      if (mode === "range") {
+        setRangeStart(String(rangeLow));
+        setRangeEnd(String(rangeHigh));
+      }
+    },
+    [rangeHigh, rangeLow],
+  );
+
   const handleGenerate = useCallback(() => {
+    if (!canGenerate) return;
+    if (sourceMode === "range") {
+      setRangeStart(String(rangeLow));
+      setRangeEnd(String(rangeHigh));
+      if (!rangeStartMessageId || !rangeEndMessageId) return;
+      generateSummary.mutate(
+        { chatId, rangeStartMessageId, rangeEndMessageId },
+        {
+          onSuccess: (data) => {
+            setDraft(data.summary);
+            setEditing(false);
+          },
+        },
+      );
+      return;
+    }
+    setLocalSize(String(normalizedLastSize));
     generateSummary.mutate(
-      { chatId, contextSize },
+      { chatId, contextSize: normalizedLastSize },
       {
         onSuccess: (data) => {
           setDraft(data.summary);
@@ -82,7 +175,17 @@ export function SummaryPopover({ chatId, summary, contextSize, onContextSizeChan
         },
       },
     );
-  }, [chatId, contextSize, generateSummary]);
+  }, [
+    canGenerate,
+    chatId,
+    generateSummary,
+    normalizedLastSize,
+    rangeHigh,
+    rangeLow,
+    rangeEndMessageId,
+    rangeStartMessageId,
+    sourceMode,
+  ]);
 
   const handleSave = useCallback(() => {
     updateMeta.mutate({ id: chatId, summary: draft || null });
@@ -118,48 +221,6 @@ export function SummaryPopover({ chatId, summary, contextSize, onContextSizeChan
             Chat Summary
           </div>
           <div className="flex items-center gap-1">
-            <div
-              className="flex items-center gap-1 mr-1"
-              title="Context size — number of recent messages used for summary generation"
-            >
-              <input
-                type="number"
-                min={5}
-                max={200}
-                value={localSize}
-                onFocus={() => {
-                  sizeInputFocused.current = true;
-                }}
-                onChange={(e) => setLocalSize(e.target.value)}
-                onBlur={() => {
-                  sizeInputFocused.current = false;
-                  const parsed = parseInt(localSize);
-                  if (!localSize || isNaN(parsed)) {
-                    setLocalSize("50");
-                    onContextSizeChange(50);
-                  } else {
-                    const clamped = Math.max(5, Math.min(200, parsed));
-                    setLocalSize(String(clamped));
-                    onContextSizeChange(clamped);
-                  }
-                }}
-                className="w-12 rounded-md bg-[var(--secondary)] px-1.5 py-0.5 text-center text-[0.625rem] tabular-nums ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-              />
-            </div>
-            <button
-              onClick={handleGenerate}
-              disabled={isGenerating}
-              className={cn(
-                "flex items-center gap-1 rounded-lg px-2 py-1 text-[0.625rem] font-medium transition-all",
-                isGenerating
-                  ? "cursor-wait text-amber-300/60"
-                  : "text-amber-300 hover:bg-amber-400/15 hover:text-amber-200",
-              )}
-              title="Generate summary with AI"
-            >
-              {isGenerating ? <Loader2 size="0.6875rem" className="animate-spin" /> : <Sparkles size="0.6875rem" />}
-              {isGenerating ? "Generating…" : "Generate"}
-            </button>
             <button
               onClick={onClose}
               className="rounded-md p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
@@ -223,6 +284,135 @@ export function SummaryPopover({ chatId, summary, contextSize, onContextSizeChan
               )}
             </div>
           )}
+        </div>
+
+        {/* Source controls */}
+        <div className="border-t border-[var(--border)] px-3 py-2">
+          <button
+            type="button"
+            onClick={() => setSourceOpen((open) => !open)}
+            className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-[var(--accent)]"
+          >
+            <span className="min-w-0">
+              <span className="block text-[0.625rem] font-medium uppercase text-[var(--muted-foreground)]">Source</span>
+              <span className="block truncate text-xs font-semibold text-[var(--foreground)]/85">{sourceSummary}</span>
+            </span>
+            <span className="flex min-w-0 shrink items-center justify-end gap-1 text-right text-[0.625rem] text-[var(--muted-foreground)]">
+              {sourceDetail}
+              <ChevronDown
+                size="0.75rem"
+                className={cn("transition-transform", sourceOpen && "rotate-180 text-amber-300")}
+              />
+            </span>
+          </button>
+
+          {sourceOpen && (
+            <div className="mt-2 space-y-2 rounded-lg border border-[var(--border)] bg-[var(--secondary)]/40 p-2">
+              <div className="grid grid-cols-2 gap-1 rounded-lg bg-[var(--background)]/30 p-1">
+                {(["last", "range"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => handleSourceModeChange(mode)}
+                    className={cn(
+                      "rounded-md px-2 py-1 text-[0.625rem] font-semibold transition-colors",
+                      sourceMode === mode
+                        ? "bg-amber-400/20 text-amber-200 ring-1 ring-amber-300/30"
+                        : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
+                    )}
+                  >
+                    {mode === "last" ? "Last" : "Range"}
+                  </button>
+                ))}
+              </div>
+
+              {sourceMode === "last" ? (
+                <label className="flex items-center justify-between gap-2 text-[0.6875rem] text-[var(--muted-foreground)]">
+                  <span>Messages</span>
+                  <input
+                    type="number"
+                    min={MIN_SUMMARY_MESSAGES}
+                    max={MAX_SUMMARY_MESSAGES}
+                    value={localSize}
+                    onFocus={() => {
+                      sizeInputFocused.current = true;
+                    }}
+                    onChange={(e) => setLocalSize(e.target.value)}
+                    onBlur={() => {
+                      sizeInputFocused.current = false;
+                      const clamped = clampSummaryCount(parsePositiveInteger(localSize) ?? 50);
+                      setLocalSize(String(clamped));
+                    }}
+                    className="w-16 rounded-md bg-[var(--card)] px-2 py-1 text-center text-xs tabular-nums text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                  />
+                </label>
+              ) : (
+                <div className="space-y-1.5">
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="space-y-1 text-[0.625rem] font-medium text-[var(--muted-foreground)]">
+                      From
+                      <input
+                        type="number"
+                        min={1}
+                        max={Math.max(1, totalMessageCount)}
+                        value={rangeStart}
+                        onFocus={() => {
+                          rangeInputFocused.current = true;
+                        }}
+                        onChange={(e) => setRangeStart(e.target.value)}
+                        onBlur={() => {
+                          rangeInputFocused.current = false;
+                          setRangeStart(String(normalizedRangeStart));
+                        }}
+                        className="w-full rounded-md bg-[var(--card)] px-2 py-1 text-center text-xs tabular-nums text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                      />
+                    </label>
+                    <label className="space-y-1 text-[0.625rem] font-medium text-[var(--muted-foreground)]">
+                      To
+                      <input
+                        type="number"
+                        min={1}
+                        max={Math.max(1, totalMessageCount)}
+                        value={rangeEnd}
+                        onFocus={() => {
+                          rangeInputFocused.current = true;
+                        }}
+                        onChange={(e) => setRangeEnd(e.target.value)}
+                        onBlur={() => {
+                          rangeInputFocused.current = false;
+                          setRangeEnd(String(normalizedRangeEnd));
+                        }}
+                        className="w-full rounded-md bg-[var(--card)] px-2 py-1 text-center text-xs tabular-nums text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                      />
+                    </label>
+                  </div>
+                  <p
+                    className={cn(
+                      "text-[0.625rem]",
+                      rangeTooLarge || !rangeMessagesLoaded ? "text-red-300" : "text-[var(--muted-foreground)]",
+                    )}
+                  >
+                    {rangeStatusText}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          <button
+            onClick={handleGenerate}
+            disabled={isGenerating || !canGenerate}
+            className={cn(
+              "mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all",
+              isGenerating || !canGenerate
+                ? "cursor-not-allowed bg-[var(--secondary)] text-[var(--muted-foreground)]"
+                : "bg-gradient-to-r from-amber-400 to-orange-500 text-white shadow-sm hover:shadow-md active:scale-[0.98]",
+            )}
+            title="Generate summary with AI"
+          >
+            {isGenerating ? <Loader2 size="0.8125rem" className="animate-spin" /> : <Sparkles size="0.8125rem" />}
+            {isGenerating ? "Generating..." : "Generate"}
+          </button>
         </div>
 
         {/* Info tip */}

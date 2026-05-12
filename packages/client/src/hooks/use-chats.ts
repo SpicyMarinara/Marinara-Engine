@@ -723,11 +723,22 @@ export function useBranchChat() {
 }
 
 /** Generate a rolling summary for a chat via the LLM */
+export type GenerateSummaryInput = {
+  chatId: string;
+  contextSize?: number;
+  rangeStartMessageId?: string;
+  rangeEndMessageId?: string;
+};
+
 export function useGenerateSummary() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ chatId, contextSize }: { chatId: string; contextSize?: number }) =>
-      api.post<{ summary: string }>(`/chats/${chatId}/generate-summary`, { contextSize }),
+    mutationFn: ({ chatId, contextSize, rangeStartMessageId, rangeEndMessageId }: GenerateSummaryInput) =>
+      api.post<{ summary: string }>(`/chats/${chatId}/generate-summary`, {
+        contextSize,
+        rangeStartMessageId,
+        rangeEndMessageId,
+      }),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: chatKeys.detail(vars.chatId) });
     },

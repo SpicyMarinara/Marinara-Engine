@@ -326,12 +326,14 @@ function SummaryButton({
   chatId,
   summary,
   summaryContextSize,
-  onContextSizeChange,
+  totalMessageCount,
+  messageIdByOrderIndex,
 }: {
   chatId: string | null;
   summary: string | null;
   summaryContextSize: number;
-  onContextSizeChange: (size: number) => void;
+  totalMessageCount: number;
+  messageIdByOrderIndex: Map<number, string>;
 }) {
   const [open, setOpen] = useState(false);
   const compact = useUIStore((s) => s.centerCompact);
@@ -361,7 +363,8 @@ function SummaryButton({
             chatId={chatId}
             summary={summary}
             contextSize={summaryContextSize}
-            onContextSizeChange={onContextSizeChange}
+            totalMessageCount={totalMessageCount}
+            messageIdByOrderIndex={messageIdByOrderIndex}
             onClose={() => setOpen(false)}
           />
         </Suspense>
@@ -505,6 +508,7 @@ type RoleplaySurfaceProps = {
   shouldAnimateMessages: boolean;
   summaryContextSize: number;
   totalMessageCount: number;
+  messageIdByOrderIndex: Map<number, string>;
   lastAssistantMessageId: string | null;
   settingsOpen: boolean;
   filesOpen: boolean;
@@ -532,7 +536,6 @@ type RoleplaySurfaceProps = {
   onCloneSceneFromHere?: (messageId: string) => void;
   isCloneSceneFromHereDisabled?: boolean;
   onToggleSelectMessage: (toggle: MessageSelectionToggle) => void;
-  onSummaryContextSizeChange: (size: number) => void;
   onRerunTrackers: () => void;
   onRerunSingleTracker: (agentType: string) => void;
   onRetryFailedAgents?: () => void;
@@ -605,6 +608,7 @@ export function ChatRoleplaySurface({
   shouldAnimateMessages,
   summaryContextSize,
   totalMessageCount,
+  messageIdByOrderIndex,
   lastAssistantMessageId,
   settingsOpen,
   filesOpen,
@@ -632,7 +636,6 @@ export function ChatRoleplaySurface({
   onCloneSceneFromHere,
   isCloneSceneFromHereDisabled,
   onToggleSelectMessage,
-  onSummaryContextSizeChange,
   onRerunTrackers,
   onRerunSingleTracker,
   onRetryFailedAgents,
@@ -744,7 +747,8 @@ export function ChatRoleplaySurface({
                       chatId={chat?.id ?? null}
                       summary={chatMeta.summary ?? null}
                       summaryContextSize={summaryContextSize}
-                      onContextSizeChange={onSummaryContextSizeChange}
+                      totalMessageCount={totalMessageCount}
+                      messageIdByOrderIndex={messageIdByOrderIndex}
                     />
                     <ActiveWorldInfoButton chatId={chat?.id ?? null} />
                     <AuthorNotesButton chatId={chat?.id ?? null} chatMeta={chatMeta} />
@@ -830,7 +834,8 @@ export function ChatRoleplaySurface({
                           chatId={chat?.id ?? null}
                           summary={chatMeta.summary ?? null}
                           summaryContextSize={summaryContextSize}
-                          onContextSizeChange={onSummaryContextSizeChange}
+                          totalMessageCount={totalMessageCount}
+                          messageIdByOrderIndex={messageIdByOrderIndex}
                         />
                         <ActiveWorldInfoButton chatId={chat?.id ?? null} />
                         <AuthorNotesButton chatId={chat?.id ?? null} chatMeta={chatMeta} />
@@ -888,7 +893,8 @@ export function ChatRoleplaySurface({
                         chatId={chat?.id ?? null}
                         summary={chatMeta.summary ?? null}
                         summaryContextSize={summaryContextSize}
-                        onContextSizeChange={onSummaryContextSizeChange}
+                        totalMessageCount={totalMessageCount}
+                        messageIdByOrderIndex={messageIdByOrderIndex}
                       />
                       <ActiveWorldInfoButton chatId={chat?.id ?? null} />
                       <AuthorNotesButton chatId={chat?.id ?? null} chatMeta={chatMeta} />

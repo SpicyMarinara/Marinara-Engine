@@ -1845,12 +1845,17 @@ export async function chatsRoutes(app: FastifyInstance) {
 
     const chatMeta = typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : (chat.metadata ?? {});
 
-    // Accept context size from request body, fall back to chat meta, then default 50
+    // Accept context size from request body, fall back to chat meta, then default 50.
+    // Manual UI generation may also pass inclusive message ID anchors.
     const body = (req.body ?? {}) as Record<string, unknown>;
     const contextSize = Math.max(
       5,
       Math.min(200, Number(body.contextSize) || (chatMeta.summaryContextSize as number) || 50),
     );
+    const requestedRangeStartMessageId =
+      typeof body.rangeStartMessageId === "string" ? body.rangeStartMessageId : null;
+    const requestedRangeEndMessageId = typeof body.rangeEndMessageId === "string" ? body.rangeEndMessageId : null;
+    const hasRange = !!requestedRangeStartMessageId && !!requestedRangeEndMessageId;
 
     const chatConnId = chat.connectionId;
 
@@ -1908,10 +1913,31 @@ export async function chatsRoutes(app: FastifyInstance) {
       model = conn.model;
     }
 
-    // Build conversation context (use contextSize from popover)
+    // Build conversation context (use contextSize from popover, or a custom range)
     const allMessages = await storage.listMessages(req.params.id);
-    const recentMessages = allMessages.slice(-contextSize);
-    const chatLog = recentMessages.map((m: any) => `[${m.role}]: ${(m.content as string).slice(0, 2000)}`).join("\n\n");
+    const selectedMessages = hasRange
+      ? (() => {
+          const startIndex = allMessages.findIndex((message) => message.id === requestedRangeStartMessageId);
+          const endIndex = allMessages.findIndex((message) => message.id === requestedRangeEndMessageId);
+          if (startIndex === -1 || endIndex === -1) {
+            return { error: "Summary range messages were not found in this chat" as const };
+          }
+          const from = Math.min(startIndex, endIndex);
+          const to = Math.max(startIndex, endIndex);
+          const count = to - from + 1;
+          if (count > 200) {
+            return { error: "Summary ranges cannot include more than 200 messages" as const };
+          }
+          return allMessages.slice(from, to + 1);
+        })()
+      : allMessages.slice(-contextSize);
+    if (selectedMessages && "error" in selectedMessages) {
+      return reply.status(400).send({ error: selectedMessages.error });
+    }
+    if (selectedMessages.length === 0) {
+      return reply.status(400).send({ error: "No messages available for the requested summary range" });
+    }
+    const chatLog = selectedMessages.map((m: any) => `[${m.role}]: ${(m.content as string).slice(0, 2000)}`).join("\n\n");
 
     const previousSummary = chatMeta.summary ?? null;
     const summaryPrompt = getDefaultAgentPrompt("chat-summary");
@@ -1950,11 +1976,14 @@ export async function chatsRoutes(app: FastifyInstance) {
       summaryText = result.content.trim();
     }
 
-    // Append to existing summary (don't replace)
-    const existing = ((chatMeta.summary as string) ?? "").trim();
-    const combined = existing ? `${existing}\n\n${summaryText}` : summaryText;
-    const merged = { ...chatMeta, summary: combined };
-    await storage.updateMetadata(req.params.id, merged);
+    // Append to the latest summary without replacing concurrent metadata changes.
+    let combined = summaryText;
+    const updatedChat = await storage.patchMetadata(req.params.id, (freshMeta) => {
+      const existing = ((freshMeta.summary as string) ?? "").trim();
+      combined = existing ? `${existing}\n\n${summaryText}` : summaryText;
+      return { summary: combined };
+    });
+    if (!updatedChat) return reply.status(404).send({ error: "Chat not found" });
 
     return { summary: combined };
   });

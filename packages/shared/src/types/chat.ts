@@ -96,6 +96,8 @@ export interface ChatMemoryChunk {
 export interface ChatMetadata {
   /** Summary text for context injection */
   summary: string | null;
+  /** Recent message count used by manual rolling summary generation and the automated summary agent. */
+  summaryContextSize?: number;
   /** Custom tags for organisation */
   tags: string[];
   /** Whether agents are enabled for this chat */

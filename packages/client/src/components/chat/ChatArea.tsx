@@ -440,12 +440,6 @@ export function ChatArea() {
 
   const updateMeta = useUpdateChatMetadata();
   const summaryContextSize: number = (chatMeta.summaryContextSize as number) ?? 50;
-  const handleSummaryContextSizeChange = useCallback(
-    (size: number) => {
-      if (chat?.id) updateMeta.mutate({ id: chat.id, summaryContextSize: size });
-    },
-    [chat?.id, updateMeta],
-  );
 
   // Sync translation config from chat metadata to the translation store
   useEffect(() => {
@@ -1904,6 +1898,7 @@ export function ChatArea() {
           shouldAnimateMessages={shouldAnimateMessages}
           summaryContextSize={summaryContextSize}
           totalMessageCount={totalMessageCount}
+          messageIdByOrderIndex={messageIdByOrderIndex}
           lastAssistantMessageId={lastAssistantMessageId}
           settingsOpen={settingsOpen}
           filesOpen={filesOpen}
@@ -1931,7 +1926,6 @@ export function ChatArea() {
           onCloneSceneFromHere={isSceneChat ? handleCloneSceneFromHere : undefined}
           isCloneSceneFromHereDisabled={isForking || isStreaming}
           onToggleSelectMessage={handleToggleSelectMessage}
-          onSummaryContextSizeChange={handleSummaryContextSizeChange}
           onRerunTrackers={handleRerunTrackers}
           onRerunSingleTracker={handleRerunSingleTracker}
           onStartEncounter={() => startEncounter()}
