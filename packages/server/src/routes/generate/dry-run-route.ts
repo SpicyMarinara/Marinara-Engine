@@ -784,11 +784,13 @@ export async function registerDryRunRoute(app: FastifyInstance) {
         });
     let effectivePresetId: string | null = null;
     let effectivePresetSource: PromptPresetCandidateSource | null = null;
+    let effectivePreset: Awaited<ReturnType<typeof presets.getById>> | null = null;
     for (const candidate of promptPresetCandidates) {
       const candidatePreset = await presets.getById(candidate.id);
       if (candidatePreset) {
         effectivePresetId = candidate.id;
         effectivePresetSource = candidate.source;
+        effectivePreset = candidatePreset;
         break;
       }
       if (candidate.source !== "chat") {
@@ -818,9 +820,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
       effectivePresetSource !== "chat" &&
       effectivePresetId !== ((chat.promptPresetId as string | null) ?? null);
     const presetDefaultChoices =
-      isDifferentPresetOverride && effectivePresetId
-        ? parsePresetChoices((await presets.getById(effectivePresetId))?.defaultChoices)
-        : null;
+      isDifferentPresetOverride && effectivePreset ? parsePresetChoices(effectivePreset.defaultChoices) : null;
 
     const chatChoices: Record<string, string | string[]> =
       requestChoices ?? (isDifferentPresetOverride ? (presetDefaultChoices ?? {}) : chatChoicesFromMeta);
@@ -849,11 +849,8 @@ export async function registerDryRunRoute(app: FastifyInstance) {
         promptParts.wrapFormat === "xml"
       ) {
         wrapFormat = promptParts.wrapFormat;
-      } else if (effectivePresetId) {
-        const preset = await presets.getById(effectivePresetId);
-        if (preset) {
-          wrapFormat = (preset.wrapFormat as "xml" | "markdown" | "none") || "xml";
-        }
+      } else if (effectivePreset) {
+        wrapFormat = (effectivePreset.wrapFormat as "xml" | "markdown" | "none") || "xml";
       }
 
       type PromptPartKey =
@@ -1180,94 +1177,92 @@ export async function registerDryRunRoute(app: FastifyInstance) {
           continue;
         }
       }
-    } else if (effectivePresetId) {
-      const preset = await presets.getById(effectivePresetId);
-      if (preset) {
-        wrapFormat = (preset.wrapFormat as "xml" | "markdown" | "none") || "xml";
-        const [sections, groups, choiceBlocks] = await Promise.all([
-          presets.listSections(effectivePresetId),
-          presets.listGroups(effectivePresetId),
-          presets.listChoiceBlocksForPreset(effectivePresetId),
-        ]);
+    } else if (effectivePresetId && effectivePreset) {
+      const preset = effectivePreset;
+      wrapFormat = (preset.wrapFormat as "xml" | "markdown" | "none") || "xml";
+      const [sections, groups, choiceBlocks] = await Promise.all([
+        presets.listSections(effectivePresetId),
+        presets.listGroups(effectivePresetId),
+        presets.listChoiceBlocksForPreset(effectivePresetId),
+      ]);
 
-        const assemblerInput: AssemblerInput = {
-          db: app.db,
-          preset: preset as any,
-          sections: sections as any,
-          groups: groups as any,
-          choiceBlocks: choiceBlocks as any,
-          chatChoices,
-          chatId,
-          characterIds,
-          personaId,
-          personaName,
-          personaDescription,
-          personaFields,
-          personaStats: (() => {
-            if (!persona?.personaStats) return undefined;
-            if (typeof persona.personaStats !== "string") return persona.personaStats;
-            try {
-              return JSON.parse(persona.personaStats);
-            } catch {
-              return undefined;
-            }
-          })(),
-          chatMessages: mappedMessages,
-          chatSummary: resolvedInjectChatSummary ? ((chatMeta.summary as string) ?? "").trim() || null : null,
-          enableAgents: false,
-          activeAgentIds: [],
-          activeLorebookIds: resolvedInjectLorebook
-            ? Array.isArray(chatMeta.activeLorebookIds)
-              ? (chatMeta.activeLorebookIds as string[])
-              : []
-            : [],
-          excludedLorebookIds: lorebookScopeExclusions.excludedLorebookIds,
-          excludedLorebookSourceAgentIds: lorebookScopeExclusions.excludedSourceAgentIds,
-          chatEmbedding: null,
-          entryStateOverrides:
-            (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
-            typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object"
-              ? ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) as Record<
-                  string,
-                  { ephemeral?: number | null; enabled?: boolean }
-                >)
-              : undefined,
-          entryTimingStates:
-            (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
-            typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object"
-              ? ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) as Record<
-                  string,
-                  LorebookEntryTimingState
-                >)
-              : undefined,
-          lorebookTokenBudget,
-          generationTriggers: lorebookGenerationTriggers,
-          previewOnly: true,
-          groupScenarioOverrideText:
-            typeof chatMeta.groupScenarioText === "string" && (chatMeta.groupScenarioText as string).trim()
-              ? (chatMeta.groupScenarioText as string).trim()
-              : null,
-        };
+      const assemblerInput: AssemblerInput = {
+        db: app.db,
+        preset: preset as any,
+        sections: sections as any,
+        groups: groups as any,
+        choiceBlocks: choiceBlocks as any,
+        chatChoices,
+        chatId,
+        characterIds,
+        personaId,
+        personaName,
+        personaDescription,
+        personaFields,
+        personaStats: (() => {
+          if (!persona?.personaStats) return undefined;
+          if (typeof persona.personaStats !== "string") return persona.personaStats;
+          try {
+            return JSON.parse(persona.personaStats);
+          } catch {
+            return undefined;
+          }
+        })(),
+        chatMessages: mappedMessages,
+        chatSummary: resolvedInjectChatSummary ? ((chatMeta.summary as string) ?? "").trim() || null : null,
+        enableAgents: false,
+        activeAgentIds: [],
+        activeLorebookIds: resolvedInjectLorebook
+          ? Array.isArray(chatMeta.activeLorebookIds)
+            ? (chatMeta.activeLorebookIds as string[])
+            : []
+          : [],
+        excludedLorebookIds: lorebookScopeExclusions.excludedLorebookIds,
+        excludedLorebookSourceAgentIds: lorebookScopeExclusions.excludedSourceAgentIds,
+        chatEmbedding: null,
+        entryStateOverrides:
+          (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
+          typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object"
+            ? ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) as Record<
+                string,
+                { ephemeral?: number | null; enabled?: boolean }
+              >)
+            : undefined,
+        entryTimingStates:
+          (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
+          typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object"
+            ? ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) as Record<
+                string,
+                LorebookEntryTimingState
+              >)
+            : undefined,
+        lorebookTokenBudget,
+        generationTriggers: lorebookGenerationTriggers,
+        previewOnly: true,
+        groupScenarioOverrideText:
+          typeof chatMeta.groupScenarioText === "string" && (chatMeta.groupScenarioText as string).trim()
+            ? (chatMeta.groupScenarioText as string).trim()
+            : null,
+      };
 
-        const assembled = await assemblePrompt(assemblerInput);
-        finalMessages = assembled.messages;
-        temperature = assembled.parameters.temperature;
-        maxTokens = assembled.parameters.maxTokens;
-        topP = assembled.parameters.topP ?? 1;
-        topK = assembled.parameters.topK ?? 0;
-        frequencyPenalty = assembled.parameters.frequencyPenalty ?? 0;
-        presencePenalty = assembled.parameters.presencePenalty ?? 0;
-        showThoughts = assembled.parameters.showThoughts ?? true;
-        reasoningEffort = assembled.parameters.reasoningEffort ?? null;
-        verbosity = assembled.parameters.verbosity ?? null;
-        assistantPrefill = assembled.parameters.assistantPrefill ?? "";
-        customParameters = mergeCustomParameters(customParameters, assembled.parameters.customParameters);
+      const assembled = await assemblePrompt(assemblerInput);
+      finalMessages = assembled.messages;
+      temperature = assembled.parameters.temperature;
+      maxTokens = assembled.parameters.maxTokens;
+      topP = assembled.parameters.topP ?? 1;
+      topK = assembled.parameters.topK ?? 0;
+      frequencyPenalty = assembled.parameters.frequencyPenalty ?? 0;
+      presencePenalty = assembled.parameters.presencePenalty ?? 0;
+      showThoughts = assembled.parameters.showThoughts ?? true;
+      reasoningEffort = assembled.parameters.reasoningEffort ?? null;
+      verbosity = assembled.parameters.verbosity ?? null;
+      assistantPrefill = assembled.parameters.assistantPrefill ?? "";
+      customParameters = mergeCustomParameters(customParameters, assembled.parameters.customParameters);
 
-        const presetMaxContext = assembled.parameters.useMaxContext
-          ? knownModelContext
-          : normalizeMaxContext(assembled.parameters.maxContext);
-        effectiveMaxContext = minContextLimit(effectiveMaxContext, presetMaxContext);
-      }
+      const presetMaxContext = assembled.parameters.useMaxContext
+        ? knownModelContext
+        : normalizeMaxContext(assembled.parameters.maxContext);
+      effectiveMaxContext = minContextLimit(effectiveMaxContext, presetMaxContext);
     }
 
     applyParameterOverrides(connectionParams);
