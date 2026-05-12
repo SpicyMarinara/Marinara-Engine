@@ -3158,7 +3158,8 @@ export function ChatSettingsDrawer({
                       (c) =>
                         c.id !== chat.id &&
                         (c.mode === "roleplay" || c.mode === "game") &&
-                        !c.connectedChatId &&
+                        // Show chats that point to this chat, so the severed relationship can be repaired manually.
+                        (!c.connectedChatId || c.connectedChatId === chat.id) &&
                         getConnectedChatDisplayName(c).toLowerCase().includes(connectionSearch.toLowerCase()),
                     )
                     .map((c) => (
@@ -3322,7 +3323,8 @@ export function ChatSettingsDrawer({
                       (c) =>
                         c.id !== chat.id &&
                         c.mode === "conversation" &&
-                        !c.connectedChatId &&
+                        // Show chats that point to this chat, so the severed relationship can be repaired manually.
+                        (!c.connectedChatId || c.connectedChatId === chat.id) &&
                         getConnectedChatDisplayName(c).toLowerCase().includes(connectionSearch.toLowerCase()),
                     )
                     .map((c) => (

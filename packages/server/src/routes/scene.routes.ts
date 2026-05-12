@@ -297,8 +297,6 @@ export async function sceneRoutes(app: FastifyInstance) {
     // so for scenes we do not call connectChats, which would overwrite any
     // pre-existing connection to an RP from the origin chat.
 
-    console.log(`Creating scene. Origin chat ${originChatId} → scene chat ${sceneChat.id}`);
-
     // 1. Inject participation guide as a narrator message (visible to user, OOC guidance)
     if (plan.participationGuide) {
       await chats.createMessage({
