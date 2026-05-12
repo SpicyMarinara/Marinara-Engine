@@ -756,15 +756,20 @@ export function createChatsStorage(db: DB) {
       await db.update(chats).set({ connectedChatId: chatIdA, updatedAt: timestamp }).where(eq(chats.id, chatIdB));
     },
 
-    /** Remove the bidirectional link for a chat (and its partner). */
+    /** Remove the bidirectional link for a chat (and its partner). Only nulls
+     *  the partner row when it actually reciprocates — leaves dangling pointers
+     *  to other chats alone so we don't sever an unrelated link. */
     async disconnectChat(chatId: string) {
       const chat = await this.getById(chatId);
       if (!chat) return;
-      const parsed = typeof chat.connectedChatId === "string" ? chat.connectedChatId : null;
+      const partnerId = typeof chat.connectedChatId === "string" ? chat.connectedChatId : null;
       const timestamp = now();
       await db.update(chats).set({ connectedChatId: null, updatedAt: timestamp }).where(eq(chats.id, chatId));
-      if (parsed) {
-        await db.update(chats).set({ connectedChatId: null, updatedAt: timestamp }).where(eq(chats.id, parsed));
+      if (partnerId) {
+        const partner = await this.getById(partnerId);
+        if (partner?.connectedChatId === chatId) {
+          await db.update(chats).set({ connectedChatId: null, updatedAt: timestamp }).where(eq(chats.id, partnerId));
+        }
       }
     },
 

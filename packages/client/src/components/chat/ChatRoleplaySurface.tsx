@@ -26,7 +26,7 @@ import {
   FlipHorizontal2,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { getConnectedChatDisplayName } from "../../lib/chat-display";
+import { getChatDisplayName } from "../../lib/chat-display";
 import { useUIStore } from "../../stores/ui.store";
 import { useChatStore } from "../../stores/chat.store";
 import { useGameStateStore } from "../../stores/game-state.store";
@@ -664,8 +664,14 @@ export function ChatRoleplaySurface({
   onSelectAllBelowSelection,
   isGrouped,
 }: RoleplaySurfaceProps) {
-  const linkedChatName = chat?.connectedChatId
-    ? getConnectedChatDisplayName(allChats?.find((c) => c.id === chat.connectedChatId))
+  // Scene chats use sceneOriginChatId from metadata for "switch to" navigation
+  // instead of connectedChatId — scenes deliberately don't establish a
+  // connection so they can't displace a pre-existing Conv↔RP link.
+  const sceneOriginChatId =
+    typeof chatMeta?.sceneOriginChatId === "string" ? chatMeta.sceneOriginChatId : null;
+  const linkedChatId = sceneOriginChatId ?? chat?.connectedChatId ?? null;
+  const linkedChatName = linkedChatId
+    ? getChatDisplayName(allChats?.find((c) => c.id === linkedChatId))
     : undefined;
   const sidebarOpen = useUIStore((s) => s.sidebarOpen);
   const rightPanelOpen = useUIStore((s) => s.rightPanelOpen);
@@ -768,11 +774,11 @@ export function ChatRoleplaySurface({
                       />
                     )}
                     <RpToolbarButton icon={<Image size="0.875rem" />} title="Gallery" onClick={onOpenGallery} />
-                    {chat?.connectedChatId && (
+                    {linkedChatId && (
                       <RpToolbarButton
                         icon={<ArrowRightLeft size="0.875rem" />}
                         title={linkedChatName ? `Switch to ${linkedChatName}` : "Connected chat"}
-                        onClick={() => useChatStore.getState().setActiveChatId(chat.connectedChatId!)}
+                        onClick={() => useChatStore.getState().setActiveChatId(linkedChatId)}
                       />
                     )}
                     <RpToolbarButton
@@ -854,11 +860,11 @@ export function ChatRoleplaySurface({
                           />
                         )}
                         <RpToolbarButton icon={<Image size="0.875rem" />} title="Gallery" onClick={onOpenGallery} />
-                        {chat?.connectedChatId && (
+                        {linkedChatId && (
                           <RpToolbarButton
                             icon={<ArrowRightLeft size="0.875rem" />}
                             title={linkedChatName ? `Switch to ${linkedChatName}` : "Connected chat"}
-                            onClick={() => useChatStore.getState().setActiveChatId(chat.connectedChatId!)}
+                            onClick={() => useChatStore.getState().setActiveChatId(linkedChatId)}
                           />
                         )}
                         <RpToolbarButton
@@ -894,11 +900,11 @@ export function ChatRoleplaySurface({
                         onClick={onOpenFiles}
                       />
                       <RpToolbarButton icon={<Image size="0.875rem" />} title="Gallery" onClick={onOpenGallery} />
-                      {chat?.connectedChatId && (
+                      {linkedChatId && (
                         <RpToolbarButton
                           icon={<ArrowRightLeft size="0.875rem" />}
                           title={linkedChatName ? `Switch to ${linkedChatName}` : "Connected chat"}
-                          onClick={() => useChatStore.getState().setActiveChatId(chat.connectedChatId!)}
+                          onClick={() => useChatStore.getState().setActiveChatId(linkedChatId)}
                         />
                       )}
                       <RpToolbarButton

@@ -293,8 +293,9 @@ export async function sceneRoutes(app: FastifyInstance) {
       sceneBusyCharIds: initiatorCharId ? [initiatorCharId] : finalParticipantIds,
     });
 
-    // Bidirectionally link the chats
-    await chats.connectChats(originChatId, sceneChat.id);
+    // Scene→origin navigation is driven by sceneOriginChatId in metadata, so we
+    // deliberately do NOT call connectChats here — that would clobber any
+    // pre-existing Conv↔RP link on the origin chat.
 
     // 1. Inject participation guide as a narrator message (visible to user, OOC guidance)
     if (plan.participationGuide) {
@@ -475,9 +476,6 @@ export async function sceneRoutes(app: FastifyInstance) {
       await chats.updateMetadata(originChatId, originMeta);
     }
 
-    // 5. Disconnect the chats (scene is over, no longer linked)
-    await chats.disconnectChat(sceneChatId);
-
     return {
       summary,
       originChatId,
@@ -506,10 +504,7 @@ export async function sceneRoutes(app: FastifyInstance) {
       await chats.updateMetadata(originChatId, originMeta);
     }
 
-    // 2. Disconnect the chats
-    await chats.disconnectChat(sceneChatId);
-
-    // 3. Delete the scene chat entirely
+    // 2. Delete the scene chat entirely
     await chats.remove(sceneChatId);
 
     return { originChatId };
@@ -679,7 +674,6 @@ export async function sceneRoutes(app: FastifyInstance) {
           logger.info("[scene/fork] Origin chat %s missing during convert of scene %s", originChatId, sceneChatId);
         }
 
-        await chats.disconnectChat(sceneChatId);
         await chats.remove(sceneChatId);
       }
     } catch (err) {
