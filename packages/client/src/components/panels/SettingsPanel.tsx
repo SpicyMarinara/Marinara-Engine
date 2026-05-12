@@ -69,6 +69,15 @@ import { DraftNumberInput } from "../ui/DraftNumberInput";
 import { ExportFormatDialog, type ExportFormatChoice } from "../ui/ExportFormatDialog";
 import { inspectCharacterFilesForEmbeddedLorebooks } from "../../lib/character-import";
 
+type CustomFontFace = {
+  filename: string;
+  family: string;
+  url: string;
+  weight?: string;
+  style?: string;
+  unicodeRange?: string;
+};
+
 const TABS = [
   { id: "general", label: "General" },
   { id: "appearance", label: "Appearance" },
@@ -967,18 +976,29 @@ function AppearanceSettings() {
   const [draftStrokeColor, setDraftStrokeColor] = useState(textStrokeColor);
 
   // Custom fonts — query is pre-warmed in App.tsx, no fetch here
-  const { data: customFonts } = useQuery<{ filename: string; family: string; url: string }[]>({
+  const { data: customFonts } = useQuery<CustomFontFace[]>({
     queryKey: ["custom-fonts"],
     queryFn: () => api.get("/fonts"),
     staleTime: Infinity,
   });
+  const customFontOptions = React.useMemo(() => {
+    const seen = new Set<string>();
+    return (customFonts ?? []).filter((font) => {
+      const family = font.family.trim();
+      if (!family || seen.has(family)) return false;
+      seen.add(family);
+      return true;
+    });
+  }, [customFonts]);
 
   // Google Fonts download
   const [googleFontName, setGoogleFontName] = useState("");
   const queryClient = useQueryClient();
   const googleFontMutation = useMutation({
     mutationFn: (family: string) =>
-      api.post<{ filename: string; family: string; url: string }>("/fonts/google/download", { family }),
+      api.post<{ filename: string; family: string; url: string; files?: CustomFontFace[] }>("/fonts/google/download", {
+        family,
+      }),
     onSuccess: (data) => {
       toast.success(`Installed "${data.family}"`);
       setGoogleFontName("");
@@ -1056,7 +1076,7 @@ function AppearanceSettings() {
           className="rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs outline-none ring-1 ring-transparent transition-shadow focus:ring-[var(--primary)]"
         >
           <option value="">Default (Inter)</option>
-          {customFonts?.map((f) => (
+          {customFontOptions.map((f) => (
             <option key={f.family} value={f.family}>
               {f.family}
             </option>

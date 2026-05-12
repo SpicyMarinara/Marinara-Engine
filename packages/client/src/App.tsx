@@ -31,6 +31,17 @@ type HealthResponse = {
   version: string;
 };
 
+type CustomFontFace = {
+  filename: string;
+  family: string;
+  url: string;
+  weight?: string;
+  style?: string;
+  unicodeRange?: string;
+};
+
+const registeredCustomFontFaceKeys = new Set<string>();
+
 function stripFontFamilyQuotes(family: string): string {
   const trimmed = family.trim();
   if (trimmed.length < 2) return trimmed;
@@ -46,6 +57,10 @@ function stripFontFamilyQuotes(family: string): string {
 function toCssFontFamilyValue(family: string): string {
   const cleanFamily = stripFontFamilyQuotes(family);
   return `"${cleanFamily.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function customFontFaceKey(family: string, font: CustomFontFace): string {
+  return [family, font.url, font.weight ?? "400", font.style ?? "normal", font.unicodeRange ?? ""].join("|");
 }
 
 function syncRangeSliderProgress(input: HTMLInputElement) {
@@ -216,8 +231,8 @@ export function App() {
     }
   }, [fontFamily]);
 
-  // Pre-load custom fonts at startup so switching to Appearance tab doesn't cause a flash
-  const { data: customFonts } = useQuery<{ filename: string; family: string; url: string }[]>({
+  // Register custom font faces without forcing every shard to load at startup.
+  const { data: customFonts } = useQuery<CustomFontFace[]>({
     queryKey: ["custom-fonts"],
     queryFn: () => api.get("/fonts"),
     staleTime: Infinity,
@@ -242,19 +257,20 @@ export function App() {
           return;
         }
 
+        const key = customFontFaceKey(family, f);
+        if (registeredCustomFontFaceKeys.has(key)) {
+          return;
+        }
+
         const fontFace = new FontFace(family, `url("${f.url}")`, {
           display: "swap",
-          weight: "400",
+          weight: f.weight ?? "400",
+          style: f.style ?? "normal",
+          ...(f.unicodeRange ? { unicodeRange: f.unicodeRange } : {}),
         });
 
-        fontFace
-          .load()
-          .then((loadedFace) => {
-            document.fonts.add(loadedFace);
-          })
-          .catch(() => {
-            // Ignore individual font load errors to avoid breaking others
-          });
+        document.fonts.add(fontFace);
+        registeredCustomFontFaceKeys.add(key);
       } catch {
         // Ignore construction errors for invalid font definitions
       }
