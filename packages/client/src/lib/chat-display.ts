@@ -21,5 +21,8 @@ export function parseChatMetadata(raw: unknown): Record<string, any> {
 export function getChatDisplayName(chat: ChatDisplaySource | null | undefined): string {
   if (!chat) return "";
   const metadata = parseChatMetadata(chat.metadata);
-  return typeof metadata.branchName === "string" && metadata.branchName.trim() ? metadata.branchName : chat.name;
+  if (typeof metadata.branchName !== "string") return chat.name;
+
+  const branchName = metadata.branchName.trim();
+  return branchName && branchName !== "New Branch" ? branchName : chat.name;
 }
