@@ -289,6 +289,20 @@ function normalizeHapticAgentCommand(command: Record<string, unknown>): HapticDe
   };
 }
 
+export function normalizeHapticAgentCommands(data: Record<string, unknown>): Array<Record<string, unknown>> {
+  if (Array.isArray(data.commands)) {
+    return data.commands.filter(
+      (entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object",
+    );
+  }
+
+  if (normalizeHapticAgentAction(data.action)) {
+    return [data];
+  }
+
+  return [];
+}
+
 const COMPLETE_OUTPUT_END_RE = /[.!?…。！？]["'”’)\]}»›]*$/;
 const COMPLETE_SENTENCE_RE = /[.!?…。！？](?:["'”’)\]}»›]+)?(?=\s|$)/g;
 
@@ -7699,8 +7713,8 @@ export async function generateRoutes(app: FastifyInstance) {
                   (hData.raw as string)?.slice(0, 200),
                 );
               } else {
-                const cmds = hData.commands as Array<Record<string, unknown>> | undefined;
-                if (cmds && cmds.length > 0) {
+                const cmds = normalizeHapticAgentCommands(hData);
+                if (cmds.length > 0) {
                   const { hapticService } = await import("../services/haptic/buttplug-service.js");
                   if (hapticService.connected) {
                     const executedCommands: HapticDeviceCommand[] = [];
