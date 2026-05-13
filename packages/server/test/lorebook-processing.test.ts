@@ -98,6 +98,7 @@ function makeEntry(overrides: Partial<LorebookEntry> = {}): LorebookEntry {
     dynamicState: {},
     activationConditions: [],
     schedule: null,
+    excludeFromVectorization: false,
     embedding: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -164,6 +165,7 @@ function lorebookEntryRow(id: string) {
     activationConditions: "[]",
     schedule: null,
     preventRecursion: "false",
+    excludeFromVectorization: "false",
     embedding: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -680,6 +682,21 @@ test("entry probability is not re-rolled by semantic fallback after a keyword ma
 
   assert.equal(activated.length, 0);
   assert.equal(rolls, 1);
+});
+
+test("entries excluded from vectorization do not activate through semantic fallback", () => {
+  const entry = makeEntry({
+    keys: ["no-keyword-match"],
+    embedding: [1, 0],
+    excludeFromVectorization: true,
+  });
+
+  const activated = scanForActivatedEntries([{ role: "user", content: "ordinary chat" }], [entry], {
+    chatEmbedding: [1, 0],
+    semanticThreshold: 0.5,
+  });
+
+  assert.equal(activated.length, 0);
 });
 
 test("entry probability allows activation when the roll is below the configured percentage", () => {

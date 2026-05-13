@@ -1180,7 +1180,9 @@ export async function generateRoutes(app: FastifyInstance) {
           excludedLorebookIds: gameLorebookScopeExclusions.excludedLorebookIds,
           excludedSourceAgentIds: gameLorebookScopeExclusions.excludedSourceAgentIds,
         });
-        const hasVectorizedEntries = (activeEntries as Array<Record<string, unknown>>).some((e) => e.embedding != null);
+        const hasVectorizedEntries = (activeEntries as Array<Record<string, unknown>>).some(
+          (e) => !e.excludeFromVectorization && e.embedding != null,
+        );
         if (hasVectorizedEntries) {
           // Embed the last ~10 messages as context
           const recentMsgs = mappedMessages

@@ -102,6 +102,7 @@ test("startup migrations add lorebook folders schema to existing installs", asyn
 
     assert.equal(folderTables.length, 1);
     assert.ok(entryColumns.some((column) => column.name === "folder_id"));
+    assert.ok(entryColumns.some((column) => column.name === "exclude_from_vectorization"));
     const lorebookColumns = await db.all<{ name: string }>(sql.raw("PRAGMA table_info(lorebooks)"));
     const migratedBooks = await db.all<{ id: string; is_global: string }>(
       sql.raw(`SELECT id, is_global FROM lorebooks WHERE id = 'legacy-book'`),
