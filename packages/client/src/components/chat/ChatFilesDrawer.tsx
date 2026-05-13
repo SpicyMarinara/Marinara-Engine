@@ -48,8 +48,8 @@ export function ChatFilesDrawer({ chat, open, onClose }: ChatFilesDrawerProps) {
     setIsImporting(true);
     try {
       const formData = new FormData();
-      formData.append("file", file);
       formData.append("chatId", chat.id);
+      formData.append("file", file);
       const res = await fetch("/api/import/st-chat-into-group", { method: "POST", body: formData });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data?.success === false || data?.error) {
