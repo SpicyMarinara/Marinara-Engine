@@ -1373,7 +1373,8 @@ async function applyRetryResultEffects(args: {
           );
           const trimmedText = text.trim();
           if (trimmedText) {
-            const entry = { agentType: result.agentType, text: trimmedText };
+            const agentName = resolvedAgents.find((entry) => entry.resolved.type === result.agentType)?.cfg.name;
+            const entry = { agentType: result.agentType, agentName, text: trimmedText };
             const idx = list.findIndex((e) => e.agentType === result.agentType);
             if (idx >= 0) list[idx] = entry;
             else list.push(entry);

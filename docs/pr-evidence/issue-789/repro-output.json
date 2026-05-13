@@ -1,0 +1,25 @@
+{
+  "passed": true,
+  "results": [
+    {
+      "name": "single XML injection uses current agent name",
+      "passed": true,
+      "output": "<probability_engine>\n[INSTRUCTION FROM PROBABILITY ENGINE: Actions are not contested.]\n</probability_engine>"
+    },
+    {
+      "name": "single Markdown injection uses current agent name",
+      "passed": true,
+      "output": "## Probability Engine\n[INSTRUCTION FROM PROBABILITY ENGINE: Actions are not contested.]"
+    },
+    {
+      "name": "multiple injections use each current name",
+      "passed": true,
+      "output": "<probability_engine>\n[INSTRUCTION FROM PROBABILITY ENGINE: Actions are not contested.]\n</probability_engine>\n\n<narrative_director>\nKeep the pacing deliberate.\n</narrative_director>"
+    },
+    {
+      "name": "legacy cached injection falls back to agent type",
+      "passed": true,
+      "output": "<director>\nKeep the pacing deliberate.\n</director>"
+    }
+  ]
+}

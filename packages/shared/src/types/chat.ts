@@ -324,7 +324,7 @@ export interface MessageExtra {
    * Cached pipeline injections (prose-guardian, director, knowledge-retrieval, etc.)
    * saved with this assistant message — reused when regenerating that swipe unless refreshed.
    */
-  contextInjections?: Array<{ agentType: string; text: string }> | null;
+  contextInjections?: Array<{ agentType: string; agentName?: string; text: string }> | null;
 }
 
 /** Metadata about how a message was generated. */

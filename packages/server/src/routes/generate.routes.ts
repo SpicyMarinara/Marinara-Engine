@@ -586,22 +586,25 @@ function packRecalledMemories(
 
 /**
  * Format agent injection results into a wrapped block for prompt injection.
- * Each agent gets its own XML/markdown section with its type as the tag name.
+ * Each agent gets its own XML/markdown section with its current display name
+ * as the section label, falling back to the stable type for legacy caches.
  */
 function formatAgentInjections(injections: AgentInjection[], wrapFormat: string): string {
   if (injections.length === 1) {
-    const { agentType, text } = injections[0]!;
-    const tag = agentType.replace(/[^a-z0-9_-]/gi, "_");
-    if (wrapFormat === "markdown") return `## ${tag}\n${text}`;
+    const { agentType, agentName, text } = injections[0]!;
+    const label = agentName?.trim() || agentType;
+    const tag = nameToXmlTag(label) || agentType.replace(/[^a-z0-9_-]/gi, "_");
+    if (wrapFormat === "markdown") return `## ${label}\n${text}`;
     if (wrapFormat === "xml") return `<${tag}>\n${text}\n</${tag}>`;
     return text;
   }
   // Multiple agents — wrap each individually
   const parts: string[] = [];
-  for (const { agentType, text } of injections) {
-    const tag = agentType.replace(/[^a-z0-9_-]/gi, "_");
+  for (const { agentType, agentName, text } of injections) {
+    const label = agentName?.trim() || agentType;
+    const tag = nameToXmlTag(label) || agentType.replace(/[^a-z0-9_-]/gi, "_");
     if (wrapFormat === "markdown") {
-      parts.push(`## ${tag}\n${text}`);
+      parts.push(`## ${label}\n${text}`);
     } else if (wrapFormat === "xml") {
       parts.push(`<${tag}>\n${text}\n</${tag}>`);
     } else {
@@ -4839,8 +4842,15 @@ export async function generateRoutes(app: FastifyInstance) {
       // prose-guardian) which improve writing quality and should run every time.
       // On regens, reuse cached injections from the first generation to save tokens.
       // Post-gen agents still run after every response.
+      const agentNameByType = new Map(resolvedAgents.map((agent) => [agent.type, agent.name] as const));
+      const attachAgentName = (entry: AgentInjection): AgentInjection => ({
+        ...entry,
+        agentName: agentNameByType.get(entry.agentType) ?? entry.agentName,
+      });
       const reviewedAgentInjections: AgentInjection[] = input.agentInjectionOverrides
-        .map((entry) => ({ agentType: entry.agentType.trim(), text: entry.text }))
+        .map((entry) =>
+          attachAgentName({ agentType: entry.agentType.trim(), agentName: entry.agentName, text: entry.text }),
+        )
         .filter((entry) => entry.agentType && entry.text.trim().length > 0);
       const reviewedAgentTypes = new Set(reviewedAgentInjections.map((entry) => entry.agentType));
       let contextInjections: AgentInjection[] = reviewedAgentInjections;
@@ -4915,9 +4925,9 @@ export async function generateRoutes(app: FastifyInstance) {
                 );
               }
               const _tAgents = Date.now();
-              const injections = await pipeline.preGenerate(
-                (t) => !EXCLUDED_FROM_PIPELINE.has(t) && !reviewedAgentTypes.has(t),
-              );
+              const injections = (
+                await pipeline.preGenerate((t) => !EXCLUDED_FROM_PIPELINE.has(t) && !reviewedAgentTypes.has(t))
+              ).map(attachAgentName);
               logger.debug(`[timing] Pre-gen agents: ${Date.now() - _tAgents}ms`);
               return injections;
             })()
@@ -5181,7 +5191,7 @@ export async function generateRoutes(app: FastifyInstance) {
                 type: "agent_result",
                 data: {
                   agentType: inj.agentType,
-                  agentName: inj.agentType,
+                  agentName: agentNameByType.get(inj.agentType) ?? inj.agentName ?? inj.agentType,
                   resultType: "context_injection",
                   data: { text: inj.text },
                   success: true,
@@ -5199,9 +5209,11 @@ export async function generateRoutes(app: FastifyInstance) {
           if (hasContextInjectionAgents) {
             reply.raw.write(`data: ${JSON.stringify({ type: "agent_start", data: { phase: "pre_generation" } })}\n\n`);
             // On regens, exclude secret-plot-driver — it only triggers on new user messages
-            contextInjections = await pipeline.preGenerate(
-              (agentType) => !EXCLUDED_FROM_PIPELINE.has(agentType) && agentType !== "secret-plot-driver",
-            );
+            contextInjections = (
+              await pipeline.preGenerate(
+                (agentType) => !EXCLUDED_FROM_PIPELINE.has(agentType) && agentType !== "secret-plot-driver",
+              )
+            ).map(attachAgentName);
 
             // Failure gate — same as the new-message path
             const regenPreGenResults = pipeline.results.filter(

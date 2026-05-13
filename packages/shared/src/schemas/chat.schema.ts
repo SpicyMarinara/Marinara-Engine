@@ -41,6 +41,7 @@ export const generateRequestSchema = z.object({
     .array(
       z.object({
         agentType: z.string().min(1).max(100),
+        agentName: z.string().min(1).max(200).optional(),
         text: z.string().max(50_000),
       }),
     )
