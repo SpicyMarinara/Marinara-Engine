@@ -750,26 +750,32 @@ export function createChatsStorage(db: DB) {
     // ── Chat Connections ──
 
     /** Bidirectionally link two chats. Severs any pre-existing mutual link on
-     *  either side first so we don't strand a third chat with a dangling reference. */
+     *  either side first so we don't strand a third chat with a dangling
+     *  reference. The whole disconnect & reconnect sequence runs in a single
+     *  transaction so a mid-flight failure can't leave a one-sided link. */
     async connectChats(chatIdA: string, chatIdB: string) {
-      await this.disconnectChat(chatIdA);
-      await this.disconnectChat(chatIdB);
-      const timestamp = now();
-      await db.update(chats).set({ connectedChatId: chatIdB, updatedAt: timestamp }).where(eq(chats.id, chatIdA));
-      await db.update(chats).set({ connectedChatId: chatIdA, updatedAt: timestamp }).where(eq(chats.id, chatIdB));
+      await db.transaction(async (tx) => {
+        await this.disconnectChat(chatIdA, { tx });
+        await this.disconnectChat(chatIdB, { tx });
+        const timestamp = now();
+        await tx.update(chats).set({ connectedChatId: chatIdB, updatedAt: timestamp }).where(eq(chats.id, chatIdA));
+        await tx.update(chats).set({ connectedChatId: chatIdA, updatedAt: timestamp }).where(eq(chats.id, chatIdB));
+      });
     },
 
     /** Remove the bidirectional link for a chat (and its partner). Only nulls
-     *  the partner row when it points back to this chat, otherwise we would 
+     *  the partner row when it points back to this chat, otherwise we would
      *  sever an unrelated link. */
-    async disconnectChat(chatId: string) {
-      const chat = await this.getById(chatId);
+    async disconnectChat(chatId: string, opts?: { tx?: Pick<DB, "select" | "update"> }) {
+      const conn = opts?.tx ?? db;
+      const rows = await conn.select().from(chats).where(eq(chats.id, chatId));
+      const chat = rows[0];
       if (!chat) return;
       const partnerId = typeof chat.connectedChatId === "string" ? chat.connectedChatId : null;
       const timestamp = now();
-      await db.update(chats).set({ connectedChatId: null, updatedAt: timestamp }).where(eq(chats.id, chatId));
+      await conn.update(chats).set({ connectedChatId: null, updatedAt: timestamp }).where(eq(chats.id, chatId));
       if (partnerId) {
-        await db
+        await conn
           .update(chats)
           .set({ connectedChatId: null, updatedAt: timestamp })
           .where(and(eq(chats.id, partnerId), eq(chats.connectedChatId, chatId)));
