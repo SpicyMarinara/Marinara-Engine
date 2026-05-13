@@ -1001,14 +1001,6 @@ export async function generateRoutes(app: FastifyInstance) {
         applyAllSegmentEdits(mappedMessages, chatMeta as Record<string, unknown>, chatMessages);
       }
 
-      const lorebookScanMessages = buildLorebookScanMessagesWithGenerationGuide(
-        mappedMessages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
-        input,
-      );
-
       // Resolve persona — prefer per-chat personaId, fall back to globally active persona
       // (Game mode skips the fallback — persona must be explicitly selected in the setup wizard)
       let personaId: string | null = null;
@@ -1184,6 +1176,14 @@ export async function generateRoutes(app: FastifyInstance) {
         msg.content = msg.content.replace(/\n([ \t]*\n){2,}/g, "\n\n");
       }
       promptMacroContext.lastInput = [...mappedMessages].reverse().find((message) => message.role === "user")?.content;
+      const toLorebookScanMessages = () =>
+        buildLorebookScanMessagesWithGenerationGuide(
+          mappedMessages.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+          input,
+        );
 
       // ── Compute chat embedding for semantic lorebook matching (if any entries are vectorized) ──
       sendProgress("embedding");
@@ -1279,7 +1279,7 @@ export async function generateRoutes(app: FastifyInstance) {
             }
           })(),
           chatMessages: mappedMessages,
-          lorebookScanMessages,
+          lorebookScanMessages: toLorebookScanMessages(),
           chatSummary: ((chatMeta.summary as string) ?? "").trim() || null,
           enableAgents: chatEnableAgents,
           activeAgentIds: chatActiveAgentIds,
@@ -2371,7 +2371,7 @@ export async function generateRoutes(app: FastifyInstance) {
         // ── Lorebook injection for conversation mode ──
         {
           sendProgress("lorebooks");
-          const lorebookResult = await processLorebooks(app.db, lorebookScanMessages, null, {
+          const lorebookResult = await processLorebooks(app.db, toLorebookScanMessages(), null, {
             chatId: input.chatId,
             characterIds,
             personaId,
@@ -2421,7 +2421,7 @@ export async function generateRoutes(app: FastifyInstance) {
       // preset-driven chats get lorebook content via the preset assembler.
       if (!presetId && (chatMode === "roleplay" || chatMode === "visual_novel")) {
         sendProgress("lorebooks");
-        const lorebookResult = await processLorebooks(app.db, lorebookScanMessages, null, {
+        const lorebookResult = await processLorebooks(app.db, toLorebookScanMessages(), null, {
           chatId: input.chatId,
           characterIds,
           personaId,
@@ -3593,7 +3593,7 @@ export async function generateRoutes(app: FastifyInstance) {
           sendProgress("lorebooks");
           const lorebookResult = await processLorebooks(
             app.db,
-            lorebookScanMessages,
+            toLorebookScanMessages(),
             await resolveLatestGameStateForLorebooks(app.db, input.chatId),
             {
               chatId: input.chatId,

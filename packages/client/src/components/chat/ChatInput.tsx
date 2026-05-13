@@ -32,6 +32,7 @@ import {
   type SlashCommandContext,
 } from "../../lib/slash-commands";
 import { createInputMacroResolverForChat, isPromptPreviewMacro } from "../../lib/chat-macros";
+import { parseChatMetadata } from "../../lib/chat-display";
 import { cn, getAvatarCropStyle, type AvatarCropValue } from "../../lib/utils";
 import { translateDraftText } from "../../lib/draft-translation";
 import { EmojiPicker } from "../ui/EmojiPicker";
@@ -149,6 +150,8 @@ export const ChatInput = memo(function ChatInput({
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const inputBarRef = useRef<HTMLDivElement>(null);
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const attachmentsRef = useRef<Attachment[]>([]);
+  const pendingAttachmentDraftsRef = useRef<Map<string, Attachment[]>>(new Map());
   const activeChatId = useChatStore((s) => s.activeChatId);
   const streamingChatId = useChatStore((s) => s.streamingChatId);
   const isStreamingGlobal = useChatStore((s) => s.isStreaming);
@@ -182,6 +185,23 @@ export const ChatInput = memo(function ChatInput({
     [setCurrentInput],
   );
 
+  const replaceAttachments = useCallback((next: Attachment[]) => {
+    attachmentsRef.current = next;
+    setAttachments(next);
+  }, []);
+
+  const updateAttachments = useCallback((updater: (current: Attachment[]) => Attachment[]) => {
+    setAttachments((current) => {
+      const next = updater(current);
+      attachmentsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
+
   // Restore draft when mounting or switching chats
   const prevChatIdRef = useRef<string | null>(null);
   useEffect(() => {
@@ -194,6 +214,12 @@ export const ChatInput = memo(function ChatInput({
         } else {
           clearInputDraft(prevChatIdRef.current);
         }
+        const prevAttachments = attachmentsRef.current;
+        if (prevAttachments.length > 0) {
+          pendingAttachmentDraftsRef.current.set(prevChatIdRef.current, prevAttachments);
+        } else {
+          pendingAttachmentDraftsRef.current.delete(prevChatIdRef.current);
+        }
       }
       prevChatIdRef.current = activeChatId;
     }
@@ -205,8 +231,13 @@ export const ChatInput = memo(function ChatInput({
       // Resize textarea to fit content
       textareaRef.current.style.height = "auto";
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + "px";
+      const restoredAttachments = pendingAttachmentDraftsRef.current.get(activeChatId) ?? [];
+      replaceAttachments(restoredAttachments);
+      pendingAttachmentDraftsRef.current.delete(activeChatId);
+    } else if (!activeChatId) {
+      replaceAttachments([]);
     }
-  }, [activeChatId, setInputDraft, clearInputDraft, syncInputState]);
+  }, [activeChatId, setInputDraft, clearInputDraft, syncInputState, replaceAttachments]);
 
   // Save draft when component unmounts (e.g. navigating to editor)
   useEffect(() => {
@@ -276,7 +307,7 @@ export const ChatInput = memo(function ChatInput({
   const requiresManualGuideTarget = groupResponseOrder === "manual" && characterNames.length > 1;
 
   const removeAttachment = (idx: number) => {
-    setAttachments((prev) => prev.filter((_, i) => i !== idx));
+    updateAttachments((prev) => prev.filter((_, i) => i !== idx));
   };
 
   const addFiles = useCallback(async (files: FileList | File[]) => {
@@ -308,7 +339,7 @@ export const ChatInput = memo(function ChatInput({
           ctx.drawImage(bitmap, 0, 0);
           const pngBlob = await canvas.convertToBlob({ type: "image/png" });
           const data = await readFileAsDataUrl(pngBlob);
-          setAttachments((prev) => [
+          updateAttachments((prev) => [
             ...prev,
             { type: "image/png", data, name: displayName.replace(/\.gif$/i, ".png") },
           ]);
@@ -322,14 +353,14 @@ export const ChatInput = memo(function ChatInput({
 
       try {
         const data = await readFileAsDataUrl(file);
-        setAttachments((prev) => [...prev, { type: inferAttachmentType(file), data, name: displayName }]);
+        updateAttachments((prev) => [...prev, { type: inferAttachmentType(file), data, name: displayName }]);
       } catch {
         toast.error(`Failed to read ${displayName}`);
       } finally {
         setPendingAttachmentReads((count) => Math.max(0, count - 1));
       }
     }
-  }, []);
+  }, [updateAttachments]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -440,7 +471,7 @@ export const ChatInput = memo(function ChatInput({
       }
       syncInputState("");
       setCompletions([]);
-      setAttachments([]);
+      replaceAttachments([]);
       clearInputDraft(activeChatId);
       onPeekPrompt?.();
       return;
@@ -458,7 +489,7 @@ export const ChatInput = memo(function ChatInput({
       }
       syncInputState("");
       setCompletions([]);
-      setAttachments([]);
+      replaceAttachments([]);
       clearInputDraft(activeChatId);
 
       const result = await match.command.execute(match.args, ctx);
@@ -483,11 +514,7 @@ export const ChatInput = memo(function ChatInput({
     let message = applyToUserInput(normalized, { resolveMacros: resolveInputMacros });
 
     // Input translation: translate user's message before sending
-    const chatMeta = chat?.metadata
-      ? typeof chat.metadata === "string"
-        ? JSON.parse(chat.metadata)
-        : chat.metadata
-      : {};
+    const chatMeta = parseChatMetadata(chat?.metadata);
     if (chatMeta.translateInput && message.trim()) {
       try {
         const { translateText } = await import("../../lib/translate-text");
@@ -507,7 +534,7 @@ export const ChatInput = memo(function ChatInput({
     syncInputState("");
     setCompletions([]);
     const pendingAttachments = attachments.map((a) => ({ type: a.type, data: a.data, filename: a.name, name: a.name }));
-    setAttachments([]);
+    replaceAttachments([]);
     clearInputDraft(activeChatId);
 
     // Manual mode: only create the user message, no auto-generation
@@ -558,6 +585,7 @@ export const ChatInput = memo(function ChatInput({
     createMessage,
     updateMessageExtra,
     syncInputState,
+    replaceAttachments,
     onPeekPrompt,
   ]);
 
@@ -659,11 +687,7 @@ export const ChatInput = memo(function ChatInput({
     const resolveInputMacros = createInputMacroResolverForChat(chat, cachedCharacters, cachedPersonas, normalized);
     let message = applyToUserInput(normalized, { resolveMacros: resolveInputMacros });
 
-    const chatMeta = chat?.metadata
-      ? typeof chat.metadata === "string"
-        ? JSON.parse(chat.metadata)
-        : chat.metadata
-      : {};
+    const chatMeta = parseChatMetadata(chat?.metadata);
     if (chatMeta.translateInput && message.trim()) {
       try {
         const { translateText } = await import("../../lib/translate-text");
@@ -692,7 +716,7 @@ export const ChatInput = memo(function ChatInput({
     }
     syncInputState("");
     setCompletions([]);
-    setAttachments([]);
+    replaceAttachments([]);
     clearInputDraft(submittingChatId);
 
     let createdMessageId: string | null = null;
@@ -718,17 +742,20 @@ export const ChatInput = memo(function ChatInput({
           rollbackFailed = true;
         }
       }
+      const activeChatIdAfterFailure = useChatStore.getState().activeChatId;
       const currentValue = textareaRef.current?.value ?? "";
-      const canRestoreVisibleDraft =
-        useChatStore.getState().activeChatId === submittingChatId && currentValue.length === 0;
+      const canRestoreVisibleDraft = activeChatIdAfterFailure === submittingChatId && currentValue.length === 0;
       if (canRestoreVisibleDraft && textareaRef.current) {
         textareaRef.current.value = submittedDraft;
         textareaRef.current.style.height = submittedHeight;
         syncInputState(submittedDraft);
         setCompletions(submittedCompletions);
-        setAttachments((current) => (current.length === 0 ? submittedAttachments : current));
+        updateAttachments((current) => (current.length === 0 ? submittedAttachments : current));
       }
-      if (submittedDraft && (canRestoreVisibleDraft || useChatStore.getState().activeChatId !== submittingChatId)) {
+      if (submittedAttachments.length > 0 && activeChatIdAfterFailure !== submittingChatId) {
+        pendingAttachmentDraftsRef.current.set(submittingChatId, submittedAttachments);
+      }
+      if (submittedDraft && (canRestoreVisibleDraft || activeChatIdAfterFailure !== submittingChatId)) {
         setInputDraft(submittingChatId, submittedDraft);
       }
       const msg = error instanceof Error ? error.message : "Failed to post message";
@@ -747,6 +774,8 @@ export const ChatInput = memo(function ChatInput({
     syncInputState,
     clearInputDraft,
     setInputDraft,
+    replaceAttachments,
+    updateAttachments,
     createMessage,
     deleteMessage,
     updateMessageExtra,
@@ -770,6 +799,28 @@ export const ChatInput = memo(function ChatInput({
   const quickReplyActions = useMemo<QuickReplyAction[]>(
     () => {
       const actions: QuickReplyAction[] = [];
+      const getPostOnlyDisabledReason = () => {
+        if (!activeChatId) return "Select or create a chat first.";
+        if (isStreaming) return "Wait for the current stream to finish.";
+        if (isReadingAttachments) return "Still reading attached files.";
+        if (!hasInput && attachments.length === 0) return "Type a draft first.";
+        return undefined;
+      };
+      const getGuideDisabledReason = () => {
+        if (!activeChatId) return "Select or create a chat first.";
+        if (isStreaming) return "Wait for the current stream to finish.";
+        if (requiresManualGuideTarget) return "Choose a character from the reply picker.";
+        if (hasPendingAttachments) return "Clear or post attachments first.";
+        if (!hasInput) return "Type a direction first.";
+        return undefined;
+      };
+      const getImpersonateDisabledReason = () => {
+        if (!activeChatId) return "Select or create a chat first.";
+        if (isStreaming) return "Wait for the current stream to finish.";
+        if (hasPendingAttachments) return "Clear or post attachments first.";
+        if (!hasInput) return "Type a direction first.";
+        return undefined;
+      };
       if (showQuickReplyPostOnly) {
         actions.push({
           id: "post-only",
@@ -777,7 +828,7 @@ export const ChatInput = memo(function ChatInput({
           description: "Add your message without a reply",
           icon: <FileText size="0.875rem" />,
           disabled: !activeChatId || isStreaming || isReadingAttachments || (!hasInput && attachments.length === 0),
-          disabledReason: isReadingAttachments ? "Still reading attached files." : "Type a draft first.",
+          disabledReason: getPostOnlyDisabledReason(),
           onSelect: handlePostOnlyButton,
         });
       }
@@ -788,11 +839,7 @@ export const ChatInput = memo(function ChatInput({
           description: "Send as /narrator direction",
           icon: <WandSparkles size="0.875rem" />,
           disabled: !activeChatId || isStreaming || requiresManualGuideTarget || !hasInput || hasPendingAttachments,
-          disabledReason: requiresManualGuideTarget
-            ? "Choose a character from the reply picker."
-            : hasPendingAttachments
-              ? "Clear or post attachments first."
-              : "Type a direction first.",
+          disabledReason: getGuideDisabledReason(),
           onSelect: handleGuidedGenerationButton,
         });
       }
@@ -803,7 +850,7 @@ export const ChatInput = memo(function ChatInput({
           description: "Generate as your persona",
           icon: <UserCheck size="0.875rem" />,
           disabled: !activeChatId || isStreaming || !hasInput || hasPendingAttachments,
-          disabledReason: hasPendingAttachments ? "Clear or post attachments first." : "Type a direction first.",
+          disabledReason: getImpersonateDisabledReason(),
           onSelect: handleImpersonateQuickButton,
         });
       }
