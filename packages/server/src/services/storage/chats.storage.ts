@@ -749,8 +749,11 @@ export function createChatsStorage(db: DB) {
 
     // ── Chat Connections ──
 
-    /** Bidirectionally link two chats. */
+    /** Bidirectionally link two chats. Severs any pre-existing mutual link on
+     *  either side first so we don't strand a third chat with a dangling reference. */
     async connectChats(chatIdA: string, chatIdB: string) {
+      await this.disconnectChat(chatIdA);
+      await this.disconnectChat(chatIdB);
       const timestamp = now();
       await db.update(chats).set({ connectedChatId: chatIdB, updatedAt: timestamp }).where(eq(chats.id, chatIdA));
       await db.update(chats).set({ connectedChatId: chatIdA, updatedAt: timestamp }).where(eq(chats.id, chatIdB));
