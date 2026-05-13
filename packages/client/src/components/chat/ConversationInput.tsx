@@ -18,6 +18,7 @@ import {
   RefreshCw,
   Bookmark,
   Trash2,
+  WandSparkles,
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
@@ -46,6 +47,7 @@ import { SpeechToTextButton } from "../ui/SpeechToTextButton";
 import { MariThinkingIndicator } from "./MariThinkingIndicator";
 import { MariCapabilityNotice } from "./MariCapabilityNotice";
 import { SlashCommandFeedback } from "./SlashCommandFeedback";
+import { QuickReplyMenu, type QuickReplyAction } from "./QuickReplyMenu";
 import type { Message } from "@marinara-engine/shared";
 
 interface Attachment {
@@ -264,7 +266,10 @@ export function ConversationInput({
   const { applyToUserInput } = useApplyRegex();
   const enterToSend = useUIStore((s) => s.enterToSendConvo);
   const guideGenerations = useUIStore((s) => s.guideGenerations);
-  const impersonateShowQuickButton = useUIStore((s) => s.impersonateShowQuickButton);
+  const showQuickRepliesMenu = useUIStore((s) => s.showQuickRepliesMenu);
+  const showQuickReplyPostOnly = useUIStore((s) => s.showQuickReplyPostOnly);
+  const showQuickReplyGuide = useUIStore((s) => s.showQuickReplyGuide);
+  const showQuickReplyImpersonate = useUIStore((s) => s.showQuickReplyImpersonate);
   const speechToTextEnabled = useUIStore((s) => s.speechToTextEnabled);
   const userActivity = useUIStore((s) => s.userActivity);
   const setUserActivity = useUIStore((s) => s.setUserActivity);
@@ -276,6 +281,7 @@ export function ConversationInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isReadingAttachments = pendingAttachmentReads > 0;
   const hasPendingAttachments = isReadingAttachments || attachments.length > 0;
+  const requiresManualGuideTarget = groupResponseOrder === "manual" && characterNames.length > 1;
 
   // Read from the existing infinite-message cache so an empty Send can retry
   // after a failed generation without adding a second user message.
@@ -681,6 +687,46 @@ export function ConversationInput({
     onPeekPrompt,
   ]);
 
+  const runQuickSlashCommand = useCallback(
+    async (commandLine: string, fallbackError: string) => {
+      if (!activeChatId) return;
+      const matched = matchSlashCommand(commandLine);
+      if (!matched) return;
+      const slashCtx: SlashCommandContext = {
+        chatId: activeChatId,
+        generate,
+        createMessage: (data) => createMessage.mutate(data),
+        invalidate: () => qc.invalidateQueries({ queryKey: chatKeys.all }),
+        characterNames,
+      };
+
+      if (draftTimerRef.current) {
+        clearTimeout(draftTimerRef.current);
+        draftTimerRef.current = null;
+      }
+      if (textareaRef.current) {
+        textareaRef.current.value = "";
+        textareaRef.current.style.height = "auto";
+      }
+      clearInputDraft(activeChatId);
+      syncInputState("");
+      setCompletions([]);
+      setMentionQuery(null);
+      setMentionCompletions([]);
+
+      try {
+        const result = await matched.command.execute(matched.args, slashCtx);
+        if (result.feedback) {
+          setFeedback(result.feedback);
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : fallbackError;
+        toast.error(msg);
+      }
+    },
+    [activeChatId, characterNames, clearInputDraft, createMessage, generate, qc, syncInputState],
+  );
+
   const handleImpersonateQuickButton = useCallback(async () => {
     if (!activeChatId || isStreaming) return;
     if (hasPendingAttachments) {
@@ -689,33 +735,162 @@ export function ConversationInput({
     }
     const text = textareaRef.current?.value?.trim() ?? "";
     if (!text) return;
-    const { impersonatePresetId, impersonateConnectionId, impersonateBlockAgents, impersonatePromptTemplate } =
-      useUIStore.getState();
-    const trimmedPromptTemplate = impersonatePromptTemplate.trim();
+    await runQuickSlashCommand(`/impersonate ${text}`, "Impersonate failed");
+  }, [activeChatId, isStreaming, hasPendingAttachments, runQuickSlashCommand]);
+
+  const handlePostOnlyButton = useCallback(async () => {
+    if (!activeChatId || isStreaming) return;
+    if (isReadingAttachments) {
+      toast.info("Still reading attached files. Post will be ready in a moment.");
+      return;
+    }
+    const raw = textareaRef.current?.value.trim() ?? "";
+    const hasText = raw.length > 0;
+    const hasFiles = attachments.length > 0;
+    if (!hasText && !hasFiles) return;
+
+    if (draftTimerRef.current) {
+      clearTimeout(draftTimerRef.current);
+      draftTimerRef.current = null;
+    }
+
+    const activeChatData = useChatStore.getState().activeChat;
+    const cachedCharacters = qc.getQueryData<Array<{ id: string; data: unknown }>>(characterKeys.list());
+    const cachedPersonas = qc.getQueryData<Array<Record<string, unknown>>>(characterKeys.personas);
+    const resolveInputMacros = createInputMacroResolverForChat(activeChatData, cachedCharacters, cachedPersonas, raw);
+    let message = applyToUserInput(raw, { resolveMacros: resolveInputMacros });
+
+    const chatMeta = activeChatData?.metadata
+      ? typeof activeChatData.metadata === "string"
+        ? JSON.parse(activeChatData.metadata)
+        : activeChatData.metadata
+      : {};
+    if (chatMeta.translateInput && message.trim()) {
+      try {
+        const { translateText } = await import("../../lib/translate-text");
+        const translated = await translateText(message);
+        if (translated.trim()) message = translated;
+      } catch {
+        toast.error("Failed to translate message; posting original");
+      }
+    }
+
+    message = resolveInputMacros(message);
+    const pendingAttachments = attachments.map((a) => ({ type: a.type, data: a.data, filename: a.name, name: a.name }));
+
+    if (textareaRef.current) {
+      textareaRef.current.value = "";
+      textareaRef.current.style.height = "auto";
+    }
+    clearInputDraft(activeChatId);
+    syncInputState("");
+    setAttachments([]);
+    setCompletions([]);
+    setMentionQuery(null);
+    setMentionCompletions([]);
+
     try {
-      const generated = await generate({
-        chatId: activeChatId,
-        connectionId: null,
-        impersonate: true,
-        userMessage: text,
-        ...(impersonatePresetId ? { impersonatePresetId } : {}),
-        ...(impersonateConnectionId ? { impersonateConnectionId } : {}),
-        ...(impersonateBlockAgents ? { impersonateBlockAgents: true } : {}),
-        ...(trimmedPromptTemplate ? { impersonatePromptTemplate: trimmedPromptTemplate } : {}),
+      const created = await createMessage.mutateAsync({
+        role: "user",
+        content: message,
+        characterId: null,
       });
-      if (generated) {
-        if (textareaRef.current) {
-          textareaRef.current.value = "";
-          textareaRef.current.style.height = "auto";
-        }
-        syncInputState("");
-        clearInputDraft(activeChatId);
+      if (pendingAttachments.length) {
+        await updateMessageExtra.mutateAsync({
+          messageId: created.id,
+          extra: { attachments: pendingAttachments },
+        });
       }
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "Impersonate failed";
+      const msg = error instanceof Error ? error.message : "Failed to post message";
       toast.error(msg);
     }
-  }, [activeChatId, isStreaming, hasPendingAttachments, generate, syncInputState, clearInputDraft]);
+  }, [
+    activeChatId,
+    isStreaming,
+    isReadingAttachments,
+    attachments,
+    applyToUserInput,
+    qc,
+    clearInputDraft,
+    syncInputState,
+    createMessage,
+    updateMessageExtra,
+  ]);
+
+  const handleGuidedGenerationButton = useCallback(async () => {
+    if (!activeChatId || isStreaming) return;
+    if (requiresManualGuideTarget) {
+      toast.info("Choose a character from the reply picker to guide a specific reply.");
+      return;
+    }
+    if (hasPendingAttachments) {
+      toast.info("Clear or send attachments before using guided generation.");
+      return;
+    }
+    const text = textareaRef.current?.value?.trim() ?? "";
+    if (!text) return;
+    await runQuickSlashCommand(`/narrator ${text}`, "Guided generation failed");
+  }, [activeChatId, isStreaming, requiresManualGuideTarget, hasPendingAttachments, runQuickSlashCommand]);
+
+  const quickReplyActions = useMemo<QuickReplyAction[]>(
+    () => {
+      const actions: QuickReplyAction[] = [];
+      if (showQuickReplyPostOnly) {
+        actions.push({
+          id: "post-only",
+          label: "Post only",
+          description: "Add your message without a reply",
+          icon: <FileText size="0.875rem" />,
+          disabled: !activeChatId || isStreaming || isReadingAttachments || (!hasInput && attachments.length === 0),
+          disabledReason: isReadingAttachments ? "Still reading attached files." : "Type a draft first.",
+          onSelect: handlePostOnlyButton,
+        });
+      }
+      if (showQuickReplyGuide) {
+        actions.push({
+          id: "guide-reply",
+          label: "Guide reply",
+          description: "Send as /narrator direction",
+          icon: <WandSparkles size="0.875rem" />,
+          disabled: !activeChatId || isStreaming || requiresManualGuideTarget || !hasInput || hasPendingAttachments,
+          disabledReason: requiresManualGuideTarget
+            ? "Choose a character from the reply picker."
+            : hasPendingAttachments
+              ? "Clear or post attachments first."
+              : "Type a direction first.",
+          onSelect: handleGuidedGenerationButton,
+        });
+      }
+      if (showQuickReplyImpersonate) {
+        actions.push({
+          id: "impersonate",
+          label: "Impersonate",
+          description: "Generate as your persona",
+          icon: <UserCheck size="0.875rem" />,
+          disabled: !activeChatId || isStreaming || !hasInput || hasPendingAttachments,
+          disabledReason: hasPendingAttachments ? "Clear or post attachments first." : "Type a direction first.",
+          onSelect: handleImpersonateQuickButton,
+        });
+      }
+      return actions;
+    },
+    [
+      activeChatId,
+      isStreaming,
+      isReadingAttachments,
+      hasInput,
+      attachments.length,
+      hasPendingAttachments,
+      requiresManualGuideTarget,
+      showQuickReplyPostOnly,
+      showQuickReplyGuide,
+      showQuickReplyImpersonate,
+      handlePostOnlyButton,
+      handleGuidedGenerationButton,
+      handleImpersonateQuickButton,
+    ],
+  );
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -915,7 +1090,13 @@ export function ConversationInput({
       try {
         await generate(
           guideGenerations && hasInput
-            ? { chatId: activeChatId, connectionId: null, forCharacterId: characterId, generationGuide: currentInput }
+            ? {
+                chatId: activeChatId,
+                connectionId: null,
+                forCharacterId: characterId,
+                generationGuide: currentInput,
+                generationGuideSource: "guide",
+              }
             : { chatId: activeChatId, connectionId: null, forCharacterId: characterId },
         );
       } catch (error) {
@@ -1340,22 +1521,6 @@ export function ConversationInput({
             </button>
           )}
 
-          {impersonateShowQuickButton && (
-            <button
-              onClick={handleImpersonateQuickButton}
-              disabled={!hasInput || isStreaming || !activeChatId || hasPendingAttachments}
-              className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
-                hasInput && activeChatId && !isStreaming && !hasPendingAttachments
-                  ? "text-[var(--primary)] hover:bg-[var(--primary)]/15"
-                  : "text-foreground/20",
-              )}
-              title="Generate as {{user}} using this text as direction"
-            >
-              <UserCheck size="1rem" />
-            </button>
-          )}
-
           {showDraftTranslateButton && (
             <button
               type="button"
@@ -1399,6 +1564,13 @@ export function ConversationInput({
           >
             <Bookmark size="1rem" />
           </button>
+
+          {showQuickRepliesMenu && quickReplyActions.length > 0 && (
+            <QuickReplyMenu
+              actions={quickReplyActions}
+              disabled={!activeChatId || isReadingAttachments || (!hasInput && attachments.length === 0)}
+            />
+          )}
 
           <button
             onClick={isActuallyGenerating ? () => useChatStore.getState().stopGeneration() : handleSend}

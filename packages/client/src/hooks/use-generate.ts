@@ -531,6 +531,7 @@ export function useGenerate() {
       mentionedCharacterNames?: string[];
       forCharacterId?: string;
       generationGuide?: string;
+      generationGuideSource?: "narrator" | "guide" | "game_start";
       agentInjectionOverrides?: Array<{ agentType: string; text: string }>;
       impersonatePresetId?: string;
       impersonateConnectionId?: string;

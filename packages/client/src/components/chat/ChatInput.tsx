@@ -2,7 +2,19 @@
 // Chat: Input — mode-aware styling
 // ──────────────────────────────────────────────
 import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react";
-import { Send, Paperclip, StopCircle, X, Smile, Users, UserCheck, Languages, Loader2, FileText } from "lucide-react";
+import {
+  Send,
+  Paperclip,
+  StopCircle,
+  X,
+  Smile,
+  Users,
+  UserCheck,
+  Languages,
+  Loader2,
+  FileText,
+  WandSparkles,
+} from "lucide-react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
@@ -30,6 +42,7 @@ import { QuickSwitcherMobile } from "./QuickSwitcherMobile";
 import { MariThinkingIndicator } from "./MariThinkingIndicator";
 import { MariCapabilityNotice } from "./MariCapabilityNotice";
 import { SlashCommandFeedback } from "./SlashCommandFeedback";
+import { QuickReplyMenu, type QuickReplyAction } from "./QuickReplyMenu";
 
 interface Attachment {
   type: string; // MIME type
@@ -149,7 +162,10 @@ export const ChatInput = memo(function ChatInput({
   const { applyToUserInput } = useApplyRegex();
   const enterToSend = useUIStore((s) => s.enterToSendRP);
   const guideGenerations = useUIStore((s) => s.guideGenerations);
-  const impersonateShowQuickButton = useUIStore((s) => s.impersonateShowQuickButton);
+  const showQuickRepliesMenu = useUIStore((s) => s.showQuickRepliesMenu);
+  const showQuickReplyPostOnly = useUIStore((s) => s.showQuickReplyPostOnly);
+  const showQuickReplyGuide = useUIStore((s) => s.showQuickReplyGuide);
+  const showQuickReplyImpersonate = useUIStore((s) => s.showQuickReplyImpersonate);
   const speechToTextEnabled = useUIStore((s) => s.speechToTextEnabled);
   const createMessage = useCreateMessage(activeChatId);
   const updateMessageExtra = useUpdateMessageExtra(activeChatId);
@@ -256,6 +272,7 @@ export const ChatInput = memo(function ChatInput({
   const canContinue = !isStreaming && mode === "roleplay" && lastMessageRole === "assistant";
   const isReadingAttachments = pendingAttachmentReads > 0;
   const hasPendingAttachments = isReadingAttachments || attachments.length > 0;
+  const requiresManualGuideTarget = groupResponseOrder === "manual" && characterNames.length > 1;
 
   const removeAttachment = (idx: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== idx));
@@ -543,50 +560,201 @@ export const ChatInput = memo(function ChatInput({
     onPeekPrompt,
   ]);
 
+  const runQuickSlashCommand = useCallback(
+    async (commandLine: string, fallbackError: string) => {
+      if (!activeChatId) return;
+      const match = matchSlashCommand(commandLine);
+      const ctx = buildContext();
+      if (!match || !ctx) return;
+
+      if (draftTimerRef.current) {
+        clearTimeout(draftTimerRef.current);
+        draftTimerRef.current = null;
+      }
+      if (textareaRef.current) {
+        textareaRef.current.value = "";
+        textareaRef.current.style.height = "auto";
+      }
+      syncInputState("");
+      setCompletions([]);
+      clearInputDraft(activeChatId);
+
+      try {
+        const result = await match.command.execute(match.args, ctx);
+        if (result.feedback) {
+          setFeedback(result.feedback);
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : fallbackError;
+        toast.error(msg);
+      }
+    },
+    [activeChatId, buildContext, clearInputDraft, syncInputState],
+  );
+
   const handleImpersonateQuickButton = useCallback(async () => {
     if (!activeChatId || isStreaming) return;
     if (hasPendingAttachments) {
       toast.info("Clear or send attachments before using quick impersonate.");
       return;
     }
-    const submittingChatId = activeChatId;
-    const submittingInput = textareaRef.current?.value ?? "";
-    const text = submittingInput.trim();
+    const text = textareaRef.current?.value?.trim() ?? "";
     if (!text) return;
-    const { impersonatePresetId, impersonateConnectionId, impersonateBlockAgents, impersonatePromptTemplate } =
-      useUIStore.getState();
-    const trimmedPromptTemplate = impersonatePromptTemplate.trim();
+    await runQuickSlashCommand(`/impersonate ${text}`, "Impersonate failed");
+  }, [activeChatId, isStreaming, hasPendingAttachments, runQuickSlashCommand]);
+
+  const handlePostOnlyButton = useCallback(async () => {
+    if (!activeChatId || isStreaming) return;
+    if (isReadingAttachments) {
+      toast.info("Still reading attached files. Post will be ready in a moment.");
+      return;
+    }
+    const raw = textareaRef.current?.value ?? "";
+    const hasText = raw.trim().length > 0;
+    const hasFiles = attachments.length > 0;
+    if (!hasText && !hasFiles) return;
+
+    if (draftTimerRef.current) {
+      clearTimeout(draftTimerRef.current);
+      draftTimerRef.current = null;
+    }
+
+    const normalized = normalizeQuotes(raw.trim());
+    const chat = useChatStore.getState().activeChat;
+    const cachedCharacters = qc.getQueryData<Array<{ id: string; data: unknown }>>(characterKeys.list());
+    const cachedPersonas = qc.getQueryData<Array<Record<string, unknown>>>(characterKeys.personas);
+    const resolveInputMacros = createInputMacroResolverForChat(chat, cachedCharacters, cachedPersonas, normalized);
+    let message = applyToUserInput(normalized, { resolveMacros: resolveInputMacros });
+
+    const chatMeta = chat?.metadata
+      ? typeof chat.metadata === "string"
+        ? JSON.parse(chat.metadata)
+        : chat.metadata
+      : {};
+    if (chatMeta.translateInput && message.trim()) {
+      try {
+        const { translateText } = await import("../../lib/translate-text");
+        const translated = await translateText(message);
+        if (translated.trim()) message = translated;
+      } catch {
+        toast.error("Failed to translate message; posting original");
+      }
+    }
+
+    message = resolveInputMacros(message);
+    const pendingAttachments = attachments.map((a) => ({ type: a.type, data: a.data, filename: a.name, name: a.name }));
+
+    if (textareaRef.current) {
+      textareaRef.current.value = "";
+      textareaRef.current.style.height = "auto";
+    }
+    syncInputState("");
+    setCompletions([]);
+    setAttachments([]);
+    clearInputDraft(activeChatId);
+
     try {
-      const generated = await generate({
-        chatId: submittingChatId,
-        connectionId: null,
-        impersonate: true,
-        userMessage: text,
-        ...(impersonatePresetId ? { impersonatePresetId } : {}),
-        ...(impersonateConnectionId ? { impersonateConnectionId } : {}),
-        ...(impersonateBlockAgents ? { impersonateBlockAgents: true } : {}),
-        ...(trimmedPromptTemplate ? { impersonatePromptTemplate: trimmedPromptTemplate } : {}),
+      const created = await createMessage.mutateAsync({
+        role: "user",
+        content: message,
+        characterId: null,
       });
-      if (generated) {
-        const isSameDraft =
-          useChatStore.getState().activeChatId === submittingChatId && textareaRef.current?.value === submittingInput;
-        if (!isSameDraft) return;
-        if (draftTimerRef.current) {
-          clearTimeout(draftTimerRef.current);
-          draftTimerRef.current = null;
-        }
-        if (textareaRef.current) {
-          textareaRef.current.value = "";
-          textareaRef.current.style.height = "auto";
-        }
-        syncInputState("");
-        clearInputDraft(submittingChatId);
+      if (pendingAttachments.length) {
+        await updateMessageExtra.mutateAsync({
+          messageId: created.id,
+          extra: { attachments: pendingAttachments },
+        });
       }
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "Impersonate failed";
+      const msg = error instanceof Error ? error.message : "Failed to post message";
       toast.error(msg);
     }
-  }, [activeChatId, isStreaming, hasPendingAttachments, generate, syncInputState, clearInputDraft]);
+  }, [
+    activeChatId,
+    isStreaming,
+    isReadingAttachments,
+    attachments,
+    applyToUserInput,
+    qc,
+    syncInputState,
+    clearInputDraft,
+    createMessage,
+    updateMessageExtra,
+  ]);
+
+  const handleGuidedGenerationButton = useCallback(async () => {
+    if (!activeChatId || isStreaming) return;
+    if (requiresManualGuideTarget) {
+      toast.info("Choose a character from the reply picker to guide a specific reply.");
+      return;
+    }
+    if (hasPendingAttachments) {
+      toast.info("Clear or send attachments before using guided generation.");
+      return;
+    }
+    const text = textareaRef.current?.value?.trim() ?? "";
+    if (!text) return;
+    await runQuickSlashCommand(`/narrator ${text}`, "Guided generation failed");
+  }, [activeChatId, isStreaming, requiresManualGuideTarget, hasPendingAttachments, runQuickSlashCommand]);
+
+  const quickReplyActions = useMemo<QuickReplyAction[]>(
+    () => {
+      const actions: QuickReplyAction[] = [];
+      if (showQuickReplyPostOnly) {
+        actions.push({
+          id: "post-only",
+          label: "Post only",
+          description: "Add your message without a reply",
+          icon: <FileText size="0.875rem" />,
+          disabled: !activeChatId || isStreaming || isReadingAttachments || (!hasInput && attachments.length === 0),
+          disabledReason: isReadingAttachments ? "Still reading attached files." : "Type a draft first.",
+          onSelect: handlePostOnlyButton,
+        });
+      }
+      if (showQuickReplyGuide) {
+        actions.push({
+          id: "guide-reply",
+          label: "Guide reply",
+          description: "Send as /narrator direction",
+          icon: <WandSparkles size="0.875rem" />,
+          disabled: !activeChatId || isStreaming || requiresManualGuideTarget || !hasInput || hasPendingAttachments,
+          disabledReason: requiresManualGuideTarget
+            ? "Choose a character from the reply picker."
+            : hasPendingAttachments
+              ? "Clear or post attachments first."
+              : "Type a direction first.",
+          onSelect: handleGuidedGenerationButton,
+        });
+      }
+      if (showQuickReplyImpersonate) {
+        actions.push({
+          id: "impersonate",
+          label: "Impersonate",
+          description: "Generate as your persona",
+          icon: <UserCheck size="0.875rem" />,
+          disabled: !activeChatId || isStreaming || !hasInput || hasPendingAttachments,
+          disabledReason: hasPendingAttachments ? "Clear or post attachments first." : "Type a direction first.",
+          onSelect: handleImpersonateQuickButton,
+        });
+      }
+      return actions;
+    },
+    [
+      activeChatId,
+      isStreaming,
+      isReadingAttachments,
+      hasInput,
+      attachments.length,
+      hasPendingAttachments,
+      requiresManualGuideTarget,
+      showQuickReplyPostOnly,
+      showQuickReplyGuide,
+      showQuickReplyImpersonate,
+      handlePostOnlyButton,
+      handleGuidedGenerationButton,
+      handleImpersonateQuickButton,
+    ],
+  );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Autocomplete navigation
@@ -705,7 +873,13 @@ export const ChatInput = memo(function ChatInput({
       try {
         await generate(
           guideGenerations && hasInput
-            ? { chatId: activeChatId, connectionId: null, forCharacterId: characterId, generationGuide: currentInput }
+            ? {
+                chatId: activeChatId,
+                connectionId: null,
+                forCharacterId: characterId,
+                generationGuide: currentInput,
+                generationGuideSource: "guide",
+              }
             : { chatId: activeChatId, connectionId: null, forCharacterId: characterId },
         );
       } catch (error) {
@@ -990,23 +1164,6 @@ export const ChatInput = memo(function ChatInput({
           </button>
         )}
 
-        {/* Impersonate quick button */}
-        {impersonateShowQuickButton && (
-          <button
-            onClick={handleImpersonateQuickButton}
-            disabled={!hasInput || isStreaming || !activeChatId || hasPendingAttachments}
-            className={cn(
-              "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
-              hasInput && activeChatId && !isStreaming && !hasPendingAttachments
-                ? "text-[var(--primary)] hover:bg-[var(--primary)]/15"
-                : "text-foreground/20",
-            )}
-            title="Generate as {{user}} using this text as direction"
-          >
-            <UserCheck size="1rem" />
-          </button>
-        )}
-
         {showDraftTranslateButton && (
           <button
             type="button"
@@ -1030,6 +1187,13 @@ export const ChatInput = memo(function ChatInput({
             onTranscript={handleSpeechTranscript}
             className="rounded-full"
             iconSize={16}
+          />
+        )}
+
+        {showQuickRepliesMenu && quickReplyActions.length > 0 && (
+          <QuickReplyMenu
+            actions={quickReplyActions}
+            disabled={!activeChatId || isReadingAttachments || (!hasInput && attachments.length === 0)}
           />
         )}
 

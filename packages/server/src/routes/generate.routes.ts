@@ -351,7 +351,13 @@ function formatConversationPromptTurn(content: string, role: string, personaName
 }
 
 function resolveLorebookGenerationTriggers(
-  input: { impersonate?: boolean; regenerateMessageId?: string | null; userMessage?: string | null },
+  input: {
+    impersonate?: boolean;
+    regenerateMessageId?: string | null;
+    userMessage?: string | null;
+    generationGuide?: string | null;
+    generationGuideSource?: "narrator" | "guide" | "game_start" | null;
+  },
   chatMode: string,
 ): string[] {
   const triggers = new Set<string>();
@@ -362,6 +368,11 @@ function resolveLorebookGenerationTriggers(
   } else if (input.regenerateMessageId) {
     triggers.add("swipe");
     triggers.add("regenerate");
+  } else if (
+    input.generationGuide?.trim() &&
+    (input.generationGuideSource === "narrator" || input.generationGuideSource === "guide")
+  ) {
+    triggers.add("chat");
   } else if (!input.userMessage?.trim()) {
     triggers.add("continue");
     triggers.add("autonomous");

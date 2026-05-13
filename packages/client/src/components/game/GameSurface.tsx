@@ -4324,6 +4324,7 @@ export function GameSurface({
       chatId: activeChatId,
       connectionId: null,
       generationGuide: GAME_START_GENERATION_GUIDE,
+      generationGuideSource: "game_start",
     });
   }, [activeChatId, generate]);
 

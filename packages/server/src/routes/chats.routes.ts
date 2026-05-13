@@ -194,6 +194,32 @@ function resolveLorebookGenerationTriggers(mode: unknown): string[] {
   return Array.from(new Set([modeTrigger, "chat"]));
 }
 
+async function buildPersonaSnapshotForChat(app: FastifyInstance, chat: { personaId?: string | null } | null) {
+  const charactersStore = createCharactersStorage(app.db);
+  const personas = await charactersStore.listPersonas();
+  const chatPersonaId = chat?.personaId ?? null;
+  const persona =
+    (chatPersonaId ? personas.find((candidate: any) => candidate.id === chatPersonaId) : null) ??
+    personas.find((candidate: any) => candidate.isActive === "true");
+
+  if (!persona) return null;
+
+  return {
+    personaId: persona.id,
+    name: persona.name,
+    description: persona.description ?? "",
+    personality: persona.personality ?? "",
+    scenario: persona.scenario ?? "",
+    backstory: persona.backstory ?? "",
+    appearance: persona.appearance ?? "",
+    avatarUrl: persona.avatarPath || null,
+    avatarCrop: persona.avatarCrop || null,
+    nameColor: persona.nameColor || null,
+    dialogueColor: persona.dialogueColor || null,
+    boxColor: persona.boxColor || null,
+  };
+}
+
 function resolveEntryStateOverrides(value: unknown): EntryStateOverrides | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
 
@@ -667,13 +693,21 @@ export async function chatsRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>("/:id/messages", async (req) => {
     const input = createMessageSchema.parse({ ...(req.body as Record<string, unknown>), chatId: req.params.id });
     const body = req.body as Record<string, unknown>;
-    return storage.createMessage(
+    const created = await storage.createMessage(
       input,
       normalizeTimestampOverrides({
         createdAt: body.createdAt,
         updatedAt: body.updatedAt,
       }),
     );
+    if (created?.id && input.role === "user") {
+      const chat = await storage.getById(req.params.id);
+      const personaSnapshot = await buildPersonaSnapshotForChat(app, chat);
+      if (personaSnapshot) {
+        return (await storage.updateMessageExtra(created.id, { personaSnapshot })) ?? created;
+      }
+    }
+    return created;
   });
 
   // Delete message
