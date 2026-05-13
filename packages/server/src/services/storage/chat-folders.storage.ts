@@ -20,23 +20,27 @@ export function createChatFoldersStorage(db: DB) {
     async create(input: { name: string; mode: string; color?: string }) {
       const id = newId();
       const timestamp = now();
-      // Shift existing folders down and place new folder at the top
-      const existing = await db.select().from(chatFolders);
-      for (const f of existing) {
-        await db
-          .update(chatFolders)
-          .set({ sortOrder: f.sortOrder + 1 })
-          .where(eq(chatFolders.id, f.id));
-      }
-      await db.insert(chatFolders).values({
-        id,
-        name: input.name,
-        mode: input.mode as "conversation" | "roleplay" | "visual_novel",
-        color: input.color ?? "",
-        sortOrder: 0,
-        collapsed: "false",
-        createdAt: timestamp,
-        updatedAt: timestamp,
+      // Shift existing folders down and place new folder at the top.
+      // Atomic so a partial failure can't leave the sort_order column in a
+      // half-shifted state with no new folder.
+      await db.transaction(async (tx) => {
+        const existing = await tx.select().from(chatFolders);
+        for (const f of existing) {
+          await tx
+            .update(chatFolders)
+            .set({ sortOrder: f.sortOrder + 1 })
+            .where(eq(chatFolders.id, f.id));
+        }
+        await tx.insert(chatFolders).values({
+          id,
+          name: input.name,
+          mode: input.mode as "conversation" | "roleplay" | "visual_novel",
+          color: input.color ?? "",
+          sortOrder: 0,
+          collapsed: "false",
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
       });
       return this.getById(id);
     },
@@ -62,9 +66,19 @@ export function createChatFoldersStorage(db: DB) {
     },
 
     async reorder(orderedIds: string[]) {
-      for (let i = 0; i < orderedIds.length; i++) {
-        await db.update(chatFolders).set({ sortOrder: i, updatedAt: now() }).where(eq(chatFolders.id, orderedIds[i]!));
-      }
+      // Atomic: a partial failure mid-loop would leave the folder list with
+      // mixed sort orders. Folder counts are O(dozens) per user, well below
+      // the loop size that triggers the libSQL Windows transaction
+      // use-after-free noted in chats.storage.ts:449.
+      const timestamp = now();
+      await db.transaction(async (tx) => {
+        for (let i = 0; i < orderedIds.length; i++) {
+          await tx
+            .update(chatFolders)
+            .set({ sortOrder: i, updatedAt: timestamp })
+            .where(eq(chatFolders.id, orderedIds[i]!));
+        }
+      });
     },
   };
 }

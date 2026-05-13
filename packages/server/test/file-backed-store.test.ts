@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { and, eq } from "drizzle-orm";
 import { characterCardVersions, characters, chats, lorebookFolders, lorebooks } from "../src/db/schema/index.js";
 import { createFileNativeDB } from "../src/db/file-backed-store.js";
+import { createChatsStorage } from "../src/services/storage/chats.storage.js";
 
 async function writeLegacyDb(path: string, rows: Array<{ id: string; name: string; updatedAt: string }>) {
   const { DatabaseSync } = await import("node:sqlite");
@@ -315,6 +316,48 @@ test("file-native import falls back to node:sqlite when libSQL is unavailable", 
           assert.deepEqual(
             rows.map((row) => row.id),
             ["node-sqlite-chat"],
+          );
+        } finally {
+          await db._fileStore.close();
+        }
+      }),
+    );
+  } finally {
+    await removeTempDir(root);
+  }
+});
+
+test("file-native storage does not resurrect a deleted chat from the legacy import source", async () => {
+  const root = mkdtempSync(join(tmpdir(), "marinara-file-delete-legacy-"));
+  try {
+    const storageDir = join(root, "storage");
+    const legacyDb = join(root, "legacy.db");
+    await writeLegacyDb(legacyDb, [
+      { id: "keep-chat", name: "Keep Chat", updatedAt: "2026-05-02T00:00:00.000Z" },
+      { id: "delete-chat", name: "Delete Chat", updatedAt: "2026-05-02T00:00:00.000Z" },
+    ]);
+
+    await withEnv("MARINARA_DISABLE_LIBSQL_LEGACY_READER", "true", () =>
+      withFileStorageDir(storageDir, async () => {
+        let db = await createFileNativeDB([legacyDb]);
+        try {
+          const storage = createChatsStorage(db);
+          await storage.remove("delete-chat");
+          const afterDelete = await db.select().from(chats);
+          assert.deepEqual(
+            afterDelete.map((row) => row.id).sort(),
+            ["keep-chat"],
+          );
+        } finally {
+          await db._fileStore.close();
+        }
+
+        db = await createFileNativeDB([legacyDb]);
+        try {
+          const afterRestart = await db.select().from(chats);
+          assert.deepEqual(
+            afterRestart.map((row) => row.id).sort(),
+            ["keep-chat"],
           );
         } finally {
           await db._fileStore.close();

@@ -279,6 +279,16 @@ export function useChatGroup(groupId: string | null) {
   });
 }
 
+type DeleteChatInput = string | { id: string; groupId?: string | null };
+
+function getDeleteChatId(input: DeleteChatInput) {
+  return typeof input === "string" ? input : input.id;
+}
+
+function getDeleteChatGroupId(input: DeleteChatInput) {
+  return typeof input === "string" ? null : (input.groupId ?? null);
+}
+
 export function useCreateChat() {
   const qc = useQueryClient();
   return useMutation({
@@ -300,30 +310,46 @@ export function useCreateChat() {
 export function useDeleteChat() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.delete(`/chats/${id}`),
-    onMutate: async (id) => {
+    mutationFn: (input: DeleteChatInput) => api.delete(`/chats/${getDeleteChatId(input)}`),
+    onMutate: async (input) => {
+      const id = getDeleteChatId(input);
+      const providedGroupId = getDeleteChatGroupId(input);
       await qc.cancelQueries({ queryKey: chatKeys.list() });
+      if (providedGroupId) {
+        await qc.cancelQueries({ queryKey: chatKeys.group(providedGroupId) });
+      }
       const previous = qc.getQueryData<Chat[]>(chatKeys.list());
-      const deletedChat = previous?.find((c) => c.id === id) ?? null;
+      const previousGroup = providedGroupId ? qc.getQueryData<Chat[]>(chatKeys.group(providedGroupId)) : undefined;
+      const deletedChat = previous?.find((c) => c.id === id) ?? previousGroup?.find((c) => c.id === id) ?? null;
+      const groupId = deletedChat?.groupId ?? providedGroupId;
 
       qc.setQueryData<Chat[]>(chatKeys.list(), (old) => old?.filter((c) => c.id !== id));
 
-      if (deletedChat?.groupId) {
-        qc.setQueryData<Chat[]>(chatKeys.group(deletedChat.groupId), (old) => old?.filter((c) => c.id !== id));
+      if (groupId) {
+        qc.setQueryData<Chat[]>(chatKeys.group(groupId), (old) => old?.filter((c) => c.id !== id));
       }
 
-      return { previous, deletedChat };
+      return { previous, previousGroup, groupId };
     },
     onError: (_err, _id, context) => {
-      if (context?.previous) qc.setQueryData(chatKeys.list(), context.previous);
-      if (context?.deletedChat?.groupId) {
-        qc.invalidateQueries({ queryKey: chatKeys.group(context.deletedChat.groupId) });
+      if (context?.previous) {
+        qc.setQueryData(chatKeys.list(), context.previous);
+      } else {
+        qc.invalidateQueries({ queryKey: chatKeys.list() });
+      }
+      if (context?.groupId) {
+        if (context.previousGroup) {
+          qc.setQueryData(chatKeys.group(context.groupId), context.previousGroup);
+        } else {
+          qc.invalidateQueries({ queryKey: chatKeys.group(context.groupId) });
+        }
       }
     },
-    onSettled: (_data, _err, _id, context) => {
+    onSettled: (_data, _err, input, context) => {
+      const groupId = context?.groupId ?? getDeleteChatGroupId(input);
       qc.invalidateQueries({ queryKey: chatKeys.list() });
-      if (context?.deletedChat?.groupId) {
-        qc.invalidateQueries({ queryKey: chatKeys.group(context.deletedChat.groupId) });
+      if (groupId) {
+        qc.invalidateQueries({ queryKey: chatKeys.group(groupId) });
       }
     },
   });

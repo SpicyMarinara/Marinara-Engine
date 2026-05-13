@@ -1,6 +1,7 @@
 import { promises as dns } from "node:dns";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { basename, extname, relative, resolve, sep, win32 } from "node:path";
+import { gunzipSync } from "node:zlib";
 import { Agent } from "undici";
 import { isLoopbackIp, isPrivateNetworkIp } from "../middleware/ip-allowlist.js";
 import { CSRF_HEADER, CSRF_HEADER_VALUE } from "@marinara-engine/shared";
@@ -386,7 +387,8 @@ async function readCappedResponse(response: Response, maxBytes: number, dispatch
   } finally {
     await dispatcher?.close().catch(() => undefined);
   }
-  return new Response(Buffer.concat(chunks), {
+  const body = decodePossiblyCompressedBody(Buffer.concat(chunks));
+  return new Response(body, {
     status: response.status,
     statusText: response.statusText,
     headers: response.headers,
@@ -432,6 +434,13 @@ function capStreamingResponse(response: Response, maxBytes: number, dispatcher?:
     statusText: response.statusText,
     headers: response.headers,
   });
+}
+
+export function decodePossiblyCompressedBody(buffer: Buffer): Buffer {
+  if (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b) {
+    return gunzipSync(buffer);
+  }
+  return buffer;
 }
 
 export async function safeFetch(url: string | URL, options: SafeFetchOptions = {}): Promise<Response> {

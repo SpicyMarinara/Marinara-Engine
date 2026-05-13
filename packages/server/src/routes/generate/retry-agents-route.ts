@@ -1373,7 +1373,8 @@ async function applyRetryResultEffects(args: {
           );
           const trimmedText = text.trim();
           if (trimmedText) {
-            const entry = { agentType: result.agentType, text: trimmedText };
+            const agentName = resolvedAgents.find((entry) => entry.resolved.type === result.agentType)?.cfg.name;
+            const entry = { agentType: result.agentType, agentName, text: trimmedText };
             const idx = list.findIndex((e) => e.agentType === result.agentType);
             if (idx >= 0) list[idx] = entry;
             else list.push(entry);
@@ -1653,6 +1654,10 @@ async function applyRetryResultEffects(args: {
           const illustratorAgent = resolvedAgents.find(
             (a) => a.resolved.id === result.agentId || a.resolved.type === "illustrator",
           );
+          const rawImagePositivePrompt = illustratorAgent?.resolved.settings?.imagePositivePrompt;
+          const rawSavedNegativePrompt = illustratorAgent?.resolved.settings?.imageNegativePrompt;
+          const imagePositivePrompt = typeof rawImagePositivePrompt === "string" ? rawImagePositivePrompt.trim() : "";
+          const savedNegativePrompt = typeof rawSavedNegativePrompt === "string" ? rawSavedNegativePrompt.trim() : "";
           let imgConnId = (illustratorAgent?.resolved.settings?.imageConnectionId as string) ?? null;
           if (!imgConnId) {
             const defaultImageConn = (await conns.list()).find(
@@ -1692,6 +1697,10 @@ async function applyRetryResultEffects(args: {
               }
 
               let fullPrompt = style ? `${style}, ${imagePrompt}` : imagePrompt;
+              if (imagePositivePrompt) {
+                fullPrompt = `${fullPrompt}, ${imagePositivePrompt}`;
+              }
+              const finalNegativePrompt = [negativePrompt, savedNegativePrompt].filter(Boolean).join(", ");
 
               // Collect character avatar references when enabled
               const useAvatarRefs = illustratorAgent?.resolved.settings?.useAvatarReferences === true;
@@ -1745,7 +1754,7 @@ async function applyRetryResultEffects(args: {
 
               const imageResult = await generateImage(imgModel, imgBaseUrl, imgApiKey, imgServiceHint, {
                 prompt: fullPrompt,
-                negativePrompt: negativePrompt || undefined,
+                negativePrompt: finalNegativePrompt || undefined,
                 model: imgModel,
                 width: imgWidth,
                 height: imgHeight,

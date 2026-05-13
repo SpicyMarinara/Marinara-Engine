@@ -10,6 +10,9 @@ import {
   findKnownModel,
   nameToXmlTag,
   DEFAULT_AGENT_TOOLS,
+  DEFAULT_AGENT_MAX_TOKENS,
+  MAX_AGENT_MAX_TOKENS,
+  MIN_AGENT_MAX_TOKENS,
   LOCAL_SIDECAR_CONNECTION_ID,
   resolveMacros,
   LIMITS,
@@ -286,6 +289,20 @@ function normalizeHapticAgentCommand(command: Record<string, unknown>): HapticDe
   };
 }
 
+export function normalizeHapticAgentCommands(data: Record<string, unknown>): Array<Record<string, unknown>> {
+  if (Array.isArray(data.commands)) {
+    return data.commands.filter(
+      (entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object",
+    );
+  }
+
+  if (normalizeHapticAgentAction(data.action)) {
+    return [data];
+  }
+
+  return [];
+}
+
 const COMPLETE_OUTPUT_END_RE = /[.!?…。！？]["'”’)\]}»›]*$/;
 const COMPLETE_SENTENCE_RE = /[.!?…。！？](?:["'”’)\]}»›]+)?(?=\s|$)/g;
 
@@ -496,6 +513,16 @@ function normalizeMaxContext(value: unknown): number | undefined {
   return Math.floor(value);
 }
 
+function normalizeAgentMaxTokens(value: unknown, fallback = DEFAULT_AGENT_MAX_TOKENS): number {
+  const parsed = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(MIN_AGENT_MAX_TOKENS, Math.min(MAX_AGENT_MAX_TOKENS, Math.trunc(parsed)));
+}
+
+function applyProviderMaxTokensOverride(provider: BaseLLMProvider, maxTokens: number): number {
+  return provider.maxTokensOverrideValue !== null ? Math.min(maxTokens, provider.maxTokensOverrideValue) : maxTokens;
+}
+
 function minContextLimit(...limits: Array<number | undefined>): number | undefined {
   let resolved: number | undefined;
   for (const limit of limits) {
@@ -573,22 +600,25 @@ function packRecalledMemories(
 
 /**
  * Format agent injection results into a wrapped block for prompt injection.
- * Each agent gets its own XML/markdown section with its type as the tag name.
+ * Each agent gets its own XML/markdown section with its current display name
+ * as the section label, falling back to the stable type for legacy caches.
  */
 function formatAgentInjections(injections: AgentInjection[], wrapFormat: string): string {
   if (injections.length === 1) {
-    const { agentType, text } = injections[0]!;
-    const tag = agentType.replace(/[^a-z0-9_-]/gi, "_");
-    if (wrapFormat === "markdown") return `## ${tag}\n${text}`;
+    const { agentType, agentName, text } = injections[0]!;
+    const label = agentName?.trim() || agentType;
+    const tag = nameToXmlTag(label) || agentType.replace(/[^a-z0-9_-]/gi, "_");
+    if (wrapFormat === "markdown") return `## ${label}\n${text}`;
     if (wrapFormat === "xml") return `<${tag}>\n${text}\n</${tag}>`;
     return text;
   }
   // Multiple agents — wrap each individually
   const parts: string[] = [];
-  for (const { agentType, text } of injections) {
-    const tag = agentType.replace(/[^a-z0-9_-]/gi, "_");
+  for (const { agentType, agentName, text } of injections) {
+    const label = agentName?.trim() || agentType;
+    const tag = nameToXmlTag(label) || agentType.replace(/[^a-z0-9_-]/gi, "_");
     if (wrapFormat === "markdown") {
-      parts.push(`## ${tag}\n${text}`);
+      parts.push(`## ${label}\n${text}`);
     } else if (wrapFormat === "xml") {
       parts.push(`<${tag}>\n${text}\n</${tag}>`);
     } else {
@@ -885,8 +915,11 @@ export async function generateRoutes(app: FastifyInstance) {
 
       // ── Regeneration as swipe: exclude the target message from context ──
       if (input.regenerateMessageId) {
-        regenMsg = chatMessages.find((m: any) => m.id === input.regenerateMessageId);
-        if (!regenMsg) return reply.code(404).send({ error: "Regenerated message not found" });
+        regenMsg = scopedMessages.find((m: any) => m.id === input.regenerateMessageId);
+        if (!regenMsg) {
+          sendSseEvent(reply, { type: "error", data: "Regenerated message not found" });
+          return;
+        }
         chatMessages = chatMessages.filter((m: any) => m.id !== input.regenerateMessageId);
         lorebookKeeperMessages = lorebookKeeperMessages.filter((m: any) => m.id !== input.regenerateMessageId);
       }
@@ -2702,6 +2735,8 @@ export async function generateRoutes(app: FastifyInstance) {
       const agentConnectionWarnings: AgentConnectionWarning[] = [];
       const skippedLocalSidecarAgents: string[] = [];
       const defaultAgentConnectionAgents: string[] = [];
+      let responseOrchestratorSelectorAgent: ResolvedAgent | null = null;
+      let responseOrchestratorSelectorUnavailable = false;
       for (const cfg of enabledConfigs) {
         // If this chat has a per-chat agent list, only include agents in that list
         if (hasPerChatAgentList && !perChatAgentSet.has(cfg.type)) continue;
@@ -2810,6 +2845,110 @@ export async function generateRoutes(app: FastifyInstance) {
           model: builtInCached?.model ?? conn.model,
           maxParallelJobs: builtInCached?.maxParallelJobs ?? chatConnectionMaxParallelJobs,
         });
+      }
+
+      // The smart group speaker picker is an internal Response Orchestrator call,
+      // not a normal pipeline agent. Resolve only that agent's config so its
+      // connection/model/budget controls apply without enabling unrelated agents.
+      const selectorGroupResponseOrder = (chatMeta.groupResponseOrder as string) ?? "sequential";
+      const selectorGroupChatMode =
+        chatMode === "conversation"
+          ? selectorGroupResponseOrder === "manual"
+            ? "individual"
+            : "merged"
+          : ((chatMeta.groupChatMode as string) ?? "merged");
+      const shouldResolveResponseOrchestratorSelector =
+        !input.impersonate &&
+        !input.regenerateMessageId &&
+        characterIds.length > 1 &&
+        selectorGroupChatMode === "individual" &&
+        selectorGroupResponseOrder === "smart";
+      if (shouldResolveResponseOrchestratorSelector) {
+        const resolvedResponseOrchestratorAgent = resolvedAgents.find((agent) => agent.type === "response-orchestrator");
+        if (resolvedResponseOrchestratorAgent) {
+          responseOrchestratorSelectorAgent = resolvedResponseOrchestratorAgent;
+        } else {
+          const storedResponseOrchestratorConfig = await agentsStore.getByType("response-orchestrator");
+          const cfg =
+            storedResponseOrchestratorConfig ??
+            (defaultAgentConn
+              ? (BUILT_IN_AGENTS.find((agent) => agent.id === "response-orchestrator") ?? null)
+              : null);
+          if (cfg) {
+            const settings =
+              "settings" in cfg && cfg.settings
+                ? JSON.parse(cfg.settings as string)
+                : getDefaultBuiltInAgentSettings("response-orchestrator");
+            let agentProvider = provider;
+            let agentModel = conn.model;
+            let agentMaxParallelJobs = chatConnectionMaxParallelJobs;
+            const requestedConnectionId = "connectionId" in cfg ? (cfg.connectionId as string | null) : null;
+            const effectiveConnectionId = resolveAgentConnectionId({
+              requestedConnectionId,
+              defaultAgentConnectionId: defaultAgentConn?.id ?? null,
+              localSidecarAvailable: localSidecarAvailableForTrackers,
+            });
+
+            if (effectiveConnectionId === "skip-local-sidecar") {
+              responseOrchestratorSelectorUnavailable = true;
+              const alreadyWarned = skippedLocalSidecarAgents.some((agentName) => agentName === "Response Orchestrator");
+              if (!alreadyWarned) {
+                agentConnectionWarnings.push(buildLocalSidecarUnavailableWarning(["Response Orchestrator"]));
+              }
+              logger.warn(
+                "[group-smart] Skipping Response Orchestrator Local Model override for chat %s because the sidecar is unavailable",
+                input.chatId,
+              );
+            } else {
+              if (defaultAgentConn && effectiveConnectionId === defaultAgentConn.id) {
+                defaultAgentConnectionAgents.push("Response Orchestrator");
+              }
+              if (effectiveConnectionId) {
+                const cached = agentProviderCache.get(effectiveConnectionId);
+                if (cached) {
+                  agentProvider = cached.provider;
+                  agentModel = cached.model;
+                  agentMaxParallelJobs = cached.maxParallelJobs;
+                } else {
+                  const agentConn = await connections.getWithKey(effectiveConnectionId);
+                  if (agentConn) {
+                    const agentBaseUrl = resolveBaseUrl(agentConn);
+                    if (agentBaseUrl) {
+                      agentProvider = createLLMProvider(
+                        agentConn.provider,
+                        agentBaseUrl,
+                        agentConn.apiKey,
+                        agentConn.maxContext,
+                        agentConn.openrouterProvider,
+                        agentConn.maxTokensOverride,
+                      );
+                      agentModel = agentConn.model;
+                      agentMaxParallelJobs = Number(agentConn.maxParallelJobs) || 1;
+                      agentProviderCache.set(effectiveConnectionId, {
+                        provider: agentProvider,
+                        model: agentModel,
+                        maxParallelJobs: agentMaxParallelJobs,
+                      });
+                    }
+                  }
+                }
+              }
+
+              responseOrchestratorSelectorAgent = {
+                id: "id" in cfg ? String(cfg.id) : "builtin:response-orchestrator",
+                type: "response-orchestrator",
+                name: "name" in cfg ? String(cfg.name) : "Response Orchestrator",
+                phase: "phase" in cfg ? String(cfg.phase) : "pre_generation",
+                promptTemplate: "promptTemplate" in cfg ? String(cfg.promptTemplate ?? "") : "",
+                connectionId: effectiveConnectionId,
+                settings,
+                provider: agentProvider,
+                model: agentModel,
+                maxParallelJobs: agentMaxParallelJobs,
+              };
+            }
+          }
+        }
       }
 
       if (defaultAgentConn && defaultAgentConnectionAgents.length > 0) {
@@ -4717,8 +4856,15 @@ export async function generateRoutes(app: FastifyInstance) {
       // prose-guardian) which improve writing quality and should run every time.
       // On regens, reuse cached injections from the first generation to save tokens.
       // Post-gen agents still run after every response.
+      const agentNameByType = new Map(resolvedAgents.map((agent) => [agent.type, agent.name] as const));
+      const attachAgentName = (entry: AgentInjection): AgentInjection => ({
+        ...entry,
+        agentName: agentNameByType.get(entry.agentType) ?? entry.agentName,
+      });
       const reviewedAgentInjections: AgentInjection[] = input.agentInjectionOverrides
-        .map((entry) => ({ agentType: entry.agentType.trim(), text: entry.text }))
+        .map((entry) =>
+          attachAgentName({ agentType: entry.agentType.trim(), agentName: entry.agentName, text: entry.text }),
+        )
         .filter((entry) => entry.agentType && entry.text.trim().length > 0);
       const reviewedAgentTypes = new Set(reviewedAgentInjections.map((entry) => entry.agentType));
       let contextInjections: AgentInjection[] = reviewedAgentInjections;
@@ -4793,9 +4939,9 @@ export async function generateRoutes(app: FastifyInstance) {
                 );
               }
               const _tAgents = Date.now();
-              const injections = await pipeline.preGenerate(
-                (t) => !EXCLUDED_FROM_PIPELINE.has(t) && !reviewedAgentTypes.has(t),
-              );
+              const injections = (
+                await pipeline.preGenerate((t) => !EXCLUDED_FROM_PIPELINE.has(t) && !reviewedAgentTypes.has(t))
+              ).map(attachAgentName);
               logger.debug(`[timing] Pre-gen agents: ${Date.now() - _tAgents}ms`);
               return injections;
             })()
@@ -5059,7 +5205,7 @@ export async function generateRoutes(app: FastifyInstance) {
                 type: "agent_result",
                 data: {
                   agentType: inj.agentType,
-                  agentName: inj.agentType,
+                  agentName: agentNameByType.get(inj.agentType) ?? inj.agentName ?? inj.agentType,
                   resultType: "context_injection",
                   data: { text: inj.text },
                   success: true,
@@ -5077,9 +5223,11 @@ export async function generateRoutes(app: FastifyInstance) {
           if (hasContextInjectionAgents) {
             reply.raw.write(`data: ${JSON.stringify({ type: "agent_start", data: { phase: "pre_generation" } })}\n\n`);
             // On regens, exclude secret-plot-driver — it only triggers on new user messages
-            contextInjections = await pipeline.preGenerate(
-              (agentType) => !EXCLUDED_FROM_PIPELINE.has(agentType) && agentType !== "secret-plot-driver",
-            );
+            contextInjections = (
+              await pipeline.preGenerate(
+                (agentType) => !EXCLUDED_FROM_PIPELINE.has(agentType) && agentType !== "secret-plot-driver",
+              )
+            ).map(attachAgentName);
 
             // Failure gate — same as the new-message path
             const regenPreGenResults = pipeline.results.filter(
@@ -5479,6 +5627,7 @@ export async function generateRoutes(app: FastifyInstance) {
       const selectSmartGroupResponders = async (): Promise<string[]> => {
         const explicitMentionIds = getExplicitlyMentionedCharacterIds();
         if (explicitMentionIds.length > 0) return explicitMentionIds;
+        if (responseOrchestratorSelectorUnavailable) return fallbackSmartGroupResponders();
 
         const recentTranscript = chatMessages
           .slice(-16)
@@ -5534,10 +5683,21 @@ export async function generateRoutes(app: FastifyInstance) {
         ];
 
         try {
-          const result = await provider.chatComplete(selectionPrompt, {
-            model: conn.model,
-            temperature: 0.2,
-            maxTokens: 512,
+          const orchestratorAgent =
+            responseOrchestratorSelectorAgent ?? resolvedAgents.find((agent) => agent.type === "response-orchestrator");
+          const selectorProvider = orchestratorAgent?.provider ?? provider;
+          const selectorModel = orchestratorAgent?.model ?? conn.model;
+          const selectorTemperature =
+            typeof orchestratorAgent?.settings.temperature === "number" ? orchestratorAgent.settings.temperature : 0.2;
+          const selectorMaxTokens = applyProviderMaxTokensOverride(
+            selectorProvider,
+            normalizeAgentMaxTokens(orchestratorAgent?.settings?.maxTokens),
+          );
+
+          const result = await selectorProvider.chatComplete(selectionPrompt, {
+            model: selectorModel,
+            temperature: selectorTemperature,
+            maxTokens: selectorMaxTokens,
             maxContext: effectiveMaxContext,
             topP: 1,
             stream: false,
@@ -6547,10 +6707,14 @@ export async function generateRoutes(app: FastifyInstance) {
         }
 
         if (regenGroupChatIndividual) {
-          if (regenMsg?.chatId !== input.chatId)
-            return reply.code(400).send({ error: "Regenerated message does not belong to this chat" });
-          if (!regenMsg?.characterId)
-            return reply.code(400).send({ error: "Regenerated message is missing character" });
+          if (regenMsg?.chatId !== input.chatId) {
+            sendSseEvent(reply, { type: "error", data: "Regenerated message does not belong to this chat" });
+            return;
+          }
+          if (!regenMsg?.characterId) {
+            sendSseEvent(reply, { type: "error", data: "Regenerated message is missing character" });
+            return;
+          }
 
           // Get character of regenerated message and append "Respond ONLY as [name]" instruction
           targetCharId = regenMsg?.characterId ?? null;
@@ -7549,8 +7713,8 @@ export async function generateRoutes(app: FastifyInstance) {
                   (hData.raw as string)?.slice(0, 200),
                 );
               } else {
-                const cmds = hData.commands as Array<Record<string, unknown>> | undefined;
-                if (cmds && cmds.length > 0) {
+                const cmds = normalizeHapticAgentCommands(hData);
+                if (cmds.length > 0) {
                   const { hapticService } = await import("../services/haptic/buttplug-service.js");
                   if (hapticService.connected) {
                     const executedCommands: HapticDeviceCommand[] = [];
@@ -7617,6 +7781,8 @@ export async function generateRoutes(app: FastifyInstance) {
             if (shouldGenerate && imagePrompt) {
               // Resolve connections: text LLM = connectionId, image gen = settings.imageConnectionId
               const illustratorAgent = resolvedAgents.find((a) => a.id === result.agentId || a.type === "illustrator");
+              const imagePositivePrompt = ((illustratorAgent?.settings?.imagePositivePrompt as string) ?? "").trim();
+              const savedNegativePrompt = ((illustratorAgent?.settings?.imageNegativePrompt as string) ?? "").trim();
               let imgConnId = (illustratorAgent?.settings?.imageConnectionId as string) ?? null;
               if (!imgConnId) {
                 const defaultImageConn = (await connections.list()).find(
@@ -7662,6 +7828,10 @@ export async function generateRoutes(app: FastifyInstance) {
 
                     // Prepend style to the prompt for better results
                     let fullPrompt = style ? `${style}, ${imagePrompt}` : imagePrompt;
+                    if (imagePositivePrompt) {
+                      fullPrompt = `${fullPrompt}, ${imagePositivePrompt}`;
+                    }
+                    const finalNegativePrompt = [negativePrompt, savedNegativePrompt].filter(Boolean).join(", ");
 
                     logger.debug(`[illustrator] Starting image generation (${imgWidth}x${imgHeight})...`);
 
@@ -7734,7 +7904,7 @@ export async function generateRoutes(app: FastifyInstance) {
 
                     const imageResult = await generateImage(imgModel, imgBaseUrl, imgApiKey, imgServiceHint, {
                       prompt: fullPrompt,
-                      negativePrompt: negativePrompt || undefined,
+                      negativePrompt: finalNegativePrompt || undefined,
                       model: imgModel,
                       width: imgWidth,
                       height: imgHeight,
@@ -8092,6 +8262,11 @@ export async function generateRoutes(app: FastifyInstance) {
                     const selfieTags: string[] = Array.isArray(chatMeta.selfieTags)
                       ? (chatMeta.selfieTags as string[])
                       : [];
+                    const selfiePositivePrompt =
+                      typeof chatMeta.selfiePositivePrompt === "string"
+                        ? chatMeta.selfiePositivePrompt.trim()
+                        : selfieTags.join(", ").trim();
+                    const selfieNegativePrompt = ((chatMeta.selfieNegativePrompt as string) ?? "").trim();
                     const promptBuilder = createLLMProvider(
                       conn.provider,
                       baseUrl,
@@ -8106,10 +8281,7 @@ export async function generateRoutes(app: FastifyInstance) {
                       {
                         appearance,
                         charName,
-                        selfieTagsBlock:
-                          selfieTags.length > 0
-                            ? `\n\nAlways include these tags/modifiers in the prompt: ${selfieTags.join(", ")}`
-                            : "",
+                        selfieTagsBlock: "",
                       },
                     );
                     const promptResult = await promptBuilder.chatComplete(
@@ -8130,6 +8302,9 @@ export async function generateRoutes(app: FastifyInstance) {
 
                     const imagePrompt = (promptResult.content ?? "").trim();
                     if (imagePrompt) {
+                      const finalSelfiePrompt = selfiePositivePrompt
+                        ? `${imagePrompt}, ${selfiePositivePrompt}`
+                        : imagePrompt;
                       const { generateImage, saveImageToDisk } = await import("../services/image/image-generation.js");
                       const { createGalleryStorage } = await import("../services/storage/gallery.storage.js");
                       const galleryStore = createGalleryStorage(app.db);
@@ -8152,7 +8327,8 @@ export async function generateRoutes(app: FastifyInstance) {
                         imgApiKey,
                         serviceHint || imgSource,
                         {
-                          prompt: imagePrompt,
+                          prompt: finalSelfiePrompt,
+                          negativePrompt: selfieNegativePrompt || undefined,
                           model: imgModel,
                           width: selfieW || imageSettings.selfie.width,
                           height: selfieH || imageSettings.selfie.height,
@@ -8166,7 +8342,7 @@ export async function generateRoutes(app: FastifyInstance) {
                       const galleryEntry = await galleryStore.create({
                         chatId: input.chatId,
                         filePath,
-                        prompt: imagePrompt,
+                        prompt: finalSelfiePrompt,
                         provider: imgConnFull.provider ?? "image_generation",
                         model: imgModel || "unknown",
                         width: selfieW || imageSettings.selfie.width,
@@ -8182,7 +8358,7 @@ export async function generateRoutes(app: FastifyInstance) {
                           type: "image",
                           url: imageUrl,
                           filename: `selfie_${charName.toLowerCase().replace(/\s+/g, "_")}.${imageResult.ext}`,
-                          prompt: imagePrompt,
+                          prompt: finalSelfiePrompt,
                           galleryId: (galleryEntry as any)?.id,
                         };
                         await chats.appendSwipeAttachment(messageId, generationSwipeIndex, attachment);
@@ -8202,12 +8378,12 @@ export async function generateRoutes(app: FastifyInstance) {
                             characterName: charName,
                             messageId,
                             imageUrl,
-                            prompt: imagePrompt,
+                            prompt: finalSelfiePrompt,
                             galleryId: (galleryEntry as any)?.id,
                           },
                         })}\n\n`,
                       );
-                      logger.info(`[commands] Selfie generated for ${charName}: ${imagePrompt.slice(0, 80)}...`);
+                      logger.debug("[commands] Selfie generated for %s", charName);
                     }
                   } catch (imgErr) {
                     logger.error(imgErr, "[commands] Selfie generation failed");

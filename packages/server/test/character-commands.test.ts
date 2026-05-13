@@ -53,6 +53,68 @@ test("parses update_character with the expanded safe text fields", () => {
   ]);
 });
 
+test("parses assistant update text fields with escaped quotes and newlines", () => {
+  const { commands, cleanContent } = parseCharacterCommands(
+    `[update_character: name="Luna", description="She goes by \\"The Bread Witch\\" and everyone knows it.", scenario="First paragraph\\n\\nSecond paragraph"]` +
+      `[update_persona: name="Alex Storm", description="Known as \\"The Anchor\\"", backstory="Line one\\nLine two"]`,
+  );
+
+  assert.equal(cleanContent, "");
+  assert.deepEqual(commands, [
+    {
+      type: "update_character",
+      name: "Luna",
+      description: 'She goes by "The Bread Witch" and everyone knows it.',
+      scenario: "First paragraph\n\nSecond paragraph",
+    },
+    {
+      type: "update_persona",
+      name: "Alex Storm",
+      description: 'Known as "The Anchor"',
+      backstory: "Line one\nLine two",
+    },
+  ]);
+});
+
+test("parses assistant update fields delimited by smart quotes", () => {
+  const { commands, cleanContent } = parseCharacterCommands(
+    `[update_character: name=“Luna”, description=“She says ‘hi’ — then writes alternate greetings.”, alternate_greetings=““Hello” — warm || ‘Goodnight’ — soft”]`,
+  );
+
+  assert.equal(cleanContent, "");
+  assert.deepEqual(commands, [
+    {
+      type: "update_character",
+      name: "Luna",
+      description: "She says ‘hi’ — then writes alternate greetings.",
+      alternateGreetings: ["“Hello” — warm", "‘Goodnight’ — soft"],
+    },
+  ]);
+});
+
+test("keeps adjacent assistant command parsing stable with escaped characters", () => {
+  const { commands } = parseCharacterCommands(
+    `[create_character: name="Luna", first_message="She said \\"hello\\". Path C:\\\\Moon", tags="mystic, seer", alternate_greetings="Hi || Hello"]` +
+      `[update_character: name="Luna", system_prompt="", depth_prompt_role="system"]`,
+  );
+
+  assert.deepEqual(commands, [
+    {
+      type: "create_character",
+      name: "Luna",
+      firstMessage: 'She said "hello". Path C:\\Moon',
+      tags: ["mystic", "seer"],
+      alternateGreetings: ["Hi", "Hello"],
+    },
+    {
+      type: "update_character",
+      name: "Luna",
+      systemPrompt: "",
+      depthPromptRole: "system",
+    },
+  ]);
+});
+
 test("parses update_persona with scenario and backstory", () => {
   const { commands, cleanContent } = parseCharacterCommands(
     `[update_persona: name="Alex Storm", scenario="Urban fantasy city", backstory="Former detective"]`,

@@ -13,6 +13,27 @@ echo ""
 # Navigate to script directory
 cd "$(dirname "$0")"
 
+SKIP_UPDATE=0
+for arg in "$@"; do
+    case "$arg" in
+        --skip-update|--no-update)
+            SKIP_UPDATE=1
+            ;;
+        -h|--help)
+            echo "Usage: ./start-termux.sh [--skip-update]"
+            echo ""
+            echo "  ./start-termux.sh               Check for updates, then start Marinara Engine"
+            echo "  ./start-termux.sh --skip-update Start the current local install without checking for updates"
+            exit 0
+            ;;
+        *)
+            echo "  [ERROR] Unknown option: $arg"
+            echo "          Run ./start-termux.sh --help for usage."
+            exit 1
+            ;;
+    esac
+done
+
 # ── Ensure required Termux packages ──
 for pkg_name in git; do
     if ! dpkg -s "$pkg_name" &> /dev/null; then
@@ -148,7 +169,9 @@ restore_stashed_changes() {
 }
 
 # ── Auto-update from Git ──
-if [ -d ".git" ]; then
+if [ "$SKIP_UPDATE" = "1" ]; then
+    echo "  [OK] Skipping update check; starting the current local install."
+elif [ -d ".git" ]; then
     echo "  [..] Checking for updates..."
     OLD_HEAD=$(git rev-parse HEAD 2>/dev/null)
     if ! git fetch origin main --quiet 2>/dev/null; then

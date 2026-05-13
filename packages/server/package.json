@@ -33,13 +33,13 @@
     "png-chunk-text": "^1.0.0",
     "png-chunks-encode": "^1.0.0",
     "png-chunks-extract": "^1.0.0",
-    "sharp": "^0.34.5",
     "undici": "^7.25.0",
     "zod": "^3.25.76"
   },
   "optionalDependencies": {
     "onnxruntime-node": "^1.24.3",
-    "onnxruntime-web": "^1.24.3"
+    "onnxruntime-web": "^1.24.3",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.8",

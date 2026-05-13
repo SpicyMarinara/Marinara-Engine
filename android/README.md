@@ -4,7 +4,7 @@ The Android app is a thin WebView wrapper around Marinara Engine running locally
 
 ## How It Works
 
-- Start Marinara Engine in Termux with `./start-termux.sh`.
+- Start Marinara Engine in Termux with `./start-termux.sh`, or use `./start-termux.sh --skip-update` to start the current local install without checking for updates.
 - The APK opens `http://127.0.0.1:<PORT>` inside a fullscreen WebView. The default build-time port is `7860`.
 - The server, launcher updates, and `AUTO_OPEN_BROWSER` behavior are owned by the Termux launcher, not by this APK.
 - Release and versioning policy follows the main repo docs in [../CONTRIBUTING.md](../CONTRIBUTING.md): root `package.json` is canonical, Android `versionName` should match the app version, and `versionCode` must increase for every shipped APK.
@@ -82,6 +82,8 @@ cd android
    ```bash
    ./start-termux.sh
    ```
+
+   To skip the update check and start the already-installed local copy, run `./start-termux.sh --skip-update`.
 
 2. Open the **Marinara Engine** app from your home screen.
 3. The app shows "Connecting..." until the local server is ready, then loads automatically.

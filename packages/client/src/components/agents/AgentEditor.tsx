@@ -211,6 +211,8 @@ export function AgentEditor() {
   const [localAutoGenerateAvatars, setLocalAutoGenerateAvatars] = useState(false);
   const [localAutoGenerateBackgrounds, setLocalAutoGenerateBackgrounds] = useState(false);
   const [localUseAvatarReferences, setLocalUseAvatarReferences] = useState(false);
+  const [localImagePositivePrompt, setLocalImagePositivePrompt] = useState("");
+  const [localImageNegativePrompt, setLocalImageNegativePrompt] = useState("");
   const [spotifyStatus, setSpotifyStatus] = useState<{
     connected: boolean;
     expired: boolean;
@@ -264,6 +266,8 @@ export function AgentEditor() {
       setLocalAutoGenerateAvatars(settings.autoGenerateAvatars ?? false);
       setLocalAutoGenerateBackgrounds(settings.autoGenerateBackgrounds ?? false);
       setLocalUseAvatarReferences(settings.useAvatarReferences ?? false);
+      setLocalImagePositivePrompt((settings.imagePositivePrompt as string) ?? "");
+      setLocalImageNegativePrompt((settings.imageNegativePrompt as string) ?? "");
       setLocalResultType(normalizeCustomResultType(settings.resultType));
       setLocalPrompt(dbConfig.promptTemplate || "");
     } else if (builtIn) {
@@ -283,6 +287,8 @@ export function AgentEditor() {
       setLocalAutoGenerateAvatars(false);
       setLocalAutoGenerateBackgrounds(false);
       setLocalUseAvatarReferences(false);
+      setLocalImagePositivePrompt("");
+      setLocalImageNegativePrompt("");
       setLocalResultType("context_injection");
       setLocalPrompt("");
     } else {
@@ -303,6 +309,8 @@ export function AgentEditor() {
       setLocalAutoGenerateAvatars(false);
       setLocalAutoGenerateBackgrounds(false);
       setLocalUseAvatarReferences(false);
+      setLocalImagePositivePrompt("");
+      setLocalImageNegativePrompt("");
       setLocalResultType("context_injection");
       setLocalPrompt("");
     }
@@ -472,6 +480,8 @@ export function AgentEditor() {
         ...(localAutoGenerateAvatars ? { autoGenerateAvatars: true } : {}),
         ...(localAutoGenerateBackgrounds ? { autoGenerateBackgrounds: true } : {}),
         ...(localUseAvatarReferences ? { useAvatarReferences: true } : {}),
+        ...(localImagePositivePrompt.trim() ? { imagePositivePrompt: localImagePositivePrompt.trim() } : {}),
+        ...(localImageNegativePrompt.trim() ? { imageNegativePrompt: localImageNegativePrompt.trim() } : {}),
       },
     };
 
@@ -517,6 +527,8 @@ export function AgentEditor() {
     localAutoGenerateAvatars,
     localAutoGenerateBackgrounds,
     localUseAvatarReferences,
+    localImagePositivePrompt,
+    localImageNegativePrompt,
     dbConfig,
     builtIn,
     isCustomAgent,
@@ -836,6 +848,39 @@ export function AgentEditor() {
                 The Illustrator uses two connections: the LLM above analyzes the scene and writes an image prompt, then
                 this connection generates the actual image from that prompt. Leave this empty to use the default
                 Illustrator image connection from Settings → Connections, if one is configured.
+              </p>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">
+                    Positive prompt / tags
+                  </span>
+                  <textarea
+                    value={localImagePositivePrompt}
+                    onChange={(e) => {
+                      setLocalImagePositivePrompt(e.target.value);
+                      markDirty();
+                    }}
+                    placeholder="masterpiece, best quality, detailed lighting"
+                    className="min-h-[5rem] resize-y rounded-xl border border-[var(--border)] bg-[var(--secondary)] px-3 py-2 text-xs text-[var(--foreground)] outline-none transition-colors placeholder:text-[var(--muted-foreground)]/45 focus:border-[var(--primary)]/50"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">Negative prompt</span>
+                  <textarea
+                    value={localImageNegativePrompt}
+                    onChange={(e) => {
+                      setLocalImageNegativePrompt(e.target.value);
+                      markDirty();
+                    }}
+                    placeholder="lowres, bad anatomy, text artifacts"
+                    className="min-h-[5rem] resize-y rounded-xl border border-[var(--border)] bg-[var(--secondary)] px-3 py-2 text-xs text-[var(--foreground)] outline-none transition-colors placeholder:text-[var(--muted-foreground)]/45 focus:border-[var(--primary)]/50"
+                  />
+                </label>
+              </div>
+              <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
+                Saved on the Illustrator agent. Positive tags are appended after the generated prompt; negative tags are
+                sent directly to the image generator and combine with any connection-level defaults. NovelAI tag syntax is
+                supported.
               </p>
               <label className="mt-3 flex items-center gap-2 cursor-pointer">
                 <input

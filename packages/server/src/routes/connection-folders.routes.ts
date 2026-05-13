@@ -25,7 +25,8 @@ export async function connectionFoldersRoutes(app: FastifyInstance) {
     const { name, color } = req.body;
     if (!name?.trim()) return reply.status(400).send({ error: "Name is required" });
     const folder = await storage.create({ name: name.trim(), color });
-    return reply.send({ ...folder, collapsed: folder!.collapsed === "true" });
+    if (!folder) return reply.status(500).send({ error: "Failed to create folder" });
+    return reply.send({ ...folder, collapsed: folder.collapsed === "true" });
   });
 
   // ── Update a folder ──
@@ -36,7 +37,8 @@ export async function connectionFoldersRoutes(app: FastifyInstance) {
     const existing = await storage.getById(req.params.id);
     if (!existing) return reply.status(404).send({ error: "Folder not found" });
     const folder = await storage.update(req.params.id, req.body);
-    return reply.send({ ...folder, collapsed: folder!.collapsed === "true" });
+    if (!folder) return reply.status(500).send({ error: "Failed to update folder" });
+    return reply.send({ ...folder, collapsed: folder.collapsed === "true" });
   });
 
   // ── Delete a folder (connections are moved to root) ──

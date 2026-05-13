@@ -12,6 +12,7 @@ services:
       - marinara-data:/app/data
     environment:
       - NODE_ENV=production
+      - HOME=/app
       - DATA_DIR=/app/data
       - FILE_STORAGE_DIR=/app/data/storage
       - MARINARA_DOCKER=true

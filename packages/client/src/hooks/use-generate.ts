@@ -531,7 +531,7 @@ export function useGenerate() {
       mentionedCharacterNames?: string[];
       forCharacterId?: string;
       generationGuide?: string;
-      agentInjectionOverrides?: Array<{ agentType: string; text: string }>;
+      agentInjectionOverrides?: Array<{ agentType: string; agentName?: string; text: string }>;
       impersonatePresetId?: string;
       impersonateConnectionId?: string;
       impersonateBlockAgents?: boolean;

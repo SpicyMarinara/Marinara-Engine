@@ -103,7 +103,7 @@ function CharacterLibraryDetailCard({
   return (
     <div className="space-y-4">
       <div className="overflow-hidden rounded-[1.5rem] border border-[var(--border)]/50 bg-[var(--background)]/70 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.95)] sm:rounded-[2rem]">
-        <div className="relative aspect-[4/3] overflow-hidden bg-gradient-to-br from-pink-400/25 via-rose-500/15 to-sky-400/15">
+        <div className="relative aspect-square overflow-hidden bg-gradient-to-br from-pink-400/25 via-rose-500/15 to-sky-400/15">
           {character.avatarPath ? (
             <img
               src={character.avatarPath}
@@ -384,7 +384,7 @@ export function CharacterLibraryView() {
           {isLoading && (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {[1, 2, 3, 4, 5, 6].map((item) => (
-                <div key={item} className="shimmer aspect-[4/5] rounded-[1.75rem]" />
+                <div key={item} className="shimmer aspect-square rounded-[1.75rem]" />
               ))}
             </div>
           )}
@@ -426,7 +426,7 @@ export function CharacterLibraryView() {
                           : "border-[var(--border)]/50",
                       )}
                     >
-                      <div className="relative h-24 w-24 shrink-0 overflow-hidden bg-gradient-to-br from-pink-400/25 via-rose-500/15 to-sky-400/15 sm:h-auto sm:w-full sm:aspect-[4/3]">
+                      <div className="relative h-24 w-24 shrink-0 overflow-hidden bg-gradient-to-br from-pink-400/25 via-rose-500/15 to-sky-400/15 sm:h-auto sm:w-full sm:aspect-square">
                         {char.avatarPath ? (
                           <img
                             src={char.avatarPath}

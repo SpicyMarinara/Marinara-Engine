@@ -21,21 +21,25 @@ export function createConnectionFoldersStorage(db: DB) {
       const id = newId();
       const timestamp = now();
       // Shift existing folders down and place new folder at the top.
-      const existing = await db.select().from(apiConnectionFolders);
-      for (const f of existing) {
-        await db
-          .update(apiConnectionFolders)
-          .set({ sortOrder: f.sortOrder + 1 })
-          .where(eq(apiConnectionFolders.id, f.id));
-      }
-      await db.insert(apiConnectionFolders).values({
-        id,
-        name: input.name,
-        color: input.color ?? "",
-        sortOrder: 0,
-        collapsed: "false",
-        createdAt: timestamp,
-        updatedAt: timestamp,
+      // Atomic so a partial failure can't leave the sort_order column in a
+      // half-shifted state with no new folder.
+      await db.transaction(async (tx) => {
+        const existing = await tx.select().from(apiConnectionFolders);
+        for (const f of existing) {
+          await tx
+            .update(apiConnectionFolders)
+            .set({ sortOrder: f.sortOrder + 1 })
+            .where(eq(apiConnectionFolders.id, f.id));
+        }
+        await tx.insert(apiConnectionFolders).values({
+          id,
+          name: input.name,
+          color: input.color ?? "",
+          sortOrder: 0,
+          collapsed: "false",
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
       });
       return this.getById(id);
     },
@@ -61,12 +65,17 @@ export function createConnectionFoldersStorage(db: DB) {
     },
 
     async reorder(orderedIds: string[]) {
-      for (let i = 0; i < orderedIds.length; i++) {
-        await db
-          .update(apiConnectionFolders)
-          .set({ sortOrder: i, updatedAt: now() })
-          .where(eq(apiConnectionFolders.id, orderedIds[i]!));
-      }
+      // Atomic: same rationale as chat-folders reorder — a partial failure
+      // would leave the folder list with mixed sort orders.
+      const timestamp = now();
+      await db.transaction(async (tx) => {
+        for (let i = 0; i < orderedIds.length; i++) {
+          await tx
+            .update(apiConnectionFolders)
+            .set({ sortOrder: i, updatedAt: timestamp })
+            .where(eq(apiConnectionFolders.id, orderedIds[i]!));
+        }
+      });
     },
 
     async moveConnection(connectionId: string, folderId: string | null) {
@@ -77,12 +86,18 @@ export function createConnectionFoldersStorage(db: DB) {
     },
 
     async reorderConnections(orderedIds: string[], folderId: string | null) {
-      for (let i = 0; i < orderedIds.length; i++) {
-        await db
-          .update(apiConnections)
-          .set({ sortOrder: i + 1, folderId, updatedAt: now() })
-          .where(eq(apiConnections.id, orderedIds[i]!));
-      }
+      // Atomic: prevents a partial failure from leaving connections with a
+      // mix of old and new sort_order / folder_id values within the same
+      // logical operation.
+      const timestamp = now();
+      await db.transaction(async (tx) => {
+        for (let i = 0; i < orderedIds.length; i++) {
+          await tx
+            .update(apiConnections)
+            .set({ sortOrder: i + 1, folderId, updatedAt: timestamp })
+            .where(eq(apiConnections.id, orderedIds[i]!));
+        }
+      });
     },
   };
 }
