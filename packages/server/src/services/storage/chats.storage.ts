@@ -769,10 +769,10 @@ export function createChatsStorage(db: DB) {
       const timestamp = now();
       await db.update(chats).set({ connectedChatId: null, updatedAt: timestamp }).where(eq(chats.id, chatId));
       if (partnerId) {
-        const partner = await this.getById(partnerId);
-        if (partner?.connectedChatId === chatId) {
-          await db.update(chats).set({ connectedChatId: null, updatedAt: timestamp }).where(eq(chats.id, partnerId));
-        }
+        await db
+          .update(chats)
+          .set({ connectedChatId: null, updatedAt: timestamp })
+          .where(and(eq(chats.id, partnerId), eq(chats.connectedChatId, chatId)));
       }
     },
 
