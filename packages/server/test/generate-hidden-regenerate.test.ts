@@ -210,14 +210,16 @@ test("smart group selector uses the configured Response Orchestrator connection 
     mainRequests.push(body);
     writeChatCompletion(res, "Alpha replies from the main model.");
   });
-  const selectorUrl = await new Promise<string>((resolve) => {
+  const selectorUrl = await new Promise<string>((resolve, reject) => {
+    selectorServer.once("error", reject);
     selectorServer.listen(0, "127.0.0.1", () => {
       const address = selectorServer.address();
       assert.ok(address && typeof address === "object");
       resolve(`http://127.0.0.1:${address.port}/v1`);
     });
   });
-  const mainUrl = await new Promise<string>((resolve) => {
+  const mainUrl = await new Promise<string>((resolve, reject) => {
+    mainServer.once("error", reject);
     mainServer.listen(0, "127.0.0.1", () => {
       const address = mainServer.address();
       assert.ok(address && typeof address === "object");
@@ -323,7 +325,7 @@ test("smart group selector uses the configured Response Orchestrator connection 
           chatId: "chat-smart-selector",
           connectionId: "conn-main",
           userMessage: "Who wants to answer this?",
-          streaming: false,
+          streaming: true,
         },
       });
 

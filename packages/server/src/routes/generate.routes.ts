@@ -2833,8 +2833,19 @@ export async function generateRoutes(app: FastifyInstance) {
       // The smart group speaker picker is an internal Response Orchestrator call,
       // not a normal pipeline agent. Resolve only that agent's config so its
       // connection/model/budget controls apply without enabling unrelated agents.
+      const selectorGroupResponseOrder = (chatMeta.groupResponseOrder as string) ?? "sequential";
+      const selectorGroupChatMode =
+        chatMode === "conversation"
+          ? selectorGroupResponseOrder === "manual"
+            ? "individual"
+            : "merged"
+          : ((chatMeta.groupChatMode as string) ?? "merged");
       const shouldResolveResponseOrchestratorSelector =
-        !input.impersonate && characterIds.length > 1 && (chatMeta.groupResponseOrder as string) === "smart";
+        !input.impersonate &&
+        !input.regenerateMessageId &&
+        characterIds.length > 1 &&
+        selectorGroupChatMode === "individual" &&
+        selectorGroupResponseOrder === "smart";
       if (shouldResolveResponseOrchestratorSelector) {
         const resolvedResponseOrchestratorAgent = resolvedAgents.find((agent) => agent.type === "response-orchestrator");
         if (resolvedResponseOrchestratorAgent) {
@@ -5652,12 +5663,10 @@ export async function generateRoutes(app: FastifyInstance) {
           const selectorModel = orchestratorAgent?.model ?? conn.model;
           const selectorTemperature =
             typeof orchestratorAgent?.settings.temperature === "number" ? orchestratorAgent.settings.temperature : 0.2;
-          const selectorMaxTokens = orchestratorAgent
-            ? applyProviderMaxTokensOverride(
-                selectorProvider,
-                normalizeAgentMaxTokens(orchestratorAgent.settings.maxTokens, 512),
-              )
-            : applyProviderMaxTokensOverride(selectorProvider, 512);
+          const selectorMaxTokens = applyProviderMaxTokensOverride(
+            selectorProvider,
+            normalizeAgentMaxTokens(orchestratorAgent?.settings?.maxTokens),
+          );
 
           const result = await selectorProvider.chatComplete(selectionPrompt, {
             model: selectorModel,
