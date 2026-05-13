@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { gzipSync } from "node:zlib";
 import { MODEL_LISTS } from "../../shared/src/constants/model-lists.ts";
 import { createLLMProvider } from "../src/services/llm/provider-registry.js";
 import { OpenAIProvider } from "../src/services/llm/providers/openai.provider.js";
@@ -319,6 +320,49 @@ test("custom compatible streams accept SSE data lines without a space", async ()
     });
     assert.equal(tokenChunks.join(""), "hello");
     assert.equal(result.content, "hello");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalLocalUrls === undefined) {
+      delete process.env.PROVIDER_LOCAL_URLS_ENABLED;
+    } else {
+      process.env.PROVIDER_LOCAL_URLS_ENABLED = originalLocalUrls;
+    }
+  }
+});
+
+test("OpenRouter non-stream chat decodes raw gzip JSON without content-encoding", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLocalUrls = process.env.PROVIDER_LOCAL_URLS_ENABLED;
+
+  globalThis.fetch = async () =>
+    new Response(
+      gzipSync(
+        Buffer.from(
+          JSON.stringify({
+            choices: [{ message: { content: "decoded" } }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+        ),
+      ),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+
+  try {
+    process.env.PROVIDER_LOCAL_URLS_ENABLED = "true";
+    const provider = new OpenAIProvider("https://openrouter.ai/api/v1", "test-key");
+    const chunks: string[] = [];
+    for await (const chunk of provider.chat([{ role: "user", content: "Hello" }], {
+      model: "deepseek/deepseek-v4-pro",
+      stream: false,
+      maxTokens: 512,
+    })) {
+      chunks.push(chunk);
+    }
+
+    assert.equal(chunks.join(""), "decoded");
   } finally {
     globalThis.fetch = originalFetch;
     if (originalLocalUrls === undefined) {

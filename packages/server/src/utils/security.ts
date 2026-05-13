@@ -1,6 +1,7 @@
 import { promises as dns } from "node:dns";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { basename, extname, relative, resolve, sep, win32 } from "node:path";
+import { gunzipSync } from "node:zlib";
 import { Agent } from "undici";
 import { isLoopbackIp, isPrivateNetworkIp } from "../middleware/ip-allowlist.js";
 import { CSRF_HEADER, CSRF_HEADER_VALUE } from "@marinara-engine/shared";
@@ -386,11 +387,25 @@ async function readCappedResponse(response: Response, maxBytes: number, dispatch
   } finally {
     await dispatcher?.close().catch(() => undefined);
   }
-  return new Response(Buffer.concat(chunks), {
+  const body = normalizeRawCompressedBody(Buffer.concat(chunks), response.headers, maxBytes);
+  return new Response(body, {
     status: response.status,
     statusText: response.statusText,
     headers: response.headers,
   });
+}
+
+function normalizeRawCompressedBody(body: Buffer, headers: Headers, maxBytes: number): Buffer {
+  const encoding = headers.get("content-encoding")?.toLowerCase().trim();
+  if (encoding || body.length < 2 || body[0] !== 0x1f || body[1] !== 0x8b) return body;
+  try {
+    return gunzipSync(body, { maxOutputLength: maxBytes });
+  } catch (err) {
+    if (err instanceof Error && "code" in err && err.code === "ERR_BUFFER_TOO_LARGE") {
+      throw new Error(`Outbound response exceeded ${maxBytes} bytes`);
+    }
+    return body;
+  }
 }
 
 function capStreamingResponse(response: Response, maxBytes: number, dispatcher?: Agent): Response {

@@ -4,6 +4,7 @@ import { promises as dns } from "node:dns";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join, resolve, win32 } from "node:path";
 import { tmpdir } from "node:os";
+import { gzipSync } from "node:zlib";
 import {
   assertInsideDir,
   isAllowedImageBuffer,
@@ -188,6 +189,59 @@ test("safeFetch can return a streaming capped response without buffering", async
   assert.ok(reader);
   const first = await reader.read();
   assert.equal(Buffer.from(first.value ?? []).toString("utf8"), "hello");
+});
+
+test("safeFetch decodes raw gzip bodies when providers omit content-encoding", async () => {
+  const response = await safeFetch("https://example.com/models", {
+    policy: { allowLocal: true },
+    dispatcher: {
+      dispatch(
+        _options: unknown,
+        handler: {
+          onConnect: (abort: () => void) => void;
+          onHeaders: (status: number, headers: string[], resume: () => void) => void;
+          onData: (chunk: Buffer) => void;
+          onComplete: (trailers: string[]) => void;
+        },
+      ) {
+        handler.onConnect(() => undefined);
+        handler.onHeaders(200, ["content-type", "application/json"], () => undefined);
+        handler.onData(gzipSync(Buffer.from(JSON.stringify({ models: [{ id: "openrouter/test" }] }))));
+        handler.onComplete([]);
+        return true;
+      },
+    },
+  });
+
+  assert.deepEqual(await response.json(), { models: [{ id: "openrouter/test" }] });
+});
+
+test("safeFetch caps decoded raw gzip bodies when providers omit content-encoding", async () => {
+  await assert.rejects(
+    () =>
+      safeFetch("https://example.com/models", {
+        policy: { allowLocal: true },
+        maxResponseBytes: 64,
+        dispatcher: {
+          dispatch(
+            _options: unknown,
+            handler: {
+              onConnect: (abort: () => void) => void;
+              onHeaders: (status: number, headers: string[], resume: () => void) => void;
+              onData: (chunk: Buffer) => void;
+              onComplete: (trailers: string[]) => void;
+            },
+          ) {
+            handler.onConnect(() => undefined);
+            handler.onHeaders(200, ["content-type", "application/json"], () => undefined);
+            handler.onData(gzipSync(Buffer.from("x".repeat(512))));
+            handler.onComplete([]);
+            return true;
+          },
+        },
+      }),
+    /Outbound response exceeded 64 bytes/,
+  );
 });
 
 test("safeFetch rejects missing content-type when a content gate is configured", async () => {
