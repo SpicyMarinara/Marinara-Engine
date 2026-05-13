@@ -76,6 +76,22 @@ test("parses assistant update text fields with escaped quotes and newlines", () 
   ]);
 });
 
+test("parses assistant update fields delimited by smart quotes", () => {
+  const { commands, cleanContent } = parseCharacterCommands(
+    `[update_character: name=“Luna”, description=“She says ‘hi’ — then writes alternate greetings.”, alternate_greetings=““Hello” — warm || ‘Goodnight’ — soft”]`,
+  );
+
+  assert.equal(cleanContent, "");
+  assert.deepEqual(commands, [
+    {
+      type: "update_character",
+      name: "Luna",
+      description: "She says ‘hi’ — then writes alternate greetings.",
+      alternateGreetings: ["“Hello” — warm", "‘Goodnight’ — soft"],
+    },
+  ]);
+});
+
 test("keeps adjacent assistant command parsing stable with escaped characters", () => {
   const { commands } = parseCharacterCommands(
     `[create_character: name="Luna", first_message="She said \\"hello\\". Path C:\\\\Moon", tags="mystic, seer", alternate_greetings="Hi || Hello"]` +

@@ -295,10 +295,48 @@ function decodeQuotedParamValue(value: string): string {
   });
 }
 
+const QUOTE_PAIRS: Record<string, string> = {
+  '"': '"',
+  "\u201c": "\u201d",
+  "\u201d": "\u201d",
+  "\u2018": "\u2019",
+  "\u2019": "\u2019",
+};
+
 function parseQuotedParam(params: string, key: string, allowEmpty = false): string | undefined {
-  const match = params.match(new RegExp(`${key}="((?:\\\\.|[^"\\\\])*)"`));
-  if (!match) return undefined;
-  const value = decodeQuotedParamValue(match[1] ?? "");
+  const match = params.match(new RegExp(`${key}\\s*=\\s*(["\u201c\u201d\u2018\u2019])`));
+  if (!match || match.index === undefined) return undefined;
+
+  const openingQuote = match[1] ?? '"';
+  const closingQuote = QUOTE_PAIRS[openingQuote] ?? openingQuote;
+  let rawValue = "";
+  let index = match.index + match[0].length;
+
+  while (index < params.length) {
+    const char = params[index] ?? "";
+    const nextChar = params[index + 1];
+
+    if (char === "\\" && nextChar !== undefined) {
+      rawValue += char + nextChar;
+      index += 2;
+      continue;
+    }
+
+    const remainder = params.slice(index + 1).trimStart();
+    if (
+      char === closingQuote &&
+      (remainder.length === 0 || remainder.startsWith(",") || /^[A-Za-z_][A-Za-z0-9_]*\s*=/.test(remainder))
+    ) {
+      break;
+    }
+
+    rawValue += char;
+    index += 1;
+  }
+
+  if (index >= params.length) return undefined;
+
+  const value = decodeQuotedParamValue(rawValue);
   if (!allowEmpty && value.length === 0) return undefined;
   return value;
 }
