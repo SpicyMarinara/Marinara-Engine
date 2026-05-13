@@ -46,6 +46,7 @@ import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import type { Chat, ChatFolder, ChatMode } from "@marinara-engine/shared";
 import { Modal } from "../ui/Modal";
 import { Reorder, useDragControls } from "framer-motion";
+import { parseChatMetadata } from "../../lib/chat-display";
 
 type ChatSortOption = "newest" | "oldest" | "name-asc" | "name-desc";
 
@@ -120,6 +121,7 @@ export function ChatSidebar() {
   const activeChatId = useChatStore((s) => s.activeChatId);
   const setActiveChatId = useChatStore((s) => s.setActiveChatId);
   const unreadCounts = useChatStore((s) => s.unreadCounts);
+  const hydrateUnread = useChatStore((s) => s.hydrateUnread);
   const { data: allCharacters } = useCharacters();
   const hasAnyDetailOpen = useUIStore((s) => s.hasAnyDetailOpen);
   const editorDirty = useUIStore((s) => s.editorDirty);
@@ -328,6 +330,33 @@ export function ChatSidebar() {
   // Detect if active chat belongs to a group (so its group row highlights)
   const activeChat = chats?.find((c) => c.id === activeChatId);
   const activeGroupId = activeChat?.groupId ?? null;
+
+  useEffect(() => {
+    if (!chats?.length) return;
+    const unread = chats
+      .map((chat) => {
+        const metadata = parseChatMetadata(chat.metadata);
+        const count = typeof metadata.autonomousUnreadCount === "number" ? metadata.autonomousUnreadCount : 0;
+        if (count <= 0) return null;
+        const characterId =
+          (Array.isArray(metadata.autonomousUnreadCharacterIds)
+            ? metadata.autonomousUnreadCharacterIds.find((id): id is string => typeof id === "string")
+            : null) ?? normalizeChatCharacterIds(chat.characterIds)[0];
+        const character = characterId ? charLookup.get(characterId) : null;
+        return {
+          chatId: chat.id,
+          count,
+          characterName: character?.name ?? "Someone",
+          avatarUrl: character?.avatarUrl ?? null,
+          avatarCrop: character?.avatarCrop ?? null,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+    hydrateUnread(
+      unread,
+      chats.map((chat) => chat.id),
+    );
+  }, [chats, charLookup, hydrateUnread]);
 
   // ── Sync sidebar tab + folder with the currently active chat ──
   // Covers: recent-chat clicks, page refresh, connected-chat switch,

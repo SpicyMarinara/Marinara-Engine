@@ -76,6 +76,16 @@ function parseMetadata(raw: unknown): MetadataPatch {
   return typeof raw === "object" ? (raw as MetadataPatch) : {};
 }
 
+function readUnreadCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+function readCharacterIds(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+    : [];
+}
+
 function resolveTimestamps(overrides?: TimestampOverrides | null) {
   const normalized = normalizeTimestampOverrides(overrides);
   const createdAt = normalized?.createdAt ?? now();
@@ -201,7 +211,11 @@ export function createChatsStorage(db: DB) {
       return this.getById(id);
     },
 
-    async patchMetadata(id: string, patchOrUpdater: MetadataPatch | MetadataUpdater) {
+    async patchMetadata(
+      id: string,
+      patchOrUpdater: MetadataPatch | MetadataUpdater,
+      opts: { touchUpdatedAt?: boolean } = {},
+    ) {
       return withMetadataPatchQueue(id, async () => {
         const existing = await this.getById(id);
         if (!existing) return null;
@@ -212,10 +226,52 @@ export function createChatsStorage(db: DB) {
 
         await db
           .update(chats)
-          .set({ metadata: JSON.stringify(merged), updatedAt: now() })
+          .set({
+            metadata: JSON.stringify(merged),
+            ...(opts.touchUpdatedAt !== false && { updatedAt: now() }),
+          })
           .where(eq(chats.id, id));
         return this.getById(id);
       });
+    },
+
+    async markAutonomousUnread(id: string, input?: { characterId?: string | null; count?: number }) {
+      const timestamp = now();
+      return this.patchMetadata(id, (current) => {
+        const increment = Math.max(1, Math.floor(input?.count ?? 1));
+        const currentCount = readUnreadCount(current.autonomousUnreadCount);
+        const characterIds = new Set(readCharacterIds(current.autonomousUnreadCharacterIds));
+        if (input?.characterId) characterIds.add(input.characterId);
+
+        return {
+          ...current,
+          autonomousUnreadCount: currentCount + increment,
+          autonomousUnreadCharacterIds: Array.from(characterIds),
+          autonomousUnreadAt: timestamp,
+        };
+      });
+    },
+
+    async clearAutonomousUnread(id: string) {
+      return this.patchMetadata(
+        id,
+        (current) => {
+          if (
+            current.autonomousUnreadCount === undefined &&
+            current.autonomousUnreadCharacterIds === undefined &&
+            current.autonomousUnreadAt === undefined
+          ) {
+            return current;
+          }
+
+          return {
+            autonomousUnreadCount: undefined,
+            autonomousUnreadCharacterIds: undefined,
+            autonomousUnreadAt: undefined,
+          };
+        },
+        { touchUpdatedAt: false },
+      );
     },
 
     async removeLorebookFromChatMetadata(lorebookId: string) {

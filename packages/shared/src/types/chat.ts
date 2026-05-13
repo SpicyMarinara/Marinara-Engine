@@ -157,6 +157,12 @@ export interface ChatMetadata {
   showInputTranslateButton?: boolean;
   /** Allow roleplay characters to create direct-message conversation chats with hidden [dm] commands. */
   roleplayDmCommandsEnabled?: boolean;
+  /** Durable count of autonomous messages the user has not viewed yet. */
+  autonomousUnreadCount?: number;
+  /** Character IDs that contributed to the current autonomous unread state. */
+  autonomousUnreadCharacterIds?: string[];
+  /** Timestamp of the newest autonomous unread message. */
+  autonomousUnreadAt?: string | null;
 
   // ── Conversation Mode Fields ──
   /** Whether conversation character schedules are enabled for this chat. */

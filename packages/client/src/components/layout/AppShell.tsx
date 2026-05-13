@@ -17,9 +17,11 @@ import {
 } from "../../stores/ui.store";
 import { useChatStore } from "../../stores/chat.store";
 import { useBackgroundAutonomousPolling } from "../../hooks/use-background-autonomous";
+import { useClearAutonomousUnread } from "../../hooks/use-chats";
 import { useIdleDetection } from "../../hooks/use-idle-detection";
 import { usePageActivity } from "../../hooks/use-page-activity";
 import { cn } from "../../lib/utils";
+import { parseChatMetadata } from "../../lib/chat-display";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   lazy,
@@ -261,11 +263,33 @@ export function AppShell() {
   const hasCompletedOnboarding = useUIStore((s) => s.hasCompletedOnboarding);
   const activeChatId = useChatStore((s) => s.activeChatId);
   const activeChat = useChatStore((s) => s.activeChat);
+  const clearUnread = useChatStore((s) => s.clearUnread);
+  const { mutate: clearAutonomousUnread, isPending: isClearingAutonomousUnread } = useClearAutonomousUnread();
   const isPageActive = usePageActivity();
   const [trackerPanelTop, setTrackerPanelTop] = useState(TRACKER_PANEL_EDGE_OFFSET);
   const [trackerPanelExitLayoutHold, setTrackerPanelExitLayoutHold] = useState(false);
   const [trackerPanelToggleAnchorY, setTrackerPanelToggleAnchorY] = useState<number | null>(null);
   const trackerPanelWasActiveRef = useRef(false);
+  const lastAutonomousUnreadClearRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!activeChatId || isClearingAutonomousUnread) return;
+    const metadata = parseChatMetadata(activeChat?.metadata);
+    const unreadCount = typeof metadata.autonomousUnreadCount === "number" ? metadata.autonomousUnreadCount : 0;
+    const persistedUnread = unreadCount > 0;
+    if (!persistedUnread && !useChatStore.getState().unreadCounts.has(activeChatId)) return;
+    const clearKey = `${activeChatId}:${unreadCount}:${metadata.autonomousUnreadAt ?? ""}`;
+    if (lastAutonomousUnreadClearRef.current === clearKey) return;
+    lastAutonomousUnreadClearRef.current = clearKey;
+    clearUnread(activeChatId);
+    clearAutonomousUnread(activeChatId);
+  }, [
+    activeChat?.metadata,
+    activeChatId,
+    clearAutonomousUnread,
+    clearUnread,
+    isClearingAutonomousUnread,
+  ]);
 
   const startSidebarResize = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>) => {

@@ -8,6 +8,7 @@ import {
   createChatSchema,
   createMessageSchema,
   getDefaultAgentPrompt,
+  markAutonomousUnreadSchema,
   nameToXmlTag,
   resolveMacros,
   summariesPatchSchema,
@@ -331,6 +332,21 @@ export async function chatsRoutes(app: FastifyInstance) {
       await clearConversationScheduleState(chat);
     }
     return storage.updateMetadata(req.params.id, merged);
+  });
+
+  // Mark a chat as having autonomous messages the user has not viewed yet.
+  app.post<{ Params: { id: string } }>("/:id/autonomous-unread", async (req, reply) => {
+    const chat = await storage.getById(req.params.id);
+    if (!chat) return reply.status(404).send({ error: "Chat not found" });
+    const input = markAutonomousUnreadSchema.parse(req.body ?? {});
+    return storage.markAutonomousUnread(req.params.id, input);
+  });
+
+  // Clear autonomous unread state when the user views the relevant chat.
+  app.delete<{ Params: { id: string } }>("/:id/autonomous-unread", async (req, reply) => {
+    const chat = await storage.getById(req.params.id);
+    if (!chat) return reply.status(404).send({ error: "Chat not found" });
+    return storage.clearAutonomousUnread(req.params.id);
   });
 
   // Update chat summaries (entry-level merge for day/week summaries).
