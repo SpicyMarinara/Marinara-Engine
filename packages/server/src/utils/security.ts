@@ -4,6 +4,7 @@ import { basename, extname, relative, resolve, sep, win32 } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { Agent } from "undici";
 import { isLoopbackIp, isPrivateNetworkIp } from "../middleware/ip-allowlist.js";
+import { logger } from "../lib/logger.js";
 import { CSRF_HEADER, CSRF_HEADER_VALUE } from "@marinara-engine/shared";
 
 export { CSRF_HEADER, CSRF_HEADER_VALUE };
@@ -399,6 +400,11 @@ function normalizeRawCompressedBody(body: Buffer, headers: Headers, maxBytes: nu
   const encoding = headers.get("content-encoding")?.toLowerCase().trim();
   if (encoding || body.length < 2 || body[0] !== 0x1f || body[1] !== 0x8b) return body;
   try {
+    logger.debug(
+      "Detected raw gzip-compressed outbound response without content-encoding header; compressedBytes=%d maxBytes=%d",
+      body.length,
+      maxBytes,
+    );
     return gunzipSync(body, { maxOutputLength: maxBytes });
   } catch (err) {
     if (err instanceof Error && "code" in err && err.code === "ERR_BUFFER_TOO_LARGE") {
