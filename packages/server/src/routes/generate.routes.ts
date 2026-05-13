@@ -10,6 +10,9 @@ import {
   findKnownModel,
   nameToXmlTag,
   DEFAULT_AGENT_TOOLS,
+  DEFAULT_AGENT_MAX_TOKENS,
+  MAX_AGENT_MAX_TOKENS,
+  MIN_AGENT_MAX_TOKENS,
   LOCAL_SIDECAR_CONNECTION_ID,
   resolveMacros,
   LIMITS,
@@ -494,6 +497,16 @@ function normalizeDmTargetName(value: string): string {
 function normalizeMaxContext(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
   return Math.floor(value);
+}
+
+function normalizeAgentMaxTokens(value: unknown, fallback = DEFAULT_AGENT_MAX_TOKENS): number {
+  const parsed = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(MIN_AGENT_MAX_TOKENS, Math.min(MAX_AGENT_MAX_TOKENS, Math.trunc(parsed)));
+}
+
+function applyProviderMaxTokensOverride(provider: BaseLLMProvider, maxTokens: number): number {
+  return provider.maxTokensOverrideValue !== null ? Math.min(maxTokens, provider.maxTokensOverrideValue) : maxTokens;
 }
 
 function minContextLimit(...limits: Array<number | undefined>): number | undefined {
@@ -2705,6 +2718,8 @@ export async function generateRoutes(app: FastifyInstance) {
       const agentConnectionWarnings: AgentConnectionWarning[] = [];
       const skippedLocalSidecarAgents: string[] = [];
       const defaultAgentConnectionAgents: string[] = [];
+      let responseOrchestratorSelectorAgent: ResolvedAgent | null = null;
+      let responseOrchestratorSelectorUnavailable = false;
       for (const cfg of enabledConfigs) {
         // If this chat has a per-chat agent list, only include agents in that list
         if (hasPerChatAgentList && !perChatAgentSet.has(cfg.type)) continue;
@@ -2813,6 +2828,99 @@ export async function generateRoutes(app: FastifyInstance) {
           model: builtInCached?.model ?? conn.model,
           maxParallelJobs: builtInCached?.maxParallelJobs ?? chatConnectionMaxParallelJobs,
         });
+      }
+
+      // The smart group speaker picker is an internal Response Orchestrator call,
+      // not a normal pipeline agent. Resolve only that agent's config so its
+      // connection/model/budget controls apply without enabling unrelated agents.
+      const shouldResolveResponseOrchestratorSelector =
+        !input.impersonate && characterIds.length > 1 && (chatMeta.groupResponseOrder as string) === "smart";
+      if (shouldResolveResponseOrchestratorSelector) {
+        const resolvedResponseOrchestratorAgent = resolvedAgents.find((agent) => agent.type === "response-orchestrator");
+        if (resolvedResponseOrchestratorAgent) {
+          responseOrchestratorSelectorAgent = resolvedResponseOrchestratorAgent;
+        } else {
+          const storedResponseOrchestratorConfig = await agentsStore.getByType("response-orchestrator");
+          const cfg =
+            storedResponseOrchestratorConfig ??
+            (defaultAgentConn
+              ? (BUILT_IN_AGENTS.find((agent) => agent.id === "response-orchestrator") ?? null)
+              : null);
+          if (cfg) {
+            const settings =
+              "settings" in cfg && cfg.settings
+                ? JSON.parse(cfg.settings as string)
+                : getDefaultBuiltInAgentSettings("response-orchestrator");
+            let agentProvider = provider;
+            let agentModel = conn.model;
+            let agentMaxParallelJobs = chatConnectionMaxParallelJobs;
+            const requestedConnectionId = "connectionId" in cfg ? (cfg.connectionId as string | null) : null;
+            const effectiveConnectionId = resolveAgentConnectionId({
+              requestedConnectionId,
+              defaultAgentConnectionId: defaultAgentConn?.id ?? null,
+              localSidecarAvailable: localSidecarAvailableForTrackers,
+            });
+
+            if (effectiveConnectionId === "skip-local-sidecar") {
+              responseOrchestratorSelectorUnavailable = true;
+              const alreadyWarned = skippedLocalSidecarAgents.some((agentName) => agentName === "Response Orchestrator");
+              if (!alreadyWarned) {
+                agentConnectionWarnings.push(buildLocalSidecarUnavailableWarning(["Response Orchestrator"]));
+              }
+              logger.warn(
+                "[group-smart] Skipping Response Orchestrator Local Model override for chat %s because the sidecar is unavailable",
+                input.chatId,
+              );
+            } else {
+              if (defaultAgentConn && effectiveConnectionId === defaultAgentConn.id) {
+                defaultAgentConnectionAgents.push("Response Orchestrator");
+              }
+              if (effectiveConnectionId) {
+                const cached = agentProviderCache.get(effectiveConnectionId);
+                if (cached) {
+                  agentProvider = cached.provider;
+                  agentModel = cached.model;
+                  agentMaxParallelJobs = cached.maxParallelJobs;
+                } else {
+                  const agentConn = await connections.getWithKey(effectiveConnectionId);
+                  if (agentConn) {
+                    const agentBaseUrl = resolveBaseUrl(agentConn);
+                    if (agentBaseUrl) {
+                      agentProvider = createLLMProvider(
+                        agentConn.provider,
+                        agentBaseUrl,
+                        agentConn.apiKey,
+                        agentConn.maxContext,
+                        agentConn.openrouterProvider,
+                        agentConn.maxTokensOverride,
+                      );
+                      agentModel = agentConn.model;
+                      agentMaxParallelJobs = Number(agentConn.maxParallelJobs) || 1;
+                      agentProviderCache.set(effectiveConnectionId, {
+                        provider: agentProvider,
+                        model: agentModel,
+                        maxParallelJobs: agentMaxParallelJobs,
+                      });
+                    }
+                  }
+                }
+              }
+
+              responseOrchestratorSelectorAgent = {
+                id: "id" in cfg ? String(cfg.id) : "builtin:response-orchestrator",
+                type: "response-orchestrator",
+                name: "name" in cfg ? String(cfg.name) : "Response Orchestrator",
+                phase: "phase" in cfg ? String(cfg.phase) : "pre_generation",
+                promptTemplate: "promptTemplate" in cfg ? String(cfg.promptTemplate ?? "") : "",
+                connectionId: effectiveConnectionId,
+                settings,
+                provider: agentProvider,
+                model: agentModel,
+                maxParallelJobs: agentMaxParallelJobs,
+              };
+            }
+          }
+        }
       }
 
       if (defaultAgentConn && defaultAgentConnectionAgents.length > 0) {
@@ -5482,6 +5590,7 @@ export async function generateRoutes(app: FastifyInstance) {
       const selectSmartGroupResponders = async (): Promise<string[]> => {
         const explicitMentionIds = getExplicitlyMentionedCharacterIds();
         if (explicitMentionIds.length > 0) return explicitMentionIds;
+        if (responseOrchestratorSelectorUnavailable) return fallbackSmartGroupResponders();
 
         const recentTranscript = chatMessages
           .slice(-16)
@@ -5537,10 +5646,23 @@ export async function generateRoutes(app: FastifyInstance) {
         ];
 
         try {
-          const result = await provider.chatComplete(selectionPrompt, {
-            model: conn.model,
-            temperature: 0.2,
-            maxTokens: 512,
+          const orchestratorAgent =
+            responseOrchestratorSelectorAgent ?? resolvedAgents.find((agent) => agent.type === "response-orchestrator");
+          const selectorProvider = orchestratorAgent?.provider ?? provider;
+          const selectorModel = orchestratorAgent?.model ?? conn.model;
+          const selectorTemperature =
+            typeof orchestratorAgent?.settings.temperature === "number" ? orchestratorAgent.settings.temperature : 0.2;
+          const selectorMaxTokens = orchestratorAgent
+            ? applyProviderMaxTokensOverride(
+                selectorProvider,
+                normalizeAgentMaxTokens(orchestratorAgent.settings.maxTokens, 512),
+              )
+            : applyProviderMaxTokensOverride(selectorProvider, 512);
+
+          const result = await selectorProvider.chatComplete(selectionPrompt, {
+            model: selectorModel,
+            temperature: selectorTemperature,
+            maxTokens: selectorMaxTokens,
             maxContext: effectiveMaxContext,
             topP: 1,
             stream: false,
