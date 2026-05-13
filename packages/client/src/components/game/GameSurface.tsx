@@ -4855,6 +4855,62 @@ export function GameSurface({
     }
   }, [activeChatId, inventoryItems, updateChatMetadata]);
 
+  const handleIncrementInventoryItem = useCallback(
+    async (itemName: string) => {
+      if (!activeChatId) return;
+
+      const normalizedItemName = normalizeInventoryName(itemName);
+      if (!normalizedItemName) return;
+
+      const updatedInventory = addInventoryUnit(inventoryItems, normalizedItemName);
+      if (updatedInventory === inventoryItems) {
+        toast.error(`Failed to increase ${normalizedItemName}.`);
+        return;
+      }
+
+      const currentGameState = useGameStateStore.getState().current;
+      const currentPlayerStats = currentGameState?.chatId === activeChatId ? currentGameState.playerStats : null;
+      const nextPlayerStats = currentPlayerStats
+        ? {
+            ...currentPlayerStats,
+            inventory: addInventoryUnit(currentPlayerStats.inventory, normalizedItemName),
+          }
+        : null;
+      const shouldPatchGameState =
+        Boolean(currentGameState?.chatId === activeChatId) && Boolean(currentPlayerStats) && Boolean(nextPlayerStats);
+      let patchedGameState = false;
+
+      try {
+        if (shouldPatchGameState && nextPlayerStats) {
+          await api.patch(`/chats/${activeChatId}/game-state`, { playerStats: nextPlayerStats });
+          patchedGameState = true;
+        }
+
+        await updateChatMetadata.mutateAsync({
+          id: activeChatId,
+          gameInventory: updatedInventory,
+        });
+
+        setInventoryItems(updatedInventory);
+        if (shouldPatchGameState && currentGameState && nextPlayerStats) {
+          useGameStateStore.getState().setGameState({
+            ...currentGameState,
+            playerStats: nextPlayerStats,
+          });
+        }
+
+        toast.success(`Added 1 ${normalizedItemName}.`);
+      } catch (error) {
+        if (patchedGameState) {
+          api.patch(`/chats/${activeChatId}/game-state`, { playerStats: currentPlayerStats }).catch(() => {});
+        }
+        const message = error instanceof Error ? error.message : `Failed to increase ${normalizedItemName}.`;
+        toast.error(message);
+      }
+    },
+    [activeChatId, inventoryItems, updateChatMetadata],
+  );
+
   const handleRemoveInventoryItem = useCallback(
     async (itemName: string) => {
       if (!activeChatId) return;
@@ -8336,6 +8392,7 @@ export function GameSurface({
                 onAddItem={handleAddInventoryItem}
                 onRenameItem={handleRenameInventoryItem}
                 onRemoveItem={handleRemoveInventoryItem}
+                onIncrementItem={handleIncrementInventoryItem}
                 canInteract={sessionInteractive && narrationDone && !isStreaming}
                 onUseItem={(itemName) => {
                   setInventoryOpen(false);
