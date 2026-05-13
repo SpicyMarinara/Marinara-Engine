@@ -26,7 +26,7 @@ import {
   FlipHorizontal2,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { getChatDisplayName } from "../../lib/chat-display";
+import { getConnectedChatDisplayName  } from "../../lib/chat-display";
 import { useUIStore } from "../../stores/ui.store";
 import { useChatStore } from "../../stores/chat.store";
 import { useGameStateStore } from "../../stores/game-state.store";
@@ -671,7 +671,7 @@ export function ChatRoleplaySurface({
     typeof chatMeta?.sceneOriginChatId === "string" ? chatMeta.sceneOriginChatId : null;
   const linkedChatId = sceneOriginChatId ?? chat?.connectedChatId ?? null;
   const linkedChatName = linkedChatId
-    ? getChatDisplayName(allChats?.find((c) => c.id === linkedChatId))
+    ? getConnectedChatDisplayName(allChats?.find((c) => c.id === linkedChatId))
     : undefined;
   const sidebarOpen = useUIStore((s) => s.sidebarOpen);
   const rightPanelOpen = useUIStore((s) => s.rightPanelOpen);

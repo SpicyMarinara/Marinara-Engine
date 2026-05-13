@@ -476,6 +476,9 @@ export async function sceneRoutes(app: FastifyInstance) {
       await chats.updateMetadata(originChatId, originMeta);
     }
 
+    // 5. Disconnect chat; backwards compatibility with old scenes that had a connected chat.
+    await chats.disconnectChat(sceneChatId) 
+
     return {
       summary,
       originChatId,
