@@ -505,6 +505,8 @@ export async function sceneRoutes(app: FastifyInstance) {
     }
 
     // 2. Delete the scene chat entirely
+    // Disconnect first; backwards compatibility with old scenes that had a connected chat.
+    await chats.disconnectChat(sceneChatId) 
     await chats.remove(sceneChatId);
 
     return { originChatId };
@@ -674,6 +676,8 @@ export async function sceneRoutes(app: FastifyInstance) {
           logger.info("[scene/fork] Origin chat %s missing during convert of scene %s", originChatId, sceneChatId);
         }
 
+        // Disconnect first; backwards compatibility with old scenes that had a connected chat.
+        await chats.disconnectChat(sceneChatId)
         await chats.remove(sceneChatId);
       }
     } catch (err) {
