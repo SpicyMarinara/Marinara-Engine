@@ -8219,7 +8219,7 @@ export async function generateRoutes(app: FastifyInstance) {
                           },
                         })}\n\n`,
                       );
-                      logger.info(`[commands] Selfie generated for ${charName}: ${finalSelfiePrompt.slice(0, 80)}...`);
+                      logger.debug("[commands] Selfie generated for %s", charName);
                     }
                   } catch (imgErr) {
                     logger.error(imgErr, "[commands] Selfie generation failed");

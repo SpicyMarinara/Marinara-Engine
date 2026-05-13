@@ -3015,10 +3015,10 @@ export function ChatSettingsDrawer({
                       positivePrompt={metadata.selfiePositivePrompt as string | undefined}
                       legacyTags={(metadata.selfieTags as string[]) ?? []}
                       negativePrompt={(metadata.selfieNegativePrompt as string) ?? ""}
-                      onChangePositivePrompt={(selfiePositivePrompt) =>
+                      onCommitPositivePrompt={(selfiePositivePrompt) =>
                         updateMeta.mutate({ id: chat.id, selfiePositivePrompt })
                       }
-                      onChangeNegativePrompt={(selfieNegativePrompt) =>
+                      onCommitNegativePrompt={(selfieNegativePrompt) =>
                         updateMeta.mutate({ id: chat.id, selfieNegativePrompt })
                       }
                     />
@@ -6185,24 +6185,44 @@ function SelfiePromptControls({
   positivePrompt,
   legacyTags,
   negativePrompt,
-  onChangePositivePrompt,
-  onChangeNegativePrompt,
+  onCommitPositivePrompt,
+  onCommitNegativePrompt,
 }: {
   positivePrompt: string | undefined;
   legacyTags: string[];
   negativePrompt: string;
-  onChangePositivePrompt: (value: string) => void;
-  onChangeNegativePrompt: (value: string) => void;
+  onCommitPositivePrompt: (value: string) => void;
+  onCommitNegativePrompt: (value: string) => void;
 }) {
   const legacyTagText = legacyTags.join(", ");
   const displayPositivePrompt = positivePrompt ?? legacyTagText;
+  const [positiveDraft, setPositiveDraft] = useState(displayPositivePrompt);
+  const [negativeDraft, setNegativeDraft] = useState(negativePrompt);
+
+  useEffect(() => {
+    setPositiveDraft(displayPositivePrompt);
+  }, [displayPositivePrompt]);
+
+  useEffect(() => {
+    setNegativeDraft(negativePrompt);
+  }, [negativePrompt]);
+
+  const commitPositivePrompt = useCallback(() => {
+    if (positiveDraft !== displayPositivePrompt) onCommitPositivePrompt(positiveDraft);
+  }, [displayPositivePrompt, onCommitPositivePrompt, positiveDraft]);
+
+  const commitNegativePrompt = useCallback(() => {
+    if (negativeDraft !== negativePrompt) onCommitNegativePrompt(negativeDraft);
+  }, [negativeDraft, negativePrompt, onCommitNegativePrompt]);
+
   return (
     <div className="mt-2 space-y-2">
       <label className="flex flex-col gap-1">
         <span className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">Positive prompt / tags</span>
         <textarea
-          value={displayPositivePrompt}
-          onChange={(e) => onChangePositivePrompt(e.target.value)}
+          value={positiveDraft}
+          onChange={(e) => setPositiveDraft(e.target.value)}
+          onBlur={commitPositivePrompt}
           placeholder="masterpiece, best quality, detailed eyes"
           className="min-h-[4rem] resize-y rounded-lg border border-[var(--border)] bg-[var(--secondary)] p-2 text-[0.6875rem] text-[var(--foreground)] outline-none transition-colors placeholder:text-[var(--muted-foreground)]/45 focus:border-[var(--primary)]/50"
         />
@@ -6210,8 +6230,9 @@ function SelfiePromptControls({
       <label className="flex flex-col gap-1">
         <span className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">Negative prompt</span>
         <textarea
-          value={negativePrompt}
-          onChange={(e) => onChangeNegativePrompt(e.target.value)}
+          value={negativeDraft}
+          onChange={(e) => setNegativeDraft(e.target.value)}
+          onBlur={commitNegativePrompt}
           placeholder="lowres, bad anatomy, extra fingers"
           className="min-h-[4rem] resize-y rounded-lg border border-[var(--border)] bg-[var(--secondary)] p-2 text-[0.6875rem] text-[var(--foreground)] outline-none transition-colors placeholder:text-[var(--muted-foreground)]/45 focus:border-[var(--primary)]/50"
         />

@@ -1653,8 +1653,10 @@ async function applyRetryResultEffects(args: {
           const illustratorAgent = resolvedAgents.find(
             (a) => a.resolved.id === result.agentId || a.resolved.type === "illustrator",
           );
-          const imagePositivePrompt = ((illustratorAgent?.resolved.settings?.imagePositivePrompt as string) ?? "").trim();
-          const savedNegativePrompt = ((illustratorAgent?.resolved.settings?.imageNegativePrompt as string) ?? "").trim();
+          const rawImagePositivePrompt = illustratorAgent?.resolved.settings?.imagePositivePrompt;
+          const rawSavedNegativePrompt = illustratorAgent?.resolved.settings?.imageNegativePrompt;
+          const imagePositivePrompt = typeof rawImagePositivePrompt === "string" ? rawImagePositivePrompt.trim() : "";
+          const savedNegativePrompt = typeof rawSavedNegativePrompt === "string" ? rawSavedNegativePrompt.trim() : "";
           let imgConnId = (illustratorAgent?.resolved.settings?.imageConnectionId as string) ?? null;
           if (!imgConnId) {
             const defaultImageConn = (await conns.list()).find(
