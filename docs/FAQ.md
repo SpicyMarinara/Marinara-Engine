@@ -164,6 +164,8 @@ Yes. Use `/narrator <direction>` when you want to steer the AI's next reply with
 
 For swipes and regens, enable **Settings -> Advanced -> Guide swipes/regens with chat input**. Then the current chat-box draft is used as guidance when you click **Regenerate**, create a new swipe/reroll, or manually trigger a character response in a group chat.
 
+Guided `/narrator` requests and guided manual character replies use Chat reply lorebook triggers. If an older lorebook entry was attached to Continue or Autonomous only so it could steer guided replies, move that entry to Chat reply.
+
 If you want to post your persona message first without triggering a reply, enable **Settings -> Advanced -> Quick replies menu** and include **Post only**. The same settings submenu can include **Guide reply** for a quick `/narrator` send and **Impersonate** for generating as your persona.
 
 </details>

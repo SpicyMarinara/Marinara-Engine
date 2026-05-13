@@ -27,7 +27,7 @@ import { useChatStore } from "../../stores/chat.store";
 import { useUIStore } from "../../stores/ui.store";
 import { useGenerate } from "../../hooks/use-generate";
 import { useApplyRegex } from "../../hooks/use-apply-regex";
-import { useCreateMessage, useUpdateMessageExtra, useChat, chatKeys } from "../../hooks/use-chats";
+import { useCreateMessage, useDeleteMessage, useUpdateMessageExtra, useChat, chatKeys } from "../../hooks/use-chats";
 import { characterKeys, usePersonas, useUpdatePersona } from "../../hooks/use-characters";
 import {
   matchSlashCommand,
@@ -274,6 +274,7 @@ export function ConversationInput({
   const userActivity = useUIStore((s) => s.userActivity);
   const setUserActivity = useUIStore((s) => s.setUserActivity);
   const createMessage = useCreateMessage(activeChatId);
+  const deleteMessage = useDeleteMessage(activeChatId);
   const updateMessageExtra = useUpdateMessageExtra(activeChatId);
   const { data: allPersonas } = usePersonas();
   const updatePersona = useUpdatePersona();
@@ -690,11 +691,17 @@ export function ConversationInput({
   const runQuickSlashCommand = useCallback(
     async (commandLine: string, fallbackError: string) => {
       if (!activeChatId) return;
+      const submittingChatId = activeChatId;
       const matched = matchSlashCommand(commandLine);
       if (!matched) return;
+      const generationStatus: { succeeded?: boolean } = {};
       const slashCtx: SlashCommandContext = {
-        chatId: activeChatId,
-        generate,
+        chatId: submittingChatId,
+        generate: async (params) => {
+          const succeeded = await generate(params);
+          if (succeeded !== undefined) generationStatus.succeeded = succeeded;
+          return succeeded;
+        },
         createMessage: (data) => createMessage.mutate(data),
         invalidate: () => qc.invalidateQueries({ queryKey: chatKeys.all }),
         characterNames,
@@ -705,6 +712,22 @@ export function ConversationInput({
       const previousCompletions = completions;
       const previousMentionQuery = _mentionQuery;
       const previousMentionCompletions = mentionCompletions;
+      const restoreSubmittedDraft = () => {
+        const currentValue = textareaRef.current?.value ?? "";
+        const canRestoreVisibleDraft =
+          useChatStore.getState().activeChatId === submittingChatId && currentValue.length === 0;
+        if (canRestoreVisibleDraft && textareaRef.current) {
+          textareaRef.current.value = previousDraft;
+          textareaRef.current.style.height = previousHeight;
+          syncInputState(previousDraft);
+          setCompletions(previousCompletions);
+          setMentionQuery(previousMentionQuery);
+          setMentionCompletions(previousMentionCompletions);
+        }
+        if (previousDraft && (canRestoreVisibleDraft || useChatStore.getState().activeChatId !== submittingChatId)) {
+          setInputDraft(submittingChatId, previousDraft);
+        }
+      };
       if (draftTimerRef.current) {
         clearTimeout(draftTimerRef.current);
         draftTimerRef.current = null;
@@ -713,7 +736,7 @@ export function ConversationInput({
         textareaRef.current.value = "";
         textareaRef.current.style.height = "auto";
       }
-      clearInputDraft(activeChatId);
+      clearInputDraft(submittingChatId);
       syncInputState("");
       setCompletions([]);
       setMentionQuery(null);
@@ -724,16 +747,11 @@ export function ConversationInput({
         if (result.feedback) {
           setFeedback(result.feedback);
         }
-      } catch (error) {
-        if (textareaRef.current) {
-          textareaRef.current.value = previousDraft;
-          textareaRef.current.style.height = previousHeight;
+        if (generationStatus.succeeded === false) {
+          restoreSubmittedDraft();
         }
-        syncInputState(previousDraft);
-        setCompletions(previousCompletions);
-        setMentionQuery(previousMentionQuery);
-        setMentionCompletions(previousMentionCompletions);
-        if (previousDraft) setInputDraft(activeChatId, previousDraft);
+      } catch (error) {
+        restoreSubmittedDraft();
         const msg = error instanceof Error ? error.message : fallbackError;
         toast.error(msg);
       }
@@ -766,6 +784,7 @@ export function ConversationInput({
 
   const handlePostOnlyButton = useCallback(async () => {
     if (!activeChatId || isStreaming) return;
+    const submittingChatId = activeChatId;
     if (isReadingAttachments) {
       toast.info("Still reading attached files. Post will be ready in a moment.");
       return;
@@ -819,19 +838,21 @@ export function ConversationInput({
       textareaRef.current.value = "";
       textareaRef.current.style.height = "auto";
     }
-    clearInputDraft(activeChatId);
+    clearInputDraft(submittingChatId);
     syncInputState("");
     setAttachments([]);
     setCompletions([]);
     setMentionQuery(null);
     setMentionCompletions([]);
 
+    let createdMessageId: string | null = null;
     try {
       const created = await createMessage.mutateAsync({
         role: "user",
         content: message,
         characterId: null,
       });
+      createdMessageId = created.id;
       if (pendingAttachments.length) {
         await updateMessageExtra.mutateAsync({
           messageId: created.id,
@@ -839,18 +860,33 @@ export function ConversationInput({
         });
       }
     } catch (error) {
-      if (textareaRef.current) {
+      let rollbackFailed = false;
+      if (createdMessageId) {
+        try {
+          await deleteMessage.mutateAsync(createdMessageId);
+        } catch {
+          rollbackFailed = true;
+        }
+      }
+      const currentValue = textareaRef.current?.value ?? "";
+      const canRestoreVisibleDraft =
+        useChatStore.getState().activeChatId === submittingChatId && currentValue.length === 0;
+      if (canRestoreVisibleDraft && textareaRef.current) {
         textareaRef.current.value = submittedDraft;
         textareaRef.current.style.height = submittedHeight;
+        syncInputState(submittedDraft);
+        setAttachments((current) => (current.length === 0 ? submittedAttachments : current));
+        setCompletions(submittedCompletions);
+        setMentionQuery(submittedMentionQuery);
+        setMentionCompletions(submittedMentionCompletions);
       }
-      syncInputState(submittedDraft);
-      setAttachments(submittedAttachments);
-      setCompletions(submittedCompletions);
-      setMentionQuery(submittedMentionQuery);
-      setMentionCompletions(submittedMentionCompletions);
-      if (submittedDraft) setInputDraft(activeChatId, submittedDraft);
+      if (submittedDraft && (canRestoreVisibleDraft || useChatStore.getState().activeChatId !== submittingChatId)) {
+        setInputDraft(submittingChatId, submittedDraft);
+      }
       const msg = error instanceof Error ? error.message : "Failed to post message";
-      toast.error(msg);
+      toast.error(
+        rollbackFailed ? `${msg}; the partial message may need to be removed before retrying.` : msg,
+      );
     }
   }, [
     activeChatId,
@@ -866,6 +902,7 @@ export function ConversationInput({
     syncInputState,
     setInputDraft,
     createMessage,
+    deleteMessage,
     updateMessageExtra,
   ]);
 

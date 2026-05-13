@@ -41,6 +41,8 @@ export interface MarkerContext {
   /** Raw personaStats JSON (for rpgStats injection) */
   personaStats?: any;
   chatMessages: ChatMLMessage[];
+  /** Optional scan-only messages for lorebook matching. */
+  lorebookScanMessages?: ChatMLMessage[];
   chatSummary: string | null;
   wrapFormat: WrapFormat;
   /** When false, agent_data markers expand to empty strings */
@@ -262,21 +264,26 @@ async function expandLorebook(config: MarkerConfig, ctx: MarkerContext): Promise
 
   const result =
     ctx.lorebookScanResult ??
-    (ctx.lorebookScanResult = await processLorebooks(ctx.db, ctx.chatMessages, ctx.gameState ?? null, {
-      chatId: ctx.chatId,
-      characterIds: ctx.characterIds,
-      personaId: ctx.personaId ?? null,
-      activeLorebookIds: ctx.activeLorebookIds,
-      excludedLorebookIds: ctx.excludedLorebookIds,
-      excludedSourceAgentIds: ctx.excludedLorebookSourceAgentIds,
-      tokenBudget: ctx.lorebookTokenBudget,
-      chatEmbedding: ctx.chatEmbedding ?? null,
-      entryStateOverrides: ctx.entryStateOverrides,
-      entryTimingStates: ctx.entryTimingStates,
-      generationTriggers: ctx.generationTriggers ?? ["chat"],
-      previewOnly: ctx.previewOnly === true,
-      resolveContent: ctx.resolveLorebookContent,
-    }));
+    (ctx.lorebookScanResult = await processLorebooks(
+      ctx.db,
+      ctx.lorebookScanMessages ?? ctx.chatMessages,
+      ctx.gameState ?? null,
+      {
+        chatId: ctx.chatId,
+        characterIds: ctx.characterIds,
+        personaId: ctx.personaId ?? null,
+        activeLorebookIds: ctx.activeLorebookIds,
+        excludedLorebookIds: ctx.excludedLorebookIds,
+        excludedSourceAgentIds: ctx.excludedLorebookSourceAgentIds,
+        tokenBudget: ctx.lorebookTokenBudget,
+        chatEmbedding: ctx.chatEmbedding ?? null,
+        entryStateOverrides: ctx.entryStateOverrides,
+        entryTimingStates: ctx.entryTimingStates,
+        generationTriggers: ctx.generationTriggers ?? ["chat"],
+        previewOnly: ctx.previewOnly === true,
+        resolveContent: ctx.resolveLorebookContent,
+      },
+    ));
 
   if (ctx.lorebookScanResultApplied !== true) {
     ctx.lorebookScanResultApplied = true;

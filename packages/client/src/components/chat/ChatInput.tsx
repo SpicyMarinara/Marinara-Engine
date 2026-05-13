@@ -22,7 +22,7 @@ import { useChatStore } from "../../stores/chat.store";
 import { useUIStore } from "../../stores/ui.store";
 import { useGenerate } from "../../hooks/use-generate";
 import { useApplyRegex } from "../../hooks/use-apply-regex";
-import { useCreateMessage, useUpdateMessageExtra, chatKeys } from "../../hooks/use-chats";
+import { useCreateMessage, useDeleteMessage, useUpdateMessageExtra, chatKeys } from "../../hooks/use-chats";
 import { characterKeys } from "../../hooks/use-characters";
 import type { Message } from "@marinara-engine/shared";
 import {
@@ -168,6 +168,7 @@ export const ChatInput = memo(function ChatInput({
   const showQuickReplyImpersonate = useUIStore((s) => s.showQuickReplyImpersonate);
   const speechToTextEnabled = useUIStore((s) => s.speechToTextEnabled);
   const createMessage = useCreateMessage(activeChatId);
+  const deleteMessage = useDeleteMessage(activeChatId);
   const updateMessageExtra = useUpdateMessageExtra(activeChatId);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const resizeRafRef = useRef<number>(0);
@@ -563,13 +564,37 @@ export const ChatInput = memo(function ChatInput({
   const runQuickSlashCommand = useCallback(
     async (commandLine: string, fallbackError: string) => {
       if (!activeChatId) return;
+      const submittingChatId = activeChatId;
       const match = matchSlashCommand(commandLine);
-      const ctx = buildContext();
-      if (!match || !ctx) return;
+      const baseCtx = buildContext();
+      if (!match || !baseCtx) return;
+      const generationStatus: { succeeded?: boolean } = {};
+      const ctx: SlashCommandContext = {
+        ...baseCtx,
+        generate: async (params) => {
+          const succeeded = await baseCtx.generate(params);
+          if (succeeded !== undefined) generationStatus.succeeded = succeeded;
+          return succeeded;
+        },
+      };
 
       const previousDraft = textareaRef.current?.value ?? "";
       const previousHeight = textareaRef.current?.style.height ?? "auto";
       const previousCompletions = completions;
+      const restoreSubmittedDraft = () => {
+        const currentValue = textareaRef.current?.value ?? "";
+        const canRestoreVisibleDraft =
+          useChatStore.getState().activeChatId === submittingChatId && currentValue.length === 0;
+        if (canRestoreVisibleDraft && textareaRef.current) {
+          textareaRef.current.value = previousDraft;
+          textareaRef.current.style.height = previousHeight;
+          syncInputState(previousDraft);
+          setCompletions(previousCompletions);
+        }
+        if (previousDraft && (canRestoreVisibleDraft || useChatStore.getState().activeChatId !== submittingChatId)) {
+          setInputDraft(submittingChatId, previousDraft);
+        }
+      };
       if (draftTimerRef.current) {
         clearTimeout(draftTimerRef.current);
         draftTimerRef.current = null;
@@ -580,21 +605,18 @@ export const ChatInput = memo(function ChatInput({
       }
       syncInputState("");
       setCompletions([]);
-      clearInputDraft(activeChatId);
+      clearInputDraft(submittingChatId);
 
       try {
         const result = await match.command.execute(match.args, ctx);
         if (result.feedback) {
           setFeedback(result.feedback);
         }
-      } catch (error) {
-        if (textareaRef.current) {
-          textareaRef.current.value = previousDraft;
-          textareaRef.current.style.height = previousHeight;
+        if (generationStatus.succeeded === false) {
+          restoreSubmittedDraft();
         }
-        syncInputState(previousDraft);
-        setCompletions(previousCompletions);
-        if (previousDraft) setInputDraft(activeChatId, previousDraft);
+      } catch (error) {
+        restoreSubmittedDraft();
         const msg = error instanceof Error ? error.message : fallbackError;
         toast.error(msg);
       }
@@ -615,6 +637,7 @@ export const ChatInput = memo(function ChatInput({
 
   const handlePostOnlyButton = useCallback(async () => {
     if (!activeChatId || isStreaming) return;
+    const submittingChatId = activeChatId;
     if (isReadingAttachments) {
       toast.info("Still reading attached files. Post will be ready in a moment.");
       return;
@@ -670,14 +693,16 @@ export const ChatInput = memo(function ChatInput({
     syncInputState("");
     setCompletions([]);
     setAttachments([]);
-    clearInputDraft(activeChatId);
+    clearInputDraft(submittingChatId);
 
+    let createdMessageId: string | null = null;
     try {
       const created = await createMessage.mutateAsync({
         role: "user",
         content: message,
         characterId: null,
       });
+      createdMessageId = created.id;
       if (pendingAttachments.length) {
         await updateMessageExtra.mutateAsync({
           messageId: created.id,
@@ -685,16 +710,31 @@ export const ChatInput = memo(function ChatInput({
         });
       }
     } catch (error) {
-      if (textareaRef.current) {
+      let rollbackFailed = false;
+      if (createdMessageId) {
+        try {
+          await deleteMessage.mutateAsync(createdMessageId);
+        } catch {
+          rollbackFailed = true;
+        }
+      }
+      const currentValue = textareaRef.current?.value ?? "";
+      const canRestoreVisibleDraft =
+        useChatStore.getState().activeChatId === submittingChatId && currentValue.length === 0;
+      if (canRestoreVisibleDraft && textareaRef.current) {
         textareaRef.current.value = submittedDraft;
         textareaRef.current.style.height = submittedHeight;
+        syncInputState(submittedDraft);
+        setCompletions(submittedCompletions);
+        setAttachments((current) => (current.length === 0 ? submittedAttachments : current));
       }
-      syncInputState(submittedDraft);
-      setCompletions(submittedCompletions);
-      setAttachments(submittedAttachments);
-      if (submittedDraft) setInputDraft(activeChatId, submittedDraft);
+      if (submittedDraft && (canRestoreVisibleDraft || useChatStore.getState().activeChatId !== submittingChatId)) {
+        setInputDraft(submittingChatId, submittedDraft);
+      }
       const msg = error instanceof Error ? error.message : "Failed to post message";
-      toast.error(msg);
+      toast.error(
+        rollbackFailed ? `${msg}; the partial message may need to be removed before retrying.` : msg,
+      );
     }
   }, [
     activeChatId,
@@ -708,6 +748,7 @@ export const ChatInput = memo(function ChatInput({
     clearInputDraft,
     setInputDraft,
     createMessage,
+    deleteMessage,
     updateMessageExtra,
   ]);
 
