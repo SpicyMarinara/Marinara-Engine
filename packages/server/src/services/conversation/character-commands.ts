@@ -280,10 +280,25 @@ const CREATE_CHAT_RE = /\[create_chat:\s*([^\]]+)\]/gi;
 const NAVIGATE_RE = /\[navigate:\s*([^\]]+)\]/gi;
 const FETCH_RE = /\[fetch:\s*([^\]]+)\]/gi;
 
+function decodeQuotedParamValue(value: string): string {
+  return value.replace(/\\(["\\nrt])/g, (_match, escaped: string) => {
+    switch (escaped) {
+      case "n":
+        return "\n";
+      case "r":
+        return "\r";
+      case "t":
+        return "\t";
+      default:
+        return escaped;
+    }
+  });
+}
+
 function parseQuotedParam(params: string, key: string, allowEmpty = false): string | undefined {
-  const match = params.match(new RegExp(`${key}="([^"]*)"`));
+  const match = params.match(new RegExp(`${key}="((?:\\\\.|[^"\\\\])*)"`));
   if (!match) return undefined;
-  const value = match[1] ?? "";
+  const value = decodeQuotedParamValue(match[1] ?? "");
   if (!allowEmpty && value.length === 0) return undefined;
   return value;
 }
@@ -598,14 +613,14 @@ export function parseCharacterCommands(content: string): {
   for (const match of content.matchAll(CREATE_PERSONA_RE)) {
     const params = match[1]!;
     const cmd: CreatePersonaCommand = { type: "create_persona", name: "" };
-    const nameMatch = params.match(/name="([^"]+)"/);
-    if (nameMatch) cmd.name = nameMatch[1]!;
-    const descMatch = params.match(/description="([^"]+)"/);
-    if (descMatch) cmd.description = descMatch[1]!;
-    const persMatch = params.match(/personality="([^"]+)"/);
-    if (persMatch) cmd.personality = persMatch[1]!;
-    const appMatch = params.match(/appearance="([^"]+)"/);
-    if (appMatch) cmd.appearance = appMatch[1]!;
+    const name = parseQuotedParam(params, "name");
+    if (name) cmd.name = name;
+    const description = parseQuotedParam(params, "description");
+    if (description) cmd.description = description;
+    const personality = parseQuotedParam(params, "personality");
+    if (personality) cmd.personality = personality;
+    const appearance = parseQuotedParam(params, "appearance");
+    if (appearance) cmd.appearance = appearance;
     if (cmd.name) commands.push(cmd);
   }
 
@@ -630,18 +645,18 @@ export function parseCharacterCommands(content: string): {
   for (const match of content.matchAll(UPDATE_PERSONA_RE)) {
     const params = match[1]!;
     const cmd: UpdatePersonaCommand = { type: "update_persona", name: "" };
-    const nameMatch = params.match(/name="([^"]+)"/);
-    if (nameMatch) cmd.name = nameMatch[1]!;
-    const descMatch = params.match(/description="([^"]*)"/);
-    if (descMatch) cmd.description = descMatch[1]!;
-    const persMatch = params.match(/personality="([^"]*)"/);
-    if (persMatch) cmd.personality = persMatch[1]!;
-    const appMatch = params.match(/appearance="([^"]*)"/);
-    if (appMatch) cmd.appearance = appMatch[1]!;
-    const scenarioMatch = params.match(/scenario="([^"]*)"/);
-    if (scenarioMatch) cmd.scenario = scenarioMatch[1]!;
-    const backstoryMatch = params.match(/backstory="([^"]*)"/);
-    if (backstoryMatch) cmd.backstory = backstoryMatch[1]!;
+    const name = parseQuotedParam(params, "name");
+    if (name) cmd.name = name;
+    const description = parseQuotedParam(params, "description", true);
+    if (description !== undefined) cmd.description = description;
+    const personality = parseQuotedParam(params, "personality", true);
+    if (personality !== undefined) cmd.personality = personality;
+    const appearance = parseQuotedParam(params, "appearance", true);
+    if (appearance !== undefined) cmd.appearance = appearance;
+    const scenario = parseQuotedParam(params, "scenario", true);
+    if (scenario !== undefined) cmd.scenario = scenario;
+    const backstory = parseQuotedParam(params, "backstory", true);
+    if (backstory !== undefined) cmd.backstory = backstory;
     if (cmd.name) commands.push(cmd);
   }
 
