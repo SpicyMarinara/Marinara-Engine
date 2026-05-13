@@ -26,7 +26,7 @@ import {
   FlipHorizontal2,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { getConnectedChatDisplayName  } from "../../lib/chat-display";
+import { getConnectedChatDisplayName } from "../../lib/chat-display";
 import { useUIStore } from "../../stores/ui.store";
 import { useChatStore } from "../../stores/chat.store";
 import { useGameStateStore } from "../../stores/game-state.store";
