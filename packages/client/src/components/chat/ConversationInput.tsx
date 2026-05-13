@@ -700,6 +700,11 @@ export function ConversationInput({
         characterNames,
       };
 
+      const previousDraft = textareaRef.current?.value ?? "";
+      const previousHeight = textareaRef.current?.style.height ?? "auto";
+      const previousCompletions = completions;
+      const previousMentionQuery = _mentionQuery;
+      const previousMentionCompletions = mentionCompletions;
       if (draftTimerRef.current) {
         clearTimeout(draftTimerRef.current);
         draftTimerRef.current = null;
@@ -720,11 +725,32 @@ export function ConversationInput({
           setFeedback(result.feedback);
         }
       } catch (error) {
+        if (textareaRef.current) {
+          textareaRef.current.value = previousDraft;
+          textareaRef.current.style.height = previousHeight;
+        }
+        syncInputState(previousDraft);
+        setCompletions(previousCompletions);
+        setMentionQuery(previousMentionQuery);
+        setMentionCompletions(previousMentionCompletions);
+        if (previousDraft) setInputDraft(activeChatId, previousDraft);
         const msg = error instanceof Error ? error.message : fallbackError;
         toast.error(msg);
       }
     },
-    [activeChatId, characterNames, clearInputDraft, createMessage, generate, qc, syncInputState],
+    [
+      activeChatId,
+      characterNames,
+      clearInputDraft,
+      completions,
+      _mentionQuery,
+      mentionCompletions,
+      createMessage,
+      generate,
+      qc,
+      setInputDraft,
+      syncInputState,
+    ],
   );
 
   const handleImpersonateQuickButton = useCallback(async () => {
@@ -776,7 +802,18 @@ export function ConversationInput({
     }
 
     message = resolveInputMacros(message);
-    const pendingAttachments = attachments.map((a) => ({ type: a.type, data: a.data, filename: a.name, name: a.name }));
+    const submittedDraft = raw;
+    const submittedHeight = textareaRef.current?.style.height ?? "auto";
+    const submittedAttachments = attachments;
+    const submittedCompletions = completions;
+    const submittedMentionQuery = _mentionQuery;
+    const submittedMentionCompletions = mentionCompletions;
+    const pendingAttachments = submittedAttachments.map((a) => ({
+      type: a.type,
+      data: a.data,
+      filename: a.name,
+      name: a.name,
+    }));
 
     if (textareaRef.current) {
       textareaRef.current.value = "";
@@ -802,6 +839,16 @@ export function ConversationInput({
         });
       }
     } catch (error) {
+      if (textareaRef.current) {
+        textareaRef.current.value = submittedDraft;
+        textareaRef.current.style.height = submittedHeight;
+      }
+      syncInputState(submittedDraft);
+      setAttachments(submittedAttachments);
+      setCompletions(submittedCompletions);
+      setMentionQuery(submittedMentionQuery);
+      setMentionCompletions(submittedMentionCompletions);
+      if (submittedDraft) setInputDraft(activeChatId, submittedDraft);
       const msg = error instanceof Error ? error.message : "Failed to post message";
       toast.error(msg);
     }
@@ -810,10 +857,14 @@ export function ConversationInput({
     isStreaming,
     isReadingAttachments,
     attachments,
+    completions,
+    _mentionQuery,
+    mentionCompletions,
     applyToUserInput,
     qc,
     clearInputDraft,
     syncInputState,
+    setInputDraft,
     createMessage,
     updateMessageExtra,
   ]);

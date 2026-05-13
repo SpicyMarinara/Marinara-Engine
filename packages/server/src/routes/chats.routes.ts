@@ -199,8 +199,8 @@ async function buildPersonaSnapshotForChat(app: FastifyInstance, chat: { persona
   const personas = await charactersStore.listPersonas();
   const chatPersonaId = chat?.personaId ?? null;
   const persona =
-    (chatPersonaId ? personas.find((candidate: any) => candidate.id === chatPersonaId) : null) ??
-    personas.find((candidate: any) => candidate.isActive === "true");
+    (chatPersonaId ? personas.find((candidate) => candidate.id === chatPersonaId) : null) ??
+    personas.find((candidate) => candidate.isActive === "true");
 
   if (!persona) return null;
 

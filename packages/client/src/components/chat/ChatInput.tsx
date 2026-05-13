@@ -567,6 +567,9 @@ export const ChatInput = memo(function ChatInput({
       const ctx = buildContext();
       if (!match || !ctx) return;
 
+      const previousDraft = textareaRef.current?.value ?? "";
+      const previousHeight = textareaRef.current?.style.height ?? "auto";
+      const previousCompletions = completions;
       if (draftTimerRef.current) {
         clearTimeout(draftTimerRef.current);
         draftTimerRef.current = null;
@@ -585,11 +588,18 @@ export const ChatInput = memo(function ChatInput({
           setFeedback(result.feedback);
         }
       } catch (error) {
+        if (textareaRef.current) {
+          textareaRef.current.value = previousDraft;
+          textareaRef.current.style.height = previousHeight;
+        }
+        syncInputState(previousDraft);
+        setCompletions(previousCompletions);
+        if (previousDraft) setInputDraft(activeChatId, previousDraft);
         const msg = error instanceof Error ? error.message : fallbackError;
         toast.error(msg);
       }
     },
-    [activeChatId, buildContext, clearInputDraft, syncInputState],
+    [activeChatId, buildContext, clearInputDraft, completions, setInputDraft, syncInputState],
   );
 
   const handleImpersonateQuickButton = useCallback(async () => {
@@ -642,7 +652,16 @@ export const ChatInput = memo(function ChatInput({
     }
 
     message = resolveInputMacros(message);
-    const pendingAttachments = attachments.map((a) => ({ type: a.type, data: a.data, filename: a.name, name: a.name }));
+    const submittedDraft = raw;
+    const submittedHeight = textareaRef.current?.style.height ?? "auto";
+    const submittedAttachments = attachments;
+    const submittedCompletions = completions;
+    const pendingAttachments = submittedAttachments.map((a) => ({
+      type: a.type,
+      data: a.data,
+      filename: a.name,
+      name: a.name,
+    }));
 
     if (textareaRef.current) {
       textareaRef.current.value = "";
@@ -666,6 +685,14 @@ export const ChatInput = memo(function ChatInput({
         });
       }
     } catch (error) {
+      if (textareaRef.current) {
+        textareaRef.current.value = submittedDraft;
+        textareaRef.current.style.height = submittedHeight;
+      }
+      syncInputState(submittedDraft);
+      setCompletions(submittedCompletions);
+      setAttachments(submittedAttachments);
+      if (submittedDraft) setInputDraft(activeChatId, submittedDraft);
       const msg = error instanceof Error ? error.message : "Failed to post message";
       toast.error(msg);
     }
@@ -674,10 +701,12 @@ export const ChatInput = memo(function ChatInput({
     isStreaming,
     isReadingAttachments,
     attachments,
+    completions,
     applyToUserInput,
     qc,
     syncInputState,
     clearInputDraft,
+    setInputDraft,
     createMessage,
     updateMessageExtra,
   ]);
