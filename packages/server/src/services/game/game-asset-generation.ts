@@ -8,6 +8,7 @@
 // ──────────────────────────────────────────────
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { createHash } from "crypto";
 import { logger } from "../../lib/logger.js";
 import { basename, join } from "path";
 import { DATA_DIR } from "../../utils/data-dir.js";
@@ -31,6 +32,7 @@ const GAME_BACKGROUND_NEGATIVE_PROMPT =
   "text, letters, captions, subtitles, UI, watermark, logo, signature, people, character, portrait, split screen, panel, collage, contact sheet, grid, multiple frames, low quality";
 const GAME_ILLUSTRATION_NEGATIVE_PROMPT =
   "text, letters, captions, subtitles, UI, watermark, logo, signature, speech bubble, split screen, panel, collage, contact sheet, character sheet, grid, four images, duplicated face, extra head, unrelated character, bad anatomy, low quality";
+const MAX_GENERATED_ASSET_SLUG_BYTES = 180;
 
 // sharp is optional in the server package. Generated game backgrounds should be
 // stored at the VN canvas ratio when possible, but generation must still work on
@@ -191,6 +193,28 @@ function safeName(name: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
+}
+
+function truncateSlugByBytes(slug: string, maxBytes: number): string {
+  let truncated = slug;
+  while (Buffer.byteLength(truncated, "utf8") > maxBytes) {
+    truncated = truncated.slice(0, -1);
+  }
+  return truncated.replace(/-+$/g, "");
+}
+
+export function safeGeneratedAssetSlug(name: string, opts: { maxBytes?: number; suffix?: string } = {}): string {
+  const maxBytes = opts.maxBytes ?? MAX_GENERATED_ASSET_SLUG_BYTES;
+  const slug = safeName(name) || "asset";
+  const suffix = opts.suffix ? safeName(opts.suffix) : "";
+  const candidate = suffix ? `${slug}-${suffix}` : slug;
+  if (Buffer.byteLength(candidate, "utf8") <= maxBytes) return candidate;
+
+  const hash = createHash("sha256").update(slug).digest("hex").slice(0, 8);
+  const tail = [hash, suffix].filter(Boolean).join("-");
+  const prefixBudget = Math.max(1, maxBytes - Buffer.byteLength(tail, "utf8") - 1);
+  const prefix = truncateSlugByBytes(slug, prefixBudget) || "asset";
+  return `${prefix}-${tail}`;
 }
 
 function hasExplicitNonHumanCue(value: string): boolean {
@@ -435,7 +459,7 @@ export async function buildSceneIllustrationImagePrompt(req: SceneIllustrationGe
  * asset manifest. Returns the asset tag on success, or null on failure.
  */
 export async function generateBackground(req: BackgroundGenRequest): Promise<string | null> {
-  const slug = safeName(req.locationSlug);
+  const slug = safeGeneratedAssetSlug(req.locationSlug);
   if (!slug) return null;
 
   const subcategory = genreToFolder(req.genre);
@@ -506,7 +530,7 @@ export async function generateBackground(req: BackgroundGenRequest): Promise<str
  * Returns the saved filename on success, or null on failure.
  */
 export async function generateChatBackground(req: ChatBackgroundGenRequest): Promise<string | null> {
-  const baseSlug = safeName(req.locationSlug || req.sceneDescription.slice(0, 80));
+  const baseSlug = safeGeneratedAssetSlug(req.locationSlug || req.sceneDescription.slice(0, 80), { maxBytes: 160 });
   if (!baseSlug) return null;
 
   const slug = `generated-${baseSlug}`;
@@ -571,8 +595,9 @@ export async function generateChatBackground(req: ChatBackgroundGenRequest): Pro
 }
 
 export async function generateSceneIllustration(req: SceneIllustrationGenRequest): Promise<string | null> {
-  const baseSlug = safeName(req.slug || req.reason || req.prompt.slice(0, 80)) || "scene-illustration";
-  const slug = `${baseSlug}-${Date.now().toString(36)}`;
+  const slug = safeGeneratedAssetSlug(req.slug || req.reason || req.prompt.slice(0, 80) || "scene-illustration", {
+    suffix: Date.now().toString(36),
+  });
   const targetDir = join(GAME_ASSETS_DIR, "backgrounds", "illustrations");
   const tag = `backgrounds:illustrations:${slug}`;
 
