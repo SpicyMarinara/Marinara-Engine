@@ -332,7 +332,11 @@ export function useDeleteChat() {
       return { previous, previousGroup, groupId };
     },
     onError: (_err, _id, context) => {
-      if (context?.previous) qc.setQueryData(chatKeys.list(), context.previous);
+      if (context?.previous) {
+        qc.setQueryData(chatKeys.list(), context.previous);
+      } else {
+        qc.invalidateQueries({ queryKey: chatKeys.list() });
+      }
       if (context?.groupId) {
         if (context.previousGroup) {
           qc.setQueryData(chatKeys.group(context.groupId), context.previousGroup);

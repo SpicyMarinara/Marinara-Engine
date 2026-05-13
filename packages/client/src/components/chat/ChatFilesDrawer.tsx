@@ -111,10 +111,6 @@ export function ChatFilesDrawer({ chat, open, onClose }: ChatFilesDrawerProps) {
     try {
       await deleteChat.mutateAsync({ id: chatId, groupId });
       if (nextActiveChatId) setActiveChatId(nextActiveChatId);
-      if (groupId) {
-        await qc.invalidateQueries({ queryKey: chatKeys.group(groupId) });
-        await refetchGroupChats();
-      }
     } catch (err) {
       toast.error(err instanceof Error ? `Delete failed: ${err.message}` : "Delete failed.");
     }
