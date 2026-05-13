@@ -170,9 +170,6 @@ importers:
       png-chunks-extract:
         specifier: ^1.0.0
         version: 1.0.0
-      sharp:
-        specifier: ^0.34.5
-        version: 0.34.5
       undici:
         specifier: ^7.25.0
         version: 7.25.0
@@ -202,6 +199,9 @@ importers:
       onnxruntime-web:
         specifier: 1.24.3
         version: 1.24.3
+      sharp:
+        specifier: ^0.34.5
+        version: 0.34.5
 
   packages/shared:
     dependencies:
