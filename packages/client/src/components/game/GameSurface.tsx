@@ -4851,6 +4851,9 @@ export function GameSurface({
         });
       }
 
+      setInventoryNotifications([`You gained ${addedItemName}!`]);
+      if (notificationTimerRef.current) clearTimeout(notificationTimerRef.current);
+      notificationTimerRef.current = setTimeout(() => setInventoryNotifications([]), 4000);
       toast.success(`Added ${addedItemName} to inventory.`);
       return addedItemName;
     } catch (error) {
@@ -4907,6 +4910,9 @@ export function GameSurface({
           });
         }
 
+        setInventoryNotifications([`You gained ${normalizedItemName}!`]);
+        if (notificationTimerRef.current) clearTimeout(notificationTimerRef.current);
+        notificationTimerRef.current = setTimeout(() => setInventoryNotifications([]), 4000);
         toast.success(`Added 1 ${normalizedItemName}.`);
       } catch (error) {
         if (patchedGameState) {
