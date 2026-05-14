@@ -27,6 +27,7 @@ export interface ResolvedAgent extends AgentExecConfig {
 
 export interface AgentInjection {
   agentType: string;
+  agentName?: string;
   text: string;
 }
 
@@ -255,7 +256,8 @@ export async function runPreGenerationAgents(
     // prose-guardian & director produce text to inject
     if (result.type === "context_injection" || result.type === "director_event") {
       const text = typeof result.data === "string" ? result.data : ((result.data as any)?.text ?? "");
-      if (text) injections.push({ agentType: result.agentType, text });
+      const agentName = agents.find((agent) => agent.type === result.agentType)?.name;
+      if (text) injections.push({ agentType: result.agentType, agentName, text });
     }
     // prompt_review is informational — the onResult callback streams it
   }

@@ -43,11 +43,11 @@ function findLastAssistant(messages: Message[] | undefined): Message | null {
   return null;
 }
 
-function agentLabel(agentType: string): string {
-  return INJECTION_LABEL[agentType] ?? agentType;
+function agentLabel(agentType: string, agentName?: string): string {
+  return agentName?.trim() || INJECTION_LABEL[agentType] || agentType;
 }
 
-type CachedInjection = { agentType: string; text: string };
+type CachedInjection = { agentType: string; agentName?: string; text: string };
 
 type AgentCadenceStatus = {
   agentType: string;
@@ -68,9 +68,13 @@ function normalizeContextInjections(raw: unknown): CachedInjection[] {
       continue;
     }
     if (!entry || typeof entry !== "object") continue;
-    const candidate = entry as { agentType?: unknown; text?: unknown };
+    const candidate = entry as { agentType?: unknown; agentName?: unknown; text?: unknown };
     if (typeof candidate.agentType !== "string" || typeof candidate.text !== "string") continue;
-    normalized.push({ agentType: candidate.agentType, text: candidate.text });
+    normalized.push({
+      agentType: candidate.agentType,
+      agentName: typeof candidate.agentName === "string" ? candidate.agentName : undefined,
+      text: candidate.text,
+    });
   }
   return normalized;
 }
@@ -165,7 +169,9 @@ export function ContextInjectionPanel({
   const handleSaveOne = useCallback(
     (agentType: string) => {
       const text = drafts[agentType] ?? "";
-      const list = injections.map((inj) => (inj.agentType === agentType ? { agentType, text } : { ...inj }));
+      const list = injections.map((inj) =>
+        inj.agentType === agentType ? { agentType, agentName: inj.agentName, text } : { ...inj },
+      );
       if (!target || !chatId) return;
       setSavingType(agentType);
       setSavedType(null);
@@ -298,7 +304,7 @@ export function ContextInjectionPanel({
                         )}
                       />
                       <span className="truncate text-[0.625rem] font-semibold text-[var(--popover-foreground)]">
-                        {agentLabel(inj.agentType)}
+                        {agentLabel(inj.agentType, inj.agentName)}
                       </span>
                       {dirty && (
                         <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--primary)]" title="Unsaved edit" />
@@ -311,8 +317,8 @@ export function ContextInjectionPanel({
                           disabled={isGenerationBusy || !!rerollingType || updateExtra.isPending}
                           onClick={() => handleReroll(inj.agentType)}
                           className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]/55 hover:text-[var(--accent-foreground)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ring)] disabled:opacity-40 max-md:h-7 max-md:w-7"
-                          title={`Re-run ${agentLabel(inj.agentType)} injection`}
-                          aria-label={`Re-run ${agentLabel(inj.agentType)} injection`}
+                          title={`Re-run ${agentLabel(inj.agentType, inj.agentName)} injection`}
+                          aria-label={`Re-run ${agentLabel(inj.agentType, inj.agentName)} injection`}
                         >
                           <RefreshCw size="0.625rem" className={cn(rerollBusy && "animate-spin")} />
                         </button>
@@ -324,13 +330,13 @@ export function ContextInjectionPanel({
                         className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--primary)] transition-colors hover:bg-[var(--primary)]/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ring)] disabled:opacity-40 max-md:h-7 max-md:w-7"
                         title={
                           saved
-                            ? `${agentLabel(inj.agentType)} injection saved`
-                            : `Save ${agentLabel(inj.agentType)} injection`
+                            ? `${agentLabel(inj.agentType, inj.agentName)} injection saved`
+                            : `Save ${agentLabel(inj.agentType, inj.agentName)} injection`
                         }
                         aria-label={
                           saved
-                            ? `${agentLabel(inj.agentType)} injection saved`
-                            : `Save ${agentLabel(inj.agentType)} injection`
+                            ? `${agentLabel(inj.agentType, inj.agentName)} injection saved`
+                            : `Save ${agentLabel(inj.agentType, inj.agentName)} injection`
                         }
                       >
                         {saved ? (
