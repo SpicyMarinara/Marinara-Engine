@@ -16,6 +16,7 @@ import type { CharacterData, ChatMemoryChunk, LorebookEntryTimingState } from "@
 import { createChatsStorage } from "../services/storage/chats.storage.js";
 import { createCharactersStorage } from "../services/storage/characters.storage.js";
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
+import { createGameStateStorage, type GameStateVisibleAnchor } from "../services/storage/game-state.storage.js";
 import { createRegexScriptsStorage } from "../services/storage/regex-scripts.storage.js";
 import { getLocalSidecarProvider, LOCAL_SIDECAR_MODEL } from "../services/llm/local-sidecar.js";
 import { createLLMProvider } from "../services/llm/provider-registry.js";
@@ -30,7 +31,12 @@ import { existsSync } from "fs";
 import { join } from "path";
 import { DATA_DIR } from "../utils/data-dir.js";
 import { normalizeTimestampOverrides } from "../services/import/import-timestamps.js";
-import { findLastIndex, parseExtra, shouldEnableAgentsForGeneration } from "./generate/generate-route-utils.js";
+import {
+  findLastIndex,
+  parseExtra,
+  resolveVisibleGameStateAnchor,
+  shouldEnableAgentsForGeneration,
+} from "./generate/generate-route-utils.js";
 import {
   filterGameInternalAgentIds,
   resolveGameLorebookScopeExclusions,
@@ -44,26 +50,15 @@ import { applyRegexScriptsToPromptMessages } from "../services/regex/regex-appli
 type TrackerWrapFormat = "xml" | "markdown" | "none";
 type EntryStateOverrides = Record<string, { ephemeral?: number | null; enabled?: boolean }>;
 
-async function loadLatestChatGameSnapshot(app: FastifyInstance, chatId: string) {
-  const committedRows = await app.db
-    .select()
-    .from(gameStateSnapshots)
-    .where(and(eq(gameStateSnapshots.chatId, chatId), eq(gameStateSnapshots.committed, 1)))
-    .orderBy(desc(gameStateSnapshots.createdAt))
-    .limit(1);
-
-  let snap = committedRows[0];
-  if (!snap) {
-    const anyRows = await app.db
-      .select()
-      .from(gameStateSnapshots)
-      .where(eq(gameStateSnapshots.chatId, chatId))
-      .orderBy(desc(gameStateSnapshots.createdAt))
-      .limit(1);
-    snap = anyRows[0];
-  }
-
-  return snap ?? null;
+async function loadLatestChatGameSnapshot(
+  app: FastifyInstance,
+  chatId: string,
+  visibleAnchor?: GameStateVisibleAnchor | null,
+) {
+  return createGameStateStorage(app.db).getForGeneration(chatId, {
+    preferLatestVisible: true,
+    visibleAnchor,
+  });
 }
 
 function formatPeekTrackerContextBlock(args: {
@@ -192,6 +187,32 @@ function formatPeekTrackerContextBlock(args: {
 function resolveLorebookGenerationTriggers(mode: unknown): string[] {
   const modeTrigger = mode === "game" ? "game" : typeof mode === "string" && mode.trim() ? mode.trim() : "roleplay";
   return Array.from(new Set([modeTrigger, "chat"]));
+}
+
+async function buildPersonaSnapshotForChat(app: FastifyInstance, chat: { personaId?: string | null } | null) {
+  const charactersStore = createCharactersStorage(app.db);
+  const personas = await charactersStore.listPersonas();
+  const chatPersonaId = chat?.personaId ?? null;
+  const persona =
+    (chatPersonaId ? personas.find((candidate) => candidate.id === chatPersonaId) : null) ??
+    personas.find((candidate) => candidate.isActive === "true");
+
+  if (!persona) return null;
+
+  return {
+    personaId: persona.id,
+    name: persona.name,
+    description: persona.description ?? "",
+    personality: persona.personality ?? "",
+    scenario: persona.scenario ?? "",
+    backstory: persona.backstory ?? "",
+    appearance: persona.appearance ?? "",
+    avatarUrl: persona.avatarPath || null,
+    avatarCrop: persona.avatarCrop || null,
+    nameColor: persona.nameColor || null,
+    dialogueColor: persona.dialogueColor || null,
+    boxColor: persona.boxColor || null,
+  };
 }
 
 function resolveEntryStateOverrides(value: unknown): EntryStateOverrides | undefined {
@@ -667,13 +688,21 @@ export async function chatsRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>("/:id/messages", async (req) => {
     const input = createMessageSchema.parse({ ...(req.body as Record<string, unknown>), chatId: req.params.id });
     const body = req.body as Record<string, unknown>;
-    return storage.createMessage(
+    const created = await storage.createMessage(
       input,
       normalizeTimestampOverrides({
         createdAt: body.createdAt,
         updatedAt: body.updatedAt,
       }),
     );
+    if (created?.id && input.role === "user") {
+      const chat = await storage.getById(req.params.id);
+      const personaSnapshot = await buildPersonaSnapshotForChat(app, chat);
+      if (personaSnapshot) {
+        return (await storage.updateMessageExtra(created.id, { personaSnapshot })) ?? created;
+      }
+    }
+    return created;
   });
 
   // Delete message
@@ -743,19 +772,12 @@ export async function chatsRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>("/:id/game-state", async (req, reply) => {
     const { createGameStateStorage } = await import("../services/storage/game-state.storage.js");
     const gameStateStore = createGameStateStorage(app.db);
-
-    // Try to find the snapshot for the last assistant message's active swipe
-    let row: Awaited<ReturnType<typeof gameStateStore.getLatest>> = null;
     const msgs = await storage.listMessages(req.params.id);
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i]!.role === "assistant") {
-        row = await gameStateStore.getByMessage(msgs[i]!.id, msgs[i]!.activeSwipeIndex);
-        break;
-      }
-    }
-    // Fall back to most recent snapshot if no swipe-specific one exists
-    const usedFallback = !row;
-    if (!row) row = await gameStateStore.getLatest(req.params.id);
+    const visibleAnchor = resolveVisibleGameStateAnchor(msgs);
+    const row = await gameStateStore.getForGeneration(req.params.id, {
+      preferLatestVisible: true,
+      visibleAnchor,
+    });
     if (!row) return reply.send(null);
     const presentCharacters = JSON.parse((row.presentCharacters as string) ?? "[]") as Array<Record<string, unknown>>;
     const playerStats = row.playerStats ? JSON.parse(row.playerStats as string) : null;
@@ -837,7 +859,13 @@ export async function chatsRoutes(app: FastifyInstance) {
     const manual = body.manual === true;
     // Explicit flag to wipe all manual overrides (e.g. from the Clear button)
     const clearOverrides = body.clearOverrides === true;
-    const fields = body as Partial<{
+    const targetMessageId = typeof body.messageId === "string" && body.messageId ? body.messageId : null;
+    const targetSwipeIndex =
+      typeof body.swipeIndex === "number" && Number.isInteger(body.swipeIndex) && body.swipeIndex >= 0
+        ? body.swipeIndex
+        : null;
+    const hasExplicitTarget = targetMessageId !== null && targetSwipeIndex !== null;
+    const fields: Partial<{
       date: string;
       time: string;
       location: string;
@@ -846,20 +874,42 @@ export async function chatsRoutes(app: FastifyInstance) {
       presentCharacters: any[];
       playerStats: any;
       personaStats: any[];
-    }>;
+    }> = {};
+    if (body.date !== undefined) fields.date = body.date as string;
+    if (body.time !== undefined) fields.time = body.time as string;
+    if (body.location !== undefined) fields.location = body.location as string;
+    if (body.weather !== undefined) fields.weather = body.weather as string;
+    if (body.temperature !== undefined) fields.temperature = body.temperature as string;
+    if (body.presentCharacters !== undefined) fields.presentCharacters = body.presentCharacters as any[];
+    if (body.playerStats !== undefined) fields.playerStats = body.playerStats;
+    if (body.personaStats !== undefined) fields.personaStats = body.personaStats as any[];
     // Target the same snapshot the GET endpoint returns — the one for the last
     // assistant message's active swipe — so edits persist to the row the user
     // actually sees. Falls back to updateLatest when no messages exist yet.
     let updated: Awaited<ReturnType<typeof gameStateStore.updateLatest>> = null;
-    const msgs = await storage.listMessages(req.params.id);
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i]!.role === "assistant") {
-        const msg = msgs[i]!;
-        updated = await gameStateStore.updateByMessage(msg.id, msg.activeSwipeIndex, req.params.id, fields, manual);
-        break;
+    if (hasExplicitTarget) {
+      const targetMessage = await storage.getMessage(targetMessageId);
+      if (targetMessage?.chatId === req.params.id) {
+        updated = await gameStateStore.updateByMessage(
+          targetMessageId,
+          targetSwipeIndex,
+          req.params.id,
+          fields,
+          manual,
+        );
       }
     }
-    if (!updated) {
+    if (!updated && !hasExplicitTarget) {
+      const msgs = await storage.listMessages(req.params.id);
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i]!.role === "assistant") {
+          const msg = msgs[i]!;
+          updated = await gameStateStore.updateByMessage(msg.id, msg.activeSwipeIndex, req.params.id, fields, manual);
+          break;
+        }
+      }
+    }
+    if (!updated && !hasExplicitTarget) {
       updated = await gameStateStore.updateLatest(req.params.id, fields, manual);
     }
     // Wipe all manual overrides when explicitly requested
@@ -873,7 +923,7 @@ export async function chatsRoutes(app: FastifyInstance) {
       updated = { ...updated, manualOverrides: null };
     }
     // If no snapshot exists yet, create one so manual edits aren't lost
-    if (!updated && manual) {
+    if (!updated && manual && !hasExplicitTarget) {
       const manualOverrides: Record<string, string> = {};
       const TRACKABLE = ["date", "time", "location", "weather", "temperature"] as const;
       for (const key of TRACKABLE) {
@@ -917,6 +967,7 @@ export async function chatsRoutes(app: FastifyInstance) {
 
     const chatMessages = await storage.listMessages(req.params.id);
     const chatMeta = typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : (chat.metadata ?? {});
+    const visibleGameStateAnchor = resolveVisibleGameStateAnchor(chatMessages);
 
     // ── Primary: return the cached prompt from the last generation ──
     // This is an exact copy of what was actually sent to the model,
@@ -1387,7 +1438,7 @@ export async function chatsRoutes(app: FastifyInstance) {
             impersonateBlockAgents: false,
           });
           if (chatEnableAgents && activeAgentIds.length > 0) {
-            const snap = await loadLatestChatGameSnapshot(app, req.params.id);
+            const snap = await loadLatestChatGameSnapshot(app, req.params.id, visibleGameStateAnchor);
             const contextBlock = snap
               ? formatPeekTrackerContextBlock({ wrapFormat, snap, chatMeta, activeAgentIds })
               : null;

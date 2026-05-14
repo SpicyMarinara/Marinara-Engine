@@ -186,6 +186,8 @@ export interface LorebookEntry {
   /** Schedule: only active during certain in-game times/dates */
   schedule: LorebookSchedule | null;
 
+  /** When true, bulk vectorization skips this entry and semantic matching ignores any stored vector */
+  excludeFromVectorization: boolean;
   /** Pre-computed embedding vector for semantic matching (null if not vectorized) */
   embedding: number[] | null;
 

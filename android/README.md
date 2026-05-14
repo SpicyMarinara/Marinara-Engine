@@ -2,6 +2,8 @@
 
 The Android app is a thin WebView wrapper around Marinara Engine running locally in Termux. It is not a standalone server build.
 
+> **Do this first:** Install Marinara Engine in Termux and start it with `./start-termux.sh`. The APK only opens that already-running local server.
+
 ## How It Works
 
 - Start Marinara Engine in Termux with `./start-termux.sh`, or use `./start-termux.sh --skip-update` to start the current local install without checking for updates.
@@ -15,7 +17,7 @@ The Android app is a thin WebView wrapper around Marinara Engine running locally
 ## Features
 
 - Native app icon on the home screen
-- Full-screen standalone experience without browser chrome
+- Full-screen app-like experience without browser chrome
 - Automatic retry while the local server is still starting
 - File upload support for character cards, images, and similar assets
 - Back button navigation inside the WebView
@@ -93,3 +95,5 @@ Because the APK points at `http://127.0.0.1:<PORT>`, it only works while the Mar
 ## Pre-built APKs
 
 When maintainers attach them to a tagged release, pre-built APKs are available on the main [Releases](https://github.com/Pasta-Devs/Marinara-Engine/releases) page.
+
+Downloading a release APK does not replace the Termux setup. Install and start Marinara Engine in Termux first; the APK only opens the already-running local server in a fullscreen WebView. If Termux is not running, the APK will stay on the connection screen.

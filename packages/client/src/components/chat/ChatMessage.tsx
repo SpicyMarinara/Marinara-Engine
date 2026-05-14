@@ -22,6 +22,7 @@ import {
   X,
   Flag,
   Eye,
+  ScrollText,
   Circle,
   Brain,
   Languages,
@@ -49,6 +50,7 @@ import { buildTTSMessageText, resolveTTSVoiceForSpeaker } from "../../lib/tts-di
 import { DIALOGUE_QUOTE_PATTERN_SOURCE, HTML_SAFE_DIALOGUE_QUOTE_PATTERN_SOURCE } from "../../lib/dialogue-quotes";
 import DOMPurify from "dompurify";
 import type { CharacterMap, MessageSelectionToggle, PersonaInfo } from "./chat-area.types";
+import { GenerationReplayDetailsModal, hasGenerationReplayDetails } from "./GenerationReplayDetailsModal";
 import { ImagePromptPanel } from "./ImagePromptPanel";
 import { SwipeJumpControl } from "./SwipeJumpControl";
 
@@ -709,6 +711,7 @@ export const ChatMessage = memo(function ChatMessage({
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [showThinking, setShowThinking] = useState(false);
+  const [showGenerationReplay, setShowGenerationReplay] = useState(false);
   const [showActions, setShowActions] = useState(false);
   const [avatarLightbox, setAvatarLightbox] = useState<string | null>(null);
   const [avatarLightboxPrompt, setAvatarLightboxPrompt] = useState<string | null>(null);
@@ -824,6 +827,11 @@ export const ChatMessage = memo(function ChatMessage({
   const isConversationStart = !!extra.isConversationStart;
   const isHiddenFromAI = extra.hiddenFromAI === true;
   const thinking = extra.thinking as string | undefined;
+  const generationReplay = hasGenerationReplayDetails(extra.generationReplay) ? extra.generationReplay : null;
+
+  useEffect(() => {
+    if (!generationReplay) setShowGenerationReplay(false);
+  }, [generationReplay]);
 
   // Remove an attachment from this message (keeps it in gallery)
   const qc = useQueryClient();
@@ -1742,6 +1750,14 @@ export const ChatMessage = memo(function ChatMessage({
                   dark
                 />
               )}
+              {generationReplay && (
+                <ActionBtn
+                  icon={<ScrollText size={MESSAGE_ACTION_ICON_SIZE} />}
+                  onClick={() => setShowGenerationReplay(true)}
+                  title="Stored guidance"
+                  dark
+                />
+              )}
               {thinking && !isUser && (
                 <ActionBtn
                   icon={<Brain size={MESSAGE_ACTION_ICON_SIZE} />}
@@ -1832,6 +1848,13 @@ export const ChatMessage = memo(function ChatMessage({
 
         {/* Thinking modal */}
         {showThinking && thinking && <ThinkingModal thinking={thinking} onClose={() => setShowThinking(false)} />}
+        {generationReplay && (
+          <GenerationReplayDetailsModal
+            open={showGenerationReplay}
+            replay={generationReplay}
+            onClose={() => setShowGenerationReplay(false)}
+          />
+        )}
 
         {/* Avatar lightbox */}
         {avatarLightbox && (
@@ -2142,6 +2165,13 @@ export const ChatMessage = memo(function ChatMessage({
                 title="Peek prompt"
               />
             )}
+            {generationReplay && (
+              <ActionBtn
+                icon={<ScrollText size={MESSAGE_ACTION_ICON_SIZE} />}
+                onClick={() => setShowGenerationReplay(true)}
+                title="Stored guidance"
+              />
+            )}
             {thinking && !isUser && (
               <ActionBtn
                 icon={<Brain size={MESSAGE_ACTION_ICON_SIZE} />}
@@ -2225,6 +2255,13 @@ export const ChatMessage = memo(function ChatMessage({
 
       {/* Thinking modal */}
       {showThinking && thinking && <ThinkingModal thinking={thinking} onClose={() => setShowThinking(false)} />}
+      {generationReplay && (
+        <GenerationReplayDetailsModal
+          open={showGenerationReplay}
+          replay={generationReplay}
+          onClose={() => setShowGenerationReplay(false)}
+        />
+      )}
 
       {/* Avatar lightbox */}
       {avatarLightbox && (

@@ -75,6 +75,7 @@ const EXPLICIT_IMAGE_SOURCES = new Set([
   "togetherai",
   "novelai",
   "horde",
+  "xai",
   "comfyui",
   "automatic1111",
   "gemini_image",
@@ -138,6 +139,8 @@ export async function generateImage(
       return generateNovelAI(normalizedBaseUrl, apiKey, scopedRequest);
     case "horde":
       return generateHorde(normalizedBaseUrl, apiKey, scopedRequest);
+    case "xai":
+      return generateXAI(normalizedBaseUrl, apiKey, scopedRequest);
     case "comfyui":
       return generateComfyUI(normalizedBaseUrl, scopedRequest);
     case "automatic1111":
@@ -243,6 +246,34 @@ function openAIImageSize(request: ImageGenRequest): string {
   if (ratio > 1.12) return "1536x1024";
   if (ratio < 0.88) return "1024x1536";
   return "1024x1024";
+}
+
+const XAI_IMAGE_ASPECT_RATIOS = [
+  ["1:1", 1],
+  ["16:9", 16 / 9],
+  ["9:16", 9 / 16],
+  ["4:3", 4 / 3],
+  ["3:4", 3 / 4],
+  ["3:2", 3 / 2],
+  ["2:3", 2 / 3],
+  ["2:1", 2],
+  ["1:2", 1 / 2],
+  ["19.5:9", 19.5 / 9],
+  ["9:19.5", 9 / 19.5],
+  ["20:9", 20 / 9],
+  ["9:20", 9 / 20],
+] as const;
+
+function xAIImageAspectRatio(width?: number, height?: number): string {
+  if (!width || !height) return "auto";
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    throw new Error(`xAI image generation requires positive width and height values, got ${width}x${height}`);
+  }
+
+  const ratio = width / height;
+  return XAI_IMAGE_ASPECT_RATIOS.reduce((best, candidate) =>
+    Math.abs(candidate[1] - ratio) < Math.abs(best[1] - ratio) ? candidate : best,
+  )[0];
 }
 
 function imageDataUrlFromReference(reference: string): string {
@@ -512,6 +543,50 @@ async function generateOpenAI(baseUrl: string, apiKey: string, request: ImageGen
   );
 
   return readOpenAIImageResult(resp, request, "generation");
+}
+
+function xAIImagesUrl(baseUrl: string): string {
+  return openAIImagesUrl(baseUrl, "generations");
+}
+
+async function generateXAI(baseUrl: string, apiKey: string, request: ImageGenRequest): Promise<ImageGenResult> {
+  if (request.referenceImage || request.referenceImages?.length) {
+    throw new Error("xAI image generation does not support reference images in Marinara yet.");
+  }
+
+  const body: Record<string, unknown> = {
+    prompt: request.prompt,
+    n: 1,
+    aspect_ratio: xAIImageAspectRatio(request.width, request.height),
+    response_format: "b64_json",
+  };
+  if (request.model) body.model = request.model;
+
+  const resp = await imageFetch(
+    xAIImagesUrl(baseUrl),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
+    },
+    { allowLocal: request.allowLocalUrls },
+  );
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => "Unknown error");
+    throw new Error(`xAI image generation failed (${resp.status}): ${sanitizeErrorText(errText)}`);
+  }
+
+  const data = (await resp.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+  const result = data.data?.[0];
+  if (result?.b64_json) return { base64: result.b64_json, mimeType: "image/png", ext: "png" };
+  if (result?.url) return downloadImageUrl(result.url, request.allowLocalUrls);
+
+  throw new Error("No image data in xAI response");
 }
 
 async function generateNanoGPT(baseUrl: string, apiKey: string, request: ImageGenRequest): Promise<ImageGenResult> {

@@ -55,6 +55,7 @@ export function TrackerDataSidebar({ fillHeight = false }: { fillHeight?: boolea
   const currentGameState = useGameStateStore((s) =>
     activeChatId && s.current?.chatId === activeChatId ? s.current : null,
   );
+  const gameStateRefreshing = useGameStateStore((s) => s.isRefreshing);
   const setGameState = useGameStateStore((s) => s.setGameState);
   const { patchField, patchPlayerStats, flushPatch } = useGameStatePatcher(activeChatId, "tracker-data-sidebar");
   const trackerPanelSide = useUIStore((s) => s.trackerPanelSide);
@@ -77,7 +78,8 @@ export function TrackerDataSidebar({ fillHeight = false }: { fillHeight?: boolea
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
   const featuredCharacterCardsRef = useRef<Set<string>>(new Set());
   const isStreaming = isStreamingGlobal && streamingChatId === activeChatId;
-  const trackerRetryBusy = isAgentProcessing || isStreaming;
+  const isLoadingGameState = loadingGameState || gameStateRefreshing;
+  const trackerRetryBusy = isAgentProcessing || isStreaming || gameStateRefreshing;
 
   useEffect(() => {
     if (!activeChatId) {
@@ -233,6 +235,7 @@ export function TrackerDataSidebar({ fillHeight = false }: { fillHeight?: boolea
   const customFields = playerStats?.customTrackerFields ?? [];
   const isPanelCollapsed = (section: TrackerPanelSection) => trackerPanelCollapsedSections[section] === true;
   const hasFixedTrackerPanel = orderedTrackerSections.length > 0;
+  const showTrackerSections = !!activeChatId && !isLoadingGameState && !!currentGameState && hasFixedTrackerPanel;
   const persistFeaturedCharacterCards = useCallback(
     (next: Set<string>) => {
       featuredCharacterCardsRef.current = next;
@@ -564,11 +567,11 @@ export function TrackerDataSidebar({ fillHeight = false }: { fillHeight?: boolea
       />
 
       <div className={cn("relative z-10", fillHeight && "min-h-0 flex-1 overflow-y-auto")}>
-        {orderedTrackerSections.map((section) => renderTrackerSection(section))}
+        {showTrackerSections ? orderedTrackerSections.map((section) => renderTrackerSection(section)) : null}
 
         {!activeChatId ? (
           <EmptySection>Select a chat to view tracker data.</EmptySection>
-        ) : loadingGameState ? (
+        ) : isLoadingGameState ? (
           <TrackerSkeleton />
         ) : !currentGameState ? (
           <EmptySection>No tracker data yet.</EmptySection>

@@ -167,7 +167,38 @@ type GameSpotifyPlayResponse = {
   device: string | null;
 };
 
+type SpotifyPlayerSnapshot = {
+  device?: {
+    id: string | null;
+    name?: string | null;
+    type?: string | null;
+    isActive?: boolean;
+  } | null;
+};
+
+type SpotifyDevicesSnapshot = {
+  devices?: Array<{
+    id: string | null;
+    name?: string | null;
+    type?: string | null;
+    isActive?: boolean;
+  }>;
+};
+
 type GameDirectAddressMode = "party" | "gm";
+
+function isMobileGameViewport(): boolean {
+  return typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+}
+
+function isBrowserSpotifyDeviceName(name: string | null | undefined): boolean {
+  return name === "Marinara Engine";
+}
+
+function isPersonalMobileSpotifyDeviceType(type: string | null | undefined): boolean {
+  const normalized = type?.toLowerCase() ?? "";
+  return normalized === "smartphone" || normalized === "tablet";
+}
 
 function getGameDirectAddressMode(content: string | null | undefined): GameDirectAddressMode | null {
   const normalized = content?.trimStart().toLowerCase() ?? "";
@@ -1464,6 +1495,7 @@ interface GameVolumeMixerProps {
   onTtsVolumeChange: (value: number) => void;
   onAmbientVolumeChange: (value: number) => void;
   onToggleMute: () => void;
+  onAudioInteract?: () => void;
   className?: string;
 }
 
@@ -1480,6 +1512,7 @@ function GameVolumeMixer({
   onTtsVolumeChange,
   onAmbientVolumeChange,
   onToggleMute,
+  onAudioInteract,
   className,
 }: GameVolumeMixerProps) {
   const rows = [
@@ -1523,7 +1556,16 @@ function GameVolumeMixer({
               min={0}
               max={100}
               value={row.value}
-              onChange={(e) => row.onChange(Number(e.target.value))}
+              onPointerDown={onAudioInteract}
+              onTouchStart={onAudioInteract}
+              onInput={(e) => {
+                onAudioInteract?.();
+                row.onChange(Number(e.currentTarget.value));
+              }}
+              onChange={(e) => {
+                onAudioInteract?.();
+                row.onChange(Number(e.target.value));
+              }}
               className="h-1.5 w-full cursor-pointer accent-[var(--primary)]"
             />
             <span className="text-right text-[0.6875rem] tabular-nums text-white/55">{row.value}</span>
@@ -2859,10 +2901,38 @@ export function GameSurface({
       if (!activeChatId || !useSpotifyGameMusic || !track?.uri) return;
       setSpotifyRetryPending(true);
       try {
+        const cachedPlayer = queryClient.getQueryData<SpotifyPlayerSnapshot>(["spotify", "player"]) ?? null;
+        let spotifyPlayer = cachedPlayer;
+        if (!spotifyPlayer?.device?.id) {
+          spotifyPlayer = await api.get<SpotifyPlayerSnapshot>("/spotify/player").catch(() => cachedPlayer);
+        }
+
+        const mobileViewport = isMobileGameViewport();
+        const currentDevice = spotifyPlayer?.device ?? null;
+        let spotifyDeviceId = currentDevice?.id ?? null;
+        const currentDeviceIsMobile = isPersonalMobileSpotifyDeviceType(currentDevice?.type);
+        const shouldPreferMobileDevice =
+          mobileViewport &&
+          (!spotifyDeviceId || !currentDeviceIsMobile || isBrowserSpotifyDeviceName(currentDevice?.name));
+
+        if (shouldPreferMobileDevice) {
+          const devices = await api.get<SpotifyDevicesSnapshot>("/spotify/devices").catch(() => null);
+          const mobileDevices = (devices?.devices ?? []).filter(
+            (device) =>
+              !!device.id && !isBrowserSpotifyDeviceName(device.name) && isPersonalMobileSpotifyDeviceType(device.type),
+          );
+          const preferredDevice = mobileDevices.find((device) => device.isActive) ?? mobileDevices[0] ?? null;
+          if (preferredDevice?.id) {
+            spotifyDeviceId = preferredDevice.id;
+          } else if (!currentDeviceIsMobile) {
+            spotifyDeviceId = null;
+          }
+        }
+
         dispatchSpotifySceneTrackChange(track.uri);
         await api.post<GameSpotifyPlayResponse>(
           "/game/spotify/play",
-          { chatId: activeChatId, track },
+          { chatId: activeChatId, track, deviceId: spotifyDeviceId ?? undefined, mobileDeviceOnly: mobileViewport },
           { signal: AbortSignal.timeout(20_000) },
         );
         recentSpotifyTrackHistoryRef.current = appendRecentSpotifyTrack(
@@ -4279,20 +4349,32 @@ export function GameSurface({
     setActiveDirections(blueprint.introSequence);
   }, [blueprint, latestAssistantMsg?.content]);
 
-  // Sync mute state
-  useEffect(() => {
-    if (!audioSettingsHydrated) return;
-    audioManager.setMuted(audioMuted || masterVolume === 0);
-  }, [audioMuted, audioSettingsHydrated, masterVolume]);
+  const applyGameAudioSettings = useCallback(
+    (overrides: Partial<GameAudioSettings> = {}, options: { unlock?: boolean } = {}) => {
+      const nextMasterVolume = overrides.masterVolume ?? masterVolume;
+      const nextMusicVolume = overrides.musicVolume ?? musicVolume;
+      const nextSfxVolume = overrides.sfxVolume ?? sfxVolume;
+      const nextAmbientVolume = overrides.ambientVolume ?? ambientVolume;
+      const nextAudioMuted = overrides.audioMuted ?? audioMuted;
+
+      if (options.unlock) {
+        audioManager.unlock();
+      }
+
+      audioManager.setMuted(nextAudioMuted || nextMasterVolume === 0);
+      audioManager.setVolumes(
+        getEffectiveVolume(nextMasterVolume, nextMusicVolume),
+        getEffectiveVolume(nextMasterVolume, nextSfxVolume),
+        getEffectiveVolume(nextMasterVolume, nextAmbientVolume),
+      );
+    },
+    [ambientVolume, audioMuted, masterVolume, musicVolume, sfxVolume],
+  );
 
   useEffect(() => {
     if (!audioSettingsHydrated) return;
 
-    audioManager.setVolumes(
-      getEffectiveVolume(masterVolume, musicVolume),
-      getEffectiveVolume(masterVolume, sfxVolume),
-      getEffectiveVolume(masterVolume, ambientVolume),
-    );
+    applyGameAudioSettings();
 
     try {
       localStorage.setItem(
@@ -4309,7 +4391,16 @@ export function GameSurface({
     } catch {
       // Ignore storage failures and keep the in-memory setting.
     }
-  }, [ambientVolume, audioMuted, audioSettingsHydrated, masterVolume, musicVolume, sfxVolume, ttsVolume]);
+  }, [
+    ambientVolume,
+    applyGameAudioSettings,
+    audioMuted,
+    audioSettingsHydrated,
+    masterVolume,
+    musicVolume,
+    sfxVolume,
+    ttsVolume,
+  ]);
 
   // Message sending via generate hook
   const { generate, retryAgents } = useGenerate();
@@ -4324,6 +4415,7 @@ export function GameSurface({
       chatId: activeChatId,
       connectionId: null,
       generationGuide: GAME_START_GENERATION_GUIDE,
+      generationGuideSource: "game_start",
     });
   }, [activeChatId, generate]);
 
@@ -4544,7 +4636,14 @@ export function GameSurface({
     startGame.mutate(
       { chatId: activeChatId },
       {
-        onSuccess: () => {
+        onSuccess: (res) => {
+          // Race recovery (#821): if the server detected an existing GM turn,
+          // it has already restored status to "active" — skip the duplicate
+          // generation and let the UI move past the Start Game screen on the
+          // next chat refetch.
+          if (res?.alreadyStarted) {
+            return;
+          }
           generateInitialGameTurn();
         },
         onError: (err) => {
@@ -4843,6 +4942,9 @@ export function GameSurface({
         });
       }
 
+      setInventoryNotifications([`You gained ${addedItemName}!`]);
+      if (notificationTimerRef.current) clearTimeout(notificationTimerRef.current);
+      notificationTimerRef.current = setTimeout(() => setInventoryNotifications([]), 4000);
       toast.success(`Added ${addedItemName} to inventory.`);
       return addedItemName;
     } catch (error) {
@@ -4899,6 +5001,9 @@ export function GameSurface({
           });
         }
 
+        setInventoryNotifications([`You gained ${normalizedItemName}!`]);
+        if (notificationTimerRef.current) clearTimeout(notificationTimerRef.current);
+        notificationTimerRef.current = setTimeout(() => setInventoryNotifications([]), 4000);
         toast.success(`Added 1 ${normalizedItemName}.`);
       } catch (error) {
         if (patchedGameState) {
@@ -6525,6 +6630,7 @@ export function GameSurface({
       options?: { commitPendingMove?: boolean },
     ) => {
       if (!sessionInteractive) return;
+      audioManager.unlock();
       // Commit a pending interrupt: persist the truncated GM message before generating
       // so the server-side prompt build doesn't see segments the player never read. We
       // await so the PATCH (and the optional risky-mode system message) land before
@@ -6843,26 +6949,46 @@ export function GameSurface({
 
   // Toggle audio mute
   const handleToggleMute = useCallback(() => {
-    useGameAssetStore.getState().setAudioMuted(!audioMuted);
-  }, [audioMuted]);
+    const nextAudioMuted = !audioMuted;
+    useGameAssetStore.getState().setAudioMuted(nextAudioMuted);
+    applyGameAudioSettings({ audioMuted: nextAudioMuted }, { unlock: true });
+  }, [applyGameAudioSettings, audioMuted]);
+
+  const handleAudioInteract = useCallback(() => {
+    audioManager.unlock();
+    audioManager.retryPending();
+  }, []);
 
   // Handle master volume change from slider (0–100)
   const handleMasterVolumeChange = useCallback(
     (value: number) => {
       const nextValue = normalizeVolume(value, masterVolume);
       setMasterVolume(nextValue);
+      let nextAudioMuted = audioMuted;
       if (nextValue === 0 && !audioMuted) {
+        nextAudioMuted = true;
         useGameAssetStore.getState().setAudioMuted(true);
       } else if (nextValue > 0 && audioMuted) {
+        nextAudioMuted = false;
         useGameAssetStore.getState().setAudioMuted(false);
       }
+      applyGameAudioSettings({ masterVolume: nextValue, audioMuted: nextAudioMuted }, { unlock: true });
     },
-    [audioMuted, masterVolume],
+    [applyGameAudioSettings, audioMuted, masterVolume],
   );
 
-  const handleChannelVolumeChange = useCallback((setter: (value: number) => void, value: number) => {
-    setter(normalizeVolume(value, 0));
-  }, []);
+  const handleChannelVolumeChange = useCallback(
+    (
+      channel: "musicVolume" | "sfxVolume" | "ttsVolume" | "ambientVolume",
+      setter: (value: number) => void,
+      value: number,
+    ) => {
+      const nextValue = normalizeVolume(value, 0);
+      setter(nextValue);
+      applyGameAudioSettings({ [channel]: nextValue } as Partial<GameAudioSettings>, { unlock: true });
+    },
+    [applyGameAudioSettings],
+  );
 
   // Apply saved volume on mount so audioManager matches the persisted level
   useEffect(() => {
@@ -7293,6 +7419,7 @@ export function GameSurface({
                   {firstTurnFullyReady && introTypewriterDone ? (
                     <button
                       onClick={() => {
+                        audioManager.unlock();
                         setIntroPresented(true);
                         try {
                           localStorage.setItem(introPresentationStorageKey, "1");
@@ -7355,7 +7482,10 @@ export function GameSurface({
                 </div>
               ) : (
                 <button
-                  onClick={handleStartGameRequest}
+                  onClick={() => {
+                    audioManager.unlock();
+                    handleStartGameRequest();
+                  }}
                   disabled={startGame.isPending || startGameRequested}
                   className="group flex items-center gap-2 rounded-xl bg-[var(--primary)] px-6 py-3 text-sm font-semibold text-white transition-all hover:scale-105 hover:shadow-lg hover:shadow-[var(--primary)]/30 disabled:opacity-50 disabled:hover:scale-100"
                 >
@@ -7493,11 +7623,14 @@ export function GameSurface({
                         ttsVolume={ttsVolume}
                         ambientVolume={ambientVolume}
                         onMasterVolumeChange={handleMasterVolumeChange}
-                        onMusicVolumeChange={(value) => handleChannelVolumeChange(setMusicVolume, value)}
-                        onSfxVolumeChange={(value) => handleChannelVolumeChange(setSfxVolume, value)}
-                        onTtsVolumeChange={(value) => handleChannelVolumeChange(setTtsVolume, value)}
-                        onAmbientVolumeChange={(value) => handleChannelVolumeChange(setAmbientVolume, value)}
+                        onMusicVolumeChange={(value) => handleChannelVolumeChange("musicVolume", setMusicVolume, value)}
+                        onSfxVolumeChange={(value) => handleChannelVolumeChange("sfxVolume", setSfxVolume, value)}
+                        onTtsVolumeChange={(value) => handleChannelVolumeChange("ttsVolume", setTtsVolume, value)}
+                        onAmbientVolumeChange={(value) =>
+                          handleChannelVolumeChange("ambientVolume", setAmbientVolume, value)
+                        }
                         onToggleMute={handleToggleMute}
+                        onAudioInteract={handleAudioInteract}
                       />
                     )}
                   </div>
@@ -7683,11 +7816,16 @@ export function GameSurface({
                               ttsVolume={ttsVolume}
                               ambientVolume={ambientVolume}
                               onMasterVolumeChange={handleMasterVolumeChange}
-                              onMusicVolumeChange={(value) => handleChannelVolumeChange(setMusicVolume, value)}
-                              onSfxVolumeChange={(value) => handleChannelVolumeChange(setSfxVolume, value)}
-                              onTtsVolumeChange={(value) => handleChannelVolumeChange(setTtsVolume, value)}
-                              onAmbientVolumeChange={(value) => handleChannelVolumeChange(setAmbientVolume, value)}
+                              onMusicVolumeChange={(value) =>
+                                handleChannelVolumeChange("musicVolume", setMusicVolume, value)
+                              }
+                              onSfxVolumeChange={(value) => handleChannelVolumeChange("sfxVolume", setSfxVolume, value)}
+                              onTtsVolumeChange={(value) => handleChannelVolumeChange("ttsVolume", setTtsVolume, value)}
+                              onAmbientVolumeChange={(value) =>
+                                handleChannelVolumeChange("ambientVolume", setAmbientVolume, value)
+                              }
                               onToggleMute={handleToggleMute}
+                              onAudioInteract={handleAudioInteract}
                             />
                           )}
                         </div>

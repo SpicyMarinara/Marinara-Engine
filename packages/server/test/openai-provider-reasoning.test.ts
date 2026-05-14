@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { brotliCompressSync, gzipSync, zstdCompressSync } from "node:zlib";
 import { MODEL_LISTS } from "../../shared/src/constants/model-lists.ts";
 import { createLLMProvider } from "../src/services/llm/provider-registry.js";
 import { OpenAIProvider } from "../src/services/llm/providers/openai.provider.js";
@@ -319,6 +320,176 @@ test("custom compatible streams accept SSE data lines without a space", async ()
     });
     assert.equal(tokenChunks.join(""), "hello");
     assert.equal(result.content, "hello");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalLocalUrls === undefined) {
+      delete process.env.PROVIDER_LOCAL_URLS_ENABLED;
+    } else {
+      process.env.PROVIDER_LOCAL_URLS_ENABLED = originalLocalUrls;
+    }
+  }
+});
+
+test("LLM streaming requests ask providers for identity encoding", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLocalUrls = process.env.PROVIDER_LOCAL_URLS_ENABLED;
+  const seenAcceptEncodings: Array<string | null> = [];
+  const encoder = new TextEncoder();
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+    seenAcceptEncodings.push(new Headers(init?.headers).get("accept-encoding"));
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('data:{"choices":[{"delta":{"content":"identity"}}]}\n\n'));
+          controller.enqueue(encoder.encode("data:[DONE]\n\n"));
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { "Content-Type": "text/event-stream" } },
+    );
+  };
+
+  try {
+    process.env.PROVIDER_LOCAL_URLS_ENABLED = "true";
+    const provider = createLLMProvider("custom", "https://api.venice.ai/api/v1", "test-key");
+    const tokenChunks: string[] = [];
+    const result = await provider.chatComplete([{ role: "user", content: "Hello" }], {
+      model: "venice/test-model",
+      stream: true,
+      maxTokens: 512,
+      onToken: (chunk) => tokenChunks.push(chunk),
+    });
+
+    assert.equal(seenAcceptEncodings[0], "identity");
+    assert.equal(tokenChunks.join(""), "identity");
+    assert.equal(result.content, "identity");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalLocalUrls === undefined) {
+      delete process.env.PROVIDER_LOCAL_URLS_ENABLED;
+    } else {
+      process.env.PROVIDER_LOCAL_URLS_ENABLED = originalLocalUrls;
+    }
+  }
+});
+
+test("OpenRouter non-stream chat decodes raw gzip JSON without content-encoding", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLocalUrls = process.env.PROVIDER_LOCAL_URLS_ENABLED;
+
+  globalThis.fetch = async () =>
+    new Response(
+      gzipSync(
+        Buffer.from(
+          JSON.stringify({
+            choices: [{ message: { content: "decoded" } }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+        ),
+      ),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+
+  try {
+    process.env.PROVIDER_LOCAL_URLS_ENABLED = "true";
+    const provider = new OpenAIProvider("https://openrouter.ai/api/v1", "test-key");
+    const chunks: string[] = [];
+    for await (const chunk of provider.chat([{ role: "user", content: "Hello" }], {
+      model: "deepseek/deepseek-v4-pro",
+      stream: false,
+      maxTokens: 512,
+    })) {
+      chunks.push(chunk);
+    }
+
+    assert.equal(chunks.join(""), "decoded");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalLocalUrls === undefined) {
+      delete process.env.PROVIDER_LOCAL_URLS_ENABLED;
+    } else {
+      process.env.PROVIDER_LOCAL_URLS_ENABLED = originalLocalUrls;
+    }
+  }
+});
+
+test("OpenAI-compatible non-stream chat decodes raw zstd JSON without content-encoding", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLocalUrls = process.env.PROVIDER_LOCAL_URLS_ENABLED;
+
+  globalThis.fetch = async () =>
+    new Response(
+      zstdCompressSync(
+        Buffer.from(
+          JSON.stringify({
+            choices: [{ message: { content: "decoded from zstd" } }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+        ),
+      ),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+
+  try {
+    process.env.PROVIDER_LOCAL_URLS_ENABLED = "true";
+    const provider = new OpenAIProvider("https://api.venice.ai/api/v1", "test-key");
+    const chunks: string[] = [];
+    for await (const chunk of provider.chat([{ role: "user", content: "Hello" }], {
+      model: "venice/test-model",
+      stream: false,
+      maxTokens: 512,
+    })) {
+      chunks.push(chunk);
+    }
+
+    assert.equal(chunks.join(""), "decoded from zstd");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalLocalUrls === undefined) {
+      delete process.env.PROVIDER_LOCAL_URLS_ENABLED;
+    } else {
+      process.env.PROVIDER_LOCAL_URLS_ENABLED = originalLocalUrls;
+    }
+  }
+});
+
+test("OpenAI-compatible chatComplete decodes raw brotli JSON without content-encoding", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLocalUrls = process.env.PROVIDER_LOCAL_URLS_ENABLED;
+
+  globalThis.fetch = async () =>
+    new Response(
+      brotliCompressSync(
+        Buffer.from(
+          JSON.stringify({
+            choices: [{ message: { content: "decoded from brotli" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+        ),
+      ),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+
+  try {
+    process.env.PROVIDER_LOCAL_URLS_ENABLED = "true";
+    const provider = new OpenAIProvider("https://api.venice.ai/api/v1", "test-key");
+    const result = await provider.chatComplete([{ role: "user", content: "Hello" }], {
+      model: "venice/test-model",
+      stream: false,
+      maxTokens: 512,
+    });
+
+    assert.equal(result.content, "decoded from brotli");
   } finally {
     globalThis.fetch = originalFetch;
     if (originalLocalUrls === undefined) {

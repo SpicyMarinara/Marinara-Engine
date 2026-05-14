@@ -13,6 +13,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import {
+  Ban,
   ChevronDown,
   CheckCircle2,
   CheckSquare2,
@@ -308,9 +309,14 @@ export function LorebookEntryRow({
   );
 
   const showDepthInput = localPosition === 2;
+  const isVectorExcluded = entry.excludeFromVectorization === true;
   const isVectorized = Array.isArray(entry.embedding) && entry.embedding.length > 0;
-  const vectorStatusLabel = isVectorized ? "Vectorized" : "Not vectorized";
-  const vectorStatusTitle = isVectorized ? "This entry has been vectorized" : "This entry has not been vectorized yet";
+  const vectorStatusLabel = isVectorExcluded ? "Vector excluded" : isVectorized ? "Vectorized" : "Not vectorized";
+  const vectorStatusTitle = isVectorExcluded
+    ? "This entry is excluded from vectorization"
+    : isVectorized
+      ? "This entry has been vectorized"
+      : "This entry has not been vectorized yet";
 
   return (
     <div
@@ -447,7 +453,9 @@ export function LorebookEntryRow({
           type="button"
           className={cn(
             "relative inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[0.625rem] ring-1 transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--ring)]",
-            isVectorized
+            isVectorExcluded
+              ? "bg-rose-400/10 text-rose-400 ring-rose-400/20"
+              : isVectorized
               ? "bg-emerald-400/10 text-emerald-400 ring-emerald-400/20"
               : "bg-[var(--background)]/55 text-[var(--muted-foreground)] ring-[var(--border)] hover:text-[var(--foreground)]",
           )}
@@ -462,7 +470,13 @@ export function LorebookEntryRow({
             setShowVectorStatus(true);
           }}
         >
-          {isVectorized ? <CheckCircle2 size="0.75rem" /> : <CircleDashed size="0.75rem" />}
+          {isVectorExcluded ? (
+            <Ban size="0.75rem" />
+          ) : isVectorized ? (
+            <CheckCircle2 size="0.75rem" />
+          ) : (
+            <CircleDashed size="0.75rem" />
+          )}
           {showVectorStatus && (
             <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-[var(--popover)] px-2 py-1 text-[0.625rem] font-medium text-[var(--popover-foreground)] shadow-lg ring-1 ring-[var(--border)]">
               {vectorStatusLabel}
@@ -893,6 +907,7 @@ function buildEntrySavePayload(form: Partial<LorebookEntry>) {
     tag: form.tag,
     locked: form.locked,
     preventRecursion: form.preventRecursion,
+    excludeFromVectorization: form.excludeFromVectorization,
   };
 }
 
@@ -1264,7 +1279,7 @@ function ExpandedDrawer({
 
       {/* Toggles row — note: enable / regex / trigger mode are now on the row header,
           so they are intentionally omitted from this block to avoid duplication. */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
         <ToggleButton
           label="Whole Words"
           value={form.matchWholeWords ?? false}
@@ -1286,6 +1301,12 @@ function ExpandedDrawer({
           value={form.preventRecursion ?? false}
           onChange={(v) => update({ preventRecursion: v })}
           tooltip="When enabled, this entry's content won't trigger additional entries during recursive scanning."
+        />
+        <ToggleButton
+          label="No Vector"
+          value={form.excludeFromVectorization ?? false}
+          onChange={(v) => update({ excludeFromVectorization: v })}
+          tooltip="When enabled, bulk vectorization skips this entry and removes any stored embedding."
         />
       </div>
 

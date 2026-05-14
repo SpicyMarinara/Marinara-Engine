@@ -178,7 +178,7 @@ Android policy:
 Release-related behavior already in the repo:
 
 - Docker publishing is triggered by `v*` tags.
-- Tagged releases are published from `CHANGELOG.md` by the GitHub release workflow.
+- Tagged releases are published from `CHANGELOG.md` by the GitHub release workflow, with a temporary Android APK notice prepended so release-page downloaders know the APK still requires Termux.
 - The server update check reads the newest GitHub `v*` tag and uses matching release metadata when it exists.
 - Git-based installs can apply updates automatically; Docker installs are prompted with the pull command instead.
 - Pull request CI runs `pnpm check`, `pnpm version:check`, and the tracked-installer guard.
@@ -197,7 +197,7 @@ Release helpers now in the repo:
 - `pnpm version:sync -- --android-version-code <next-code>` updates the derived version files and README release references from the root `package.json` version.
 - `pnpm version:check` fails when those derived files drift out of sync.
 - `pnpm guard:installer-artifacts` fails when tracked installer binaries appear under `win/installer/*.exe`.
-- `pnpm release:notes -- <version>` renders the matching `CHANGELOG.md` entry for release publication.
+- `pnpm release:notes -- <version>` renders the matching `CHANGELOG.md` entry for release publication and prepends the temporary Android APK / Termux notice.
 
 ## Immediate Way Forward
 

@@ -25,6 +25,7 @@ import type {
   CombatRoundResult,
   CombatPlayerAction,
   HudWidget,
+  GameBlueprint,
 } from "@marinara-engine/shared";
 import type { Chat } from "@marinara-engine/shared";
 
@@ -49,6 +50,12 @@ interface SetupResponse {
 
 interface StartGameResponse {
   status: string;
+  /**
+   * True when the server detected that a GM turn already exists for this chat
+   * (race recovery — see #821). Callers must skip generating another initial
+   * turn in this case; the existing intro is already saved.
+   */
+  alreadyStarted?: boolean;
 }
 
 interface StartSessionResponse {
@@ -603,6 +610,26 @@ export function useGameSessions(gameId: string | null) {
 
 // ── Sync hook — reads chat metadata and updates game store ──
 
+function normalizeHudWidgets(widgets: readonly HudWidget[]): HudWidget[] {
+  return widgets.map((w) => {
+    if (w.type === "inventory_grid" && !w.config.contents && Array.isArray((w.config as any).items)) {
+      const items = (w.config as any).items as Array<{ name: string; slot?: string | number; quantity?: number }>;
+      return {
+        ...w,
+        config: {
+          ...w.config,
+          contents: items.map((i) => ({
+            name: i.name,
+            slot: typeof i.slot === "string" ? i.slot : undefined,
+            quantity: i.quantity ?? 1,
+          })),
+        },
+      };
+    }
+    return w;
+  });
+}
+
 export function useSyncGameState(activeChatId: string, chatMeta: Record<string, unknown>) {
   const prevChatIdRef = useRef<string | null>(null);
 
@@ -621,8 +648,10 @@ export function useSyncGameState(activeChatId: string, chatMeta: Record<string, 
   useEffect(() => {
     if (!chatMeta.gameId) return;
     const state = useGameModeStore.getState();
+    const activeGameChanged = chatMeta.gameId !== state.activeGameId;
+    const activeSessionChanged = activeChatId !== state.activeSessionChatId;
 
-    if (chatMeta.gameId !== state.activeGameId) {
+    if (activeGameChanged || activeSessionChanged) {
       useGameModeStore
         .getState()
         .setActiveGame(chatMeta.gameId as string, activeChatId, chatMeta.gamePartyChatId as string | undefined);
@@ -648,40 +677,32 @@ export function useSyncGameState(activeChatId: string, chatMeta: Record<string, 
     if (chatMeta.gameSessionStatus === "setup") {
       useGameModeStore.getState().setSetupActive(true);
     }
-    // Load blueprint + HUD widgets (only if store doesn't already have them)
-    if (chatMeta.gameBlueprint && !state.blueprint) {
-      const bp = chatMeta.gameBlueprint as import("@marinara-engine/shared").GameBlueprint;
+
+    const bp =
+      chatMeta.gameBlueprint && typeof chatMeta.gameBlueprint === "object"
+        ? (chatMeta.gameBlueprint as GameBlueprint)
+        : null;
+
+    if (bp && (activeGameChanged || activeSessionChanged || !state.blueprint)) {
       useGameModeStore.getState().setBlueprint(bp);
-      if (bp.hudWidgets?.length) {
-        // Normalize: GM may produce "items" instead of "contents" for inventory_grid,
-        // and older blueprints used {name, slot: number} instead of {name, slot?: string, quantity}.
-        const normalized = bp.hudWidgets.map((w) => {
-          if (w.type === "inventory_grid" && !w.config.contents && Array.isArray((w.config as any).items)) {
-            const items = (w.config as any).items as Array<{ name: string; slot?: string | number; quantity?: number }>;
-            return {
-              ...w,
-              config: {
-                ...w.config,
-                contents: items.map((i) => ({
-                  name: i.name,
-                  slot: typeof i.slot === "string" ? i.slot : undefined,
-                  quantity: i.quantity ?? 1,
-                })),
-              },
-            };
-          }
-          return w;
-        });
-        useGameModeStore.getState().setHudWidgets(normalized);
-      }
     }
-    // Load persisted widget state (overrides blueprint defaults)
-    if (chatMeta.gameWidgetState && Array.isArray(chatMeta.gameWidgetState)) {
-      const persisted = chatMeta.gameWidgetState as import("@marinara-engine/shared").HudWidget[];
-      if (persisted.length > 0) {
-        const pendingSignature = getPendingHudWidgetPersistenceSignature(activeChatId);
-        if (pendingSignature && pendingSignature !== getHudWidgetStateSignature(persisted)) return;
-        useGameModeStore.getState().setHudWidgets(persisted);
+
+    const persistedWidgets = Array.isArray(chatMeta.gameWidgetState)
+      ? normalizeHudWidgets(chatMeta.gameWidgetState as HudWidget[])
+      : null;
+    const blueprintWidgets = Array.isArray(bp?.hudWidgets) ? normalizeHudWidgets(bp.hudWidgets) : null;
+    const nextWidgets =
+      persistedWidgets ??
+      (activeGameChanged || activeSessionChanged || state.hudWidgets.length === 0 ? blueprintWidgets : null);
+
+    if (nextWidgets) {
+      const nextSignature = getHudWidgetStateSignature(nextWidgets);
+      const pendingSignature = getPendingHudWidgetPersistenceSignature(activeChatId);
+      if (!pendingSignature || pendingSignature === nextSignature) {
+        const currentSignature = getHudWidgetStateSignature(useGameModeStore.getState().hudWidgets);
+        if (currentSignature !== nextSignature) {
+          useGameModeStore.getState().setHudWidgets(nextWidgets);
+        }
       }
     }
   }, [activeChatId, chatMeta]);

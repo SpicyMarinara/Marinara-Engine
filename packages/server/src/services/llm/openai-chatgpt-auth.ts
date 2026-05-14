@@ -196,6 +196,7 @@ async function refreshAuth(auth: CodexAuthJson, authFilePath: string): Promise<O
     }),
     policy: authPolicy(),
     maxResponseBytes: 1024 * 1024,
+    decodeCompressedResponse: true,
   });
 
   if (!res.ok) {
@@ -265,6 +266,7 @@ export async function fetchOpenAIChatGPTModels(): Promise<Array<{ id: string; na
     },
     policy: authPolicy(),
     maxResponseBytes: 5 * 1024 * 1024,
+    decodeCompressedResponse: true,
   });
 
   if (!res.ok) {

@@ -185,6 +185,7 @@ const CREATE_TABLES: string[] = [
     activation_conditions TEXT NOT NULL DEFAULT '[]',
     schedule TEXT,
     prevent_recursion TEXT NOT NULL DEFAULT 'false',
+    exclude_from_vectorization TEXT NOT NULL DEFAULT 'false',
     embedding TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -697,6 +698,11 @@ const COLUMN_MIGRATIONS: ColumnMigration[] = [
     table: "lorebook_entries",
     column: "additional_matching_sources",
     definition: "TEXT NOT NULL DEFAULT '[]'",
+  },
+  {
+    table: "lorebook_entries",
+    column: "exclude_from_vectorization",
+    definition: "TEXT NOT NULL DEFAULT 'false'",
   },
   {
     table: "api_connections",

@@ -234,6 +234,7 @@ export async function connectionsRoutes(app: FastifyInstance) {
         headers: testHeaders,
         policy: localUrlPolicyForProvider(conn.provider, imageSource),
         maxResponseBytes: 2 * 1024 * 1024,
+        decodeCompressedResponse: true,
       });
       const latencyMs = Date.now() - start;
 
@@ -323,6 +324,7 @@ export async function connectionsRoutes(app: FastifyInstance) {
           headers,
           policy: localUrlPolicyForProvider(conn.provider, imageSource),
           maxResponseBytes: 2 * 1024 * 1024,
+          decodeCompressedResponse: true,
         });
         if (!accountRes.ok) {
           const body = await accountRes.text();
@@ -336,6 +338,7 @@ export async function connectionsRoutes(app: FastifyInstance) {
             headers,
             policy: localUrlPolicyForProvider(conn.provider, imageSource),
             maxResponseBytes: 5 * 1024 * 1024,
+            decodeCompressedResponse: true,
           });
           if (!res.ok) {
             const body = await res.text();
@@ -378,6 +381,7 @@ export async function connectionsRoutes(app: FastifyInstance) {
         const res = await safeFetch(`${baseUrl}/object_info/CheckpointLoaderSimple`, {
           policy: localUrlPolicyForProvider(conn.provider, imageSource),
           maxResponseBytes: 5 * 1024 * 1024,
+          decodeCompressedResponse: true,
         });
         if (!res.ok) {
           return reply.status(502).send({ error: `ComfyUI returned ${res.status}` });
@@ -394,6 +398,7 @@ export async function connectionsRoutes(app: FastifyInstance) {
         const res = await safeFetch(`${baseUrl}/sdapi/v1/sd-models`, {
           policy: localUrlPolicyForProvider(conn.provider, imageSource),
           maxResponseBytes: 5 * 1024 * 1024,
+          decodeCompressedResponse: true,
         });
         if (!res.ok) {
           return reply.status(502).send({ error: `SD Web UI returned ${res.status}` });
@@ -417,6 +422,7 @@ export async function connectionsRoutes(app: FastifyInstance) {
             flagName: "PROVIDER_LOCAL_URLS_ENABLED",
           },
           maxResponseBytes: 5 * 1024 * 1024,
+          decodeCompressedResponse: true,
         });
         if (!res.ok) {
           const body = await res.text();
@@ -443,6 +449,7 @@ export async function connectionsRoutes(app: FastifyInstance) {
           headers,
           policy: localUrlPolicyForProvider(conn.provider, imageSource),
           maxResponseBytes: 5 * 1024 * 1024,
+          decodeCompressedResponse: true,
         });
         if (!res.ok) {
           const body = await res.text();
@@ -467,6 +474,7 @@ export async function connectionsRoutes(app: FastifyInstance) {
           headers: hordeHeaders(conn.apiKey),
           policy: localUrlPolicyForProvider(conn.provider, imageSource),
           maxResponseBytes: 5 * 1024 * 1024,
+          decodeCompressedResponse: true,
         });
         if (!res.ok) {
           const body = await res.text();
@@ -509,6 +517,7 @@ export async function connectionsRoutes(app: FastifyInstance) {
           flagName: "PROVIDER_LOCAL_URLS_ENABLED",
         },
         maxResponseBytes: 5 * 1024 * 1024,
+        decodeCompressedResponse: true,
       });
       if (!res.ok) {
         const body = await res.text();
