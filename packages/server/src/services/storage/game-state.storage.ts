@@ -34,8 +34,20 @@ export function createGameStateStorage(db: DB) {
 
     async getForGeneration(
       chatId: string,
-      options?: { preferLatestVisible?: boolean; visibleAnchor?: GameStateVisibleAnchor | null },
+      options?: {
+        preferLatestVisible?: boolean;
+        visibleAnchor?: GameStateVisibleAnchor | null;
+        excludeMessageId?: string | null;
+      },
     ) {
+      const excludeMessageId = options?.excludeMessageId || null;
+      const latestCommitted = () =>
+        excludeMessageId
+          ? this.getLatestCommittedExcludingMessage(chatId, excludeMessageId)
+          : this.getLatestCommitted(chatId);
+      const latestAny = () =>
+        excludeMessageId ? this.getLatestExcludingMessage(chatId, excludeMessageId) : this.getLatest(chatId);
+
       if (options?.preferLatestVisible) {
         if (options.visibleAnchor?.messageId) {
           const visible = await this.getByChatAndMessage(
@@ -45,9 +57,9 @@ export function createGameStateStorage(db: DB) {
           );
           if (visible) return visible;
         }
-        return (await this.getLatestCommitted(chatId)) ?? (await this.getLatest(chatId));
+        return (await latestCommitted()) ?? (await latestAny());
       }
-      return (await this.getLatestCommitted(chatId)) ?? (await this.getLatest(chatId));
+      return (await latestCommitted()) ?? (await latestAny());
     },
 
     /** Get latest game state excluding snapshots tied to a specific message (for regen/swipes). */
@@ -56,6 +68,23 @@ export function createGameStateStorage(db: DB) {
         .select()
         .from(gameStateSnapshots)
         .where(and(eq(gameStateSnapshots.chatId, chatId), ne(gameStateSnapshots.messageId, excludeMessageId)))
+        .orderBy(desc(gameStateSnapshots.createdAt))
+        .limit(1);
+      return rows[0] ?? null;
+    },
+
+    /** Get latest committed state excluding snapshots tied to a specific message (for regen/swipes). */
+    async getLatestCommittedExcludingMessage(chatId: string, excludeMessageId: string) {
+      const rows = await db
+        .select()
+        .from(gameStateSnapshots)
+        .where(
+          and(
+            eq(gameStateSnapshots.chatId, chatId),
+            eq(gameStateSnapshots.committed, 1),
+            ne(gameStateSnapshots.messageId, excludeMessageId),
+          ),
+        )
         .orderBy(desc(gameStateSnapshots.createdAt))
         .limit(1);
       return rows[0] ?? null;
@@ -166,9 +195,10 @@ export function createGameStateStorage(db: DB) {
      * to the exact same snapshot the world-state agent created for a given swipe.
      *
      * When no snapshot exists for the target (messageId, swipeIndex) — e.g. because
-     * the world-state agent is disabled or failed — we clone the latest snapshot
-     * into a NEW row for this message+swipe and apply the update there. This avoids
-     * corrupting a previous turn's snapshot with new tracker data.
+     * the world-state agent is disabled or failed — we clone the provided base
+     * snapshot, or the latest snapshot when no base is supplied, into a NEW row for
+     * this message+swipe and apply the update there. This avoids corrupting a
+     * previous turn's snapshot with new tracker data.
      */
     async updateByMessage(
       messageId: string,
@@ -188,14 +218,18 @@ export function createGameStateStorage(db: DB) {
         >
       >,
       manual?: boolean,
+      options?: { baseSnapshot?: typeof gameStateSnapshots.$inferSelect | null },
     ) {
       const snap = await this.getByMessage(messageId, swipeIndex);
       if (snap) return this._applyUpdate(snap, fields, manual);
 
-      // No snapshot for this swipe yet — clone the latest one into a new row
+      // No snapshot for this swipe yet — clone the chosen base into a new row
       // so each (messageId, swipeIndex) gets its own snapshot and we don't
       // corrupt a previous turn's data.
-      const latest = await this.getLatest(chatId);
+      const latest =
+        options && Object.prototype.hasOwnProperty.call(options, "baseSnapshot")
+          ? options.baseSnapshot
+          : await this.getLatest(chatId);
       if (!latest && !messageId) return null;
 
       const baseState = {

@@ -103,6 +103,16 @@ export function resolveVisibleGameStateAnchor(
   return null;
 }
 
+export function resolveRegenerationGameStateAnchor(
+  messages: Array<{ role?: unknown; id?: unknown; activeSwipeIndex?: unknown }>,
+  regenerateMessageId: string | null | undefined,
+): { messageId: string; swipeIndex: number } | null {
+  if (!regenerateMessageId) return resolveVisibleGameStateAnchor(messages);
+  const targetIndex = messages.findIndex((message) => message.id === regenerateMessageId);
+  if (targetIndex < 0) return resolveVisibleGameStateAnchor(messages);
+  return resolveVisibleGameStateAnchor(messages.slice(0, targetIndex));
+}
+
 export function getAttachmentFilename(attachment: PromptAttachment): string {
   const rawName = attachment.filename ?? attachment.name;
   return typeof rawName === "string" && rawName.trim() ? rawName.trim() : "attachment";

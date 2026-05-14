@@ -13,6 +13,7 @@ import { chats, gameStateSnapshots, messages, messageSwipes } from "../src/db/sc
 import { chatsRoutes } from "../src/routes/chats.routes.js";
 import {
   parseGameStateRow,
+  resolveRegenerationGameStateAnchor,
   resolveVisibleGameStateAnchor,
   shouldPreferLatestVisibleGameState,
 } from "../src/routes/generate/generate-route-utils.js";
@@ -91,7 +92,7 @@ function makeCapturingProvider(captured: ChatMessage[][]): BaseLLMProvider {
   } as unknown as BaseLLMProvider;
 }
 
-test("custom tracker edits stay on the visible snapshot and feed regenerate/retry agent context", async () => {
+test("custom tracker edits stay on the visible snapshot and feed continue/retry agent context", async () => {
   const client = createClient({ url: "file::memory:" });
   const db = drizzle(client) as unknown as DB;
 
@@ -211,16 +212,16 @@ test("custom tracker edits stay on the visible snapshot and feed regenerate/retr
       const visibleAnchor = resolveVisibleGameStateAnchor([
         { role: "assistant", id: "assistant-current", activeSwipeIndex: 0 },
       ]);
-      const visibleForRegenerate = await gameStateStore.getForGeneration("chat-tracker-edits", {
+      const visibleForContinue = await gameStateStore.getForGeneration("chat-tracker-edits", {
         preferLatestVisible: true,
         visibleAnchor,
       });
-      assert.equal(readCustomTrackerValue(visibleForRegenerate!, "Bond"), "edited mid-session");
+      assert.equal(readCustomTrackerValue(visibleForContinue!, "Bond"), "edited mid-session");
 
       const captured: ChatMessage[][] = [];
       await executeAgent(
         makeCustomTrackerConfig(),
-        makeCustomTrackerContext(parseGameStateRow(visibleForRegenerate as Record<string, unknown>)),
+        makeCustomTrackerContext(parseGameStateRow(visibleForContinue as Record<string, unknown>)),
         makeCapturingProvider(captured),
         "test-model",
       );
@@ -232,6 +233,160 @@ test("custom tracker edits stay on the visible snapshot and feed regenerate/retr
     } finally {
       await app.close();
     }
+  } finally {
+    client.close();
+  }
+});
+
+test("regenerate tracker context uses the previous assistant snapshot instead of the target result", async () => {
+  const client = createClient({ url: "file::memory:" });
+  const db = drizzle(client) as unknown as DB;
+
+  try {
+    await runMigrations(db);
+
+    await db.insert(chats).values({
+      id: "chat-regen-baseline",
+      name: "Tracker regen baseline repro",
+      mode: "roleplay",
+      characterIds: "[]",
+      metadata: JSON.stringify({
+        enableAgents: true,
+        activeAgentIds: ["custom-tracker"],
+      }),
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(messages).values([
+      {
+        id: "assistant-previous",
+        chatId: "chat-regen-baseline",
+        role: "assistant",
+        characterId: null,
+        content: "Previous accepted assistant state.",
+        activeSwipeIndex: 0,
+        extra: "{}",
+        createdAt: "2026-05-14T02:00:00.000Z",
+      },
+      {
+        id: "user-between",
+        chatId: "chat-regen-baseline",
+        role: "user",
+        characterId: null,
+        content: "Continue.",
+        activeSwipeIndex: 0,
+        extra: "{}",
+        createdAt: "2026-05-14T02:01:00.000Z",
+      },
+      {
+        id: "assistant-target",
+        chatId: "chat-regen-baseline",
+        role: "assistant",
+        characterId: null,
+        content: "The assistant response being regenerated.",
+        activeSwipeIndex: 1,
+        extra: "{}",
+        createdAt: "2026-05-14T02:02:00.000Z",
+      },
+    ]);
+    await db.insert(gameStateSnapshots).values([
+      {
+        id: "snapshot-regen-previous",
+        chatId: "chat-regen-baseline",
+        messageId: "assistant-previous",
+        swipeIndex: 0,
+        date: null,
+        time: null,
+        location: null,
+        weather: null,
+        temperature: null,
+        presentCharacters: "[]",
+        recentEvents: "[]",
+        playerStats: JSON.stringify(playerStats([{ name: "Bond", value: "previous accepted state" }])),
+        personaStats: null,
+        manualOverrides: null,
+        committed: 1,
+        createdAt: "2026-05-14T02:00:30.000Z",
+      },
+      {
+        id: "snapshot-regen-target-first",
+        chatId: "chat-regen-baseline",
+        messageId: "assistant-target",
+        swipeIndex: 0,
+        date: null,
+        time: null,
+        location: null,
+        weather: null,
+        temperature: null,
+        presentCharacters: "[]",
+        recentEvents: "[]",
+        playerStats: JSON.stringify(playerStats([{ name: "Bond", value: "target first swipe result" }])),
+        personaStats: null,
+        manualOverrides: null,
+        committed: 0,
+        createdAt: "2026-05-14T02:03:00.000Z",
+      },
+      {
+        id: "snapshot-regen-target-second",
+        chatId: "chat-regen-baseline",
+        messageId: "assistant-target",
+        swipeIndex: 1,
+        date: null,
+        time: null,
+        location: null,
+        weather: null,
+        temperature: null,
+        presentCharacters: "[]",
+        recentEvents: "[]",
+        playerStats: JSON.stringify(playerStats([{ name: "Bond", value: "target second swipe result" }])),
+        personaStats: null,
+        manualOverrides: null,
+        committed: 0,
+        createdAt: "2026-05-14T02:04:00.000Z",
+      },
+    ]);
+
+    const orderedMessages = [
+      { role: "assistant", id: "assistant-previous", activeSwipeIndex: 0 },
+      { role: "user", id: "user-between", activeSwipeIndex: 0 },
+      { role: "assistant", id: "assistant-target", activeSwipeIndex: 1 },
+    ];
+    const gameStateStore = createGameStateStorage(db);
+
+    const visibleAnchor = resolveVisibleGameStateAnchor(orderedMessages);
+    const visibleTargetState = await gameStateStore.getForGeneration("chat-regen-baseline", {
+      preferLatestVisible: true,
+      visibleAnchor,
+    });
+    assert.equal(readCustomTrackerValue(visibleTargetState!, "Bond"), "target second swipe result");
+
+    const regenAnchor = resolveRegenerationGameStateAnchor(orderedMessages, "assistant-target");
+    assert.deepEqual(regenAnchor, { messageId: "assistant-previous", swipeIndex: 0 });
+
+    const regenBaseline = await gameStateStore.getForGeneration("chat-regen-baseline", {
+      preferLatestVisible: true,
+      visibleAnchor: regenAnchor,
+      excludeMessageId: "assistant-target",
+    });
+    assert.equal(readCustomTrackerValue(regenBaseline!, "Bond"), "previous accepted state");
+
+    const captured: ChatMessage[][] = [];
+    await executeAgent(
+      makeCustomTrackerConfig(),
+      makeCustomTrackerContext(parseGameStateRow(regenBaseline as Record<string, unknown>)),
+      makeCapturingProvider(captured),
+      "test-model",
+    );
+
+    const agentPrompt = captured[0]!.map((message) => message.content).join("\n");
+    assert.match(agentPrompt, /previous accepted state/);
+    assert.doesNotMatch(agentPrompt, /target first swipe result/);
+    assert.doesNotMatch(agentPrompt, /target second swipe result/);
+
+    const cloned = await gameStateStore.updateByMessage("assistant-target", 2, "chat-regen-baseline", {}, undefined, {
+      baseSnapshot: regenBaseline,
+    });
+    assert.equal(readCustomTrackerValue(cloned!, "Bond"), "previous accepted state");
   } finally {
     client.close();
   }
