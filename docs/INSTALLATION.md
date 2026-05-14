@@ -7,6 +7,8 @@ Choose the guide for your platform:
 - 🍎🐧 [macOS / Linux Installation Guide](installation/macos-linux.md) — run from source on macOS and Linux
 - 🤖 [Android (Termux) Installation Guide](installation/android-termux.md) — run on Android via Termux
 
+> **Android APK note:** Release APKs are optional WebView shells for the Termux-served app. They do not run Marinara Engine by themselves; install Termux and start `./start-termux.sh` on the same Android device first.
+
 Each guide includes installation steps and the relevant update instructions for that platform.
 
 - 📖 [Configuration Reference](CONFIGURATION.md) — environment variables and `.env` setup

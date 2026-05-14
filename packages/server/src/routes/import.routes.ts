@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────
 // Routes: Import (SillyTavern data)
 // ──────────────────────────────────────────────
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { execFile } from "child_process";
 import { platform, homedir } from "os";
 import { readdir, stat } from "fs/promises";
@@ -322,6 +322,27 @@ function invalidTagImportModeResponse() {
   };
 }
 
+type MultipartImportFile = { filename?: string; buffer: Buffer };
+
+async function readMultipartFileWithFields(req: FastifyRequest) {
+  let file: MultipartImportFile | null = null;
+  const fields: Record<string, unknown> = {};
+
+  for await (const part of req.parts()) {
+    if (part.type === "file") {
+      file = {
+        filename: part.filename,
+        buffer: await part.toBuffer(),
+      };
+      continue;
+    }
+
+    fields[part.fieldname] = part.value;
+  }
+
+  return { file, fields };
+}
+
 async function importCharacterBuffer(
   fileName: string,
   buffer: Buffer,
@@ -450,12 +471,10 @@ export async function importRoutes(app: FastifyInstance) {
    * "chat file" instead of spawning a new character entry.
    */
   app.post("/st-chat-into-group", async (req, reply) => {
-    const data = await req.file();
-    if (!data) return reply.status(400).send({ success: false, error: "No file uploaded" });
+    const { file, fields } = await readMultipartFileWithFields(req);
+    if (!file) return reply.status(400).send({ success: false, error: "No file uploaded" });
 
-    const targetChatField = (data as any).fields?.chatId;
-    const targetChatId =
-      (Array.isArray(targetChatField) ? targetChatField.at(-1)?.value : targetChatField?.value) ?? null;
+    const targetChatId = typeof fields.chatId === "string" ? fields.chatId : null;
     if (!targetChatId || typeof targetChatId !== "string") {
       return reply.status(400).send({ success: false, error: "Missing chatId" });
     }
@@ -464,9 +483,8 @@ export async function importRoutes(app: FastifyInstance) {
     const targetChat = await storage.getById(targetChatId);
     if (!targetChat) return reply.status(404).send({ success: false, error: "Target chat not found" });
 
-    const content = await data.toBuffer();
-    const text = content.toString("utf-8");
-    const timestampOverrides = readTimestampOverridesFromMultipart(data as any);
+    const text = file.buffer.toString("utf-8");
+    const timestampOverrides = readTimestampOverridesValue(fields.timestampOverrides ?? fields.__timestampOverrides);
 
     // Auto-create a groupId on the target chat if it isn't already in one, so
     // the imported transcript can sit alongside it as a branch (mirrors the
@@ -508,7 +526,7 @@ export async function importRoutes(app: FastifyInstance) {
       }
     }
 
-    const rawName = data.filename ?? "";
+    const rawName = file.filename ?? "";
     const branchName =
       rawName
         .replace(/\.jsonl$/i, "")

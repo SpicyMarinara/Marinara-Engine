@@ -585,6 +585,112 @@ test("multiple lorebook markers share one macro side-effect pass per prompt asse
   }
 });
 
+test("assembler can scan guide-only lorebook text without adding it to chat history", async () => {
+  const client = createClient({ url: "file::memory:" });
+  const db = drizzle(client) as unknown as DB;
+
+  try {
+    await runMigrations(db);
+
+    await db.insert(lorebooks).values({
+      id: "book-1",
+      name: "World Info",
+      description: "",
+      category: "world",
+      scanDepth: 2,
+      tokenBudget: 2048,
+      recursiveScanning: "false",
+      maxRecursionDepth: 3,
+      characterId: null,
+      personaId: null,
+      chatId: null,
+      isGlobal: "true",
+      enabled: "true",
+      tags: "[]",
+      generatedBy: null,
+      sourceAgentId: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    await db.insert(lorebookEntries).values(
+      dbLorebookEntry("guide-entry", {
+        content: "Guide-only lore",
+        keys: JSON.stringify(["guide-key"]),
+        position: 0,
+        order: 10,
+      }),
+    );
+
+    const result = await assemblePrompt({
+      db,
+      preset: {
+        id: "preset-1",
+        name: "Preset",
+        sectionOrder: JSON.stringify(["lorebook-section", "history-section"]),
+        groupOrder: "[]",
+        wrapFormat: "none",
+        parameters: JSON.stringify(DEFAULT_GENERATION_PARAMS),
+        variableGroups: "[]",
+        variableValues: "{}",
+      },
+      sections: [
+        {
+          id: "lorebook-section",
+          presetId: "preset-1",
+          identifier: "lorebook",
+          name: "Lorebook",
+          content: "",
+          role: "system",
+          enabled: "true",
+          isMarker: "true",
+          groupId: null,
+          markerConfig: JSON.stringify({ type: "world_info_before" }),
+          injectionPosition: "ordered",
+          injectionDepth: 0,
+          injectionOrder: 0,
+          forbidOverrides: "false",
+        },
+        {
+          id: "history-section",
+          presetId: "preset-1",
+          identifier: "history",
+          name: "History",
+          content: "",
+          role: "user",
+          enabled: "true",
+          isMarker: "true",
+          groupId: null,
+          markerConfig: JSON.stringify({ type: "chat_history" }),
+          injectionPosition: "ordered",
+          injectionDepth: 0,
+          injectionOrder: 1,
+          forbidOverrides: "false",
+        },
+      ],
+      groups: [],
+      choiceBlocks: [],
+      chatChoices: {},
+      chatId: "chat-1",
+      characterIds: [],
+      personaName: "User",
+      personaDescription: "",
+      chatMessages: [{ role: "user", content: "ordinary visible message" }],
+      lorebookScanMessages: [
+        { role: "user", content: "ordinary visible message" },
+        { role: "user", content: "guide-key hidden instruction" },
+      ],
+      activeLorebookIds: [],
+    });
+
+    const content = result.messages.map((message) => message.content).join("\n");
+    assert.match(content, /Guide-only lore/);
+    assert.match(content, /ordinary visible message/);
+    assert.doesNotMatch(content, /guide-key hidden instruction/);
+  } finally {
+    client.close();
+  }
+});
+
 test("entries inherit their lorebook scan depth when no per-entry override is set", () => {
   const entry = makeEntry();
   const entries = applyLorebookDefaults([entry], new Map([["book-1", makeLorebook({ scanDepth: 2 })]]));

@@ -26,6 +26,8 @@ export interface SlashCommandContext {
     chatId: string;
     connectionId: string | null;
     userMessage?: string;
+    generationGuide?: string;
+    generationGuideSource?: "narrator" | "guide" | "game_start";
     impersonate?: boolean;
     attachments?: { type: string; data: string }[];
     impersonatePresetId?: string;
@@ -258,6 +260,10 @@ function isMessageHidden(msg: { extra?: unknown }): boolean {
   }
 }
 
+export function buildNarratorInstructionMessage(direction: string): string {
+  return `[Narrator instruction — do not include a reply from {{user}}. Instead, write the next part of the narrative steering it toward the following: ${direction.trim()}]`;
+}
+
 // ── Command definitions ────────────────
 
 const COMMANDS: SlashCommand[] = [
@@ -302,7 +308,8 @@ const COMMANDS: SlashCommand[] = [
       await ctx.generate({
         chatId: ctx.chatId,
         connectionId: null,
-        userMessage: `[Narrator instruction — do not include a reply from {{user}}. Instead, write the next part of the narrative steering it toward the following: ${args.trim()}]`,
+        generationGuide: buildNarratorInstructionMessage(args),
+        generationGuideSource: "narrator",
       });
       return { handled: true };
     },

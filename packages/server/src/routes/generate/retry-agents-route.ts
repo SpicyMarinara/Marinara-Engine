@@ -36,6 +36,7 @@ import {
   parseGameStateRow,
   preserveTrackerCharacterUiFields,
   resolveBaseUrl,
+  resolveVisibleGameStateAnchor,
 } from "./generate-route-utils.js";
 import {
   buildHistoricalLorebookKeeperContext,
@@ -305,7 +306,11 @@ async function buildRetryAgentContext(args: {
       agentContext.gameState = null;
     }
   } else if (useLatestGameStateFallback) {
-    const latestGS = await gameStateStore.getLatestCommitted(chatId);
+    const visibleAnchor = lastAssistant ? resolveVisibleGameStateAnchor([lastAssistant]) : null;
+    const latestGS = await gameStateStore.getForGeneration(chatId, {
+      preferLatestVisible: true,
+      visibleAnchor,
+    });
     if (latestGS) {
       agentContext.gameState = parseGameStateRow(latestGS as Record<string, unknown>);
     }
@@ -1301,6 +1306,23 @@ async function applyRetryResultEffects(args: {
   const agentsStore = createAgentsStorage(app.db);
   const chatMeta = parseExtra(chat.metadata) as Record<string, unknown>;
   let currentResponseForRewrite = agentContext.mainResponse;
+  let retryBaseGameStateSnapshotPromise: ReturnType<typeof gameStateStore.getForGeneration> | null = null;
+  const loadRetryBaseGameStateSnapshot = () => {
+    retryBaseGameStateSnapshotPromise ??= gameStateStore.getForGeneration(chatId, {
+      preferLatestVisible: true,
+      visibleAnchor: retryMessageId ? { messageId: retryMessageId, swipeIndex: retrySwipeIndex } : null,
+      excludeMessageId: retryMessageId || null,
+    });
+    return retryBaseGameStateSnapshotPromise;
+  };
+  const loadRetryTargetGameStateSnapshot = async () => {
+    if (!retryMessageId) return loadRetryBaseGameStateSnapshot();
+    const existing = await gameStateStore.getByMessage(retryMessageId, retrySwipeIndex);
+    if (existing) return existing;
+    return gameStateStore.updateByMessage(retryMessageId, retrySwipeIndex, chatId, {}, undefined, {
+      baseSnapshot: await loadRetryBaseGameStateSnapshot(),
+    });
+  };
 
   for (const result of sortedResults) {
     if (result.success && result.type === "text_rewrite" && result.data && typeof result.data === "object") {
@@ -1336,7 +1358,14 @@ async function applyRetryResultEffects(args: {
         if (gs.weather != null) worldStatePatch.weather = gs.weather as string;
         if (gs.temperature != null) worldStatePatch.temperature = gs.temperature as string;
         if (Object.keys(worldStatePatch).length > 0) {
-          await gameStateStore.updateByMessage(retryMessageId, retrySwipeIndex, chatId, worldStatePatch as any);
+          await gameStateStore.updateByMessage(
+            retryMessageId,
+            retrySwipeIndex,
+            chatId,
+            worldStatePatch as any,
+            undefined,
+            { baseSnapshot: await loadRetryBaseGameStateSnapshot() },
+          );
         }
 
         const nextLocation = typeof worldStatePatch.location === "string" ? worldStatePatch.location : null;
@@ -1373,7 +1402,8 @@ async function applyRetryResultEffects(args: {
           );
           const trimmedText = text.trim();
           if (trimmedText) {
-            const entry = { agentType: result.agentType, text: trimmedText };
+            const agentName = resolvedAgents.find((entry) => entry.resolved.type === result.agentType)?.cfg.name;
+            const entry = { agentType: result.agentType, agentName, text: trimmedText };
             const idx = list.findIndex((e) => e.agentType === result.agentType);
             if (idx >= 0) list[idx] = entry;
             else list.push(entry);
@@ -1397,7 +1427,7 @@ async function applyRetryResultEffects(args: {
       try {
         const ctData = result.data as Record<string, unknown>;
         const presentCharacters = (ctData.presentCharacters as any[]) ?? [];
-        const previousSnapshot = await gameStateStore.getByMessage(retryMessageId, retrySwipeIndex);
+        const previousSnapshot = await loadRetryTargetGameStateSnapshot();
         let previousCharacters: any[] = [];
         if (previousSnapshot?.presentCharacters) {
           try {
@@ -1411,9 +1441,16 @@ async function applyRetryResultEffects(args: {
           }
         }
         preserveTrackerCharacterUiFields(presentCharacters, previousCharacters);
-        await gameStateStore.updateByMessage(retryMessageId, retrySwipeIndex, chatId, {
-          presentCharacters,
-        });
+        await gameStateStore.updateByMessage(
+          retryMessageId,
+          retrySwipeIndex,
+          chatId,
+          {
+            presentCharacters,
+          },
+          undefined,
+          { baseSnapshot: await loadRetryBaseGameStateSnapshot() },
+        );
         sendSseEvent(reply, { type: "game_state_patch", data: { presentCharacters } });
       } catch {
         // Non-critical patching failure.
@@ -1426,9 +1463,7 @@ async function applyRetryResultEffects(args: {
         const bars = (psData.stats as any[]) ?? [];
         const status = (psData.status as string) ?? "";
         const inventory = (psData.inventory as any[]) ?? [];
-        const latest =
-          (await gameStateStore.getByMessage(retryMessageId, retrySwipeIndex)) ??
-          (await gameStateStore.getLatest(chatId));
+        const latest = await loadRetryTargetGameStateSnapshot();
         if (latest) {
           const updates: Record<string, unknown> = {};
           if (bars.length > 0) updates.personaStats = JSON.stringify(bars);
@@ -1527,9 +1562,7 @@ async function applyRetryResultEffects(args: {
           JSON.stringify(qData).slice(0, 500),
         );
         if (updates.length > 0) {
-          const snap =
-            (await gameStateStore.getByMessage(retryMessageId, retrySwipeIndex)) ??
-            (await gameStateStore.getLatest(chatId));
+          const snap = await loadRetryTargetGameStateSnapshot();
           const existingPS = snap?.playerStats
             ? typeof snap.playerStats === "string"
               ? JSON.parse(snap.playerStats)
@@ -1617,9 +1650,7 @@ async function applyRetryResultEffects(args: {
         const ctData = result.data as Record<string, unknown>;
         const fields = (ctData.fields as any[]) ?? [];
         if (fields.length > 0) {
-          const snap =
-            (await gameStateStore.getByMessage(retryMessageId, retrySwipeIndex)) ??
-            (await gameStateStore.getLatest(chatId));
+          const snap = await loadRetryTargetGameStateSnapshot();
           if (snap) {
             const existingPS = snap.playerStats
               ? typeof snap.playerStats === "string"
@@ -1653,6 +1684,10 @@ async function applyRetryResultEffects(args: {
           const illustratorAgent = resolvedAgents.find(
             (a) => a.resolved.id === result.agentId || a.resolved.type === "illustrator",
           );
+          const rawImagePositivePrompt = illustratorAgent?.resolved.settings?.imagePositivePrompt;
+          const rawSavedNegativePrompt = illustratorAgent?.resolved.settings?.imageNegativePrompt;
+          const imagePositivePrompt = typeof rawImagePositivePrompt === "string" ? rawImagePositivePrompt.trim() : "";
+          const savedNegativePrompt = typeof rawSavedNegativePrompt === "string" ? rawSavedNegativePrompt.trim() : "";
           let imgConnId = (illustratorAgent?.resolved.settings?.imageConnectionId as string) ?? null;
           if (!imgConnId) {
             const defaultImageConn = (await conns.list()).find(
@@ -1692,6 +1727,10 @@ async function applyRetryResultEffects(args: {
               }
 
               let fullPrompt = style ? `${style}, ${imagePrompt}` : imagePrompt;
+              if (imagePositivePrompt) {
+                fullPrompt = `${fullPrompt}, ${imagePositivePrompt}`;
+              }
+              const finalNegativePrompt = [negativePrompt, savedNegativePrompt].filter(Boolean).join(", ");
 
               // Collect character avatar references when enabled
               const useAvatarRefs = illustratorAgent?.resolved.settings?.useAvatarReferences === true;
@@ -1745,7 +1784,7 @@ async function applyRetryResultEffects(args: {
 
               const imageResult = await generateImage(imgModel, imgBaseUrl, imgApiKey, imgServiceHint, {
                 prompt: fullPrompt,
-                negativePrompt: negativePrompt || undefined,
+                negativePrompt: finalNegativePrompt || undefined,
                 model: imgModel,
                 width: imgWidth,
                 height: imgHeight,

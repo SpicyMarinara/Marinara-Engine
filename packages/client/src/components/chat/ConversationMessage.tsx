@@ -13,8 +13,6 @@ import {
   X,
   User,
   Languages,
-  ChevronLeft,
-  ChevronRight,
 } from "lucide-react";
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import type { Message } from "@marinara-engine/shared";
@@ -28,6 +26,7 @@ import { useTranslate } from "../../hooks/use-translate";
 import { api } from "../../lib/api-client";
 import type { CharacterMap, MessageSelectionToggle, PersonaInfo } from "./chat-area.types";
 import { ImagePromptPanel } from "./ImagePromptPanel";
+import { SwipeJumpControl } from "./SwipeJumpControl";
 
 /** Build style object for name color (supports gradients). */
 function nameColorStyle(color?: string): CSSProperties | undefined {
@@ -494,26 +493,6 @@ export const ConversationMessage = memo(function ConversationMessage({
   const swipeCount = message.swipeCount ?? 0;
   const hasSwipes = swipeCount > 1;
 
-  const handleSwipePrev = useCallback(
-    (e?: React.MouseEvent<HTMLButtonElement>) => {
-      e?.stopPropagation();
-      if (message.activeSwipeIndex > 0) {
-        onSetActiveSwipe?.(message.id, message.activeSwipeIndex - 1);
-      }
-    },
-    [message.activeSwipeIndex, message.id, onSetActiveSwipe],
-  );
-
-  const handleSwipeNext = useCallback(
-    (e?: React.MouseEvent<HTMLButtonElement>) => {
-      e?.stopPropagation();
-      if (message.activeSwipeIndex < swipeCount - 1) {
-        onSetActiveSwipe?.(message.id, message.activeSwipeIndex + 1);
-      }
-    },
-    [message.activeSwipeIndex, message.id, onSetActiveSwipe, swipeCount],
-  );
-
   // Actions
   const handleCopy = useCallback(() => {
     copyToClipboard(renderedContent);
@@ -799,27 +778,15 @@ export const ConversationMessage = memo(function ConversationMessage({
         )}
 
         {!hideActions && hasSwipes && (
-          <div className="ml-14 mt-2 flex items-center gap-1.5 px-1 text-[0.6875rem] text-[var(--muted-foreground)]">
-            <button
-              className="rounded p-0.5 transition-colors hover:bg-[var(--accent)] disabled:opacity-30"
-              onClick={handleSwipePrev}
-              disabled={message.activeSwipeIndex <= 0}
-              title="Previous swipe"
-            >
-              <ChevronLeft size="0.75rem" />
-            </button>
-            <span className="tabular-nums">
-              {message.activeSwipeIndex + 1}/{swipeCount}
-            </span>
-            <button
-              className="rounded p-0.5 transition-colors hover:bg-[var(--accent)] disabled:opacity-30"
-              onClick={handleSwipeNext}
-              disabled={message.activeSwipeIndex >= swipeCount - 1}
-              title="Next swipe"
-            >
-              <ChevronRight size="0.75rem" />
-            </button>
-          </div>
+          <SwipeJumpControl
+            messageId={message.id}
+            activeSwipeIndex={message.activeSwipeIndex}
+            swipeCount={swipeCount}
+            onSetActiveSwipe={(index) => onSetActiveSwipe?.(message.id, index)}
+            className="ml-14 mt-2 px-1 text-[0.6875rem] text-[var(--muted-foreground)]"
+            buttonClassName="rounded p-0.5 transition-colors hover:bg-[var(--accent)] disabled:opacity-30"
+            inputClassName="h-[1.5rem] w-[3rem] text-[0.6875rem]"
+          />
         )}
 
         {/* Hover action bar */}
@@ -1094,27 +1061,15 @@ export const ConversationMessage = memo(function ConversationMessage({
         )}
 
         {!hideActions && hasSwipes && (
-          <div className="mt-1.5 flex items-center gap-1.5 text-[0.6875rem] text-[var(--muted-foreground)]">
-            <button
-              className="rounded p-0.5 transition-colors hover:bg-[var(--accent)] disabled:opacity-30"
-              onClick={handleSwipePrev}
-              disabled={message.activeSwipeIndex <= 0}
-              title="Previous swipe"
-            >
-              <ChevronLeft size="0.75rem" />
-            </button>
-            <span className="tabular-nums">
-              {message.activeSwipeIndex + 1}/{swipeCount}
-            </span>
-            <button
-              className="rounded p-0.5 transition-colors hover:bg-[var(--accent)] disabled:opacity-30"
-              onClick={handleSwipeNext}
-              disabled={message.activeSwipeIndex >= swipeCount - 1}
-              title="Next swipe"
-            >
-              <ChevronRight size="0.75rem" />
-            </button>
-          </div>
+          <SwipeJumpControl
+            messageId={message.id}
+            activeSwipeIndex={message.activeSwipeIndex}
+            swipeCount={swipeCount}
+            onSetActiveSwipe={(index) => onSetActiveSwipe?.(message.id, index)}
+            className="mt-1.5 text-[0.6875rem] text-[var(--muted-foreground)]"
+            buttonClassName="rounded p-0.5 transition-colors hover:bg-[var(--accent)] disabled:opacity-30"
+            inputClassName="h-[1.5rem] w-[3rem] text-[0.6875rem]"
+          />
         )}
       </div>
 

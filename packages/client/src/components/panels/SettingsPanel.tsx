@@ -35,11 +35,13 @@ import {
   Image,
   Trash2,
   Check,
+  ChevronDown,
   Loader2,
   Palette,
   Puzzle,
   CloudRain,
   FileCode2,
+  FileText,
   Power,
   PowerOff,
   Paintbrush,
@@ -57,6 +59,8 @@ import {
   RotateCcw,
   ExternalLink,
   ScrollText,
+  UserCheck,
+  WandSparkles,
 } from "lucide-react";
 import { useClearAllData, useExpungeData, useUpdateChatMetadata, type ExpungeScope } from "../../hooks/use-chats";
 import { useChatStore } from "../../stores/chat.store";
@@ -2801,6 +2805,14 @@ function AdvancedSettings() {
   const setShowMessageNumbers = useUIStore((s) => s.setShowMessageNumbers);
   const guideGenerations = useUIStore((s) => s.guideGenerations);
   const setGuideGenerations = useUIStore((s) => s.setGuideGenerations);
+  const showQuickRepliesMenu = useUIStore((s) => s.showQuickRepliesMenu);
+  const setShowQuickRepliesMenu = useUIStore((s) => s.setShowQuickRepliesMenu);
+  const showQuickReplyPostOnly = useUIStore((s) => s.showQuickReplyPostOnly);
+  const setShowQuickReplyPostOnly = useUIStore((s) => s.setShowQuickReplyPostOnly);
+  const showQuickReplyGuide = useUIStore((s) => s.showQuickReplyGuide);
+  const setShowQuickReplyGuide = useUIStore((s) => s.setShowQuickReplyGuide);
+  const showQuickReplyImpersonate = useUIStore((s) => s.showQuickReplyImpersonate);
+  const setShowQuickReplyImpersonate = useUIStore((s) => s.setShowQuickReplyImpersonate);
   const debugMode = useUIStore((s) => s.debugMode);
   const setDebugMode = useUIStore((s) => s.setDebugMode);
   const clearAllData = useClearAllData();
@@ -2811,6 +2823,12 @@ function AdvancedSettings() {
   const [exportProfileDialogOpen, setExportProfileDialogOpen] = useState(false);
   const [refreshingSpa, setRefreshingSpa] = useState(false);
   const [adminSecret, setAdminSecret] = useState(() => localStorage.getItem(ADMIN_SECRET_STORAGE_KEY) ?? "");
+  const [quickRepliesDrawerOpen, setQuickRepliesDrawerOpen] = useState(true);
+
+  const handleQuickRepliesMenuChange = (enabled: boolean) => {
+    setShowQuickRepliesMenu(enabled);
+    if (enabled) setQuickRepliesDrawerOpen(true);
+  };
 
   const handleExportProfile = async (format: ExportFormatChoice) => {
     setExportingProfile(true);
@@ -3191,6 +3209,11 @@ function AdvancedSettings() {
                     Download v{updateCheck.data.latestVersion}
                   </a>
                 )}
+                {updateCheck.data.versionUpdate && (
+                  <span className="text-[0.625rem] text-[var(--muted-foreground)]">
+                    Android APK assets are WebView shells, not standalone apps. Start Marinara in Termux first.
+                  </span>
+                )}
                 {applyUnavailableReason === "unsupported-install" && (
                   <span className="text-[0.625rem] text-[var(--muted-foreground)]">
                     Docker users:{" "}
@@ -3237,6 +3260,149 @@ function AdvancedSettings() {
       </div>
 
       <div className="retro-divider" />
+      <div
+        className={cn(
+          "overflow-hidden rounded-xl border transition-colors",
+          showQuickRepliesMenu
+            ? "border-[var(--primary)]/30 bg-[var(--secondary)]/15"
+            : "border-transparent bg-transparent hover:bg-[var(--secondary)]/30",
+        )}
+      >
+        <div className="flex min-h-9 items-stretch">
+          <div className="flex min-w-0 items-center gap-1.5 py-2 pl-1.5 pr-2">
+            <label className="flex min-w-0 cursor-pointer items-center gap-2.5">
+              <input
+                type="checkbox"
+                checked={showQuickRepliesMenu}
+                onChange={(e) => handleQuickRepliesMenuChange(e.target.checked)}
+                className="h-3.5 w-3.5 shrink-0 rounded border-[var(--border)] accent-[var(--primary)]"
+              />
+              <span className="min-w-0 text-xs">Quick replies</span>
+            </label>
+            <span className="shrink-0" onClick={(e) => e.preventDefault()}>
+              <HelpTooltip text="Adds alternate draft actions beside Send. One action appears directly; multiple actions open from the ellipsis." />
+            </span>
+          </div>
+          <button
+            type="button"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!showQuickRepliesMenu) return;
+              setQuickRepliesDrawerOpen((open) => !open);
+            }}
+            aria-disabled={!showQuickRepliesMenu}
+            aria-controls="quick-replies-actions-drawer"
+            aria-expanded={showQuickRepliesMenu && quickRepliesDrawerOpen}
+            aria-label={
+              !showQuickRepliesMenu
+                ? "Quick replies options disabled"
+                : quickRepliesDrawerOpen
+                  ? "Collapse Quick replies options"
+                  : "Expand Quick replies options"
+            }
+            title={
+              !showQuickRepliesMenu
+                ? "Enable Quick replies to configure options"
+                : quickRepliesDrawerOpen
+                  ? "Collapse options"
+                  : "Expand options"
+            }
+            className={cn(
+              "flex min-w-10 flex-1 items-center justify-end py-2 pl-2 pr-2 text-[var(--muted-foreground)] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]",
+              showQuickRepliesMenu && quickRepliesDrawerOpen ? "rounded-tr-xl" : "rounded-r-xl",
+              showQuickRepliesMenu
+                ? "cursor-pointer hover:bg-[var(--secondary)]/35 hover:text-[var(--foreground)] active:scale-[0.99]"
+                : "cursor-not-allowed opacity-35",
+            )}
+            tabIndex={showQuickRepliesMenu ? 0 : -1}
+          >
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg">
+              <ChevronDown
+                size="0.875rem"
+                aria-hidden="true"
+                className={cn("transition-transform", showQuickRepliesMenu && quickRepliesDrawerOpen ? "" : "-rotate-90")}
+              />
+            </span>
+          </button>
+        </div>
+        {showQuickRepliesMenu && quickRepliesDrawerOpen && (
+          <div
+            id="quick-replies-actions-drawer"
+            className="grid gap-1 border-t border-[var(--border)]/60 bg-[var(--background)]/25 p-1"
+            role="group"
+            aria-label="Quick replies actions to include"
+          >
+            {[
+              {
+                label: "Post only",
+                checked: showQuickReplyPostOnly,
+                onChange: setShowQuickReplyPostOnly,
+                description: "Add persona message without triggering a reply.",
+                icon: FileText,
+              },
+              {
+                label: "Guide reply",
+                checked: showQuickReplyGuide,
+                onChange: setShowQuickReplyGuide,
+                description: "Use draft as /narrator direction.",
+                icon: WandSparkles,
+              },
+              {
+                label: "Impersonate",
+                checked: showQuickReplyImpersonate,
+                onChange: setShowQuickReplyImpersonate,
+                description: "Generate a persona-side user reply.",
+                icon: UserCheck,
+              },
+            ].map((option) => {
+              const Icon = option.icon;
+              return (
+                <button
+                  type="button"
+                  key={option.label}
+                  aria-pressed={option.checked}
+                  onClick={() => option.onChange(!option.checked)}
+                  className={cn(
+                    "group flex min-h-10 w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] active:scale-[0.99]",
+                    option.checked
+                      ? "bg-[var(--primary)]/8 text-[var(--foreground)] ring-1 ring-[var(--primary)]/30"
+                      : "text-[var(--muted-foreground)] ring-1 ring-transparent hover:bg-[var(--secondary)]/45 hover:text-[var(--foreground)]",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "flex h-7 w-7 shrink-0 items-center justify-center rounded-md ring-1 transition-colors",
+                      option.checked
+                        ? "bg-[var(--primary)]/12 text-[var(--primary)] ring-[var(--primary)]/30"
+                        : "bg-[var(--secondary)]/35 text-[var(--muted-foreground)] ring-[var(--border)]/60 group-hover:text-[var(--foreground)]",
+                    )}
+                  >
+                    <Icon size="0.8125rem" aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-xs font-semibold">{option.label}</span>
+                    <span className="block text-[0.65rem] leading-tight text-[var(--muted-foreground)]">
+                      {option.description}
+                    </span>
+                  </span>
+                  <span
+                    className={cn(
+                      "flex h-4 w-4 shrink-0 items-center justify-center rounded-full ring-1 transition-colors",
+                      option.checked
+                        ? "bg-[var(--primary)] text-[var(--primary-foreground)] ring-[var(--primary)]"
+                        : "bg-[var(--background)]/45 text-transparent ring-[var(--border)]/70 group-hover:text-[var(--muted-foreground)]",
+                    )}
+                    aria-hidden="true"
+                  >
+                    <Check size="0.625rem" strokeWidth={3} />
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
       <ToggleSetting
         label="Group consecutive messages"
         checked={messageGrouping}
@@ -3268,10 +3434,10 @@ function AdvancedSettings() {
         help="Displays message numbers in roleplay and conversation chats."
       />
       <ToggleSetting
-        label="Guide generations with chat input"
+        label="Guide swipes/regens with chat input"
         checked={guideGenerations}
         onChange={setGuideGenerations}
-        help="Uses chat input to guide regenerations and manually triggered responses."
+        help="Uses the current draft as direction when regenerating a message or manually triggering a character response."
       />
       <ToggleSetting
         label="Debug mode"

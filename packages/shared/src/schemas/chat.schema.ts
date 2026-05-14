@@ -37,10 +37,12 @@ export const generateRequestSchema = z.object({
   mentionedCharacterNames: z.array(z.string()).optional().default([]),
   forCharacterId: z.string().nullable().optional().default(null),
   generationGuide: z.string().nullable().optional().default(null),
+  generationGuideSource: z.enum(["narrator", "guide", "game_start"]).nullable().optional().default(null),
   agentInjectionOverrides: z
     .array(
       z.object({
         agentType: z.string().min(1).max(100),
+        agentName: z.string().min(1).max(200).optional(),
         text: z.string().max(50_000),
       }),
     )

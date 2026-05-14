@@ -455,6 +455,13 @@ function capStreamingResponse(response: Response, maxBytes: number, dispatcher?:
   });
 }
 
+export function decodePossiblyCompressedBody(buffer: Buffer): Buffer {
+  if (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b) {
+    return gunzipSync(buffer);
+  }
+  return buffer;
+}
+
 export async function safeFetch(url: string | URL, options: SafeFetchOptions = {}): Promise<Response> {
   const {
     policy,
