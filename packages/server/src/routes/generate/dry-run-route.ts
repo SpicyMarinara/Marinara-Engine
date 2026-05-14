@@ -41,6 +41,7 @@ import {
   mergeCustomParameters,
   parseExtra,
   parseStoredGenerationParameters,
+  resolveRegenerationGameStateAnchor,
   resolveVisibleGameStateAnchor,
   resolveBaseUrl,
   type PromptAttachment,
@@ -86,10 +87,12 @@ async function loadLatestGameSnapshot(
   app: FastifyInstance,
   chatId: string,
   visibleAnchor?: GameStateVisibleAnchor | null,
+  excludeMessageId?: string | null,
 ): Promise<any | null> {
   return createGameStateStorage(app.db).getForGeneration(chatId, {
     preferLatestVisible: true,
     visibleAnchor,
+    excludeMessageId,
   });
 }
 
@@ -624,7 +627,6 @@ export async function registerDryRunRoute(app: FastifyInstance) {
 
     // Pull existing messages, apply the same conversation-start + context limit filtering
     const allChatMessages = await chats.listMessages(chatId);
-    const visibleGameStateAnchor = resolveVisibleGameStateAnchor(allChatMessages);
     const chatMode = (chat.mode as string) ?? "roleplay";
     const supportsHiddenFromAI = chatMode === "roleplay" || chatMode === "visual_novel";
     let startIdx = 0;
@@ -639,6 +641,13 @@ export async function registerDryRunRoute(app: FastifyInstance) {
     let chatMessages = supportsHiddenFromAI
       ? scopedMessages.filter((message: any) => !isMessageHiddenFromAI(message))
       : scopedMessages;
+    const regenerateMessageId =
+      typeof body.regenerateMessageId === "string" && body.regenerateMessageId.trim()
+        ? body.regenerateMessageId.trim()
+        : null;
+    const visibleGameStateAnchor = regenerateMessageId
+      ? resolveRegenerationGameStateAnchor(scopedMessages, regenerateMessageId)
+      : resolveVisibleGameStateAnchor(allChatMessages);
     const contextMessageLimit = chatMeta.contextMessageLimit as number | null;
     if (contextMessageLimit && contextMessageLimit > 0 && chatMessages.length > contextMessageLimit) {
       chatMessages = chatMessages.slice(-contextMessageLimit);
@@ -1063,7 +1072,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
 
       const trackersBlock = includeTrackers
         ? await (async () => {
-            const snap = await loadLatestGameSnapshot(app, chatId, visibleGameStateAnchor);
+            const snap = await loadLatestGameSnapshot(app, chatId, visibleGameStateAnchor, regenerateMessageId);
             if (!snap) return null;
             return formatTrackersContextBlock({ wrapFormat, snap, chatMeta });
           })()
@@ -1352,7 +1361,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
     // Optional injection: tracker context (read-only snapshot)
     const resolvedInjectTrackersForRun = usePromptParts ? false : resolvedInjectTrackers;
     if (resolvedInjectTrackersForRun) {
-      const snap = await loadLatestGameSnapshot(app, chatId, visibleGameStateAnchor);
+      const snap = await loadLatestGameSnapshot(app, chatId, visibleGameStateAnchor, regenerateMessageId);
       const contextBlock = snap ? formatTrackersContextBlock({ wrapFormat, snap, chatMeta }) : null;
       if (contextBlock) {
         finalMessages = injectTrackerContext(finalMessages, contextBlock, "beforeLastUser");

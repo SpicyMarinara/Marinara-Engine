@@ -1306,6 +1306,23 @@ async function applyRetryResultEffects(args: {
   const agentsStore = createAgentsStorage(app.db);
   const chatMeta = parseExtra(chat.metadata) as Record<string, unknown>;
   let currentResponseForRewrite = agentContext.mainResponse;
+  let retryBaseGameStateSnapshotPromise: ReturnType<typeof gameStateStore.getForGeneration> | null = null;
+  const loadRetryBaseGameStateSnapshot = () => {
+    retryBaseGameStateSnapshotPromise ??= gameStateStore.getForGeneration(chatId, {
+      preferLatestVisible: true,
+      visibleAnchor: retryMessageId ? { messageId: retryMessageId, swipeIndex: retrySwipeIndex } : null,
+      excludeMessageId: retryMessageId || null,
+    });
+    return retryBaseGameStateSnapshotPromise;
+  };
+  const loadRetryTargetGameStateSnapshot = async () => {
+    if (!retryMessageId) return loadRetryBaseGameStateSnapshot();
+    const existing = await gameStateStore.getByMessage(retryMessageId, retrySwipeIndex);
+    if (existing) return existing;
+    return gameStateStore.updateByMessage(retryMessageId, retrySwipeIndex, chatId, {}, undefined, {
+      baseSnapshot: await loadRetryBaseGameStateSnapshot(),
+    });
+  };
 
   for (const result of sortedResults) {
     if (result.success && result.type === "text_rewrite" && result.data && typeof result.data === "object") {
@@ -1341,7 +1358,14 @@ async function applyRetryResultEffects(args: {
         if (gs.weather != null) worldStatePatch.weather = gs.weather as string;
         if (gs.temperature != null) worldStatePatch.temperature = gs.temperature as string;
         if (Object.keys(worldStatePatch).length > 0) {
-          await gameStateStore.updateByMessage(retryMessageId, retrySwipeIndex, chatId, worldStatePatch as any);
+          await gameStateStore.updateByMessage(
+            retryMessageId,
+            retrySwipeIndex,
+            chatId,
+            worldStatePatch as any,
+            undefined,
+            { baseSnapshot: await loadRetryBaseGameStateSnapshot() },
+          );
         }
 
         const nextLocation = typeof worldStatePatch.location === "string" ? worldStatePatch.location : null;
@@ -1403,7 +1427,7 @@ async function applyRetryResultEffects(args: {
       try {
         const ctData = result.data as Record<string, unknown>;
         const presentCharacters = (ctData.presentCharacters as any[]) ?? [];
-        const previousSnapshot = await gameStateStore.getByMessage(retryMessageId, retrySwipeIndex);
+        const previousSnapshot = await loadRetryTargetGameStateSnapshot();
         let previousCharacters: any[] = [];
         if (previousSnapshot?.presentCharacters) {
           try {
@@ -1417,9 +1441,16 @@ async function applyRetryResultEffects(args: {
           }
         }
         preserveTrackerCharacterUiFields(presentCharacters, previousCharacters);
-        await gameStateStore.updateByMessage(retryMessageId, retrySwipeIndex, chatId, {
-          presentCharacters,
-        });
+        await gameStateStore.updateByMessage(
+          retryMessageId,
+          retrySwipeIndex,
+          chatId,
+          {
+            presentCharacters,
+          },
+          undefined,
+          { baseSnapshot: await loadRetryBaseGameStateSnapshot() },
+        );
         sendSseEvent(reply, { type: "game_state_patch", data: { presentCharacters } });
       } catch {
         // Non-critical patching failure.
@@ -1432,9 +1463,7 @@ async function applyRetryResultEffects(args: {
         const bars = (psData.stats as any[]) ?? [];
         const status = (psData.status as string) ?? "";
         const inventory = (psData.inventory as any[]) ?? [];
-        const latest =
-          (await gameStateStore.getByMessage(retryMessageId, retrySwipeIndex)) ??
-          (await gameStateStore.getLatest(chatId));
+        const latest = await loadRetryTargetGameStateSnapshot();
         if (latest) {
           const updates: Record<string, unknown> = {};
           if (bars.length > 0) updates.personaStats = JSON.stringify(bars);
@@ -1533,9 +1562,7 @@ async function applyRetryResultEffects(args: {
           JSON.stringify(qData).slice(0, 500),
         );
         if (updates.length > 0) {
-          const snap =
-            (await gameStateStore.getByMessage(retryMessageId, retrySwipeIndex)) ??
-            (await gameStateStore.getLatest(chatId));
+          const snap = await loadRetryTargetGameStateSnapshot();
           const existingPS = snap?.playerStats
             ? typeof snap.playerStats === "string"
               ? JSON.parse(snap.playerStats)
@@ -1623,9 +1650,7 @@ async function applyRetryResultEffects(args: {
         const ctData = result.data as Record<string, unknown>;
         const fields = (ctData.fields as any[]) ?? [];
         if (fields.length > 0) {
-          const snap =
-            (await gameStateStore.getByMessage(retryMessageId, retrySwipeIndex)) ??
-            (await gameStateStore.getLatest(chatId));
+          const snap = await loadRetryTargetGameStateSnapshot();
           if (snap) {
             const existingPS = snap.playerStats
               ? typeof snap.playerStats === "string"

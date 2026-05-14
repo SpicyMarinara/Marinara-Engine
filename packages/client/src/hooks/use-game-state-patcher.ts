@@ -27,6 +27,7 @@ type QueuedGameStatePatch = {
 const PATCH_DEBOUNCE_MS = 500;
 const pendingPatches = new Map<string, QueuedGameStatePatch>();
 const patchTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const inFlightPatches = new Map<string, { chatId: string; promise: Promise<void> }>();
 let beforeUnloadListeners = 0;
 
 function createEmptyPlayerStats(): PlayerStats {
@@ -129,20 +130,61 @@ export async function flushGameStatePatch(chatId?: string) {
     pendingPatches.delete(key);
 
     const payload = buildPayload(queuedSnapshot);
-    try {
-      await api.patch(`/chats/${queuedSnapshot.chatId}/game-state`, { ...payload, manual: true });
-    } catch (error) {
-      const existing = pendingPatches.get(key);
-      pendingPatches.set(key, {
-        chatId: queuedSnapshot.chatId,
-        target: queuedSnapshot.target,
-        fields: {
-          ...queuedSnapshot.fields,
-          ...(existing?.fields ?? {}),
-        },
+    const previousInFlight = inFlightPatches.get(key);
+    if (previousInFlight) {
+      try {
+        await previousInFlight.promise;
+      } catch (error) {
+        const existing = pendingPatches.get(key);
+        pendingPatches.set(key, {
+          chatId: queuedSnapshot.chatId,
+          target: queuedSnapshot.target,
+          fields: {
+            ...queuedSnapshot.fields,
+            ...(existing?.fields ?? {}),
+          },
+        });
+        errors.push(error);
+        continue;
+      }
+    }
+
+    const request: Promise<void> = api
+      .patch(`/chats/${queuedSnapshot.chatId}/game-state`, { ...payload, manual: true })
+      .then(() => undefined)
+      .catch((error) => {
+        const existing = pendingPatches.get(key);
+        pendingPatches.set(key, {
+          chatId: queuedSnapshot.chatId,
+          target: queuedSnapshot.target,
+          fields: {
+            ...queuedSnapshot.fields,
+            ...(existing?.fields ?? {}),
+          },
+        });
+        throw error;
+      })
+      .finally(() => {
+        if (inFlightPatches.get(key)?.promise === request) {
+          inFlightPatches.delete(key);
+        }
       });
+    inFlightPatches.set(key, { chatId: queuedSnapshot.chatId, promise: request });
+
+    try {
+      await request;
+    } catch (error) {
       errors.push(error);
     }
+  }
+
+  const inFlightResults = await Promise.allSettled(
+    Array.from(inFlightPatches.values())
+      .filter((entry) => !chatId || entry.chatId === chatId)
+      .map((entry) => entry.promise),
+  );
+  for (const result of inFlightResults) {
+    if (result.status === "rejected") errors.push(result.reason);
   }
 
   if (errors.length > 0) {
@@ -193,9 +235,11 @@ function retainBeforeUnloadFlush() {
 }
 
 export function patchGameStateField(chatId: string, field: GameStatePatchField, value: unknown) {
+  const store = useGameStateStore.getState();
+  if (store.isRefreshing) return;
   const prev = getCurrentGameStateForChat(chatId);
   const nextState = { ...(prev ?? createEmptyGameState(chatId)), [field]: value } as GameState;
-  useGameStateStore.getState().setGameState(nextState);
+  store.setGameState(nextState);
   queuePatch(chatId, field, value);
 }
 

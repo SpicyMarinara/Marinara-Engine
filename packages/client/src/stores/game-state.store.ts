@@ -7,6 +7,7 @@ import type { GameState } from "@marinara-engine/shared";
 interface GameStateStore {
   current: GameState | null;
   isVisible: boolean;
+  isRefreshing: boolean;
   expandedSections: Set<string>;
   /** Flushes any pending debounced game-state patch immediately. */
   flushPatch: (() => Promise<void>) | null;
@@ -14,6 +15,7 @@ interface GameStateStore {
   // Actions
   setGameState: (state: GameState | null) => void;
   setVisible: (visible: boolean) => void;
+  setRefreshing: (refreshing: boolean) => void;
   toggleSection: (section: string) => void;
   registerFlushPatch: (id: string, fn: () => Promise<void>) => () => void;
   reset: () => void;
@@ -38,11 +40,13 @@ function buildFlushPatch() {
 export const useGameStateStore = create<GameStateStore>((set) => ({
   current: null,
   isVisible: true,
+  isRefreshing: false,
   expandedSections: new Set(["location", "characters", "stats"]),
   flushPatch: null,
 
   setGameState: (state) => set({ current: state }),
   setVisible: (visible) => set({ isVisible: visible }),
+  setRefreshing: (refreshing) => set({ isRefreshing: refreshing }),
   registerFlushPatch: (id, fn) => {
     flushPatchCallbacks.set(id, fn);
     set({ flushPatch: buildFlushPatch() });
@@ -65,6 +69,7 @@ export const useGameStateStore = create<GameStateStore>((set) => ({
     set({
       current: null,
       isVisible: true,
+      isRefreshing: false,
       expandedSections: new Set(["location", "characters", "stats"]),
       flushPatch: null,
     });

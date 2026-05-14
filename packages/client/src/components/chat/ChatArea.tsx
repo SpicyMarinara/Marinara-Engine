@@ -140,6 +140,7 @@ export function ChatArea() {
   const prevScrollHeightRef = useRef(0);
   const isLoadingMoreRef = useRef(false);
   const intuitiveTouchStartRef = useRef<{ x: number; y: number; target: EventTarget | null } | null>(null);
+  const swipeActionSeq = useRef(0);
   // Tracks whether the initial load stagger animation has played.
   // After the first render with messages, new/re-mounted messages
   // skip the entry animation to avoid a visible flash on refetch.
@@ -646,15 +647,15 @@ export function ChatArea() {
   const expressionAgentEnabled = enabledAgentTypes.has("expression");
   const shouldRefreshGameStateOnSwipe = isGameChat || Boolean(chatMeta.enableAgents);
 
-  const refreshVisibleGameState = useCallback(() => {
+  const refreshVisibleGameState = useCallback(async () => {
     if (!shouldRefreshGameStateOnSwipe || !activeChatId) return;
-    api
-      .get<import("@marinara-engine/shared").GameState | null>(`/chats/${activeChatId}/game-state`)
-      .then((gs) => {
-        if (useChatStore.getState().activeChatId !== activeChatId) return;
-        useGameStateStore.getState().setGameState(gs ?? null);
-      })
-      .catch(() => {});
+    try {
+      const gs = await api.get<import("@marinara-engine/shared").GameState | null>(`/chats/${activeChatId}/game-state`);
+      if (useChatStore.getState().activeChatId !== activeChatId) return;
+      useGameStateStore.getState().setGameState(gs ?? null);
+    } catch {
+      // Non-critical refresh failure; the next tracker load will fetch again.
+    }
   }, [activeChatId, shouldRefreshGameStateOnSwipe]);
 
   const handleDelete = useCallback((messageId: string) => {
@@ -681,15 +682,34 @@ export function ChatArea() {
     const index = deleteDialogActiveSwipeIndex;
     setDeleteDialogMessageId(null);
     if (!messageId || !deleteDialogCanDeleteSwipe) return;
+    const actionId = ++swipeActionSeq.current;
     void (async () => {
+      const gameStateStore = useGameStateStore.getState();
+      if (shouldRefreshGameStateOnSwipe) gameStateStore.setRefreshing(true);
       try {
         const flushPatch = useGameStateStore.getState().flushPatch;
-        if (flushPatch) await flushPatch();
+        if (flushPatch) {
+          try {
+            await flushPatch();
+          } catch {
+            if (swipeActionSeq.current === actionId) {
+              toast.error("Could not save tracker changes before deleting the swipe.");
+            }
+            return;
+          }
+        }
+        if (swipeActionSeq.current !== actionId) return;
+        await deleteSwipe.mutateAsync({ messageId, index });
+        if (swipeActionSeq.current !== actionId) return;
+        await refreshVisibleGameState();
       } catch {
-        toast.error("Could not save tracker changes before deleting the swipe.");
-        return;
+        if (swipeActionSeq.current !== actionId) return;
+        toast.error("Could not delete the swipe.");
+      } finally {
+        if (swipeActionSeq.current === actionId) {
+          useGameStateStore.getState().setRefreshing(false);
+        }
       }
-      deleteSwipe.mutate({ messageId, index }, { onSuccess: refreshVisibleGameState });
     })();
   }, [
     deleteDialogActiveSwipeIndex,
@@ -697,6 +717,7 @@ export function ChatArea() {
     deleteDialogMessageId,
     deleteSwipe,
     refreshVisibleGameState,
+    shouldRefreshGameStateOnSwipe,
   ]);
 
   const handleDeleteMore = useCallback(() => {
@@ -863,23 +884,37 @@ export function ChatArea() {
 
   const handleSetActiveSwipe = useCallback(
     (messageId: string, index: number) => {
+      const actionId = ++swipeActionSeq.current;
       void (async () => {
+        const gameStateStore = useGameStateStore.getState();
+        if (shouldRefreshGameStateOnSwipe) gameStateStore.setRefreshing(true);
         try {
           const flushPatch = useGameStateStore.getState().flushPatch;
-          if (flushPatch) await flushPatch();
+          if (flushPatch) {
+            try {
+              await flushPatch();
+            } catch {
+              if (swipeActionSeq.current === actionId) {
+                toast.error("Could not save tracker changes before switching swipes.");
+              }
+              return;
+            }
+          }
+          if (swipeActionSeq.current !== actionId) return;
+          await setActiveSwipe.mutateAsync({ messageId, index });
+          if (swipeActionSeq.current !== actionId) return;
+          await refreshVisibleGameState();
         } catch {
-          toast.error("Could not save tracker changes before switching swipes.");
-          return;
+          if (swipeActionSeq.current !== actionId) return;
+          toast.error("Could not switch swipes.");
+        } finally {
+          if (swipeActionSeq.current === actionId) {
+            useGameStateStore.getState().setRefreshing(false);
+          }
         }
-        setActiveSwipe.mutate(
-          { messageId, index },
-          {
-            onSuccess: refreshVisibleGameState,
-          },
-        );
       })();
     },
-    [setActiveSwipe, refreshVisibleGameState],
+    [setActiveSwipe, refreshVisibleGameState, shouldRefreshGameStateOnSwipe],
   );
 
   const handleEdit = useCallback(

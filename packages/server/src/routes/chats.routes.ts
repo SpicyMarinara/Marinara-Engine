@@ -772,19 +772,12 @@ export async function chatsRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>("/:id/game-state", async (req, reply) => {
     const { createGameStateStorage } = await import("../services/storage/game-state.storage.js");
     const gameStateStore = createGameStateStorage(app.db);
-
-    // Try to find the snapshot for the last assistant message's active swipe
-    let row: Awaited<ReturnType<typeof gameStateStore.getLatest>> = null;
     const msgs = await storage.listMessages(req.params.id);
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i]!.role === "assistant") {
-        row = await gameStateStore.getByMessage(msgs[i]!.id, msgs[i]!.activeSwipeIndex);
-        break;
-      }
-    }
-    // Fall back to most recent snapshot if no swipe-specific one exists
-    const usedFallback = !row;
-    if (!row) row = await gameStateStore.getLatest(req.params.id);
+    const visibleAnchor = resolveVisibleGameStateAnchor(msgs);
+    const row = await gameStateStore.getForGeneration(req.params.id, {
+      preferLatestVisible: true,
+      visibleAnchor,
+    });
     if (!row) return reply.send(null);
     const presentCharacters = JSON.parse((row.presentCharacters as string) ?? "[]") as Array<Record<string, unknown>>;
     const playerStats = row.playerStats ? JSON.parse(row.playerStats as string) : null;

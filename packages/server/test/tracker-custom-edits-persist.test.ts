@@ -9,8 +9,9 @@ import type { AgentExecConfig } from "../src/services/agents/agent-executor.js";
 import { executeAgent } from "../src/services/agents/agent-executor.js";
 import type { DB } from "../src/db/connection.js";
 import { runMigrations } from "../src/db/migrate.js";
-import { chats, gameStateSnapshots, messages, messageSwipes } from "../src/db/schema/index.js";
+import { apiConnections, chats, gameStateSnapshots, messages, messageSwipes } from "../src/db/schema/index.js";
 import { chatsRoutes } from "../src/routes/chats.routes.js";
+import { registerDryRunRoute } from "../src/routes/generate/dry-run-route.js";
 import {
   parseGameStateRow,
   resolveRegenerationGameStateAnchor,
@@ -387,6 +388,48 @@ test("regenerate tracker context uses the previous assistant snapshot instead of
       baseSnapshot: regenBaseline,
     });
     assert.equal(readCustomTrackerValue(cloned!, "Bond"), "previous accepted state");
+
+    await db.insert(apiConnections).values({
+      id: "conn-dry-run-regenerate",
+      name: "Dry run test connection",
+      provider: "custom",
+      baseUrl: "http://localhost.invalid/v1",
+      apiKeyEncrypted: "",
+      model: "test-model",
+      maxContext: 4096,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const app = Fastify({ logger: false });
+    app.decorate("db", db);
+    try {
+      await app.register(registerDryRunRoute);
+      await app.ready();
+
+      const dryRunResponse = await app.inject({
+        method: "POST",
+        url: "/dryRun",
+        payload: {
+          chatId: "chat-regen-baseline",
+          connectionId: "conn-dry-run-regenerate",
+          returnPrompt: true,
+          skipPreset: true,
+          injectTrackers: true,
+          regenerateMessageId: "assistant-target",
+        },
+      });
+      assert.equal(dryRunResponse.statusCode, 200);
+      const dryRunBody = dryRunResponse.json<{
+        prompt: { messages: Array<{ role: string; content: string }> };
+      }>();
+      const promptText = dryRunBody.prompt.messages.map((message) => message.content).join("\n");
+      assert.match(promptText, /previous accepted state/);
+      assert.doesNotMatch(promptText, /target first swipe result/);
+      assert.doesNotMatch(promptText, /target second swipe result/);
+    } finally {
+      await app.close();
+    }
   } finally {
     client.close();
   }
@@ -469,6 +512,167 @@ test("visible generation fallback does not use a newer inactive swipe when the a
       visibleAnchor: { messageId: "assistant-missing-visible", swipeIndex: 0 },
     });
     assert.equal(readCustomTrackerValue(fallbackForVisible!, "Bond"), "committed baseline");
+
+    const app = Fastify({ logger: false });
+    app.decorate("db", db);
+    try {
+      await app.register(chatsRoutes, { prefix: "/api/chats" });
+      await app.ready();
+
+      const reloadResponse = await app.inject({
+        method: "GET",
+        url: "/api/chats/chat-missing-visible-snapshot/game-state",
+      });
+      assert.equal(reloadResponse.statusCode, 200);
+      const reloaded = reloadResponse.json<{ playerStats: ReturnType<typeof playerStats> }>();
+      assert.equal(reloaded.playerStats.customTrackerFields[0]?.value, "committed baseline");
+    } finally {
+      await app.close();
+    }
+  } finally {
+    client.close();
+  }
+});
+
+test("deleting a swipe keeps game-state snapshots aligned with shifted swipe indexes", async () => {
+  const client = createClient({ url: "file::memory:" });
+  const db = drizzle(client) as unknown as DB;
+
+  try {
+    await runMigrations(db);
+
+    await db.insert(chats).values({
+      id: "chat-delete-swipe-snapshots",
+      name: "Delete swipe snapshots repro",
+      mode: "roleplay",
+      characterIds: "[]",
+      metadata: JSON.stringify({
+        enableAgents: true,
+        activeAgentIds: ["custom-tracker"],
+      }),
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(messages).values({
+      id: "assistant-delete-swipe",
+      chatId: "chat-delete-swipe-snapshots",
+      role: "assistant",
+      characterId: null,
+      content: "Third swipe reply.",
+      activeSwipeIndex: 2,
+      extra: "{}",
+      createdAt: "2026-05-14T01:10:00.000Z",
+    });
+    await db.insert(messageSwipes).values([
+      {
+        id: "delete-swipe-first",
+        messageId: "assistant-delete-swipe",
+        index: 0,
+        content: "First swipe reply.",
+        extra: "{}",
+        createdAt: "2026-05-14T01:10:00.000Z",
+      },
+      {
+        id: "delete-swipe-middle",
+        messageId: "assistant-delete-swipe",
+        index: 1,
+        content: "Middle swipe reply.",
+        extra: "{}",
+        createdAt: "2026-05-14T01:11:00.000Z",
+      },
+      {
+        id: "delete-swipe-third",
+        messageId: "assistant-delete-swipe",
+        index: 2,
+        content: "Third swipe reply.",
+        extra: "{}",
+        createdAt: "2026-05-14T01:12:00.000Z",
+      },
+    ]);
+    await db.insert(gameStateSnapshots).values([
+      {
+        id: "snapshot-delete-first",
+        chatId: "chat-delete-swipe-snapshots",
+        messageId: "assistant-delete-swipe",
+        swipeIndex: 0,
+        date: null,
+        time: null,
+        location: null,
+        weather: null,
+        temperature: null,
+        presentCharacters: "[]",
+        recentEvents: "[]",
+        playerStats: JSON.stringify(playerStats([{ name: "Bond", value: "first swipe" }])),
+        personaStats: null,
+        manualOverrides: null,
+        committed: 0,
+        createdAt: "2026-05-14T01:10:30.000Z",
+      },
+      {
+        id: "snapshot-delete-middle",
+        chatId: "chat-delete-swipe-snapshots",
+        messageId: "assistant-delete-swipe",
+        swipeIndex: 1,
+        date: null,
+        time: null,
+        location: null,
+        weather: null,
+        temperature: null,
+        presentCharacters: "[]",
+        recentEvents: "[]",
+        playerStats: JSON.stringify(playerStats([{ name: "Bond", value: "deleted middle" }])),
+        personaStats: null,
+        manualOverrides: null,
+        committed: 0,
+        createdAt: "2026-05-14T01:11:30.000Z",
+      },
+      {
+        id: "snapshot-delete-third",
+        chatId: "chat-delete-swipe-snapshots",
+        messageId: "assistant-delete-swipe",
+        swipeIndex: 2,
+        date: null,
+        time: null,
+        location: null,
+        weather: null,
+        temperature: null,
+        presentCharacters: "[]",
+        recentEvents: "[]",
+        playerStats: JSON.stringify(playerStats([{ name: "Bond", value: "surviving third" }])),
+        personaStats: null,
+        manualOverrides: null,
+        committed: 0,
+        createdAt: "2026-05-14T01:12:30.000Z",
+      },
+    ]);
+
+    const app = Fastify({ logger: false });
+    app.decorate("db", db);
+    try {
+      await app.register(chatsRoutes, { prefix: "/api/chats" });
+      await app.ready();
+
+      const deleteResponse = await app.inject({
+        method: "DELETE",
+        url: "/api/chats/chat-delete-swipe-snapshots/messages/assistant-delete-swipe/swipes/1",
+      });
+      assert.equal(deleteResponse.statusCode, 200);
+
+      const activeResponse = await app.inject({
+        method: "GET",
+        url: "/api/chats/chat-delete-swipe-snapshots/game-state",
+      });
+      assert.equal(activeResponse.statusCode, 200);
+      const active = activeResponse.json<{ playerStats: ReturnType<typeof playerStats> }>();
+      assert.equal(active.playerStats.customTrackerFields[0]?.value, "surviving third");
+
+      const gameStateStore = createGameStateStorage(db);
+      const shiftedThird = await gameStateStore.getByMessage("assistant-delete-swipe", 1);
+      assert.equal(readCustomTrackerValue(shiftedThird!, "Bond"), "surviving third");
+      assert.equal(await gameStateStore.getByMessage("assistant-delete-swipe", 2), null);
+    } finally {
+      await app.close();
+    }
   } finally {
     client.close();
   }

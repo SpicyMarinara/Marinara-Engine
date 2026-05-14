@@ -7,6 +7,7 @@ import {
   chats,
   messages,
   messageSwipes,
+  gameStateSnapshots,
   chatImages,
   oocInfluences,
   conversationNotes,
@@ -778,6 +779,10 @@ export function createChatsStorage(db: DB) {
       }
 
       await db.delete(messageSwipes).where(eq(messageSwipes.id, target.id));
+      await db
+        .delete(gameStateSnapshots)
+        .where(and(eq(gameStateSnapshots.messageId, messageId), eq(gameStateSnapshots.swipeIndex, index)));
+
       const swipesToShift = await db
         .select()
         .from(messageSwipes)
@@ -787,6 +792,17 @@ export function createChatsStorage(db: DB) {
           .update(messageSwipes)
           .set({ index: swipe.index - 1 })
           .where(eq(messageSwipes.id, swipe.id));
+      }
+
+      const snapshotsToShift = await db
+        .select()
+        .from(gameStateSnapshots)
+        .where(and(eq(gameStateSnapshots.messageId, messageId), gt(gameStateSnapshots.swipeIndex, index)));
+      for (const snapshot of snapshotsToShift) {
+        await db
+          .update(gameStateSnapshots)
+          .set({ swipeIndex: snapshot.swipeIndex - 1 })
+          .where(eq(gameStateSnapshots.id, snapshot.id));
       }
 
       await db
