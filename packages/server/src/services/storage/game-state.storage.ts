@@ -9,6 +9,8 @@ import type { GameState } from "@marinara-engine/shared";
 
 export type GameStateVisibleAnchor = { messageId: string; swipeIndex: number };
 
+const MANUAL_OVERRIDE_FIELDS = ["date", "time", "location", "weather", "temperature"] as const;
+
 export function createGameStateStorage(db: DB) {
   return {
     async getLatest(chatId: string) {
@@ -237,6 +239,10 @@ export function createGameStateStorage(db: DB) {
      * snapshot, or the latest snapshot when no base is supplied, into a NEW row for
      * this message+swipe and apply the update there. This avoids corrupting a
      * previous turn's snapshot with new tracker data.
+     *
+     * options.baseSnapshot is intentionally presence-sensitive: omitted falls back
+     * to getLatest(chatId), while an explicit null means no base and creates an
+     * empty snapshot for the target.
      */
     async updateByMessage(
       messageId: string,
@@ -312,7 +318,7 @@ export function createGameStateStorage(db: DB) {
       if (fields.personaStats !== undefined) baseState.personaStats = fields.personaStats as any;
 
       const manualOverrides = manual
-        ? (["date", "time", "location", "weather", "temperature"] as const).reduce<Record<string, string>>(
+        ? MANUAL_OVERRIDE_FIELDS.reduce<Record<string, string>>(
             (acc, key) => {
               const value = fields[key];
               if (typeof value === "string" && value !== "") acc[key] = value;
@@ -359,9 +365,8 @@ export function createGameStateStorage(db: DB) {
 
       // Merge manual override tracking
       if (manual) {
-        const TRACKABLE = ["date", "time", "location", "weather", "temperature"] as const;
         const existing: Record<string, string> = row.manualOverrides ? JSON.parse(row.manualOverrides as string) : {};
-        for (const key of TRACKABLE) {
+        for (const key of MANUAL_OVERRIDE_FIELDS) {
           if (fields[key] !== undefined) {
             // Setting a field to null/empty removes the override so the agent can update it again
             if (fields[key] == null || fields[key] === "") {

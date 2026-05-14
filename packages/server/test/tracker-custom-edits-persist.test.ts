@@ -4,7 +4,12 @@ import Fastify from "fastify";
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import type { AgentContext } from "@marinara-engine/shared";
-import type { BaseLLMProvider, ChatCompletionResult, ChatMessage } from "../src/services/llm/base-provider.js";
+import {
+  BaseLLMProvider,
+  type ChatCompletionResult,
+  type ChatMessage,
+  type ChatOptions,
+} from "../src/services/llm/base-provider.js";
 import type { AgentExecConfig } from "../src/services/agents/agent-executor.js";
 import { executeAgent } from "../src/services/agents/agent-executor.js";
 import type { DB } from "../src/db/connection.js";
@@ -74,24 +79,31 @@ function makeCustomTrackerConfig(): AgentExecConfig {
   };
 }
 
+class CapturingProvider extends BaseLLMProvider {
+  constructor(private readonly captured: ChatMessage[][]) {
+    super("", "");
+  }
+
+  override async *chat(_messages: ChatMessage[], _options: ChatOptions): AsyncGenerator<string, void, unknown> {
+    throw new Error("CapturingProvider.chat is not used in these tests");
+  }
+
+  override async chatComplete(messages: ChatMessage[], _options: ChatOptions): Promise<ChatCompletionResult> {
+    this.captured.push(messages);
+    return {
+      content: JSON.stringify({
+        fields: [{ name: "Bond", value: "edited mid-session" }],
+        reasoning: "No narrative change, so the current value is kept.",
+      }),
+      toolCalls: [],
+      finishReason: "stop",
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    };
+  }
+}
+
 function makeCapturingProvider(captured: ChatMessage[][]): BaseLLMProvider {
-  return {
-    get maxTokensOverrideValue() {
-      return null;
-    },
-    chatComplete: async (messages: ChatMessage[]): Promise<ChatCompletionResult> => {
-      captured.push(messages);
-      return {
-        content: JSON.stringify({
-          fields: [{ name: "Bond", value: "edited mid-session" }],
-          reasoning: "No narrative change, so the current value is kept.",
-        }),
-        toolCalls: [],
-        finishReason: "stop",
-        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-      };
-    },
-  } as unknown as BaseLLMProvider;
+  return new CapturingProvider(captured);
 }
 
 test("custom tracker edits stay on the visible snapshot and feed continue/retry agent context", async () => {
