@@ -566,7 +566,7 @@ function selectBudgetedLorebookEntryBatch(
     return {
       selectedFromCandidates,
       state: nextState,
-      budgetSkippedEntries: toBudgetSkippedEntries(skippedFromCandidates, lorebooksById),
+      budgetSkippedEntries: toBudgetSkippedEntries(lastSkippedBudgetEntries, lorebooksById),
     };
   }
 

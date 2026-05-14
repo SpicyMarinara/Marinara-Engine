@@ -53,7 +53,9 @@ function formatBudgetCap(entry: BudgetSkippedLorebookEntry) {
   if (entry.blockedBy === "chat") {
     return `${entry.chatUsedTokens.toLocaleString()} / ${entry.chatBudget.toLocaleString()}`;
   }
-  return `${entry.lorebookUsedTokens.toLocaleString()} / ${entry.lorebookBudget.toLocaleString()} lorebook, ${entry.chatUsedTokens.toLocaleString()} / ${entry.chatBudget.toLocaleString()} chat`;
+  const lorebookPart = `${entry.lorebookUsedTokens.toLocaleString()} / ${entry.lorebookBudget.toLocaleString()} lorebook`;
+  const chatPart = `${entry.chatUsedTokens.toLocaleString()} / ${entry.chatBudget.toLocaleString()} chat`;
+  return `${lorebookPart}, ${chatPart}`;
 }
 
 function BudgetSkippedEntryRow({ entry }: { entry: BudgetSkippedLorebookEntry }) {
