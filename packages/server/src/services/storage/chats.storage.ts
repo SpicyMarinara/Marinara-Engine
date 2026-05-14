@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────
 // Storage: Chats
 // ──────────────────────────────────────────────
-import { eq, desc, and, lt, gt, inArray } from "drizzle-orm";
+import { eq, desc, and, or, lt, gt, inArray } from "drizzle-orm";
 import type { DB } from "../../db/connection.js";
 import {
   chats,
@@ -755,12 +755,32 @@ export function createChatsStorage(db: DB) {
      *  transaction so a mid-flight failure can't leave a one-sided link. */
     async connectChats(chatIdA: string, chatIdB: string) {
       await db.transaction(async (tx) => {
+        // Clear notes and influences for the chats before disconnecting them,
+        // unless one of the two already points to the other.
+        const [rowA] = await tx.select().from(chats).where(eq(chats.id, chatIdA));
+        const [rowB] = await tx.select().from(chats).where(eq(chats.id, chatIdB));
+        const oldPartnerA = typeof rowA?.connectedChatId === "string" ? rowA.connectedChatId : null;
+        const oldPartnerB = typeof rowB?.connectedChatId === "string" ? rowB.connectedChatId : null;
+        if (oldPartnerA !== chatIdB && oldPartnerB !== chatIdA) {
+          await this.deleteNotesAndInfluencesForChat(chatIdA, { tx });
+          await this.deleteNotesAndInfluencesForChat(chatIdB, { tx });
+        }
+
         await this.disconnectChat(chatIdA, { tx });
         await this.disconnectChat(chatIdB, { tx });
         const timestamp = now();
         await tx.update(chats).set({ connectedChatId: chatIdB, updatedAt: timestamp }).where(eq(chats.id, chatIdA));
         await tx.update(chats).set({ connectedChatId: chatIdA, updatedAt: timestamp }).where(eq(chats.id, chatIdB));
       });
+    },
+
+    /** Delete all notes and influence associated with a chat (as source or target). */
+    async deleteNotesAndInfluencesForChat(chatId: string, opts?: { tx?: Pick<DB, "delete"> }) {
+      const conn = opts?.tx ?? db;
+      await conn.delete(conversationNotes).where(eq(conversationNotes.sourceChatId, chatId));
+      await conn.delete(conversationNotes).where(eq(conversationNotes.targetChatId, chatId));
+      await conn.delete(oocInfluences).where(eq(oocInfluences.sourceChatId, chatId));
+      await conn.delete(oocInfluences).where(eq(oocInfluences.targetChatId, chatId));
     },
 
     /** Remove the bidirectional link for a chat (and its partner). Only nulls
