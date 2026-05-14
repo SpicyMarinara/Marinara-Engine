@@ -325,6 +325,20 @@ export interface MessageExtra {
    * saved with this assistant message — reused when regenerating that swipe unless refreshed.
    */
   contextInjections?: Array<{ agentType: string; agentName?: string; text: string }> | null;
+  /**
+   * Hidden command-generation options needed to make swipes/regenerations replay
+   * the same slash-command prompt behavior.
+   */
+  generationReplay?: {
+    impersonate?: true;
+    userMessage?: string | null;
+    generationGuide?: string | null;
+    generationGuideSource?: "narrator" | "guide" | "game_start" | null;
+    impersonatePresetId?: string | null;
+    impersonateConnectionId?: string | null;
+    impersonateBlockAgents?: boolean;
+    impersonatePromptTemplate?: string | null;
+  } | null;
 }
 
 /** Metadata about how a message was generated. */

@@ -185,6 +185,11 @@ import {
   type PromptPresetCandidateSource,
 } from "./generate/prompt-preset-selection.js";
 import {
+  applyGenerationReplayToRegenerateInput,
+  buildGenerationReplay,
+  normalizeGenerationReplay,
+} from "./generate/generation-replay.js";
+import {
   createJournal,
   addLocationEntry,
   addEventEntry,
@@ -758,6 +763,14 @@ export async function generateRoutes(app: FastifyInstance) {
         activeGenerations.delete(input.chatId);
       }
     };
+
+    if (input.regenerateMessageId) {
+      const regenCandidate = await chats.getMessage(input.regenerateMessageId);
+      if (regenCandidate?.chatId === input.chatId) {
+        const replay = normalizeGenerationReplay(parseExtra(regenCandidate.extra).generationReplay);
+        applyGenerationReplayToRegenerateInput(input, replay);
+      }
+    }
 
     // ── Discord webhook URL (parsed once, used for mirroring below) ──
     const earlyMeta = parseExtra(chat.metadata) as Record<string, unknown>;
@@ -6510,6 +6523,7 @@ export async function generateRoutes(app: FastifyInstance) {
             // Cache the exact prompt injections used for this swipe so future
             // regenerations and swipe switches replay the same guidance.
             extraUpdate.contextInjections = contextInjections.length > 0 ? contextInjections : null;
+            extraUpdate.generationReplay = buildGenerationReplay(input);
             // Cache the final prompt (what was actually sent to the model) for Peek Prompt
             extraUpdate.cachedPrompt = finalPromptSent.map((m) => ({ role: m.role, content: m.content }));
             await chats.updateMessageExtra(savedMsg.id, extraUpdate);
