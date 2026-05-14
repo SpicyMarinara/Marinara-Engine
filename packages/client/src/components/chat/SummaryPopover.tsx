@@ -5,8 +5,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useGenerateSummary, useUpdateChatMetadata } from "../../hooks/use-chats";
-import { ChevronDown, Info, Loader2, Save, ScrollText, Sparkles, X } from "lucide-react";
+import { Info, Loader2, Save, ScrollText, Settings2, Sparkles, X } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { useUIStore } from "../../stores/ui.store";
 
 interface SummaryPopoverProps {
   chatId: string;
@@ -41,11 +42,18 @@ export function SummaryPopover({
 }: SummaryPopoverProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(summary ?? "");
-  const [localSize, setLocalSize] = useState(String(contextSize || ""));
-  const [sourceMode, setSourceMode] = useState<SummarySourceMode>("last");
-  const [sourceOpen, setSourceOpen] = useState(false);
-  const [rangeStart, setRangeStart] = useState(() => String(Math.max(1, totalMessageCount - contextSize + 1)));
-  const [rangeEnd, setRangeEnd] = useState(() => String(Math.max(1, totalMessageCount)));
+  const summaryPopoverSettings = useUIStore((s) => s.summaryPopoverSettings);
+  const setSummaryPopoverSettings = useUIStore((s) => s.setSummaryPopoverSettings);
+  const persistedContextSize = summaryPopoverSettings.contextSize ?? contextSize;
+  const [localSize, setLocalSize] = useState(String(persistedContextSize || ""));
+  const sourceMode = summaryPopoverSettings.sourceMode;
+  const [scopeSettingsOpen, setScopeSettingsOpen] = useState(false);
+  const [rangeStart, setRangeStart] = useState(() =>
+    String(summaryPopoverSettings.rangeStart ?? Math.max(1, totalMessageCount - persistedContextSize + 1)),
+  );
+  const [rangeEnd, setRangeEnd] = useState(() =>
+    String(summaryPopoverSettings.rangeEnd ?? Math.max(1, totalMessageCount)),
+  );
   const sizeInputFocused = useRef(false);
   const rangeInputFocused = useRef(false);
   const generateSummary = useGenerateSummary();
@@ -85,19 +93,19 @@ export function SummaryPopover({
     setDraft(summary ?? "");
   }, [summary]);
 
-  // Sync local size when contextSize prop changes externally
+  // Sync local size when the persisted/default context size changes externally.
   useEffect(() => {
     if (!sizeInputFocused.current) {
-      setLocalSize(contextSize ? String(contextSize) : "");
+      setLocalSize(persistedContextSize ? String(persistedContextSize) : "");
     }
-  }, [contextSize]);
+  }, [persistedContextSize]);
 
   // Keep the default custom range aligned to the currently selected "last" window.
   useEffect(() => {
     if (rangeInputFocused.current || sourceMode === "range") return;
-    setRangeStart(String(Math.max(1, totalMessageCount - contextSize + 1)));
+    setRangeStart(String(Math.max(1, totalMessageCount - persistedContextSize + 1)));
     setRangeEnd(String(Math.max(1, totalMessageCount)));
-  }, [contextSize, sourceMode, totalMessageCount]);
+  }, [persistedContextSize, sourceMode, totalMessageCount]);
 
   // Focus textarea when entering edit mode
   useEffect(() => {
@@ -106,7 +114,7 @@ export function SummaryPopover({
     }
   }, [editing]);
 
-  const normalizedLastSize = clampSummaryCount(parsePositiveInteger(localSize) ?? contextSize ?? 50);
+  const normalizedLastSize = clampSummaryCount(parsePositiveInteger(localSize) ?? persistedContextSize ?? 50);
   const normalizedRangeStart = Math.max(1, Math.min(totalMessageCount || 1, parsePositiveInteger(rangeStart) ?? 1));
   const normalizedRangeEnd = Math.max(
     1,
@@ -139,13 +147,15 @@ export function SummaryPopover({
 
   const handleSourceModeChange = useCallback(
     (mode: SummarySourceMode) => {
-      setSourceMode(mode);
       if (mode === "range") {
         setRangeStart(String(rangeLow));
         setRangeEnd(String(rangeHigh));
+        setSummaryPopoverSettings({ sourceMode: mode, rangeStart: rangeLow, rangeEnd: rangeHigh });
+        return;
       }
+      setSummaryPopoverSettings({ sourceMode: mode });
     },
-    [rangeHigh, rangeLow],
+    [rangeHigh, rangeLow, setSummaryPopoverSettings],
   );
 
   const handleGenerate = useCallback(() => {
@@ -166,6 +176,7 @@ export function SummaryPopover({
       return;
     }
     setLocalSize(String(normalizedLastSize));
+    setSummaryPopoverSettings({ contextSize: normalizedLastSize });
     generateSummary.mutate(
       { chatId, contextSize: normalizedLastSize },
       {
@@ -184,6 +195,7 @@ export function SummaryPopover({
     rangeLow,
     rangeEndMessageId,
     rangeStartMessageId,
+    setSummaryPopoverSettings,
     sourceMode,
   ]);
 
@@ -210,7 +222,7 @@ export function SummaryPopover({
       {isMobile && <div className="absolute inset-0 bg-black/30" onClick={onClose} />}
       <div
         className={cn(
-          "rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl shadow-black/40",
+          "relative rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl shadow-black/40",
           isMobile ? "relative w-full max-w-sm max-h-[calc(100dvh-4rem)] overflow-y-auto" : "w-80",
         )}
       >
@@ -222,13 +234,173 @@ export function SummaryPopover({
           </div>
           <div className="flex items-center gap-1">
             <button
+              type="button"
+              onClick={() => setScopeSettingsOpen((open) => !open)}
+              className={cn(
+                "rounded-md p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ring)]",
+                scopeSettingsOpen && "bg-[var(--accent)] text-amber-300",
+              )}
+              title="Summary source settings"
+              aria-label="Summary source settings"
+              aria-expanded={scopeSettingsOpen}
+            >
+              <Settings2 size="0.75rem" />
+            </button>
+            <button
+              type="button"
               onClick={onClose}
               className="rounded-md p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+              aria-label="Close summary"
             >
               <X size="0.75rem" />
             </button>
           </div>
         </div>
+
+        {scopeSettingsOpen && (
+          <div className="absolute right-2 top-10 z-10 w-[calc(100%-1rem)] max-w-72 rounded-xl border border-[var(--border)] bg-[var(--popover)] p-2 text-[var(--popover-foreground)] shadow-xl shadow-black/30 ring-1 ring-white/5">
+            <div className="mb-2 flex items-start justify-between gap-3 px-1">
+              <div className="min-w-0">
+                <p className="text-[0.625rem] font-semibold uppercase text-[var(--muted-foreground)]">
+                  Summary Scope
+                </p>
+                <p className="truncate text-xs font-semibold text-[var(--popover-foreground)]">{sourceSummary}</p>
+              </div>
+              <span className="shrink-0 pt-0.5 text-right text-[0.625rem] text-[var(--muted-foreground)]">
+                {sourceDetail}
+              </span>
+            </div>
+
+            <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--secondary)]/40 p-2">
+              <div className="grid grid-cols-2 gap-1 rounded-lg bg-[var(--background)]/30 p-1">
+                {(["last", "range"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => handleSourceModeChange(mode)}
+                    className={cn(
+                      "rounded-md px-2 py-1 text-[0.625rem] font-semibold transition-colors",
+                      sourceMode === mode
+                        ? "bg-amber-400/20 text-amber-200 ring-1 ring-amber-300/30"
+                        : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
+                    )}
+                  >
+                    {mode === "last" ? "Last" : "Range"}
+                  </button>
+                ))}
+              </div>
+
+              {sourceMode === "last" ? (
+                <label className="flex items-center justify-between gap-2 text-[0.6875rem] text-[var(--muted-foreground)]">
+                  <span>Messages</span>
+                  <input
+                    type="number"
+                    min={MIN_SUMMARY_MESSAGES}
+                    max={MAX_SUMMARY_MESSAGES}
+                    value={localSize}
+                    onFocus={() => {
+                      sizeInputFocused.current = true;
+                    }}
+                    onChange={(e) => {
+                      setLocalSize(e.target.value);
+                      const next = parsePositiveInteger(e.target.value);
+                      if (next !== null) {
+                        setSummaryPopoverSettings({ contextSize: clampSummaryCount(next) });
+                      }
+                    }}
+                    onBlur={() => {
+                      sizeInputFocused.current = false;
+                      const clamped = clampSummaryCount(parsePositiveInteger(localSize) ?? 50);
+                      setLocalSize(String(clamped));
+                      setSummaryPopoverSettings({ contextSize: clamped });
+                    }}
+                    className="w-16 rounded-md bg-[var(--card)] px-2 py-1 text-center text-xs tabular-nums text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                  />
+                </label>
+              ) : (
+                <div className="space-y-1.5">
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="space-y-1 text-[0.625rem] font-medium text-[var(--muted-foreground)]">
+                      From
+                      <input
+                        type="number"
+                        min={1}
+                        max={Math.max(1, totalMessageCount)}
+                        value={rangeStart}
+                        onFocus={() => {
+                          rangeInputFocused.current = true;
+                        }}
+                        onChange={(e) => {
+                          setRangeStart(e.target.value);
+                          const next = parsePositiveInteger(e.target.value);
+                          if (next !== null) {
+                            setSummaryPopoverSettings({
+                              rangeStart: Math.max(1, Math.min(totalMessageCount || 1, next)),
+                            });
+                          }
+                        }}
+                        onBlur={() => {
+                          rangeInputFocused.current = false;
+                          setRangeStart(String(normalizedRangeStart));
+                          setSummaryPopoverSettings({ rangeStart: normalizedRangeStart });
+                        }}
+                        className="w-full rounded-md bg-[var(--card)] px-2 py-1 text-center text-xs tabular-nums text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                      />
+                    </label>
+                    <label className="space-y-1 text-[0.625rem] font-medium text-[var(--muted-foreground)]">
+                      To
+                      <input
+                        type="number"
+                        min={1}
+                        max={Math.max(1, totalMessageCount)}
+                        value={rangeEnd}
+                        onFocus={() => {
+                          rangeInputFocused.current = true;
+                        }}
+                        onChange={(e) => {
+                          setRangeEnd(e.target.value);
+                          const next = parsePositiveInteger(e.target.value);
+                          if (next !== null) {
+                            setSummaryPopoverSettings({
+                              rangeEnd: Math.max(1, Math.min(totalMessageCount || 1, next)),
+                            });
+                          }
+                        }}
+                        onBlur={() => {
+                          rangeInputFocused.current = false;
+                          setRangeEnd(String(normalizedRangeEnd));
+                          setSummaryPopoverSettings({ rangeEnd: normalizedRangeEnd });
+                        }}
+                        className="w-full rounded-md bg-[var(--card)] px-2 py-1 text-center text-xs tabular-nums text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                      />
+                    </label>
+                  </div>
+                  <p
+                    className={cn(
+                      "text-[0.625rem]",
+                      rangeTooLarge || !rangeMessagesLoaded ? "text-red-300" : "text-[var(--muted-foreground)]",
+                    )}
+                  >
+                    {rangeStatusText}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-1.5 pt-1">
+              <SummarySettingsToggle
+                label="Hide summarised messages"
+                checked={summaryPopoverSettings.hideSummarisedMessages}
+                onChange={(checked) => setSummaryPopoverSettings({ hideSummarisedMessages: checked })}
+              />
+              <SummarySettingsToggle
+                label="Collapse hidden messages"
+                checked={summaryPopoverSettings.collapseHiddenMessages}
+                onChange={(checked) => setSummaryPopoverSettings({ collapseHiddenMessages: checked })}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Body */}
         <div className="max-h-72 overflow-y-auto p-3">
@@ -288,116 +460,10 @@ export function SummaryPopover({
 
         {/* Source controls */}
         <div className="border-t border-[var(--border)] px-3 py-2">
-          <button
-            type="button"
-            onClick={() => setSourceOpen((open) => !open)}
-            className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-[var(--accent)]"
-          >
-            <span className="min-w-0">
-              <span className="block text-[0.625rem] font-medium uppercase text-[var(--muted-foreground)]">Source</span>
-              <span className="block truncate text-xs font-semibold text-[var(--foreground)]/85">{sourceSummary}</span>
-            </span>
-            <span className="flex min-w-0 shrink items-center justify-end gap-1 text-right text-[0.625rem] text-[var(--muted-foreground)]">
-              {sourceDetail}
-              <ChevronDown
-                size="0.75rem"
-                className={cn("transition-transform", sourceOpen && "rotate-180 text-amber-300")}
-              />
-            </span>
-          </button>
-
-          {sourceOpen && (
-            <div className="mt-2 space-y-2 rounded-lg border border-[var(--border)] bg-[var(--secondary)]/40 p-2">
-              <div className="grid grid-cols-2 gap-1 rounded-lg bg-[var(--background)]/30 p-1">
-                {(["last", "range"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => handleSourceModeChange(mode)}
-                    className={cn(
-                      "rounded-md px-2 py-1 text-[0.625rem] font-semibold transition-colors",
-                      sourceMode === mode
-                        ? "bg-amber-400/20 text-amber-200 ring-1 ring-amber-300/30"
-                        : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
-                    )}
-                  >
-                    {mode === "last" ? "Last" : "Range"}
-                  </button>
-                ))}
-              </div>
-
-              {sourceMode === "last" ? (
-                <label className="flex items-center justify-between gap-2 text-[0.6875rem] text-[var(--muted-foreground)]">
-                  <span>Messages</span>
-                  <input
-                    type="number"
-                    min={MIN_SUMMARY_MESSAGES}
-                    max={MAX_SUMMARY_MESSAGES}
-                    value={localSize}
-                    onFocus={() => {
-                      sizeInputFocused.current = true;
-                    }}
-                    onChange={(e) => setLocalSize(e.target.value)}
-                    onBlur={() => {
-                      sizeInputFocused.current = false;
-                      const clamped = clampSummaryCount(parsePositiveInteger(localSize) ?? 50);
-                      setLocalSize(String(clamped));
-                    }}
-                    className="w-16 rounded-md bg-[var(--card)] px-2 py-1 text-center text-xs tabular-nums text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-                  />
-                </label>
-              ) : (
-                <div className="space-y-1.5">
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="space-y-1 text-[0.625rem] font-medium text-[var(--muted-foreground)]">
-                      From
-                      <input
-                        type="number"
-                        min={1}
-                        max={Math.max(1, totalMessageCount)}
-                        value={rangeStart}
-                        onFocus={() => {
-                          rangeInputFocused.current = true;
-                        }}
-                        onChange={(e) => setRangeStart(e.target.value)}
-                        onBlur={() => {
-                          rangeInputFocused.current = false;
-                          setRangeStart(String(normalizedRangeStart));
-                        }}
-                        className="w-full rounded-md bg-[var(--card)] px-2 py-1 text-center text-xs tabular-nums text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-                      />
-                    </label>
-                    <label className="space-y-1 text-[0.625rem] font-medium text-[var(--muted-foreground)]">
-                      To
-                      <input
-                        type="number"
-                        min={1}
-                        max={Math.max(1, totalMessageCount)}
-                        value={rangeEnd}
-                        onFocus={() => {
-                          rangeInputFocused.current = true;
-                        }}
-                        onChange={(e) => setRangeEnd(e.target.value)}
-                        onBlur={() => {
-                          rangeInputFocused.current = false;
-                          setRangeEnd(String(normalizedRangeEnd));
-                        }}
-                        className="w-full rounded-md bg-[var(--card)] px-2 py-1 text-center text-xs tabular-nums text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-                      />
-                    </label>
-                  </div>
-                  <p
-                    className={cn(
-                      "text-[0.625rem]",
-                      rangeTooLarge || !rangeMessagesLoaded ? "text-red-300" : "text-[var(--muted-foreground)]",
-                    )}
-                  >
-                    {rangeStatusText}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
+          <div className="mb-2 flex items-center justify-between gap-2 px-2 text-[0.625rem] text-[var(--muted-foreground)]">
+            <span className="truncate">Source: {sourceSummary}</span>
+            <span className="shrink-0">{sourceDetail}</span>
+          </div>
 
           <button
             onClick={handleGenerate}
@@ -431,4 +497,24 @@ export function SummaryPopover({
   );
 
   return isMobile ? createPortal(content, document.body) : content;
+}
+
+interface SummarySettingsToggleProps {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}
+
+function SummarySettingsToggle({ label, checked, onChange }: SummarySettingsToggleProps) {
+  return (
+    <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-1.5 py-1 text-[0.6875rem] text-[var(--popover-foreground)] transition-colors hover:bg-[var(--accent)]/50">
+      <span className="min-w-0 truncate">{label}</span>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="h-3.5 w-3.5 shrink-0 accent-amber-400"
+      />
+    </label>
+  );
 }
