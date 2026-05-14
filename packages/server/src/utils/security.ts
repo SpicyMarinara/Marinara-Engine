@@ -522,7 +522,7 @@ function tryDecodeCompressedBody(buffer: Buffer, algorithm: "gzip" | "br" | "zst
   }
 }
 
-function requestHeadersWithIdentityEncoding(headersInit: RequestInit["headers"] | undefined): Headers {
+export function requestHeadersWithIdentityEncoding(headersInit: RequestInit["headers"] | undefined): Headers {
   const headers = new Headers(headersInit);
   if (!headers.has("accept-encoding")) {
     headers.set("accept-encoding", "identity");
