@@ -184,6 +184,32 @@ test("macro-expanded lorebook content is budgeted and estimated after expansion"
   assert.equal(processed.totalTokensEstimate, 20);
 });
 
+test("depth 0 lorebook entries are included for depth injection", () => {
+  const activated: ActivatedEntry[] = [
+    {
+      entry: makeEntry({
+        content: "Depth zero lore",
+        position: 2,
+        depth: 0,
+        role: "system",
+      }),
+      matchedKeys: ["keyword"],
+      injectionOrder: 100,
+    },
+  ];
+
+  const processed = processActivatedEntries(activated, 0);
+
+  assert.deepEqual(processed.depthEntries, [
+    {
+      content: "Depth zero lore",
+      role: "system",
+      depth: 0,
+      order: 100,
+    },
+  ]);
+});
+
 test("lorebook final budgets use resolved variable macro content and roll back skipped side effects", () => {
   const longPayload = tokenContent(20);
   const macroContext: MacroContext = {

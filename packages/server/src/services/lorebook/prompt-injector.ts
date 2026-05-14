@@ -58,7 +58,7 @@ export function getDepthInjectedEntries(activatedEntries: ActivatedEntry[]): Arr
   order: number;
 }> {
   return activatedEntries
-    .filter((a) => a.entry.position >= 2 && a.entry.depth > 0)
+    .filter((a) => a.entry.position >= 2 && a.entry.depth >= 0)
     .map((a) => ({
       content: a.entry.content,
       role: a.entry.role,
