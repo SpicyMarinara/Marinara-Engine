@@ -132,7 +132,7 @@ import { executeKnowledgeRouter } from "../services/agents/knowledge-router.js";
 import { extractFileText, getSourceFilePath } from "./knowledge-sources.routes.js";
 import { gameStateSnapshots as gameStateSnapshotsTable } from "../db/schema/index.js";
 import { chats as chatsTable } from "../db/schema/index.js";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { PROFESSOR_MARI_ID } from "@marinara-engine/shared";
 import { chunkAndEmbedMessages, recallMemories } from "../services/memory-recall.js";
 import { resolveMemoryRecallEmbeddingSource } from "../services/memory-recall-embedding.js";
@@ -149,6 +149,8 @@ import {
   parseGameStateRow,
   preserveTrackerCharacterUiFields,
   resolveBaseUrl,
+  resolveVisibleGameStateAnchor,
+  shouldPreferLatestVisibleGameState,
   shouldEnableAgentsForGeneration,
   wrapFields,
   type PromptAttachment,
@@ -441,24 +443,13 @@ async function persistLorebookRuntimeState(args: {
   });
 }
 
-async function resolveLatestGameStateForLorebooks(db: any, chatId: string): Promise<Record<string, unknown> | null> {
-  const latestRows = await db
-    .select()
-    .from(gameStateSnapshotsTable)
-    .where(eq(gameStateSnapshotsTable.chatId, chatId))
-    .orderBy(desc(gameStateSnapshotsTable.createdAt))
-    .limit(1);
-  const latest = latestRows[0];
-  if (latest) return parseGameStateRow(latest as Record<string, unknown>) as unknown as Record<string, unknown>;
-
-  const committedRows = await db
-    .select()
-    .from(gameStateSnapshotsTable)
-    .where(and(eq(gameStateSnapshotsTable.chatId, chatId), eq(gameStateSnapshotsTable.committed, 1)))
-    .orderBy(desc(gameStateSnapshotsTable.createdAt))
-    .limit(1);
-  const committed = committedRows[0];
-  if (committed) return parseGameStateRow(committed as Record<string, unknown>) as unknown as Record<string, unknown>;
+async function resolveLatestGameStateForLorebooks(
+  db: any,
+  chatId: string,
+  options?: Parameters<ReturnType<typeof createGameStateStorage>["getForGeneration"]>[1],
+): Promise<Record<string, unknown> | null> {
+  const row = await createGameStateStorage(db).getForGeneration(chatId, options);
+  if (row) return parseGameStateRow(row as Record<string, unknown>) as unknown as Record<string, unknown>;
   return null;
 }
 
@@ -879,6 +870,8 @@ export async function generateRoutes(app: FastifyInstance) {
       const chatMode = requestChatMode;
       const lorebookGenerationTriggers = resolveLorebookGenerationTriggers(input, chatMode);
       const supportsHiddenFromAI = chatMode === "roleplay" || chatMode === "visual_novel";
+      const preferLatestVisibleGameState = shouldPreferLatestVisibleGameState(input);
+      const visibleGameStateAnchor = resolveVisibleGameStateAnchor(allChatMessages);
 
       // ── Conversation-start filter: find the latest "isConversationStart" marker ──
       let startIdx = 0;
@@ -1256,7 +1249,13 @@ export async function generateRoutes(app: FastifyInstance) {
             (chatMeta.entryStateOverrides as Record<string, { ephemeral?: number | null; enabled?: boolean }>) ??
             undefined,
           entryTimingStates: (chatMeta.entryTimingStates as Record<string, LorebookEntryTimingState>) ?? undefined,
-          gameState: chatMode === "game" ? await resolveLatestGameStateForLorebooks(app.db, input.chatId) : null,
+          gameState:
+            chatMode === "game"
+              ? await resolveLatestGameStateForLorebooks(app.db, input.chatId, {
+                  preferLatestVisible: preferLatestVisibleGameState,
+                  visibleAnchor: visibleGameStateAnchor,
+                })
+              : null,
           generationTriggers: lorebookGenerationTriggers,
           groupScenarioOverrideText:
             typeof chatMeta.groupScenarioText === "string" && (chatMeta.groupScenarioText as string).trim()
@@ -3570,7 +3569,10 @@ export async function generateRoutes(app: FastifyInstance) {
           const lorebookResult = await processLorebooks(
             app.db,
             scanMessages,
-            await resolveLatestGameStateForLorebooks(app.db, input.chatId),
+            await resolveLatestGameStateForLorebooks(app.db, input.chatId, {
+              preferLatestVisible: preferLatestVisibleGameState,
+              visibleAnchor: visibleGameStateAnchor,
+            }),
             {
               chatId: input.chatId,
               characterIds,
@@ -3881,11 +3883,12 @@ export async function generateRoutes(app: FastifyInstance) {
       }
 
       // Get current game state (if any)
-      // Prefer committed game state (locked in when the user sent their last
-      // message), but fall back to the latest snapshot so agents still receive
-      // prior state before anything has been committed (e.g. first turn).
-      const latestGameState =
-        (await gameStateStore.getLatestCommitted(input.chatId)) ?? (await gameStateStore.getLatest(input.chatId));
+      // Prefer committed game state after a real user turn, but keep visible
+      // uncommitted tracker edits authoritative for regenerate/continue/impersonate flows.
+      const latestGameState = await gameStateStore.getForGeneration(input.chatId, {
+        preferLatestVisible: preferLatestVisibleGameState,
+        visibleAnchor: visibleGameStateAnchor,
+      });
       const gameState = latestGameState ? parseGameStateRow(latestGameState as Record<string, unknown>) : null;
 
       // Build base agent context (without mainResponse — that comes after generation)
@@ -4371,24 +4374,11 @@ export async function generateRoutes(app: FastifyInstance) {
         const hasCustomTracker = active.has("custom-tracker");
 
         if (hasWorldState || hasCharTracker || hasPersonaStats || hasQuest || hasCustomTracker) {
-          // Prefer committed snapshot; fall back to latest if none committed yet
-          let snap: typeof gameStateSnapshotsTable.$inferSelect | undefined;
-          const committedRows = await app.db
-            .select()
-            .from(gameStateSnapshotsTable)
-            .where(and(eq(gameStateSnapshotsTable.chatId, input.chatId), eq(gameStateSnapshotsTable.committed, 1)))
-            .orderBy(desc(gameStateSnapshotsTable.createdAt))
-            .limit(1);
-          snap = committedRows[0];
-          if (!snap) {
-            const anyRows = await app.db
-              .select()
-              .from(gameStateSnapshotsTable)
-              .where(eq(gameStateSnapshotsTable.chatId, input.chatId))
-              .orderBy(desc(gameStateSnapshotsTable.createdAt))
-              .limit(1);
-            snap = anyRows[0];
-          }
+          const snap =
+            (await gameStateStore.getForGeneration(input.chatId, {
+              preferLatestVisible: preferLatestVisibleGameState,
+              visibleAnchor: visibleGameStateAnchor,
+            })) ?? undefined;
 
           if (snap) {
             const trackerParts: string[] = [];

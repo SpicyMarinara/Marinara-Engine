@@ -7,6 +7,8 @@ import { gameStateSnapshots } from "../../db/schema/index.js";
 import { newId, now } from "../../utils/id-generator.js";
 import type { GameState } from "@marinara-engine/shared";
 
+export type GameStateVisibleAnchor = { messageId: string; swipeIndex: number };
+
 export function createGameStateStorage(db: DB) {
   return {
     async getLatest(chatId: string) {
@@ -28,6 +30,24 @@ export function createGameStateStorage(db: DB) {
         .orderBy(desc(gameStateSnapshots.createdAt))
         .limit(1);
       return rows[0] ?? null;
+    },
+
+    async getForGeneration(
+      chatId: string,
+      options?: { preferLatestVisible?: boolean; visibleAnchor?: GameStateVisibleAnchor | null },
+    ) {
+      if (options?.preferLatestVisible) {
+        if (options.visibleAnchor?.messageId) {
+          const visible = await this.getByChatAndMessage(
+            chatId,
+            options.visibleAnchor.messageId,
+            options.visibleAnchor.swipeIndex,
+          );
+          if (visible) return visible;
+        }
+        return (await this.getLatestCommitted(chatId)) ?? (await this.getLatest(chatId));
+      }
+      return (await this.getLatestCommitted(chatId)) ?? (await this.getLatest(chatId));
     },
 
     /** Get latest game state excluding snapshots tied to a specific message (for regen/swipes). */

@@ -643,6 +643,18 @@ export function ChatArea() {
 
   const combatAgentEnabled = enabledAgentTypes.has("combat");
   const expressionAgentEnabled = enabledAgentTypes.has("expression");
+  const shouldRefreshGameStateOnSwipe = isGameChat || Boolean(chatMeta.enableAgents);
+
+  const refreshVisibleGameState = useCallback(() => {
+    if (!shouldRefreshGameStateOnSwipe || !activeChatId) return;
+    api
+      .get<import("@marinara-engine/shared").GameState | null>(`/chats/${activeChatId}/game-state`)
+      .then((gs) => {
+        if (useChatStore.getState().activeChatId !== activeChatId) return;
+        useGameStateStore.getState().setGameState(gs ?? null);
+      })
+      .catch(() => {});
+  }, [activeChatId, shouldRefreshGameStateOnSwipe]);
 
   const handleDelete = useCallback((messageId: string) => {
     setDeleteDialogMessageId(messageId);
@@ -665,10 +677,19 @@ export function ChatArea() {
 
   const handleDeleteSwipe = useCallback(() => {
     if (deleteDialogMessageId && deleteDialogCanDeleteSwipe) {
-      deleteSwipe.mutate({ messageId: deleteDialogMessageId, index: deleteDialogActiveSwipeIndex });
+      deleteSwipe.mutate(
+        { messageId: deleteDialogMessageId, index: deleteDialogActiveSwipeIndex },
+        { onSuccess: refreshVisibleGameState },
+      );
     }
     setDeleteDialogMessageId(null);
-  }, [deleteDialogActiveSwipeIndex, deleteDialogCanDeleteSwipe, deleteDialogMessageId, deleteSwipe]);
+  }, [
+    deleteDialogActiveSwipeIndex,
+    deleteDialogCanDeleteSwipe,
+    deleteDialogMessageId,
+    deleteSwipe,
+    refreshVisibleGameState,
+  ]);
 
   const handleDeleteMore = useCallback(() => {
     if (deleteDialogMessageId) {
@@ -836,21 +857,11 @@ export function ChatArea() {
       setActiveSwipe.mutate(
         { messageId, index },
         {
-          onSuccess: () => {
-            // Refetch game state so the HUD shows trackers for the active swipe
-            if (isGameChat && activeChatId) {
-              api
-                .get<import("@marinara-engine/shared").GameState | null>(`/chats/${activeChatId}/game-state`)
-                .then((gs) => {
-                  useGameStateStore.getState().setGameState(gs ?? null);
-                })
-                .catch(() => {});
-            }
-          },
+          onSuccess: refreshVisibleGameState,
         },
       );
     },
-    [setActiveSwipe, isGameChat, activeChatId],
+    [setActiveSwipe, refreshVisibleGameState],
   );
 
   const handleEdit = useCallback(

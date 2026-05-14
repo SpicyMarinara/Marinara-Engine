@@ -36,6 +36,7 @@ import {
   parseGameStateRow,
   preserveTrackerCharacterUiFields,
   resolveBaseUrl,
+  resolveVisibleGameStateAnchor,
 } from "./generate-route-utils.js";
 import {
   buildHistoricalLorebookKeeperContext,
@@ -305,7 +306,11 @@ async function buildRetryAgentContext(args: {
       agentContext.gameState = null;
     }
   } else if (useLatestGameStateFallback) {
-    const latestGS = await gameStateStore.getLatestCommitted(chatId);
+    const visibleAnchor = lastAssistant ? resolveVisibleGameStateAnchor([lastAssistant]) : null;
+    const latestGS = await gameStateStore.getForGeneration(chatId, {
+      preferLatestVisible: true,
+      visibleAnchor,
+    });
     if (latestGS) {
       agentContext.gameState = parseGameStateRow(latestGS as Record<string, unknown>);
     }

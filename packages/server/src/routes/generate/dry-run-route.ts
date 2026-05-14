@@ -41,12 +41,12 @@ import {
   mergeCustomParameters,
   parseExtra,
   parseStoredGenerationParameters,
+  resolveVisibleGameStateAnchor,
   resolveBaseUrl,
   type PromptAttachment,
 } from "../generate/generate-route-utils.js";
 import { buildGenerationPromptPresetCandidates, type PromptPresetCandidateSource } from "./prompt-preset-selection.js";
-import { gameStateSnapshots as gameStateSnapshotsTable } from "../../db/schema/index.js";
-import { and, desc, eq } from "drizzle-orm";
+import { createGameStateStorage, type GameStateVisibleAnchor } from "../../services/storage/game-state.storage.js";
 import { logger } from "../../lib/logger.js";
 
 type WrapFormat = "xml" | "markdown" | "none";
@@ -82,26 +82,15 @@ function resolveDryRunLorebookTokenBudget(chatMeta: Record<string, unknown>): nu
   return typeof raw === "number" && Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : undefined;
 }
 
-async function loadLatestGameSnapshot(app: FastifyInstance, chatId: string): Promise<any | null> {
-  const committedRows = await app.db
-    .select()
-    .from(gameStateSnapshotsTable)
-    .where(and(eq(gameStateSnapshotsTable.chatId, chatId), eq(gameStateSnapshotsTable.committed, 1)))
-    .orderBy(desc(gameStateSnapshotsTable.createdAt))
-    .limit(1);
-
-  let snap: any = committedRows[0];
-  if (!snap) {
-    const anyRows = await app.db
-      .select()
-      .from(gameStateSnapshotsTable)
-      .where(eq(gameStateSnapshotsTable.chatId, chatId))
-      .orderBy(desc(gameStateSnapshotsTable.createdAt))
-      .limit(1);
-    snap = anyRows[0];
-  }
-
-  return snap ?? null;
+async function loadLatestGameSnapshot(
+  app: FastifyInstance,
+  chatId: string,
+  visibleAnchor?: GameStateVisibleAnchor | null,
+): Promise<any | null> {
+  return createGameStateStorage(app.db).getForGeneration(chatId, {
+    preferLatestVisible: true,
+    visibleAnchor,
+  });
 }
 
 function formatTrackersContextBlock(args: {
@@ -635,6 +624,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
 
     // Pull existing messages, apply the same conversation-start + context limit filtering
     const allChatMessages = await chats.listMessages(chatId);
+    const visibleGameStateAnchor = resolveVisibleGameStateAnchor(allChatMessages);
     const chatMode = (chat.mode as string) ?? "roleplay";
     const supportsHiddenFromAI = chatMode === "roleplay" || chatMode === "visual_novel";
     let startIdx = 0;
@@ -1073,7 +1063,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
 
       const trackersBlock = includeTrackers
         ? await (async () => {
-            const snap = await loadLatestGameSnapshot(app, chatId);
+            const snap = await loadLatestGameSnapshot(app, chatId, visibleGameStateAnchor);
             if (!snap) return null;
             return formatTrackersContextBlock({ wrapFormat, snap, chatMeta });
           })()
@@ -1362,7 +1352,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
     // Optional injection: tracker context (read-only snapshot)
     const resolvedInjectTrackersForRun = usePromptParts ? false : resolvedInjectTrackers;
     if (resolvedInjectTrackersForRun) {
-      const snap = await loadLatestGameSnapshot(app, chatId);
+      const snap = await loadLatestGameSnapshot(app, chatId, visibleGameStateAnchor);
       const contextBlock = snap ? formatTrackersContextBlock({ wrapFormat, snap, chatMeta }) : null;
       if (contextBlock) {
         finalMessages = injectTrackerContext(finalMessages, contextBlock, "beforeLastUser");

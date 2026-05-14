@@ -284,7 +284,7 @@ export function ConversationInput({
     if (!activeChatId) return;
     const targetKey = JSON.stringify(chatKeys.messages(activeChatId));
     return qc.getQueryCache().subscribe((event) => {
-      if (JSON.stringify(event.query.queryKey) === targetKey) {
+      if (event.type === "updated" && JSON.stringify(event.query.queryKey) === targetKey) {
         bumpMessagesTick((n) => n + 1);
       }
     });

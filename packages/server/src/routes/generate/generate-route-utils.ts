@@ -76,6 +76,33 @@ export function isMessageHiddenFromAI(message: { extra?: unknown }): boolean {
   return parseExtra(message.extra).hiddenFromAI === true;
 }
 
+export function shouldPreferLatestVisibleGameState(input: {
+  attachments?: unknown[] | null;
+  impersonate?: boolean;
+  regenerateMessageId?: string | null;
+  userMessage?: string | null;
+}): boolean {
+  if (input.impersonate === true || !!input.regenerateMessageId) return true;
+  return !input.userMessage?.trim() && !(input.attachments?.length);
+}
+
+export function resolveVisibleGameStateAnchor(
+  messages: Array<{ role?: unknown; id?: unknown; activeSwipeIndex?: unknown }>,
+): { messageId: string; swipeIndex: number } | null {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]!;
+    if (message.role !== "assistant" || typeof message.id !== "string" || !message.id) continue;
+    const swipeIndex =
+      typeof message.activeSwipeIndex === "number" &&
+      Number.isInteger(message.activeSwipeIndex) &&
+      message.activeSwipeIndex >= 0
+        ? message.activeSwipeIndex
+        : 0;
+    return { messageId: message.id, swipeIndex };
+  }
+  return null;
+}
+
 export function getAttachmentFilename(attachment: PromptAttachment): string {
   const rawName = attachment.filename ?? attachment.name;
   return typeof rawName === "string" && rawName.trim() ? rawName.trim() : "attachment";

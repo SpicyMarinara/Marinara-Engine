@@ -1717,6 +1717,9 @@ export function useGenerate() {
       clearThoughtBubbles();
 
       try {
+        const flushPatch = useGameStateStore.getState().flushPatch;
+        if (flushPatch) await flushPatch();
+
         let hasError = false;
         for await (const event of api.streamEvents(
           "/generate/retry-agents",

@@ -16,6 +16,7 @@ import type { CharacterData, ChatMemoryChunk, LorebookEntryTimingState } from "@
 import { createChatsStorage } from "../services/storage/chats.storage.js";
 import { createCharactersStorage } from "../services/storage/characters.storage.js";
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
+import { createGameStateStorage, type GameStateVisibleAnchor } from "../services/storage/game-state.storage.js";
 import { createRegexScriptsStorage } from "../services/storage/regex-scripts.storage.js";
 import { getLocalSidecarProvider, LOCAL_SIDECAR_MODEL } from "../services/llm/local-sidecar.js";
 import { createLLMProvider } from "../services/llm/provider-registry.js";
@@ -30,7 +31,12 @@ import { existsSync } from "fs";
 import { join } from "path";
 import { DATA_DIR } from "../utils/data-dir.js";
 import { normalizeTimestampOverrides } from "../services/import/import-timestamps.js";
-import { findLastIndex, parseExtra, shouldEnableAgentsForGeneration } from "./generate/generate-route-utils.js";
+import {
+  findLastIndex,
+  parseExtra,
+  resolveVisibleGameStateAnchor,
+  shouldEnableAgentsForGeneration,
+} from "./generate/generate-route-utils.js";
 import {
   filterGameInternalAgentIds,
   resolveGameLorebookScopeExclusions,
@@ -44,26 +50,15 @@ import { applyRegexScriptsToPromptMessages } from "../services/regex/regex-appli
 type TrackerWrapFormat = "xml" | "markdown" | "none";
 type EntryStateOverrides = Record<string, { ephemeral?: number | null; enabled?: boolean }>;
 
-async function loadLatestChatGameSnapshot(app: FastifyInstance, chatId: string) {
-  const committedRows = await app.db
-    .select()
-    .from(gameStateSnapshots)
-    .where(and(eq(gameStateSnapshots.chatId, chatId), eq(gameStateSnapshots.committed, 1)))
-    .orderBy(desc(gameStateSnapshots.createdAt))
-    .limit(1);
-
-  let snap = committedRows[0];
-  if (!snap) {
-    const anyRows = await app.db
-      .select()
-      .from(gameStateSnapshots)
-      .where(eq(gameStateSnapshots.chatId, chatId))
-      .orderBy(desc(gameStateSnapshots.createdAt))
-      .limit(1);
-    snap = anyRows[0];
-  }
-
-  return snap ?? null;
+async function loadLatestChatGameSnapshot(
+  app: FastifyInstance,
+  chatId: string,
+  visibleAnchor?: GameStateVisibleAnchor | null,
+) {
+  return createGameStateStorage(app.db).getForGeneration(chatId, {
+    preferLatestVisible: true,
+    visibleAnchor,
+  });
 }
 
 function formatPeekTrackerContextBlock(args: {
@@ -917,6 +912,7 @@ export async function chatsRoutes(app: FastifyInstance) {
 
     const chatMessages = await storage.listMessages(req.params.id);
     const chatMeta = typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : (chat.metadata ?? {});
+    const visibleGameStateAnchor = resolveVisibleGameStateAnchor(chatMessages);
 
     // ── Primary: return the cached prompt from the last generation ──
     // This is an exact copy of what was actually sent to the model,
@@ -1387,7 +1383,7 @@ export async function chatsRoutes(app: FastifyInstance) {
             impersonateBlockAgents: false,
           });
           if (chatEnableAgents && activeAgentIds.length > 0) {
-            const snap = await loadLatestChatGameSnapshot(app, req.params.id);
+            const snap = await loadLatestChatGameSnapshot(app, req.params.id, visibleGameStateAnchor);
             const contextBlock = snap
               ? formatPeekTrackerContextBlock({ wrapFormat, snap, chatMeta, activeAgentIds })
               : null;
