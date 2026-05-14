@@ -27,6 +27,10 @@ export interface GenerationReplayInput {
 const GUIDE_SOURCES = new Set<GenerationReplayGuideSource>(["narrator", "guide", "game_start"]);
 
 function asNonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function asTrimmedNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
@@ -50,10 +54,10 @@ export function buildGenerationReplay(input: GenerationReplayInput): GenerationR
     replay.impersonate = true;
     replay.userMessage = asNonEmptyString(input.userMessage);
 
-    const impersonatePresetId = asNonEmptyString(input.impersonatePresetId);
+    const impersonatePresetId = asTrimmedNonEmptyString(input.impersonatePresetId);
     if (impersonatePresetId) replay.impersonatePresetId = impersonatePresetId;
 
-    const impersonateConnectionId = asNonEmptyString(input.impersonateConnectionId);
+    const impersonateConnectionId = asTrimmedNonEmptyString(input.impersonateConnectionId);
     if (impersonateConnectionId) replay.impersonateConnectionId = impersonateConnectionId;
 
     if (input.impersonateBlockAgents === true) replay.impersonateBlockAgents = true;
@@ -74,8 +78,8 @@ export function normalizeGenerationReplay(value: unknown): GenerationReplay | nu
     impersonate: raw.impersonate === true,
     generationGuide: asNonEmptyString(raw.generationGuide),
     generationGuideSource: asGuideSource(raw.generationGuideSource),
-    impersonatePresetId: asNonEmptyString(raw.impersonatePresetId),
-    impersonateConnectionId: asNonEmptyString(raw.impersonateConnectionId),
+    impersonatePresetId: asTrimmedNonEmptyString(raw.impersonatePresetId),
+    impersonateConnectionId: asTrimmedNonEmptyString(raw.impersonateConnectionId),
     impersonateBlockAgents: raw.impersonateBlockAgents === true,
     impersonatePromptTemplate: asNonEmptyString(raw.impersonatePromptTemplate),
   });
@@ -112,12 +116,12 @@ export function applyGenerationReplayToRegenerateInput(
       applied = true;
     }
 
-    if (!asNonEmptyString(input.impersonatePresetId) && replay.impersonatePresetId) {
+    if (!asTrimmedNonEmptyString(input.impersonatePresetId) && replay.impersonatePresetId) {
       input.impersonatePresetId = replay.impersonatePresetId;
       applied = true;
     }
 
-    if (!asNonEmptyString(input.impersonateConnectionId) && replay.impersonateConnectionId) {
+    if (!asTrimmedNonEmptyString(input.impersonateConnectionId) && replay.impersonateConnectionId) {
       input.impersonateConnectionId = replay.impersonateConnectionId;
       applied = true;
     }

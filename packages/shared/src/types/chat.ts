@@ -2,6 +2,8 @@
 // Chat & Message Types
 // ──────────────────────────────────────────────
 
+import type { GenerationGuideSource } from "../utils/generation-guide.js";
+
 /** The four primary chat modes the engine supports. */
 export type ChatMode = "conversation" | "roleplay" | "visual_novel" | "game";
 
@@ -333,7 +335,7 @@ export interface MessageExtra {
     impersonate?: true;
     userMessage?: string | null;
     generationGuide?: string | null;
-    generationGuideSource?: "narrator" | "guide" | "game_start" | null;
+    generationGuideSource?: GenerationGuideSource | null;
     impersonatePresetId?: string | null;
     impersonateConnectionId?: string | null;
     impersonateBlockAgents?: boolean;

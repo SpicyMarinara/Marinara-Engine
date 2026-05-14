@@ -319,6 +319,8 @@ export const ConversationMessage = memo(function ConversationMessage({
     return typeof message.extra === "string" ? JSON.parse(message.extra) : message.extra;
   }, [message.extra]);
   const generationReplay = hasGenerationReplayDetails(extra.generationReplay) ? extra.generationReplay : null;
+  // canRegenerate lets assistant messages retry; isUser messages need generationReplay
+  // metadata from hasGenerationReplayDetails, such as /impersonate.
   const canRegenerate = !isUser || generationReplay !== null;
 
   useEffect(() => {

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { buildGuidedGenerationInstructionMessage } from "@marinara-engine/shared";
 import {
   applyGenerationReplayToRegenerateInput,
   buildGenerationReplay,
@@ -63,17 +64,17 @@ test("replays ordinary guided-regenerate guidance", () => {
 
 test("normalizes stored ordinary guide metadata", () => {
   const replay = normalizeGenerationReplay({
-    generationGuide: "stale hidden guide",
+    generationGuide: "  stale hidden guide  ",
     generationGuideSource: "guide",
   });
   const input = regenInput();
 
   assert.deepEqual(replay, {
-    generationGuide: "stale hidden guide",
+    generationGuide: "  stale hidden guide  ",
     generationGuideSource: "guide",
   });
   assert.equal(applyGenerationReplayToRegenerateInput(input, replay), true);
-  assert.equal(input.generationGuide, "stale hidden guide");
+  assert.equal(input.generationGuide, "  stale hidden guide  ");
   assert.equal(input.generationGuideSource, "guide");
 });
 
@@ -84,7 +85,7 @@ test("replays impersonate direction and overrides onto a regenerate request", ()
     impersonatePresetId: "preset-1",
     impersonateConnectionId: "connection-1",
     impersonateBlockAgents: true,
-    impersonatePromptTemplate: "Write as {{user}}: {{impersonate_direction}}",
+    impersonatePromptTemplate: "  Write as {{user}}: {{impersonate_direction}}  ",
   });
   const input = regenInput();
 
@@ -94,7 +95,7 @@ test("replays impersonate direction and overrides onto a regenerate request", ()
   assert.equal(input.impersonatePresetId, "preset-1");
   assert.equal(input.impersonateConnectionId, "connection-1");
   assert.equal(input.impersonateBlockAgents, true);
-  assert.equal(input.impersonatePromptTemplate, "Write as {{user}}: {{impersonate_direction}}");
+  assert.equal(input.impersonatePromptTemplate, "  Write as {{user}}: {{impersonate_direction}}  ");
 });
 
 test("uses explicit guided regenerate text as the new impersonate direction", () => {
@@ -104,8 +105,7 @@ test("uses explicit guided regenerate text as the new impersonate direction", ()
     impersonatePresetId: "preset-1",
   });
   const input = regenInput({
-    generationGuide:
-      "[Guided generation instruction — do not include a reply from {{user}}. Instead, write the next generated message steering it toward the following: New impersonate direction.]",
+    generationGuide: buildGuidedGenerationInstructionMessage("New impersonate direction."),
     generationGuideSource: "guide",
   });
 
@@ -124,8 +124,7 @@ test("clears generic guide injection when an explicit impersonate direction is a
   });
   const input = regenInput({
     userMessage: "Direct impersonate direction.",
-    generationGuide:
-      "[Guided generation instruction — do not include a reply from {{user}}. Instead, write the next generated message steering it toward the following: Generic guide.]",
+    generationGuide: buildGuidedGenerationInstructionMessage("Generic guide."),
     generationGuideSource: "guide",
   });
 
@@ -136,7 +135,7 @@ test("clears generic guide injection when an explicit impersonate direction is a
   assert.equal(input.generationGuideSource, null);
 });
 
-test("normalizes stored replay metadata before applying it", () => {
+test("preserves stored replay metadata whitespace before applying it", () => {
   const replay = normalizeGenerationReplay({
     impersonate: true,
     userMessage: "  whisper it  ",
@@ -148,7 +147,7 @@ test("normalizes stored replay metadata before applying it", () => {
 
   assert.equal(applyGenerationReplayToRegenerateInput(input, replay), true);
   assert.equal(input.impersonate, true);
-  assert.equal(input.userMessage, "whisper it");
+  assert.equal(input.userMessage, "  whisper it  ");
   assert.equal(input.generationGuide, null);
   assert.equal(input.generationGuideSource, null);
   assert.equal(input.impersonateBlockAgents, true);
