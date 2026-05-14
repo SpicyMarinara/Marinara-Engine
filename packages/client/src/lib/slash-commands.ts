@@ -5,7 +5,12 @@ import { api } from "./api-client";
 import { useChatStore } from "../stores/chat.store";
 import { useUIStore } from "../stores/ui.store";
 import { toast } from "sonner";
-import { SUPPORTED_MACROS, type SceneCreateResponse, type ScenePlanResponse } from "@marinara-engine/shared";
+import {
+  SUPPORTED_MACROS,
+  buildNarratorInstructionMessage,
+  type SceneCreateResponse,
+  type ScenePlanResponse,
+} from "@marinara-engine/shared";
 
 export interface SlashCommand {
   name: string;
@@ -258,10 +263,6 @@ function isMessageHidden(msg: { extra?: unknown }): boolean {
   } catch {
     return false;
   }
-}
-
-export function buildNarratorInstructionMessage(direction: string): string {
-  return `[Narrator instruction — do not include a reply from {{user}}. Instead, write the next part of the narrative steering it toward the following: ${direction.trim()}]`;
 }
 
 // ── Command definitions ────────────────

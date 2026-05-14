@@ -49,7 +49,7 @@ import { MariThinkingIndicator } from "./MariThinkingIndicator";
 import { MariCapabilityNotice } from "./MariCapabilityNotice";
 import { SlashCommandFeedback } from "./SlashCommandFeedback";
 import { QuickReplyMenu, type QuickReplyAction } from "./QuickReplyMenu";
-import type { Message } from "@marinara-engine/shared";
+import { buildGuidedGenerationInstructionMessage, type Message } from "@marinara-engine/shared";
 
 interface Attachment {
   type: string;
@@ -1303,7 +1303,7 @@ export function ConversationInput({
                 chatId: activeChatId,
                 connectionId: null,
                 forCharacterId: characterId,
-                generationGuide: currentInput,
+                generationGuide: buildGuidedGenerationInstructionMessage(currentInput),
                 generationGuideSource: "guide",
               }
             : { chatId: activeChatId, connectionId: null, forCharacterId: characterId },

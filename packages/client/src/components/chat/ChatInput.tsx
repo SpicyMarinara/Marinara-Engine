@@ -24,7 +24,7 @@ import { useGenerate } from "../../hooks/use-generate";
 import { useApplyRegex } from "../../hooks/use-apply-regex";
 import { useCreateMessage, useDeleteMessage, useUpdateMessageExtra, chatKeys } from "../../hooks/use-chats";
 import { characterKeys } from "../../hooks/use-characters";
-import type { Message } from "@marinara-engine/shared";
+import { buildGuidedGenerationInstructionMessage, type Message } from "@marinara-engine/shared";
 import {
   matchSlashCommand,
   getSlashCompletions,
@@ -1058,7 +1058,7 @@ export const ChatInput = memo(function ChatInput({
                 chatId: activeChatId,
                 connectionId: null,
                 forCharacterId: characterId,
-                generationGuide: currentInput,
+                generationGuide: buildGuidedGenerationInstructionMessage(currentInput),
                 generationGuideSource: "guide",
               }
             : { chatId: activeChatId, connectionId: null, forCharacterId: characterId },

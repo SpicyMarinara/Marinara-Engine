@@ -1,4 +1,6 @@
-export type GenerationReplayGuideSource = "narrator" | "guide" | "game_start";
+import { stripGenerationGuideInstruction, type GenerationGuideSource } from "@marinara-engine/shared";
+
+export type GenerationReplayGuideSource = GenerationGuideSource;
 
 export interface GenerationReplay {
   impersonate?: true;
@@ -93,8 +95,20 @@ export function applyGenerationReplayToRegenerateInput(
       applied = true;
     }
 
-    if (!asNonEmptyString(input.userMessage) && replay.userMessage) {
+    const currentUserMessage = asNonEmptyString(input.userMessage);
+    const explicitGuide = asNonEmptyString(input.generationGuide);
+    if (explicitGuide) {
+      if (!currentUserMessage) {
+        input.userMessage = stripGenerationGuideInstruction(explicitGuide);
+      }
+      input.generationGuide = null;
+      input.generationGuideSource = null;
+      applied = true;
+    } else if (!currentUserMessage && replay.userMessage) {
       input.userMessage = replay.userMessage;
+      applied = true;
+    } else if (!currentUserMessage && replay.generationGuide) {
+      input.userMessage = stripGenerationGuideInstruction(replay.generationGuide);
       applied = true;
     }
 
@@ -119,7 +133,7 @@ export function applyGenerationReplayToRegenerateInput(
     }
   }
 
-  if (!asNonEmptyString(input.generationGuide) && replay.generationGuide) {
+  if (replay.impersonate !== true && !asNonEmptyString(input.generationGuide) && replay.generationGuide) {
     input.generationGuide = replay.generationGuide;
     input.generationGuideSource = replay.generationGuideSource ?? "guide";
     applied = true;

@@ -327,7 +327,7 @@ export interface MessageExtra {
   contextInjections?: Array<{ agentType: string; agentName?: string; text: string }> | null;
   /**
    * Hidden command-generation options needed to make swipes/regenerations replay
-   * the same slash-command prompt behavior.
+   * the same slash-command or guided-regenerate prompt behavior.
    */
   generationReplay?: {
     impersonate?: true;

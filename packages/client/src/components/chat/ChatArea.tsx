@@ -42,7 +42,13 @@ import { chatBackgroundMetadataToUrl, chatBackgroundUrlToMetadata } from "../../
 import { useGameStateStore } from "../../stores/game-state.store";
 import { toast } from "sonner";
 import { BookOpen, Check, HelpCircle, MessageSquare, Theater, X } from "lucide-react";
-import type { SpritePlacement, SpriteSide } from "@marinara-engine/shared";
+import {
+  APP_VERSION,
+  BUILT_IN_AGENTS,
+  buildGuidedGenerationInstructionMessage,
+  type SpritePlacement,
+  type SpriteSide,
+} from "@marinara-engine/shared";
 import { useUIStore } from "../../stores/ui.store";
 import { useAgentStore } from "../../stores/agent.store";
 import { cn, parseAvatarCropJson } from "../../lib/utils";
@@ -50,8 +56,6 @@ import { Modal } from "../ui/Modal";
 import { useEncounter } from "../../hooks/use-encounter";
 import { useScene } from "../../hooks/use-scene";
 import { useEncounterStore } from "../../stores/encounter.store";
-import { APP_VERSION } from "@marinara-engine/shared";
-import { BUILT_IN_AGENTS } from "@marinara-engine/shared";
 import { useTranslationStore } from "../../stores/translation.store";
 import { ttsService } from "../../lib/tts-service";
 import { useTTSConfig } from "../../hooks/use-tts";
@@ -798,7 +802,7 @@ export function ChatArea() {
                 chatId: activeChatId,
                 connectionId: null,
                 regenerateMessageId: messageId,
-                generationGuide: currentInput?.toString(),
+                generationGuide: buildGuidedGenerationInstructionMessage(currentInput.toString()),
                 generationGuideSource: "guide",
               }
             : { chatId: activeChatId, connectionId: null, regenerateMessageId: messageId },
