@@ -4,9 +4,10 @@ import { promises as dns } from "node:dns";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join, resolve, win32 } from "node:path";
 import { tmpdir } from "node:os";
-import { gzipSync } from "node:zlib";
+import { brotliCompressSync, deflateSync, gzipSync, zstdCompressSync } from "node:zlib";
 import {
   assertInsideDir,
+  decodePossiblyCompressedBody,
   isAllowedImageBuffer,
   normalizeLoopbackUrl,
   safeFetch,
@@ -214,6 +215,47 @@ test("safeFetch decodes raw gzip bodies when providers omit content-encoding", a
   });
 
   assert.deepEqual(await response.json(), { models: [{ id: "openrouter/test" }] });
+});
+
+test("safeFetch decodes raw zstd bodies when providers omit content-encoding", async () => {
+  const response = await safeFetch("https://example.com/models", {
+    policy: { allowLocal: true },
+    dispatcher: {
+      dispatch(
+        _options: unknown,
+        handler: {
+          onConnect: (abort: () => void) => void;
+          onHeaders: (status: number, headers: string[], resume: () => void) => void;
+          onData: (chunk: Buffer) => void;
+          onComplete: (trailers: string[]) => void;
+        },
+      ) {
+        handler.onConnect(() => undefined);
+        handler.onHeaders(200, ["content-type", "application/json"], () => undefined);
+        handler.onData(zstdCompressSync(Buffer.from(JSON.stringify({ models: [{ id: "venice/test" }] }))));
+        handler.onComplete([]);
+        return true;
+      },
+    },
+  });
+
+  assert.deepEqual(await response.json(), { models: [{ id: "venice/test" }] });
+});
+
+test("decodePossiblyCompressedBody handles compressed bodies left after content-encoding", () => {
+  const json = Buffer.from(JSON.stringify({ ok: true }));
+  const cases: Array<[string, Buffer]> = [
+    ["gzip", gzipSync(json)],
+    ["br", brotliCompressSync(json)],
+    ["zstd", zstdCompressSync(json)],
+    ["deflate", deflateSync(json)],
+  ];
+
+  for (const [encoding, body] of cases) {
+    assert.deepEqual(JSON.parse(decodePossiblyCompressedBody(body, encoding).toString("utf8")), { ok: true });
+  }
+
+  assert.equal(decodePossiblyCompressedBody(json, "zstd").toString("utf8"), json.toString("utf8"));
 });
 
 test("safeFetch caps decoded raw gzip bodies when providers omit content-encoding", async () => {

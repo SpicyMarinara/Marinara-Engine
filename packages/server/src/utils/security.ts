@@ -1,7 +1,7 @@
 import { promises as dns } from "node:dns";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { basename, extname, relative, resolve, sep, win32 } from "node:path";
-import { gunzipSync } from "node:zlib";
+import { brotliDecompressSync, gunzipSync, inflateRawSync, inflateSync, zstdDecompressSync } from "node:zlib";
 import { Agent } from "undici";
 import { isLoopbackIp, isPrivateNetworkIp } from "../middleware/ip-allowlist.js";
 import { logger } from "../lib/logger.js";
@@ -388,7 +388,7 @@ async function readCappedResponse(response: Response, maxBytes: number, dispatch
   } finally {
     await dispatcher?.close().catch(() => undefined);
   }
-  const body = normalizeRawCompressedBody(Buffer.concat(chunks), response.headers, maxBytes);
+  const body = normalizeCompressedBody(Buffer.concat(chunks), response.headers, maxBytes);
   return new Response(body, {
     status: response.status,
     statusText: response.statusText,
@@ -396,22 +396,19 @@ async function readCappedResponse(response: Response, maxBytes: number, dispatch
   });
 }
 
-function normalizeRawCompressedBody(body: Buffer, headers: Headers, maxBytes: number): Buffer {
-  const encoding = headers.get("content-encoding")?.toLowerCase().trim();
-  if (encoding || body.length < 2 || body[0] !== 0x1f || body[1] !== 0x8b) return body;
-  try {
+function normalizeCompressedBody(body: Buffer, headers: Headers, maxBytes: number): Buffer {
+  const encoding = headers.get("content-encoding");
+  const normalized = decodePossiblyCompressedBody(body, encoding, maxBytes);
+  if (normalized !== body) {
     logger.debug(
-      "Detected raw gzip-compressed outbound response without content-encoding header; compressedBytes=%d maxBytes=%d",
+      "Decoded compressed outbound response body; contentEncoding=%s compressedBytes=%d decodedBytes=%d maxBytes=%d",
+      encoding?.trim() || "sniffed",
       body.length,
+      normalized.length,
       maxBytes,
     );
-    return gunzipSync(body, { maxOutputLength: maxBytes });
-  } catch (err) {
-    if (err instanceof Error && "code" in err && err.code === "ERR_BUFFER_TOO_LARGE") {
-      throw new Error(`Outbound response exceeded ${maxBytes} bytes`);
-    }
-    return body;
   }
+  return normalized;
 }
 
 function capStreamingResponse(response: Response, maxBytes: number, dispatcher?: Agent): Response {
@@ -455,11 +452,108 @@ function capStreamingResponse(response: Response, maxBytes: number, dispatcher?:
   });
 }
 
-export function decodePossiblyCompressedBody(buffer: Buffer): Buffer {
-  if (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b) {
-    return gunzipSync(buffer);
+export function decodePossiblyCompressedBody(
+  buffer: Buffer,
+  contentEncoding?: string | null,
+  maxBytes = DEFAULT_MAX_RESPONSE_BYTES,
+): Buffer {
+  const encodings = parseContentEncodings(contentEncoding);
+  let current = buffer;
+  let decoded = false;
+
+  for (const encoding of encodings.reverse()) {
+    const next = decodeByEncoding(current, encoding, maxBytes);
+    if (next) {
+      current = next;
+      decoded = true;
+    }
   }
-  return buffer;
+
+  for (let i = 0; i < 2; i += 1) {
+    const next = decodeByMagicBytes(current, maxBytes);
+    if (!next) break;
+    current = next;
+    decoded = true;
+  }
+
+  return decoded ? current : buffer;
+}
+
+function parseContentEncodings(contentEncoding?: string | null): string[] {
+  return (
+    contentEncoding
+      ?.toLowerCase()
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean) ?? []
+  );
+}
+
+function decodeByEncoding(buffer: Buffer, encoding: string, maxBytes: number): Buffer | null {
+  switch (encoding) {
+    case "gzip":
+    case "x-gzip":
+      return tryDecodeCompressedBody(buffer, "gzip", maxBytes);
+    case "br":
+      return tryDecodeCompressedBody(buffer, "br", maxBytes);
+    case "zstd":
+      return tryDecodeCompressedBody(buffer, "zstd", maxBytes);
+    case "deflate":
+      return (
+        tryDecodeCompressedBody(buffer, "deflate", maxBytes) ?? tryDecodeCompressedBody(buffer, "deflate-raw", maxBytes)
+      );
+    default:
+      return null;
+  }
+}
+
+function decodeByMagicBytes(buffer: Buffer, maxBytes: number): Buffer | null {
+  if (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b) {
+    return tryDecodeCompressedBody(buffer, "gzip", maxBytes);
+  }
+  if (buffer.length >= 4 && buffer[0] === 0x28 && buffer[1] === 0xb5 && buffer[2] === 0x2f && buffer[3] === 0xfd) {
+    return tryDecodeCompressedBody(buffer, "zstd", maxBytes);
+  }
+  if (looksLikeZlibDeflate(buffer)) {
+    return tryDecodeCompressedBody(buffer, "deflate", maxBytes);
+  }
+  return null;
+}
+
+function looksLikeZlibDeflate(buffer: Buffer): boolean {
+  if (buffer.length < 2) return false;
+  const first = buffer[0]!;
+  const second = buffer[1]!;
+  const compressionMethod = first & 0x0f;
+  if (compressionMethod !== 8) return false;
+  return ((first << 8) + second) % 31 === 0;
+}
+
+function tryDecodeCompressedBody(
+  buffer: Buffer,
+  algorithm: "gzip" | "br" | "zstd" | "deflate" | "deflate-raw",
+  maxBytes: number,
+): Buffer | null {
+  try {
+    switch (algorithm) {
+      case "gzip":
+        return gunzipSync(buffer, { maxOutputLength: maxBytes });
+      case "br":
+        return brotliDecompressSync(buffer, { maxOutputLength: maxBytes });
+      case "zstd":
+        return zstdDecompressSync(buffer, { maxOutputLength: maxBytes });
+      case "deflate":
+        return inflateSync(buffer, { maxOutputLength: maxBytes });
+      case "deflate-raw":
+        return inflateRawSync(buffer, { maxOutputLength: maxBytes });
+    }
+    return null;
+  } catch (err) {
+    if (err instanceof Error && "code" in err && err.code === "ERR_BUFFER_TOO_LARGE") {
+      throw new Error(`Outbound response exceeded ${maxBytes} bytes`);
+    }
+    return null;
+  }
 }
 
 export async function safeFetch(url: string | URL, options: SafeFetchOptions = {}): Promise<Response> {
