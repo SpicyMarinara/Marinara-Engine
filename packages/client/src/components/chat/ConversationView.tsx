@@ -132,6 +132,102 @@ function isHiddenFromUser(message: Message) {
   }
 }
 
+const LIST_LINE_RE = /^\s*(?:[-*+]|\d+\.)\s/;
+const TASK_LIST_LINE_RE = /^\s*[-*+] \[[ xX]\]\s/;
+const LIST_CONTINUATION_LINE_RE = /^\s{2,}\S/;
+const TABLE_ROW_RE = /^\s*\|.+\|\s*$/;
+const BLOCKQUOTE_LINE_RE = /^\s*>/;
+const CODE_FENCE_LINE_RE = /^\s*`{3,}/;
+
+function isListLine(line: string) {
+  return LIST_LINE_RE.test(line) || TASK_LIST_LINE_RE.test(line);
+}
+
+function isListBlockLine(line: string) {
+  return isListLine(line) || LIST_CONTINUATION_LINE_RE.test(line);
+}
+
+function chunkAssistantMarkdownBlocks(lines: string[]): string[][] {
+  const blocks: string[][] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index]!;
+
+    if (CODE_FENCE_LINE_RE.test(line)) {
+      const block = [line];
+      index++;
+      while (index < lines.length) {
+        const nextLine = lines[index]!;
+        block.push(nextLine);
+        index++;
+        if (CODE_FENCE_LINE_RE.test(nextLine)) break;
+      }
+      blocks.push(block);
+      continue;
+    }
+
+    if (TABLE_ROW_RE.test(line.trim())) {
+      const block = [line];
+      index++;
+      while (index < lines.length && TABLE_ROW_RE.test(lines[index]!.trim())) {
+        block.push(lines[index]!);
+        index++;
+      }
+      blocks.push(block);
+      continue;
+    }
+
+    if (isListLine(line)) {
+      const block = [line];
+      index++;
+      while (index < lines.length && isListBlockLine(lines[index]!)) {
+        block.push(lines[index]!);
+        index++;
+      }
+      blocks.push(block);
+      continue;
+    }
+
+    if (BLOCKQUOTE_LINE_RE.test(line)) {
+      const block = [line];
+      index++;
+      while (index < lines.length && BLOCKQUOTE_LINE_RE.test(lines[index]!)) {
+        block.push(lines[index]!);
+        index++;
+      }
+      blocks.push(block);
+      continue;
+    }
+
+    blocks.push([line]);
+    index++;
+  }
+
+  return blocks;
+}
+
+function splitAssistantContentLines(content: string, charName?: string | null): string[] {
+  const lines: string[] = [];
+  let inCodeBlock = false;
+
+  for (const line of content.split("\n")) {
+    const t = line.trim();
+    const isCodeFence = CODE_FENCE_LINE_RE.test(line);
+
+    if (!inCodeBlock && !t) continue;
+    if (!inCodeBlock && charName && (t === charName || t === `${charName}:`)) continue;
+
+    lines.push(line);
+
+    if (isCodeFence) {
+      inCodeBlock = !inCodeBlock;
+    }
+  }
+
+  return lines;
+}
+
 // Module-level set that remembers which message keys have been "seen" across
 // component remounts. This prevents stagger animations and notification sounds
 // from replaying when the user navigates away from a chat and comes back.
@@ -470,30 +566,9 @@ export function ConversationView({
         const cleaned = stripTimestamps(msg.content);
         // Strip lines that are just the character's name (LLM prefixing in group individual mode)
         const charName = msg.characterId ? characterMap.get(msg.characterId)?.name : null;
-        const lines = cleaned.split("\n").filter((l) => {
-          const t = l.trim();
-          if (!t) return false;
-          // Skip lines that are just the character name (with optional colon)
-          if (charName && (t === charName || t === `${charName}:`)) return false;
-          return true;
-        });
+        const lines = splitAssistantContentLines(cleaned, charName);
         if (lines.length > 1) {
-          // Group consecutive list items (ordered or unordered) into single
-          // blocks so numbered / bullet lists render correctly instead of
-          // each item becoming its own <ol> / <ul>.
-          const LIST_LINE_RE = /^\s*(?:[-*+]|\d+\.)\s/;
-          const blocks: string[][] = [];
-          for (const line of lines) {
-            const isList = LIST_LINE_RE.test(line);
-            const prev = blocks[blocks.length - 1];
-            if (isList && prev && LIST_LINE_RE.test(prev[0]!)) {
-              // Continue the current list block
-              prev.push(line);
-            } else {
-              // Start a new block
-              blocks.push([line]);
-            }
-          }
+          const blocks = chunkAssistantMarkdownBlocks(lines);
 
           blocks.forEach((block, bi) => {
             const isLast = bi === blocks.length - 1;
