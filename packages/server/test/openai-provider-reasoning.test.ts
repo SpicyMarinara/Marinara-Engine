@@ -330,6 +330,50 @@ test("custom compatible streams accept SSE data lines without a space", async ()
   }
 });
 
+test("LLM streaming requests ask providers for identity encoding", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLocalUrls = process.env.PROVIDER_LOCAL_URLS_ENABLED;
+  const seenAcceptEncodings: Array<string | null> = [];
+  const encoder = new TextEncoder();
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+    seenAcceptEncodings.push(new Headers(init?.headers).get("accept-encoding"));
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('data:{"choices":[{"delta":{"content":"identity"}}]}\n\n'));
+          controller.enqueue(encoder.encode("data:[DONE]\n\n"));
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { "Content-Type": "text/event-stream" } },
+    );
+  };
+
+  try {
+    process.env.PROVIDER_LOCAL_URLS_ENABLED = "true";
+    const provider = createLLMProvider("custom", "https://api.venice.ai/api/v1", "test-key");
+    const tokenChunks: string[] = [];
+    const result = await provider.chatComplete([{ role: "user", content: "Hello" }], {
+      model: "venice/test-model",
+      stream: true,
+      maxTokens: 512,
+      onToken: (chunk) => tokenChunks.push(chunk),
+    });
+
+    assert.equal(seenAcceptEncodings[0], "identity");
+    assert.equal(tokenChunks.join(""), "identity");
+    assert.equal(result.content, "identity");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalLocalUrls === undefined) {
+      delete process.env.PROVIDER_LOCAL_URLS_ENABLED;
+    } else {
+      process.env.PROVIDER_LOCAL_URLS_ENABLED = originalLocalUrls;
+    }
+  }
+});
+
 test("OpenRouter non-stream chat decodes raw gzip JSON without content-encoding", async () => {
   const originalFetch = globalThis.fetch;
   const originalLocalUrls = process.env.PROVIDER_LOCAL_URLS_ENABLED;

@@ -13,6 +13,14 @@ import { safeFetch, type SafeFetchOptions } from "../../utils/security.js";
 const LLM_HEADERS_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 const llmAgentOptions = { bodyTimeout: 0, headersTimeout: LLM_HEADERS_TIMEOUT };
 
+function providerRequestHeaders(headersInit: RequestInit["headers"] | undefined): Headers {
+  const headers = new Headers(headersInit);
+  if (!headers.has("accept-encoding")) {
+    headers.set("accept-encoding", "identity");
+  }
+  return headers;
+}
+
 /**
  * Drop-in replacement for `fetch()` that uses a custom undici dispatcher
  * with no body/headers timeout. Use this for all outgoing LLM requests.
@@ -24,6 +32,7 @@ export function llmFetch(
   const bufferResponse = init?.bufferResponse ?? false;
   return safeFetch(url, {
     ...(init ?? {}),
+    headers: providerRequestHeaders(init?.headers),
     agentOptions: llmAgentOptions,
     policy: {
       allowLocal: isProviderLocalUrlsEnabled(),
