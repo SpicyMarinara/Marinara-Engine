@@ -27,6 +27,12 @@ import {
   resolveMacrosWithVariableSnapshot,
 } from "./macro-context.js";
 
+interface RuntimeAgentData {
+  text: string;
+  startToken?: string;
+  endToken?: string;
+}
+
 // ═══════════════════════════════════════════════
 //  Public Interface
 // ═══════════════════════════════════════════════
@@ -134,6 +140,8 @@ export interface AssemblerInput {
   previewOnly?: boolean;
   /** When set, replaces individual character scenario fields with this group scenario. */
   groupScenarioOverrideText?: string | null;
+  /** Per-generation agent data keyed by agent type. Used when an agent section must consume fresh output. */
+  runtimeAgentData?: Record<string, string | RuntimeAgentData>;
 }
 
 /** Output of the assembler. */
@@ -148,6 +156,8 @@ export interface AssemblerOutput {
   updatedEntryStateOverrides?: Record<string, { ephemeral?: number | null; enabled?: boolean }>;
   /** Updated per-chat sticky/cooldown/delay timing state. Caller should persist to chat metadata. */
   updatedEntryTimingStates?: Record<string, LorebookEntryTimingState>;
+  /** Agent types whose runtime data was consumed by enabled agent_data sections. */
+  runtimeAgentTypesUsed?: string[];
 }
 
 // ═══════════════════════════════════════════════
@@ -261,6 +271,7 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
   const depthSections: ResolvedSection[] = [];
   let lorebookDepthEntriesCount = 0;
   let hasChatSummaryMarker = false;
+  const runtimeAgentTypesUsed = new Set<string>();
 
   for (const sectionId of sectionOrder) {
     const section = sectionMap.get(sectionId);
@@ -287,6 +298,8 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
       macroCtx,
       markerCtx,
       wrapFormat,
+      runtimeAgentData: input.runtimeAgentData ?? {},
+      runtimeAgentTypesUsed,
     });
 
     if (!resolved) continue;
@@ -440,6 +453,7 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
     ...(markerCtx.updatedEntryTimingStates !== undefined
       ? { updatedEntryTimingStates: markerCtx.updatedEntryTimingStates }
       : {}),
+    ...(runtimeAgentTypesUsed.size > 0 ? { runtimeAgentTypesUsed: Array.from(runtimeAgentTypesUsed) } : {}),
   };
 }
 
@@ -460,6 +474,8 @@ interface ResolveSectionCtx {
   macroCtx: MacroContext;
   markerCtx: MarkerContext;
   wrapFormat: WrapFormat;
+  runtimeAgentData: Record<string, string | RuntimeAgentData>;
+  runtimeAgentTypesUsed: Set<string>;
 }
 
 // ═══════════════════════════════════════════════
@@ -474,11 +490,25 @@ async function resolveSection(
 
   let content = section.content;
   let contentMacrosResolved = false;
+  let runtimeAgentText = "";
+  let runtimeAgentStartToken: string | undefined;
+  let runtimeAgentEndToken: string | undefined;
 
   // Handle marker sections
   if (section.isMarker === "true" && section.markerConfig) {
     const markerConfig = JSON.parse(section.markerConfig) as MarkerConfig;
-    const expanded = await expandMarker(markerConfig, ctx.markerCtx);
+    const runtimeAgentType =
+      markerConfig.type === "agent_data" && markerConfig.agentType
+        ? markerConfig.agentType
+        : null;
+    const runtimeAgentData =
+      runtimeAgentType !== null ? ctx.runtimeAgentData[runtimeAgentType] : undefined;
+    runtimeAgentText = typeof runtimeAgentData === "string" ? runtimeAgentData : (runtimeAgentData?.text ?? "");
+    runtimeAgentStartToken = typeof runtimeAgentData === "string" ? undefined : runtimeAgentData?.startToken;
+    runtimeAgentEndToken = typeof runtimeAgentData === "string" ? undefined : runtimeAgentData?.endToken;
+    const hasRuntimeAgentData =
+      runtimeAgentType !== null && Object.prototype.hasOwnProperty.call(ctx.runtimeAgentData, runtimeAgentType);
+    const expanded = hasRuntimeAgentData ? { content: runtimeAgentText } : await expandMarker(markerConfig, ctx.markerCtx);
 
     // Chat history marker returns multiple messages
     if (markerConfig.type === "chat_history" && expanded.messages) {
@@ -501,8 +531,11 @@ async function resolveSection(
       const agentType = markerConfig.agentType ?? "";
       ctx.macroCtx.agentData = {
         ...ctx.macroCtx.agentData,
-        [agentType]: expanded.content,
+        [agentType]: hasRuntimeAgentData ? runtimeAgentText : expanded.content,
       };
+      if (hasRuntimeAgentData) {
+        ctx.runtimeAgentTypesUsed.add(agentType);
+      }
       content = section.content;
     } else {
       // Other markers return content to be wrapped
@@ -518,15 +551,21 @@ async function resolveSection(
   // Resolve macros
   content = contentMacrosResolved ? content : resolveMacros(content, ctx.macroCtx);
   if (!content.trim()) return null;
+  const shouldWrapRuntimeAgentSection =
+    Boolean(runtimeAgentStartToken && runtimeAgentEndToken) && content.includes(runtimeAgentText);
 
   // Auto-wrap in the preset's format
   const wrapped = wrapContent(content, section.name, ctx.wrapFormat);
+  const messageContent =
+    shouldWrapRuntimeAgentSection
+      ? `${runtimeAgentStartToken}${wrapped || content}${runtimeAgentEndToken}`
+      : wrapped || content;
 
   return {
     id: section.id,
     groupId: section.groupId,
     role,
-    messages: [{ role, content: wrapped || content, contextKind: "prompt" }],
+    messages: [{ role, content: messageContent, contextKind: "prompt" }],
     depth: section.injectionDepth,
   };
 }

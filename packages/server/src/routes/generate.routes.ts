@@ -652,6 +652,107 @@ const REVIEWABLE_WRITER_AGENT_TYPES = new Set(
   ).map((agent) => agent.id),
 );
 
+type RuntimeAgentSectionType = "knowledge-retrieval" | "knowledge-router";
+
+const RUNTIME_AGENT_SECTION_TYPES = new Set<string>(["knowledge-retrieval", "knowledge-router"]);
+const RUNTIME_AGENT_SECTION_TOKEN_PREFIX = "__MARINARA_RUNTIME_AGENT_SECTION__";
+
+interface RuntimeAgentSectionTokens {
+  placeholder: string;
+  start: string;
+  end: string;
+}
+
+function toRuntimeAgentSectionType(agentType: string): RuntimeAgentSectionType | null {
+  return RUNTIME_AGENT_SECTION_TYPES.has(agentType) ? (agentType as RuntimeAgentSectionType) : null;
+}
+
+function makeRuntimeAgentSectionTokens(
+  agentType: RuntimeAgentSectionType,
+  nonce: string,
+): RuntimeAgentSectionTokens {
+  return {
+    placeholder: `${RUNTIME_AGENT_SECTION_TOKEN_PREFIX}${nonce}__${agentType}__VALUE__`,
+    start: `${RUNTIME_AGENT_SECTION_TOKEN_PREFIX}${nonce}__${agentType}__START__`,
+    end: `${RUNTIME_AGENT_SECTION_TOKEN_PREFIX}${nonce}__${agentType}__END__`,
+  };
+}
+
+function replaceRuntimeAgentSection(
+  messages: Array<{ content: string }>,
+  tokens: RuntimeAgentSectionTokens,
+  text: string,
+): boolean {
+  let replaced = false;
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i]!;
+    if (!message.content.includes(tokens.placeholder)) continue;
+    messages[i] = {
+      ...message,
+      content: message.content
+        .split(tokens.start)
+        .join("")
+        .split(tokens.end)
+        .join("")
+        .split(tokens.placeholder)
+        .join(text),
+    };
+    replaced = true;
+  }
+  return replaced;
+}
+
+export function clearUnusedRuntimeAgentSectionsForTest(
+  messages: Array<{ content: string }>,
+  tokenEntries: Iterable<[RuntimeAgentSectionType, RuntimeAgentSectionTokens]>,
+): void {
+  let changed = false;
+  for (const [, tokens] of tokenEntries) {
+    const sectionPattern = new RegExp(
+      escapeRegExp(tokens.start) + "[\\s\\S]*?" + escapeRegExp(tokens.end),
+      "g",
+    );
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i]!;
+      if (!message.content.includes(tokens.start)) continue;
+      const content = message.content.replace(sectionPattern, "").trim();
+      if (content) {
+        messages[i] = { ...message, content };
+      } else {
+        messages.splice(i, 1);
+      }
+      changed = true;
+    }
+  }
+  if (changed) {
+    pruneEmptyPromptWrappers(messages);
+  }
+}
+
+const clearUnusedRuntimeAgentSections = clearUnusedRuntimeAgentSectionsForTest;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function pruneEmptyPromptWrappers(messages: Array<{ content: string }>): void {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const content = messages[i]!.content.trim();
+    if (isEmptyPromptWrapper(content)) {
+      messages.splice(i, 1);
+    } else if (content !== messages[i]!.content) {
+      messages[i] = { ...messages[i]!, content };
+    }
+  }
+}
+
+function isEmptyPromptWrapper(content: string): boolean {
+  if (!content) return true;
+  const xmlMatch = content.match(/^<([A-Za-z][\w.-]*)>\s*<\/\1>$/);
+  if (xmlMatch) return true;
+  return /^#{1,6}\s+\S.*$/m.test(content) && content.split(/\r?\n/).slice(1).every((line) => !line.trim());
+}
+
 function normalizeChatTopP(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   if (value <= 0) return 1;
@@ -1130,6 +1231,8 @@ export async function generateRoutes(app: FastifyInstance) {
       let assistantPrefill = "";
       let customParameters: Record<string, unknown> = {};
       let wrapFormat: "xml" | "markdown" | "none" = "xml";
+      const runtimeAgentSectionTypes = new Set<RuntimeAgentSectionType>();
+      const runtimeAgentSectionTokens = new Map<RuntimeAgentSectionType, RuntimeAgentSectionTokens>();
       const connectionMaxContext = normalizeMaxContext(conn.maxContext);
       const knownModelContext = normalizeMaxContext(findKnownModel(conn.provider as APIProvider, conn.model)?.context);
       let effectiveMaxContext = minContextLimit(connectionMaxContext, knownModelContext);
@@ -1283,6 +1386,34 @@ export async function generateRoutes(app: FastifyInstance) {
           presets.listGroups(presetId),
           presets.listChoiceBlocksForPreset(presetId),
         ]);
+        for (const section of sections) {
+          if (section.enabled !== "true" || section.isMarker !== "true" || !section.markerConfig) continue;
+          try {
+            const markerConfig = JSON.parse(section.markerConfig) as { type?: unknown; agentType?: unknown };
+            const runtimeType =
+              markerConfig.type === "agent_data" && typeof markerConfig.agentType === "string"
+                ? toRuntimeAgentSectionType(markerConfig.agentType)
+                : null;
+            if (runtimeType) runtimeAgentSectionTypes.add(runtimeType);
+          } catch {
+            /* ignore malformed marker config */
+          }
+        }
+        const runtimeAgentNonce = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+        const runtimeAgentData = Object.fromEntries(
+          Array.from(runtimeAgentSectionTypes).map((agentType) => {
+            const tokens = makeRuntimeAgentSectionTokens(agentType, runtimeAgentNonce);
+            runtimeAgentSectionTokens.set(agentType, tokens);
+            return [
+              agentType,
+              {
+                text: tokens.placeholder,
+                startToken: tokens.start,
+                endToken: tokens.end,
+              },
+            ];
+          }),
+        );
 
         const assemblerInput: AssemblerInput = {
           db: app.db,
@@ -1326,6 +1457,7 @@ export async function generateRoutes(app: FastifyInstance) {
             typeof chatMeta.groupScenarioText === "string" && (chatMeta.groupScenarioText as string).trim()
               ? (chatMeta.groupScenarioText as string).trim()
               : null,
+          runtimeAgentData,
         };
 
         const assembled = await assemblePrompt(assemblerInput);
@@ -5175,7 +5307,12 @@ export async function generateRoutes(app: FastifyInstance) {
           const krText =
             typeof krResult.data === "string" ? krResult.data : ((krResult.data as { text?: string })?.text ?? "");
           if (krText) {
-            appendSeparateAgentInjection("knowledge-retrieval", krText);
+            const tokens = runtimeAgentSectionTokens.get("knowledge-retrieval");
+            const handledByPresetSection =
+              tokens !== undefined && replaceRuntimeAgentSection(finalMessages, tokens, krText);
+            if (!handledByPresetSection) {
+              appendSeparateAgentInjection("knowledge-retrieval", krText);
+            }
             contextInjections.push({ agentType: "knowledge-retrieval", text: krText });
           }
         }
@@ -5187,10 +5324,16 @@ export async function generateRoutes(app: FastifyInstance) {
               ? routerResult.data
               : ((routerResult.data as { text?: string })?.text ?? "");
           if (routerText) {
-            appendSeparateAgentInjection("knowledge-router", routerText);
+            const tokens = runtimeAgentSectionTokens.get("knowledge-router");
+            const handledByPresetSection =
+              tokens !== undefined && replaceRuntimeAgentSection(finalMessages, tokens, routerText);
+            if (!handledByPresetSection) {
+              appendSeparateAgentInjection("knowledge-router", routerText);
+            }
             contextInjections.push({ agentType: "knowledge-router", text: routerText });
           }
         }
+        clearUnusedRuntimeAgentSections(finalMessages, runtimeAgentSectionTokens);
       } else if (input.regenerateMessageId) {
         // Regeneration — try to reuse cached context injections from the original generation.
         // This must run regardless of whether `hasPreGenAgents` is true, because the cached
@@ -5279,8 +5422,17 @@ export async function generateRoutes(app: FastifyInstance) {
         }
 
         for (const inj of cachedSeparateInjections) {
-          appendSeparateAgentInjection(inj.agentType as "knowledge-retrieval" | "knowledge-router", inj.text);
+          const runtimeType = toRuntimeAgentSectionType(inj.agentType);
+          const tokens = runtimeType ? runtimeAgentSectionTokens.get(runtimeType) : undefined;
+          const handledByPresetSection =
+            tokens !== undefined && replaceRuntimeAgentSection(finalMessages, tokens, inj.text);
+          if (!handledByPresetSection) {
+            appendSeparateAgentInjection(inj.agentType as "knowledge-retrieval" | "knowledge-router", inj.text);
+          }
         }
+        clearUnusedRuntimeAgentSections(finalMessages, runtimeAgentSectionTokens);
+      } else {
+        clearUnusedRuntimeAgentSections(finalMessages, runtimeAgentSectionTokens);
       }
 
       // ────────────────────────────────────────

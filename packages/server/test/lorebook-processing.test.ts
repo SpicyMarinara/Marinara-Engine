@@ -585,6 +585,134 @@ test("multiple lorebook markers share one macro side-effect pass per prompt asse
   }
 });
 
+test("agent_data marker uses runtime agent data when supplied", async () => {
+  const client = createClient({ url: "file::memory:" });
+  const db = drizzle(client) as unknown as DB;
+
+  try {
+    await runMigrations(db);
+
+    const result = await assemblePrompt({
+      db,
+      preset: {
+        id: "preset-1",
+        name: "Preset",
+        sectionOrder: JSON.stringify(["knowledge-section"]),
+        groupOrder: "[]",
+        wrapFormat: "xml",
+        parameters: JSON.stringify(DEFAULT_GENERATION_PARAMS),
+        variableGroups: "[]",
+        variableValues: "{}",
+      },
+      sections: [
+        {
+          id: "knowledge-section",
+          presetId: "preset-1",
+          identifier: "agent_knowledge-retrieval",
+          name: "Knowledge Retrieval (Agent)",
+          content: "Fresh guidance:\n{{agent::knowledge-retrieval}}",
+          role: "system",
+          enabled: "true",
+          isMarker: "true",
+          groupId: null,
+          markerConfig: JSON.stringify({ type: "agent_data", agentType: "knowledge-retrieval" }),
+          injectionPosition: "ordered",
+          injectionDepth: 0,
+          injectionOrder: 0,
+          forbidOverrides: "false",
+        },
+      ],
+      groups: [],
+      choiceBlocks: [],
+      chatChoices: {},
+      chatId: "chat-1",
+      characterIds: [],
+      personaName: "User",
+      personaDescription: "",
+      chatMessages: [{ role: "user", content: "tell me about the library" }],
+      runtimeAgentData: {
+        "knowledge-retrieval": {
+          text: "The old library closes at dusk.",
+          startToken: "__runtime_start__",
+          endToken: "__runtime_end__",
+        },
+      },
+    });
+
+    const content = result.messages.map((message) => message.content).join("\n");
+    assert.match(content, /__runtime_start__/);
+    assert.match(content, /Fresh guidance:/);
+    assert.match(content, /The old library closes at dusk\./);
+    assert.match(content, /__runtime_end__/);
+    assert.deepEqual(result.runtimeAgentTypesUsed, ["knowledge-retrieval"]);
+  } finally {
+    client.close();
+  }
+});
+
+test("runtime agent section boundaries are skipped when the macro is absent", async () => {
+  const client = createClient({ url: "file::memory:" });
+  const db = drizzle(client) as unknown as DB;
+
+  try {
+    await runMigrations(db);
+
+    const result = await assemblePrompt({
+      db,
+      preset: {
+        id: "preset-1",
+        name: "Preset",
+        sectionOrder: JSON.stringify(["knowledge-section"]),
+        groupOrder: "[]",
+        wrapFormat: "xml",
+        parameters: JSON.stringify(DEFAULT_GENERATION_PARAMS),
+        variableGroups: "[]",
+        variableValues: "{}",
+      },
+      sections: [
+        {
+          id: "knowledge-section",
+          presetId: "preset-1",
+          identifier: "agent_knowledge-retrieval",
+          name: "Knowledge Retrieval (Agent)",
+          content: "Keep this custom instruction.",
+          role: "system",
+          enabled: "true",
+          isMarker: "true",
+          groupId: null,
+          markerConfig: JSON.stringify({ type: "agent_data", agentType: "knowledge-retrieval" }),
+          injectionPosition: "ordered",
+          injectionDepth: 0,
+          injectionOrder: 0,
+          forbidOverrides: "false",
+        },
+      ],
+      groups: [],
+      choiceBlocks: [],
+      chatChoices: {},
+      chatId: "chat-1",
+      characterIds: [],
+      personaName: "User",
+      personaDescription: "",
+      chatMessages: [{ role: "user", content: "hello" }],
+      runtimeAgentData: {
+        "knowledge-retrieval": {
+          text: "__placeholder__",
+          startToken: "__runtime_start__",
+          endToken: "__runtime_end__",
+        },
+      },
+    });
+
+    const content = result.messages.map((message) => message.content).join("\n");
+    assert.match(content, /Keep this custom instruction\./);
+    assert.doesNotMatch(content, /__runtime_start__/);
+    assert.doesNotMatch(content, /__runtime_end__/);
+  } finally {
+    client.close();
+  }
+});
+
 test("assembler can scan guide-only lorebook text without adding it to chat history", async () => {
   const client = createClient({ url: "file::memory:" });
   const db = drizzle(client) as unknown as DB;
