@@ -237,6 +237,7 @@ export function ChatArea() {
     if (!agentInjectionReview) return;
     const overrides = agentInjectionReview.injections.map((injection) => ({
       agentType: injection.agentType,
+      agentName: injection.agentName,
       text: agentInjectionDrafts[injection.agentType] ?? injection.text,
     }));
     const chatId = agentInjectionReview.chatId;

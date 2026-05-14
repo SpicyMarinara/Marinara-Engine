@@ -1,6 +1,6 @@
 // Game: Inventory Panel
 import { useState, useCallback, useEffect } from "react";
-import { Check, ChevronLeft, ChevronRight, Package, Plus, Trash2, Wand2, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Minus, Package, Plus, Wand2, X } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 export interface InventoryItem {
@@ -19,7 +19,9 @@ interface GameInventoryProps {
   /** Called when the user wants to rename an item */
   onRenameItem?: (currentName: string, nextName: string) => Promise<string | null> | string | null;
   /** Called when the user wants to manually remove one unit of an item */
-  onRemoveItem?: (itemName: string) => void;
+  onRemoveItem?: (itemName: string) => void | Promise<void>;
+  /** Called when the user wants to manually add one unit of an item */
+  onIncrementItem?: (itemName: string) => void | Promise<void>;
   /** Whether the player can interact (input phase) */
   canInteract?: boolean;
 }
@@ -34,12 +36,14 @@ export function GameInventory({
   onUseItem,
   onRenameItem,
   onRemoveItem,
+  onIncrementItem,
   canInteract,
 }: GameInventoryProps) {
   const [selectedItem, setSelectedItem] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [renamePending, setRenamePending] = useState(false);
   const [addPending, setAddPending] = useState(false);
+  const [amountPending, setAmountPending] = useState<"increment" | "decrement" | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
 
   const handleItemClick = useCallback(
@@ -124,6 +128,34 @@ export function GameInventory({
       setAddPending(false);
     }
   }, [items.length, onAddItem]);
+
+  const handleIncrement = useCallback(
+    async (itemName: string) => {
+      if (!onIncrementItem) return;
+
+      setAmountPending("increment");
+      try {
+        await onIncrementItem(itemName);
+      } finally {
+        setAmountPending(null);
+      }
+    },
+    [onIncrementItem],
+  );
+
+  const handleDecrement = useCallback(
+    async (itemName: string) => {
+      if (!onRemoveItem) return;
+
+      setAmountPending("decrement");
+      try {
+        await onRemoveItem(itemName);
+      } finally {
+        setAmountPending(null);
+      }
+    },
+    [onRemoveItem],
+  );
 
   if (!open) return null;
 
@@ -279,6 +311,44 @@ export function GameInventory({
                   Add
                 </button>
               )}
+              {selectedInventoryItem && (onRemoveItem || onIncrementItem) && (
+                <div
+                  className="flex h-7 shrink-0 items-center overflow-hidden rounded border border-white/8 bg-white/[0.03]"
+                  aria-label={`${selectedInventoryItem.name} amount controls`}
+                >
+                  {onRemoveItem && (
+                    <button
+                      type="button"
+                      onClick={() => void handleDecrement(selectedInventoryItem.name)}
+                      disabled={amountPending !== null}
+                      className="flex h-full w-7 items-center justify-center text-white/65 transition-colors hover:bg-white/[0.07] hover:text-white/90 disabled:cursor-not-allowed disabled:opacity-40"
+                      aria-label={
+                        selectedInventoryItem.quantity > 1
+                          ? `Decrease ${selectedInventoryItem.name} amount`
+                          : `Delete ${selectedInventoryItem.name}`
+                      }
+                      title={selectedInventoryItem.quantity > 1 ? "Decrease amount" : "Delete item"}
+                    >
+                      <Minus size={12} />
+                    </button>
+                  )}
+                  <span className="min-w-8 border-x border-white/8 px-2 text-center text-[0.7rem] font-semibold tabular-nums text-white/80">
+                    {selectedInventoryItem.quantity}
+                  </span>
+                  {onIncrementItem && (
+                    <button
+                      type="button"
+                      onClick={() => void handleIncrement(selectedInventoryItem.name)}
+                      disabled={amountPending !== null}
+                      className="flex h-full w-7 items-center justify-center text-white/65 transition-colors hover:bg-white/[0.07] hover:text-white/90 disabled:cursor-not-allowed disabled:opacity-40"
+                      aria-label={`Increase ${selectedInventoryItem.name} amount`}
+                      title="Increase amount"
+                    >
+                      <Plus size={12} />
+                    </button>
+                  )}
+                </div>
+              )}
               {selectedItem && canInteract && onUseItem && (
                 <button
                   onClick={() => handleUse(selectedItem)}
@@ -289,15 +359,6 @@ export function GameInventory({
                 </button>
               )}
             </div>
-            {onRemoveItem && selectedInventoryItem && (
-              <button
-                onClick={() => onRemoveItem(selectedInventoryItem.name)}
-                className="mt-1.5 flex w-full items-center justify-center gap-1 rounded border border-rose-500/20 bg-rose-500/10 py-1.5 text-[0.7rem] font-semibold text-rose-300 transition-colors hover:bg-rose-500/15"
-              >
-                <Trash2 size={12} />
-                {selectedInventoryItem.quantity > 1 ? "Remove 1" : "Delete"}
-              </button>
-            )}
           </div>
         )}
       </div>

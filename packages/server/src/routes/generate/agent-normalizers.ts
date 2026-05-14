@@ -12,10 +12,16 @@ export function normalizeContextInjections(raw: unknown): AgentInjection[] {
       continue;
     }
     if (!entry || typeof entry !== "object") continue;
-    const candidate = entry as { agentType?: unknown; text?: unknown };
+    const candidate = entry as { agentType?: unknown; agentName?: unknown; text?: unknown };
     if (typeof candidate.agentType !== "string" || typeof candidate.text !== "string") continue;
     const text = candidate.text.trim();
-    if (text) normalized.push({ agentType: candidate.agentType, text });
+    if (text) {
+      normalized.push({
+        agentType: candidate.agentType,
+        agentName: typeof candidate.agentName === "string" ? candidate.agentName : undefined,
+        text,
+      });
+    }
   }
   return normalized;
 }

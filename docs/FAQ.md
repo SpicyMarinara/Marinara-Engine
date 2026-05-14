@@ -63,6 +63,27 @@ Spotify's OAuth rules only allow `https://` or `http://127.0.0.1` redirect URIs,
 ---
 
 <details>
+<summary><strong>Is the Android APK a standalone app?</strong></summary>
+<br>
+
+No. The Android APK is a WebView shell, not a standalone Marinara Engine server build.
+
+The APK only opens `http://127.0.0.1:<PORT>` on the same Android device. That means Marinara Engine must already be installed and running in Termux before the APK can load anything.
+
+Use this flow:
+
+1. Install Termux from F-Droid.
+2. Follow the [Android (Termux) Installation Guide](installation/android-termux.md).
+3. Start Marinara Engine with `./start-termux.sh`.
+4. Open the APK if you want a dedicated home-screen shell.
+
+If you downloaded only the APK from a GitHub Release and skipped Termux, the app will not start by itself.
+
+</details>
+
+---
+
+<details>
 <summary><strong>What can Professor Mari do?</strong></summary>
 <br>
 

@@ -3009,11 +3009,18 @@ export function ChatSettingsDrawer({
                     </div>
                   )}
 
-                  {/* Selfie tags */}
+                  {/* Selfie prompt controls */}
                   {(metadata.imageGenConnectionId as string) && (
-                    <SelfieTagsEditor
-                      tags={(metadata.selfieTags as string[]) ?? []}
-                      onChange={(tags) => updateMeta.mutate({ id: chat.id, selfieTags: tags })}
+                    <SelfiePromptControls
+                      positivePrompt={metadata.selfiePositivePrompt as string | undefined}
+                      legacyTags={(metadata.selfieTags as string[]) ?? []}
+                      negativePrompt={(metadata.selfieNegativePrompt as string) ?? ""}
+                      onCommitPositivePrompt={(selfiePositivePrompt) =>
+                        updateMeta.mutate({ id: chat.id, selfiePositivePrompt })
+                      }
+                      onCommitNegativePrompt={(selfieNegativePrompt) =>
+                        updateMeta.mutate({ id: chat.id, selfieNegativePrompt })
+                      }
                     />
                   )}
                 </div>
@@ -6174,62 +6181,69 @@ interface ScheduleBlock {
   status: "online" | "idle" | "dnd" | "offline";
 }
 
-function SelfieTagsEditor({ tags, onChange }: { tags: string[]; onChange: (tags: string[]) => void }) {
-  const [input, setInput] = useState("");
-  const addTag = () => {
-    const tag = input.trim();
-    if (!tag || tags.includes(tag)) return;
-    onChange([...tags, tag]);
-    setInput("");
-  };
+function SelfiePromptControls({
+  positivePrompt,
+  legacyTags,
+  negativePrompt,
+  onCommitPositivePrompt,
+  onCommitNegativePrompt,
+}: {
+  positivePrompt: string | undefined;
+  legacyTags: string[];
+  negativePrompt: string;
+  onCommitPositivePrompt: (value: string) => void;
+  onCommitNegativePrompt: (value: string) => void;
+}) {
+  const legacyTagText = legacyTags.join(", ");
+  const displayPositivePrompt = positivePrompt ?? legacyTagText;
+  const [positiveDraft, setPositiveDraft] = useState(displayPositivePrompt);
+  const [negativeDraft, setNegativeDraft] = useState(negativePrompt);
+
+  useEffect(() => {
+    setPositiveDraft(displayPositivePrompt);
+  }, [displayPositivePrompt]);
+
+  useEffect(() => {
+    setNegativeDraft(negativePrompt);
+  }, [negativePrompt]);
+
+  const commitPositivePrompt = useCallback(() => {
+    if (positiveDraft !== displayPositivePrompt) onCommitPositivePrompt(positiveDraft);
+  }, [displayPositivePrompt, onCommitPositivePrompt, positiveDraft]);
+
+  const commitNegativePrompt = useCallback(() => {
+    if (negativeDraft !== negativePrompt) onCommitNegativePrompt(negativeDraft);
+  }, [negativeDraft, negativePrompt, onCommitNegativePrompt]);
+
   return (
-    <div className="mt-2 space-y-1.5">
-      <span className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">Tags</span>
-      <div className="flex flex-wrap items-center gap-1">
-        {tags.map((tag) => (
-          <span
-            key={tag}
-            className="inline-flex items-center gap-0.5 rounded-full bg-[var(--secondary)] px-1.5 py-0.5 text-[0.5625rem] text-[var(--muted-foreground)]"
-          >
-            {tag}
-            <button
-              onClick={() => onChange(tags.filter((t) => t !== tag))}
-              className="ml-0.5 hover:text-[var(--destructive)]"
-            >
-              <X size="0.5rem" />
-            </button>
-          </span>
-        ))}
-      </div>
-      <div className="flex items-center gap-1">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              addTag();
-            }
-          }}
-          placeholder="Add tag…"
-          className="w-full min-w-0 rounded border border-[var(--border)] bg-[var(--background)] px-1.5 py-0.5 text-[0.625rem] text-[var(--foreground)] outline-none focus:border-[var(--primary)]"
+    <div className="mt-2 space-y-2">
+      <label className="flex flex-col gap-1">
+        <span className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">Positive prompt / tags</span>
+        <textarea
+          value={positiveDraft}
+          onChange={(e) => setPositiveDraft(e.target.value)}
+          onBlur={commitPositivePrompt}
+          placeholder="masterpiece, best quality, detailed eyes"
+          className="min-h-[4rem] resize-y rounded-lg border border-[var(--border)] bg-[var(--secondary)] p-2 text-[0.6875rem] text-[var(--foreground)] outline-none transition-colors placeholder:text-[var(--muted-foreground)]/45 focus:border-[var(--primary)]/50"
         />
-        <button
-          onClick={addTag}
-          disabled={!input.trim()}
-          className="shrink-0 rounded bg-[var(--primary)] px-1.5 py-0.5 text-[0.5625rem] text-[var(--primary-foreground)] disabled:opacity-40"
-        >
-          Add
-        </button>
-      </div>
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">Negative prompt</span>
+        <textarea
+          value={negativeDraft}
+          onChange={(e) => setNegativeDraft(e.target.value)}
+          onBlur={commitNegativePrompt}
+          placeholder="lowres, bad anatomy, extra fingers"
+          className="min-h-[4rem] resize-y rounded-lg border border-[var(--border)] bg-[var(--secondary)] p-2 text-[0.6875rem] text-[var(--foreground)] outline-none transition-colors placeholder:text-[var(--muted-foreground)]/45 focus:border-[var(--primary)]/50"
+        />
+      </label>
       <p className="text-[0.55rem] text-[var(--muted-foreground)]">
-        Extra tags appended to every selfie prompt (e.g. art style, quality modifiers).
+        Saved for this chat. Positive tags are appended to the generated selfie prompt; negative tags are sent directly
+        to the image generator. NovelAI tag syntax is supported.
       </p>
     </div>
   );
 }
-
 function ScheduleEditor({
   characterSchedules,
   chatCharIds,

@@ -3209,6 +3209,11 @@ function AdvancedSettings() {
                     Download v{updateCheck.data.latestVersion}
                   </a>
                 )}
+                {updateCheck.data.versionUpdate && (
+                  <span className="text-[0.625rem] text-[var(--muted-foreground)]">
+                    Android APK assets are WebView shells, not standalone apps. Start Marinara in Termux first.
+                  </span>
+                )}
                 {applyUnavailableReason === "unsupported-install" && (
                   <span className="text-[0.625rem] text-[var(--muted-foreground)]">
                     Docker users:{" "}

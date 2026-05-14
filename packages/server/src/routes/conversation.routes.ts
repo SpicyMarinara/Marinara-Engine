@@ -435,8 +435,7 @@ export async function conversationRoutes(app: FastifyInstance) {
     const chat = await chats.getById(req.params.chatId);
     if (!chat) return reply.status(404).send({ error: "Chat not found" });
 
-    const meta = typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : (chat.metadata ?? {});
-    const schedules: CharacterSchedules = getEnabledConversationSchedules(meta);
+    const schedules: CharacterSchedules = await chats.inheritFreshConversationSchedules(req.params.chatId);
     const characterIds: string[] =
       typeof chat.characterIds === "string" ? JSON.parse(chat.characterIds) : chat.characterIds;
 
@@ -530,7 +529,7 @@ export async function conversationRoutes(app: FastifyInstance) {
       return reply.send({ shouldTrigger: false, characterIds: [], reason: "disabled", inactivityMs: 0 });
     }
 
-    const schedules: CharacterSchedules = getEnabledConversationSchedules(meta);
+    const schedules: CharacterSchedules = await chats.inheritFreshConversationSchedules(chatId);
     const characterIds: string[] =
       typeof chat.characterIds === "string" ? JSON.parse(chat.characterIds) : chat.characterIds;
     const isGroup = characterIds.length > 1;
@@ -614,8 +613,7 @@ export async function conversationRoutes(app: FastifyInstance) {
     const chat = await chats.getById(chatId);
     if (!chat) return reply.status(404).send({ error: "Chat not found" });
 
-    const meta = typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : (chat.metadata ?? {});
-    const schedules: CharacterSchedules = getEnabledConversationSchedules(meta);
+    const schedules: CharacterSchedules = await chats.inheritFreshConversationSchedules(chatId);
     const schedule = schedules[characterId];
 
     if (!schedule) {
@@ -652,7 +650,7 @@ export async function conversationRoutes(app: FastifyInstance) {
       return reply.send({ shouldTrigger: false, characterIds: [], reason: "exchanges_disabled", inactivityMs: 0 });
     }
 
-    const schedules: CharacterSchedules = getEnabledConversationSchedules(meta);
+    const schedules: CharacterSchedules = await chats.inheritFreshConversationSchedules(chatId);
     const messages = await chats.listMessages(chatId);
     initializeActivityFromMessages(
       chatId,

@@ -304,6 +304,14 @@ export function mergeLorebookKeeperUpdateContent(args: {
   return baseContent ? `${baseContent}\n\n${addition}` : addition;
 }
 
+function getExplicitUpdateReplacementContent(update: Record<string, unknown>): string | null {
+  if (typeof update.action !== "string" || update.action.trim().toLowerCase() !== "update") return null;
+  if (typeof update.content !== "string") return null;
+
+  const replacement = dedupeKeeperContentParagraphs(update.content);
+  return replacement.length > 0 ? replacement : null;
+}
+
 export async function persistLorebookKeeperUpdates(args: {
   lorebooksStore: LorebooksStore;
   chatId: string;
@@ -358,11 +366,13 @@ export async function persistLorebookKeeperUpdates(args: {
     }
 
     if (existing) {
-      const mergedContent = mergeLorebookKeeperUpdateContent({
-        existingContent: existing.content,
-        replacementContent: content,
-        newFacts: update.newFacts,
-      });
+      const mergedContent =
+        getExplicitUpdateReplacementContent(update) ??
+        mergeLorebookKeeperUpdateContent({
+          existingContent: existing.content,
+          replacementContent: content,
+          newFacts: update.newFacts,
+        });
       const mergedKeys = mergeLorebookKeys(existing.keys, keys);
       const mergedTag = tag || existing.tag || "";
       await lorebooksStore.updateEntry(existing.id, {

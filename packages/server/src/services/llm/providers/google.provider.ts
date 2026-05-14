@@ -9,6 +9,7 @@ import {
   type ChatOptions,
   type LLMUsage,
 } from "../base-provider.js";
+import { decodePossiblyCompressedBody } from "../../../utils/security.js";
 
 /** A single Gemini response part (text, thought summary, or signature-only). */
 interface GeminiPart {
@@ -131,14 +132,18 @@ export class GoogleProvider extends BaseLLMProvider {
       ...(options.signal ? { signal: options.signal } : {}),
     });
 
+    async function readDecodedText() {
+      return decodePossiblyCompressedBody(Buffer.from(await response.arrayBuffer())).toString("utf8");
+    }
+
     if (!response.ok) {
-      const errorText = await response.text();
+      const errorText = await readDecodedText();
       throw new Error(`Gemini API error ${response.status}: ${sanitizeApiError(errorText)}`);
     }
 
     // ── Non-streaming path (also used when thinking is enabled) ──
     if (!useStreaming) {
-      const json = (await response.json()) as {
+      const json = JSON.parse(await readDecodedText()) as {
         candidates?: Array<{
           content: { parts: GeminiPart[] };
         }>;
