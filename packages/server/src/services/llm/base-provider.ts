@@ -19,8 +19,9 @@ const llmAgentOptions = { bodyTimeout: 0, headersTimeout: LLM_HEADERS_TIMEOUT };
  */
 export function llmFetch(
   url: string | URL,
-  init?: RequestInit & Pick<SafeFetchOptions, "bufferResponse">,
+  init?: RequestInit & Pick<SafeFetchOptions, "bufferResponse" | "decodeCompressedResponse">,
 ): Promise<Response> {
+  const bufferResponse = init?.bufferResponse ?? false;
   return safeFetch(url, {
     ...(init ?? {}),
     agentOptions: llmAgentOptions,
@@ -32,7 +33,8 @@ export function llmFetch(
       flagName: "PROVIDER_LOCAL_URLS_ENABLED",
     },
     maxResponseBytes: 50 * 1024 * 1024,
-    bufferResponse: init?.bufferResponse ?? false,
+    bufferResponse,
+    decodeCompressedResponse: init?.decodeCompressedResponse ?? bufferResponse,
   });
 }
 
