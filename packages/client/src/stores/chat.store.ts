@@ -496,10 +496,15 @@ export const useChatStore = create<ChatState>()(
         }
 
         if (known) {
-          for (const chatId of known) {
-            if (serverChatIds.has(chatId)) continue;
-            unreadCounts.delete(chatId);
-            chatNotifications.delete(chatId);
+          for (const chatId of Array.from(unreadCounts.keys())) {
+            if (!known.has(chatId) || !serverChatIds.has(chatId)) {
+              unreadCounts.delete(chatId);
+            }
+          }
+          for (const chatId of Array.from(chatNotifications.keys())) {
+            if (!known.has(chatId) || !serverChatIds.has(chatId)) {
+              chatNotifications.delete(chatId);
+            }
           }
         }
 

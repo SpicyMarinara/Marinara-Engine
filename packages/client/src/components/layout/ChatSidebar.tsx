@@ -332,8 +332,8 @@ export function ChatSidebar() {
   const activeGroupId = activeChat?.groupId ?? null;
 
   useEffect(() => {
-    if (!chats?.length) return;
-    const unread = chats
+    const allChats = chats ?? [];
+    const unread = allChats
       .map((chat) => {
         const metadata = parseChatMetadata(chat.metadata);
         const count = typeof metadata.autonomousUnreadCount === "number" ? metadata.autonomousUnreadCount : 0;
@@ -354,7 +354,7 @@ export function ChatSidebar() {
       .filter((item): item is NonNullable<typeof item> => item !== null);
     hydrateUnread(
       unread,
-      chats.map((chat) => chat.id),
+      allChats.map((chat) => chat.id),
     );
   }, [chats, charLookup, hydrateUnread]);
 

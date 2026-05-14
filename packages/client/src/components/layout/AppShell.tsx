@@ -280,9 +280,12 @@ export function AppShell() {
     if (!persistedUnread && !useChatStore.getState().unreadCounts.has(activeChatId)) return;
     const clearKey = `${activeChatId}:${unreadCount}:${metadata.autonomousUnreadAt ?? ""}`;
     if (lastAutonomousUnreadClearRef.current === clearKey) return;
-    lastAutonomousUnreadClearRef.current = clearKey;
     clearUnread(activeChatId);
-    clearAutonomousUnread(activeChatId);
+    clearAutonomousUnread(activeChatId, {
+      onSuccess: () => {
+        lastAutonomousUnreadClearRef.current = clearKey;
+      },
+    });
   }, [
     activeChat?.metadata,
     activeChatId,
