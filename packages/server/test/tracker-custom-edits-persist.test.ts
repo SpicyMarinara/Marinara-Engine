@@ -14,6 +14,7 @@ import { chatsRoutes } from "../src/routes/chats.routes.js";
 import { registerDryRunRoute } from "../src/routes/generate/dry-run-route.js";
 import {
   parseGameStateRow,
+  resolveRegenerationGameStateFallbackMessageIds,
   resolveRegenerationGameStateAnchor,
   resolveVisibleGameStateAnchor,
   shouldPreferLatestVisibleGameState,
@@ -430,6 +431,199 @@ test("regenerate tracker context uses the previous assistant snapshot instead of
     } finally {
       await app.close();
     }
+  } finally {
+    client.close();
+  }
+});
+
+test("regenerate fallback stays bounded before the target assistant", async () => {
+  const client = createClient({ url: "file::memory:" });
+  const db = drizzle(client) as unknown as DB;
+
+  try {
+    await runMigrations(db);
+
+    await db.insert(chats).values({
+      id: "chat-regen-bounded-fallback",
+      name: "Tracker regen bounded fallback",
+      mode: "roleplay",
+      characterIds: "[]",
+      metadata: JSON.stringify({
+        enableAgents: true,
+        activeAgentIds: ["custom-tracker"],
+      }),
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(messages).values([
+      {
+        id: "assistant-earlier",
+        chatId: "chat-regen-bounded-fallback",
+        role: "assistant",
+        characterId: null,
+        content: "Earlier assistant state.",
+        activeSwipeIndex: 0,
+        extra: "{}",
+        createdAt: "2026-05-14T02:00:00.000Z",
+      },
+      {
+        id: "assistant-previous-missing",
+        chatId: "chat-regen-bounded-fallback",
+        role: "assistant",
+        characterId: null,
+        content: "Previous assistant has no active tracker row.",
+        activeSwipeIndex: 1,
+        extra: "{}",
+        createdAt: "2026-05-14T02:01:00.000Z",
+      },
+      {
+        id: "assistant-target-bounded",
+        chatId: "chat-regen-bounded-fallback",
+        role: "assistant",
+        characterId: null,
+        content: "Target assistant being regenerated.",
+        activeSwipeIndex: 0,
+        extra: "{}",
+        createdAt: "2026-05-14T02:02:00.000Z",
+      },
+      {
+        id: "assistant-future",
+        chatId: "chat-regen-bounded-fallback",
+        role: "assistant",
+        characterId: null,
+        content: "Later assistant state must not leak backward.",
+        activeSwipeIndex: 0,
+        extra: "{}",
+        createdAt: "2026-05-14T02:03:00.000Z",
+      },
+    ]);
+    await db.insert(gameStateSnapshots).values([
+      {
+        id: "snapshot-bounded-earlier",
+        chatId: "chat-regen-bounded-fallback",
+        messageId: "assistant-earlier",
+        swipeIndex: 0,
+        date: null,
+        time: null,
+        location: null,
+        weather: null,
+        temperature: null,
+        presentCharacters: "[]",
+        recentEvents: "[]",
+        playerStats: JSON.stringify(playerStats([{ name: "Bond", value: "earlier safe fallback" }])),
+        personaStats: null,
+        manualOverrides: null,
+        committed: 1,
+        createdAt: "2026-05-14T02:00:30.000Z",
+      },
+      {
+        id: "snapshot-bounded-target",
+        chatId: "chat-regen-bounded-fallback",
+        messageId: "assistant-target-bounded",
+        swipeIndex: 0,
+        date: null,
+        time: null,
+        location: null,
+        weather: null,
+        temperature: null,
+        presentCharacters: "[]",
+        recentEvents: "[]",
+        playerStats: JSON.stringify(playerStats([{ name: "Bond", value: "target output" }])),
+        personaStats: null,
+        manualOverrides: null,
+        committed: 0,
+        createdAt: "2026-05-14T02:02:30.000Z",
+      },
+      {
+        id: "snapshot-bounded-future",
+        chatId: "chat-regen-bounded-fallback",
+        messageId: "assistant-future",
+        swipeIndex: 0,
+        date: null,
+        time: null,
+        location: null,
+        weather: null,
+        temperature: null,
+        presentCharacters: "[]",
+        recentEvents: "[]",
+        playerStats: JSON.stringify(playerStats([{ name: "Bond", value: "future leak" }])),
+        personaStats: null,
+        manualOverrides: null,
+        committed: 1,
+        createdAt: "2026-05-14T02:04:00.000Z",
+      },
+    ]);
+
+    const orderedMessages = [
+      { role: "assistant", id: "assistant-earlier", activeSwipeIndex: 0 },
+      { role: "assistant", id: "assistant-previous-missing", activeSwipeIndex: 1 },
+      { role: "assistant", id: "assistant-target-bounded", activeSwipeIndex: 0 },
+      { role: "assistant", id: "assistant-future", activeSwipeIndex: 0 },
+    ];
+    const regenAnchor = resolveRegenerationGameStateAnchor(orderedMessages, "assistant-target-bounded");
+    assert.deepEqual(regenAnchor, { messageId: "assistant-previous-missing", swipeIndex: 1 });
+
+    const boundedFallback = await createGameStateStorage(db).getForGeneration("chat-regen-bounded-fallback", {
+      preferLatestVisible: true,
+      visibleAnchor: regenAnchor,
+      excludeMessageId: "assistant-target-bounded",
+      fallbackMessageIds: resolveRegenerationGameStateFallbackMessageIds(
+        orderedMessages,
+        "assistant-target-bounded",
+      ),
+    });
+    assert.equal(readCustomTrackerValue(boundedFallback!, "Bond"), "earlier safe fallback");
+  } finally {
+    client.close();
+  }
+});
+
+test("manual overrides persist when targeted update creates a fresh swipe snapshot", async () => {
+  const client = createClient({ url: "file::memory:" });
+  const db = drizzle(client) as unknown as DB;
+
+  try {
+    await runMigrations(db);
+
+    await db.insert(chats).values({
+      id: "chat-manual-create",
+      name: "Manual override create repro",
+      mode: "roleplay",
+      characterIds: "[]",
+      metadata: "{}",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(gameStateSnapshots).values({
+      id: "snapshot-manual-base",
+      chatId: "chat-manual-create",
+      messageId: "assistant-base",
+      swipeIndex: 0,
+      date: null,
+      time: null,
+      location: "Old location",
+      weather: null,
+      temperature: null,
+      presentCharacters: "[]",
+      recentEvents: "[]",
+      playerStats: JSON.stringify(playerStats([{ name: "Bond", value: "base" }])),
+      personaStats: null,
+      manualOverrides: null,
+      committed: 1,
+      createdAt: "2026-05-14T02:05:00.000Z",
+    });
+
+    const gameStateStore = createGameStateStorage(db);
+    const updated = await gameStateStore.updateByMessage(
+      "assistant-fresh",
+      0,
+      "chat-manual-create",
+      { location: "Edited location" },
+      true,
+    );
+
+    assert.equal(updated?.location, "Edited location");
+    assert.deepEqual(JSON.parse((updated?.manualOverrides as string) ?? "{}"), { location: "Edited location" });
   } finally {
     client.close();
   }

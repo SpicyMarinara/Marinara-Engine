@@ -38,15 +38,25 @@ export function createGameStateStorage(db: DB) {
         preferLatestVisible?: boolean;
         visibleAnchor?: GameStateVisibleAnchor | null;
         excludeMessageId?: string | null;
+        fallbackMessageIds?: string[] | null;
       },
     ) {
       const excludeMessageId = options?.excludeMessageId || null;
+      const fallbackMessageIds = Array.from(
+        new Set((options?.fallbackMessageIds ?? []).filter((id): id is string => typeof id === "string")),
+      );
       const latestCommitted = () =>
-        excludeMessageId
-          ? this.getLatestCommittedExcludingMessage(chatId, excludeMessageId)
-          : this.getLatestCommitted(chatId);
+        fallbackMessageIds.length > 0
+          ? this.getLatestCommittedForMessages(chatId, fallbackMessageIds)
+          : excludeMessageId
+            ? this.getLatestCommittedExcludingMessage(chatId, excludeMessageId)
+            : this.getLatestCommitted(chatId);
       const latestAny = () =>
-        excludeMessageId ? this.getLatestExcludingMessage(chatId, excludeMessageId) : this.getLatest(chatId);
+        fallbackMessageIds.length > 0
+          ? this.getLatestForMessages(chatId, fallbackMessageIds)
+          : excludeMessageId
+            ? this.getLatestExcludingMessage(chatId, excludeMessageId)
+            : this.getLatest(chatId);
 
       if (options?.preferLatestVisible) {
         if (options.visibleAnchor?.messageId) {
@@ -83,6 +93,34 @@ export function createGameStateStorage(db: DB) {
             eq(gameStateSnapshots.chatId, chatId),
             eq(gameStateSnapshots.committed, 1),
             ne(gameStateSnapshots.messageId, excludeMessageId),
+          ),
+        )
+        .orderBy(desc(gameStateSnapshots.createdAt))
+        .limit(1);
+      return rows[0] ?? null;
+    },
+
+    async getLatestForMessages(chatId: string, messageIds: string[]) {
+      if (messageIds.length === 0) return null;
+      const rows = await db
+        .select()
+        .from(gameStateSnapshots)
+        .where(and(eq(gameStateSnapshots.chatId, chatId), inArray(gameStateSnapshots.messageId, messageIds)))
+        .orderBy(desc(gameStateSnapshots.createdAt))
+        .limit(1);
+      return rows[0] ?? null;
+    },
+
+    async getLatestCommittedForMessages(chatId: string, messageIds: string[]) {
+      if (messageIds.length === 0) return null;
+      const rows = await db
+        .select()
+        .from(gameStateSnapshots)
+        .where(
+          and(
+            eq(gameStateSnapshots.chatId, chatId),
+            eq(gameStateSnapshots.committed, 1),
+            inArray(gameStateSnapshots.messageId, messageIds),
           ),
         )
         .orderBy(desc(gameStateSnapshots.createdAt))
@@ -273,8 +311,18 @@ export function createGameStateStorage(db: DB) {
       if (fields.playerStats !== undefined) baseState.playerStats = fields.playerStats as any;
       if (fields.personaStats !== undefined) baseState.personaStats = fields.personaStats as any;
 
-      // Manual overrides are one-shot — do not carry forward to the new snapshot.
-      const newId = await this.create(baseState as any, null);
+      const manualOverrides = manual
+        ? (["date", "time", "location", "weather", "temperature"] as const).reduce<Record<string, string>>(
+            (acc, key) => {
+              const value = fields[key];
+              if (typeof value === "string" && value !== "") acc[key] = value;
+              return acc;
+            },
+            {},
+          )
+        : {};
+      // Manual overrides are one-shot — carry only overrides from this edit.
+      await this.create(baseState as any, Object.keys(manualOverrides).length > 0 ? manualOverrides : null);
       return this.getByMessage(messageId, swipeIndex);
     },
 

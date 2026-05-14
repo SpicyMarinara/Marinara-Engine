@@ -418,15 +418,26 @@ function shouldRefreshGameStateAfterGeneration(qc: QueryClient, chatId: string) 
   return enableAgents === true || enableAgents === "true";
 }
 
+const pendingVisibleGameStateRefreshes = new Map<string, Promise<void>>();
+
 async function refreshVisibleGameStateAfterGeneration(chatId: string) {
-  try {
-    const gs = await api.get<import("@marinara-engine/shared").GameState | null>(`/chats/${chatId}/game-state`);
-    if (useChatStore.getState().activeChatId === chatId) {
-      useGameStateStore.getState().setGameState(gs ?? null);
+  const existing = pendingVisibleGameStateRefreshes.get(chatId);
+  if (existing) return existing;
+
+  const refreshPromise = (async () => {
+    try {
+      const gs = await api.get<import("@marinara-engine/shared").GameState | null>(`/chats/${chatId}/game-state`);
+      if (useChatStore.getState().activeChatId === chatId) {
+        useGameStateStore.getState().setGameState(gs ?? null);
+      }
+    } catch {
+      /* best-effort — SSE patches already populated the store */
+    } finally {
+      pendingVisibleGameStateRefreshes.delete(chatId);
     }
-  } catch {
-    /* best-effort — SSE patches already populated the store */
-  }
+  })();
+  pendingVisibleGameStateRefreshes.set(chatId, refreshPromise);
+  return refreshPromise;
 }
 
 function slugifyGameMapId(value: string): string {
@@ -1752,7 +1763,14 @@ export function useGenerate() {
 
       try {
         const flushPatch = useGameStateStore.getState().flushPatch;
-        if (flushPatch) await flushPatch();
+        if (flushPatch) {
+          try {
+            await flushPatch();
+          } catch (error) {
+            const detail = error instanceof Error && error.message ? `: ${error.message}` : "";
+            throw new Error(`Failed to flush pending game-state edits${detail}`, { cause: error });
+          }
+        }
 
         let hasError = false;
         for await (const event of api.streamEvents(

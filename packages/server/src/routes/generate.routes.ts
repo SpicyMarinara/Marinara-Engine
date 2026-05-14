@@ -132,7 +132,7 @@ import { executeKnowledgeRouter } from "../services/agents/knowledge-router.js";
 import { extractFileText, getSourceFilePath } from "./knowledge-sources.routes.js";
 import { gameStateSnapshots as gameStateSnapshotsTable } from "../db/schema/index.js";
 import { chats as chatsTable } from "../db/schema/index.js";
-import { eq, desc } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { PROFESSOR_MARI_ID } from "@marinara-engine/shared";
 import { chunkAndEmbedMessages, recallMemories } from "../services/memory-recall.js";
 import { resolveMemoryRecallEmbeddingSource } from "../services/memory-recall-embedding.js";
@@ -149,6 +149,7 @@ import {
   parseGameStateRow,
   preserveTrackerCharacterUiFields,
   resolveBaseUrl,
+  resolveRegenerationGameStateFallbackMessageIds,
   resolveRegenerationGameStateAnchor,
   resolveVisibleGameStateAnchor,
   shouldPreferLatestVisibleGameState,
@@ -483,16 +484,6 @@ async function persistLorebookRuntimeState(args: {
     ...(args.entryStateOverrides !== undefined ? { entryStateOverrides: args.entryStateOverrides } : {}),
     ...(args.entryTimingStates !== undefined ? { entryTimingStates: args.entryTimingStates } : {}),
   });
-}
-
-async function resolveLatestGameStateForLorebooks(
-  db: any,
-  chatId: string,
-  options?: Parameters<ReturnType<typeof createGameStateStorage>["getForGeneration"]>[1],
-): Promise<Record<string, unknown> | null> {
-  const row = await createGameStateStorage(db).getForGeneration(chatId, options);
-  if (row) return parseGameStateRow(row as Record<string, unknown>) as unknown as Record<string, unknown>;
-  return null;
 }
 
 /** Read a character's avatar from disk as base64, or return undefined if unavailable. */
@@ -950,6 +941,12 @@ export async function generateRoutes(app: FastifyInstance) {
         preferLatestVisible: preferLatestVisibleGameState,
         visibleAnchor: visibleGameStateAnchor,
         excludeMessageId: input.regenerateMessageId ?? null,
+        fallbackMessageIds: resolveRegenerationGameStateFallbackMessageIds(scopedMessages, input.regenerateMessageId),
+      };
+      const selectedGameStateSnapshotPromise = gameStateStore.getForGeneration(input.chatId, gameStateGenerationOptions);
+      const selectedGameStateForPrompt = async (): Promise<Record<string, unknown> | null> => {
+        const row = await selectedGameStateSnapshotPromise;
+        return row ? (parseGameStateRow(row as Record<string, unknown>) as unknown as Record<string, unknown>) : null;
       };
 
       // ── Context message limit (from chat metadata, off by default) ──
@@ -1310,10 +1307,7 @@ export async function generateRoutes(app: FastifyInstance) {
             (chatMeta.entryStateOverrides as Record<string, { ephemeral?: number | null; enabled?: boolean }>) ??
             undefined,
           entryTimingStates: (chatMeta.entryTimingStates as Record<string, LorebookEntryTimingState>) ?? undefined,
-          gameState:
-            chatMode === "game"
-              ? await resolveLatestGameStateForLorebooks(app.db, input.chatId, gameStateGenerationOptions)
-              : null,
+          gameState: chatMode === "game" ? await selectedGameStateForPrompt() : null,
           generationTriggers: lorebookGenerationTriggers,
           groupScenarioOverrideText:
             typeof chatMeta.groupScenarioText === "string" && (chatMeta.groupScenarioText as string).trim()
@@ -3473,13 +3467,7 @@ export async function generateRoutes(app: FastifyInstance) {
         let weatherContext: string | undefined;
         let gameTime: string | undefined;
         try {
-          const snapRows = await app.db
-            .select()
-            .from(gameStateSnapshotsTable)
-            .where(eq(gameStateSnapshotsTable.chatId, input.chatId))
-            .orderBy(desc(gameStateSnapshotsTable.createdAt))
-            .limit(1);
-          const snap = snapRows[0];
+          const snap = await selectedGameStateSnapshotPromise;
           if (snap) {
             if (snap.weather)
               weatherContext = `Current weather: ${snap.weather}${snap.temperature ? `, ${snap.temperature}` : ""}`;
@@ -3514,13 +3502,7 @@ export async function generateRoutes(app: FastifyInstance) {
         // ── Passive perception hints ──
         let perceptionHintsBlock: string | undefined;
         try {
-          const snapRows2 = await app.db
-            .select()
-            .from(gameStateSnapshotsTable)
-            .where(eq(gameStateSnapshotsTable.chatId, input.chatId))
-            .orderBy(desc(gameStateSnapshotsTable.createdAt))
-            .limit(1);
-          const latSnap = snapRows2[0];
+          const latSnap = await selectedGameStateSnapshotPromise;
           const pStats = latSnap?.playerStats ? JSON.parse(latSnap.playerStats as string) : null;
           if (pStats) {
             const presentNpcs = latSnap?.presentCharacters
@@ -3615,7 +3597,7 @@ export async function generateRoutes(app: FastifyInstance) {
           const lorebookResult = await processLorebooks(
             app.db,
             toLorebookScanMessages(),
-            await resolveLatestGameStateForLorebooks(app.db, input.chatId, gameStateGenerationOptions),
+            await selectedGameStateForPrompt(),
             {
               chatId: input.chatId,
               characterIds,
@@ -3929,7 +3911,7 @@ export async function generateRoutes(app: FastifyInstance) {
       // Prefer committed game state after a real user turn, but keep visible
       // uncommitted tracker edits authoritative for continue/impersonate flows.
       // Regenerate uses the previous assistant's tracker snapshot as the prompt baseline.
-      const latestGameState = await gameStateStore.getForGeneration(input.chatId, gameStateGenerationOptions);
+      const latestGameState = await selectedGameStateSnapshotPromise;
       const baseGameStateSnapshot = latestGameState;
       const allowLatestGameStateFallback = !input.regenerateMessageId;
       const gameState = latestGameState ? parseGameStateRow(latestGameState as Record<string, unknown>) : null;
@@ -4417,7 +4399,7 @@ export async function generateRoutes(app: FastifyInstance) {
         const hasCustomTracker = active.has("custom-tracker");
 
         if (hasWorldState || hasCharTracker || hasPersonaStats || hasQuest || hasCustomTracker) {
-          const snap = (await gameStateStore.getForGeneration(input.chatId, gameStateGenerationOptions)) ?? undefined;
+          const snap = latestGameState ?? undefined;
 
           if (snap) {
             const trackerParts: string[] = [];

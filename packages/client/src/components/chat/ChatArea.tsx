@@ -141,6 +141,7 @@ export function ChatArea() {
   const isLoadingMoreRef = useRef(false);
   const intuitiveTouchStartRef = useRef<{ x: number; y: number; target: EventTarget | null } | null>(null);
   const swipeActionSeq = useRef(0);
+  const pendingSwipeMutationsRef = useRef(new Map<string, Promise<void>>());
   // Tracks whether the initial load stagger animation has played.
   // After the first render with messages, new/re-mounted messages
   // skip the entry animation to avoid a visible flash on refetch.
@@ -683,9 +684,10 @@ export function ChatArea() {
     setDeleteDialogMessageId(null);
     if (!messageId || !deleteDialogCanDeleteSwipe) return;
     const actionId = ++swipeActionSeq.current;
+    const refreshChatId = activeChatId;
     void (async () => {
       const gameStateStore = useGameStateStore.getState();
-      if (shouldRefreshGameStateOnSwipe) gameStateStore.setRefreshing(true);
+      if (shouldRefreshGameStateOnSwipe && refreshChatId) gameStateStore.setRefreshingChat(refreshChatId);
       try {
         const flushPatch = useGameStateStore.getState().flushPatch;
         if (flushPatch) {
@@ -707,11 +709,12 @@ export function ChatArea() {
         toast.error("Could not delete the swipe.");
       } finally {
         if (swipeActionSeq.current === actionId) {
-          useGameStateStore.getState().setRefreshing(false);
+          useGameStateStore.getState().clearRefreshingChat(refreshChatId);
         }
       }
     })();
   }, [
+    activeChatId,
     deleteDialogActiveSwipeIndex,
     deleteDialogCanDeleteSwipe,
     deleteDialogMessageId,
@@ -885,9 +888,10 @@ export function ChatArea() {
   const handleSetActiveSwipe = useCallback(
     (messageId: string, index: number) => {
       const actionId = ++swipeActionSeq.current;
+      const refreshChatId = activeChatId;
       void (async () => {
         const gameStateStore = useGameStateStore.getState();
-        if (shouldRefreshGameStateOnSwipe) gameStateStore.setRefreshing(true);
+        if (shouldRefreshGameStateOnSwipe && refreshChatId) gameStateStore.setRefreshingChat(refreshChatId);
         try {
           const flushPatch = useGameStateStore.getState().flushPatch;
           if (flushPatch) {
@@ -901,7 +905,28 @@ export function ChatArea() {
             }
           }
           if (swipeActionSeq.current !== actionId) return;
-          await setActiveSwipe.mutateAsync({ messageId, index });
+          const previousMutation = pendingSwipeMutationsRef.current.get(messageId);
+          if (previousMutation) {
+            try {
+              await previousMutation;
+            } catch {
+              // The active action below will report its own failure if needed.
+            }
+          }
+          if (swipeActionSeq.current !== actionId) return;
+          const mutation = setActiveSwipe.mutateAsync({ messageId, index });
+          const trackedMutation = mutation.then(
+            () => undefined,
+            () => undefined,
+          );
+          pendingSwipeMutationsRef.current.set(messageId, trackedMutation);
+          try {
+            await mutation;
+          } finally {
+            if (pendingSwipeMutationsRef.current.get(messageId) === trackedMutation) {
+              pendingSwipeMutationsRef.current.delete(messageId);
+            }
+          }
           if (swipeActionSeq.current !== actionId) return;
           await refreshVisibleGameState();
         } catch {
@@ -909,12 +934,12 @@ export function ChatArea() {
           toast.error("Could not switch swipes.");
         } finally {
           if (swipeActionSeq.current === actionId) {
-            useGameStateStore.getState().setRefreshing(false);
+            useGameStateStore.getState().clearRefreshingChat(refreshChatId);
           }
         }
       })();
     },
-    [setActiveSwipe, refreshVisibleGameState, shouldRefreshGameStateOnSwipe],
+    [activeChatId, setActiveSwipe, refreshVisibleGameState, shouldRefreshGameStateOnSwipe],
   );
 
   const handleEdit = useCallback(

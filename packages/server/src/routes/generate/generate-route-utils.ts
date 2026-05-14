@@ -113,6 +113,22 @@ export function resolveRegenerationGameStateAnchor(
   return resolveVisibleGameStateAnchor(messages.slice(0, targetIndex));
 }
 
+export function resolveRegenerationGameStateFallbackMessageIds(
+  messages: Array<{ role?: unknown; id?: unknown }>,
+  regenerateMessageId: string | null | undefined,
+): string[] | null {
+  if (!regenerateMessageId) return null;
+  const targetIndex = messages.findIndex((message) => message.id === regenerateMessageId);
+  const boundedMessages = targetIndex >= 0 ? messages.slice(0, targetIndex) : messages;
+  const ids = new Set<string>([""]);
+  for (const message of boundedMessages) {
+    if (message.role === "assistant" && typeof message.id === "string") {
+      ids.add(message.id);
+    }
+  }
+  return Array.from(ids);
+}
+
 export function getAttachmentFilename(attachment: PromptAttachment): string {
   const rawName = attachment.filename ?? attachment.name;
   return typeof rawName === "string" && rawName.trim() ? rawName.trim() : "attachment";

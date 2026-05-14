@@ -23,11 +23,17 @@ type QueuedGameStatePatch = {
   target: GameStatePatchTarget;
   fields: GameStatePatch;
 };
+type InFlightGameStatePatch = {
+  chatId: string;
+  controller: AbortController;
+  promise: Promise<void>;
+  canceled: boolean;
+};
 
 const PATCH_DEBOUNCE_MS = 500;
 const pendingPatches = new Map<string, QueuedGameStatePatch>();
 const patchTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const inFlightPatches = new Map<string, { chatId: string; promise: Promise<void> }>();
+const inFlightPatches = new Map<string, InFlightGameStatePatch>();
 let beforeUnloadListeners = 0;
 
 function createEmptyPlayerStats(): PlayerStats {
@@ -135,33 +141,45 @@ export async function flushGameStatePatch(chatId?: string) {
       try {
         await previousInFlight.promise;
       } catch (error) {
-        const existing = pendingPatches.get(key);
-        pendingPatches.set(key, {
-          chatId: queuedSnapshot.chatId,
-          target: queuedSnapshot.target,
-          fields: {
-            ...queuedSnapshot.fields,
-            ...(existing?.fields ?? {}),
-          },
-        });
-        errors.push(error);
-        continue;
+        if (!previousInFlight.canceled) {
+          const existing = pendingPatches.get(key);
+          pendingPatches.set(key, {
+            chatId: queuedSnapshot.chatId,
+            target: queuedSnapshot.target,
+            fields: {
+              ...queuedSnapshot.fields,
+              ...(existing?.fields ?? {}),
+            },
+          });
+          errors.push(error);
+          continue;
+        }
+        // Superseded/discarded writes should not block the queued replacement.
       }
     }
 
+    const controller = new AbortController();
+    const inFlightEntry: InFlightGameStatePatch = {
+      chatId: queuedSnapshot.chatId,
+      controller,
+      promise: Promise.resolve(),
+      canceled: false,
+    };
     const request: Promise<void> = api
-      .patch(`/chats/${queuedSnapshot.chatId}/game-state`, { ...payload, manual: true })
+      .patch(`/chats/${queuedSnapshot.chatId}/game-state`, { ...payload, manual: true }, { signal: controller.signal })
       .then(() => undefined)
       .catch((error) => {
-        const existing = pendingPatches.get(key);
-        pendingPatches.set(key, {
-          chatId: queuedSnapshot.chatId,
-          target: queuedSnapshot.target,
-          fields: {
-            ...queuedSnapshot.fields,
-            ...(existing?.fields ?? {}),
-          },
-        });
+        if (!inFlightEntry.canceled) {
+          const existing = pendingPatches.get(key);
+          pendingPatches.set(key, {
+            chatId: queuedSnapshot.chatId,
+            target: queuedSnapshot.target,
+            fields: {
+              ...queuedSnapshot.fields,
+              ...(existing?.fields ?? {}),
+            },
+          });
+        }
         throw error;
       })
       .finally(() => {
@@ -169,12 +187,13 @@ export async function flushGameStatePatch(chatId?: string) {
           inFlightPatches.delete(key);
         }
       });
-    inFlightPatches.set(key, { chatId: queuedSnapshot.chatId, promise: request });
+    inFlightEntry.promise = request;
+    inFlightPatches.set(key, inFlightEntry);
 
     try {
       await request;
     } catch (error) {
-      errors.push(error);
+      if (!inFlightEntry.canceled) errors.push(error);
     }
   }
 
@@ -202,6 +221,17 @@ export function discardPendingGameStatePatch(chatId?: string) {
     if (timer) clearTimeout(timer);
     patchTimers.delete(key);
     pendingPatches.delete(key);
+  }
+
+  const inFlightKeys = Array.from(inFlightPatches.entries())
+    .filter(([, entry]) => !chatId || entry.chatId === chatId)
+    .map(([key]) => key);
+  for (const key of inFlightKeys) {
+    const entry = inFlightPatches.get(key);
+    if (!entry) continue;
+    entry.canceled = true;
+    entry.controller.abort();
+    inFlightPatches.delete(key);
   }
 }
 
