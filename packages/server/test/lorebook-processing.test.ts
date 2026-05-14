@@ -98,6 +98,7 @@ function makeEntry(overrides: Partial<LorebookEntry> = {}): LorebookEntry {
     dynamicState: {},
     activationConditions: [],
     schedule: null,
+    excludeFromVectorization: false,
     embedding: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -164,6 +165,7 @@ function lorebookEntryRow(id: string) {
     activationConditions: "[]",
     schedule: null,
     preventRecursion: "false",
+    excludeFromVectorization: "false",
     embedding: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -182,6 +184,32 @@ test("macro-expanded lorebook content is budgeted and estimated after expansion"
   assert.deepEqual(budgetedOut, []);
   assert.equal(processed.worldInfoBefore, expandedContent);
   assert.equal(processed.totalTokensEstimate, 20);
+});
+
+test("depth 0 lorebook entries are included for depth injection", () => {
+  const activated: ActivatedEntry[] = [
+    {
+      entry: makeEntry({
+        content: "Depth zero lore",
+        position: 2,
+        depth: 0,
+        role: "system",
+      }),
+      matchedKeys: ["keyword"],
+      injectionOrder: 100,
+    },
+  ];
+
+  const processed = processActivatedEntries(activated, 0);
+
+  assert.deepEqual(processed.depthEntries, [
+    {
+      content: "Depth zero lore",
+      role: "system",
+      depth: 0,
+      order: 100,
+    },
+  ]);
 });
 
 test("lorebook final budgets use resolved variable macro content and roll back skipped side effects", () => {
@@ -585,6 +613,112 @@ test("multiple lorebook markers share one macro side-effect pass per prompt asse
   }
 });
 
+test("assembler can scan guide-only lorebook text without adding it to chat history", async () => {
+  const client = createClient({ url: "file::memory:" });
+  const db = drizzle(client) as unknown as DB;
+
+  try {
+    await runMigrations(db);
+
+    await db.insert(lorebooks).values({
+      id: "book-1",
+      name: "World Info",
+      description: "",
+      category: "world",
+      scanDepth: 2,
+      tokenBudget: 2048,
+      recursiveScanning: "false",
+      maxRecursionDepth: 3,
+      characterId: null,
+      personaId: null,
+      chatId: null,
+      isGlobal: "true",
+      enabled: "true",
+      tags: "[]",
+      generatedBy: null,
+      sourceAgentId: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    await db.insert(lorebookEntries).values(
+      dbLorebookEntry("guide-entry", {
+        content: "Guide-only lore",
+        keys: JSON.stringify(["guide-key"]),
+        position: 0,
+        order: 10,
+      }),
+    );
+
+    const result = await assemblePrompt({
+      db,
+      preset: {
+        id: "preset-1",
+        name: "Preset",
+        sectionOrder: JSON.stringify(["lorebook-section", "history-section"]),
+        groupOrder: "[]",
+        wrapFormat: "none",
+        parameters: JSON.stringify(DEFAULT_GENERATION_PARAMS),
+        variableGroups: "[]",
+        variableValues: "{}",
+      },
+      sections: [
+        {
+          id: "lorebook-section",
+          presetId: "preset-1",
+          identifier: "lorebook",
+          name: "Lorebook",
+          content: "",
+          role: "system",
+          enabled: "true",
+          isMarker: "true",
+          groupId: null,
+          markerConfig: JSON.stringify({ type: "world_info_before" }),
+          injectionPosition: "ordered",
+          injectionDepth: 0,
+          injectionOrder: 0,
+          forbidOverrides: "false",
+        },
+        {
+          id: "history-section",
+          presetId: "preset-1",
+          identifier: "history",
+          name: "History",
+          content: "",
+          role: "user",
+          enabled: "true",
+          isMarker: "true",
+          groupId: null,
+          markerConfig: JSON.stringify({ type: "chat_history" }),
+          injectionPosition: "ordered",
+          injectionDepth: 0,
+          injectionOrder: 1,
+          forbidOverrides: "false",
+        },
+      ],
+      groups: [],
+      choiceBlocks: [],
+      chatChoices: {},
+      chatId: "chat-1",
+      characterIds: [],
+      personaName: "User",
+      personaDescription: "",
+      chatMessages: [{ role: "user", content: "ordinary visible message" }],
+      lorebookScanMessages: [
+        { role: "user", content: "ordinary visible message" },
+        { role: "user", content: "guide-key hidden instruction" },
+      ],
+      activeLorebookIds: [],
+    });
+
+    const content = result.messages.map((message) => message.content).join("\n");
+    assert.match(content, /Guide-only lore/);
+    assert.match(content, /ordinary visible message/);
+    assert.doesNotMatch(content, /guide-key hidden instruction/);
+  } finally {
+    client.close();
+  }
+});
+
 test("entries inherit their lorebook scan depth when no per-entry override is set", () => {
   const entry = makeEntry();
   const entries = applyLorebookDefaults([entry], new Map([["book-1", makeLorebook({ scanDepth: 2 })]]));
@@ -680,6 +814,21 @@ test("entry probability is not re-rolled by semantic fallback after a keyword ma
 
   assert.equal(activated.length, 0);
   assert.equal(rolls, 1);
+});
+
+test("entries excluded from vectorization do not activate through semantic fallback", () => {
+  const entry = makeEntry({
+    keys: ["no-keyword-match"],
+    embedding: [1, 0],
+    excludeFromVectorization: true,
+  });
+
+  const activated = scanForActivatedEntries([{ role: "user", content: "ordinary chat" }], [entry], {
+    chatEmbedding: [1, 0],
+    semanticThreshold: 0.5,
+  });
+
+  assert.equal(activated.length, 0);
 });
 
 test("entry probability allows activation when the roll is below the configured percentage", () => {

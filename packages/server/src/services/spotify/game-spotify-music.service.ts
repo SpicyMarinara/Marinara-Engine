@@ -66,6 +66,14 @@ const SPOTIFY_REPEAT_RETRY_DELAYS_MS = [0, 450, 900] as const;
 
 const spotifyTrackIndexCache = new Map<string, SpotifyTrackIndexCacheEntry>();
 
+type SpotifyPlaybackDevice = {
+  id?: string | null;
+  name?: string;
+  type?: string | null;
+  is_active?: boolean;
+  is_restricted?: boolean;
+};
+
 const SPOTIFY_STOP_WORDS = new Set([
   "a",
   "an",
@@ -578,11 +586,17 @@ function normalizeRepeatState(value: unknown): "off" | "track" | "context" {
   return value === "track" || value === "context" ? value : "off";
 }
 
+function isPersonalMobileSpotifyDeviceType(type: string | null | undefined): boolean {
+  const normalized = type?.toLowerCase() ?? "";
+  return normalized === "smartphone" || normalized === "tablet";
+}
+
 async function readPlaybackSnapshot(credentials: SpotifyCredentialsResult): Promise<{
   trackUri: string | null;
   repeatState: "off" | "track" | "context";
   deviceId: string | null;
   deviceName: string | null;
+  deviceType: string | null;
 } | null> {
   const res = await fetchSpotifyApi(credentials, "/me/player", { signal: AbortSignal.timeout(10_000) }).catch(
     () => null,
@@ -591,13 +605,14 @@ async function readPlaybackSnapshot(credentials: SpotifyCredentialsResult): Prom
   const data = (await res.json()) as {
     repeat_state?: string;
     item?: { uri?: string | null } | null;
-    device?: { id?: string | null; name?: string | null } | null;
+    device?: { id?: string | null; name?: string | null; type?: string | null } | null;
   };
   return {
     trackUri: typeof data.item?.uri === "string" ? data.item.uri : null,
     repeatState: normalizeRepeatState(data.repeat_state),
     deviceId: typeof data.device?.id === "string" ? data.device.id : null,
     deviceName: typeof data.device?.name === "string" ? data.device.name : null,
+    deviceType: typeof data.device?.type === "string" ? data.device.type : null,
   };
 }
 
@@ -607,21 +622,27 @@ async function readPlaybackSnapshot(credentials: SpotifyCredentialsResult): Prom
 // /me/player/play with no device_id 404s with NO_ACTIVE_DEVICE.
 async function findAvailablePlaybackDevice(
   credentials: SpotifyCredentialsResult,
+  options?: { mobileOnly?: boolean },
 ): Promise<{ deviceId: string; deviceName: string } | null> {
   const res = await fetchSpotifyApi(credentials, "/me/player/devices", {
     signal: AbortSignal.timeout(10_000),
   }).catch(() => null);
   if (!res || !res.ok) return null;
   const data = (await res.json().catch(() => null)) as {
-    devices?: Array<{ id?: string | null; name?: string; is_active?: boolean; is_restricted?: boolean }>;
+    devices?: SpotifyPlaybackDevice[];
   } | null;
   const devices = data?.devices ?? [];
 
-  const pick = (
-    predicate: (d: { id?: string | null; name?: string; is_active?: boolean; is_restricted?: boolean }) => boolean,
-  ) => devices.find((d) => typeof d.id === "string" && d.id && !d.is_restricted && predicate(d));
+  const pick = (predicate: (d: SpotifyPlaybackDevice) => boolean) =>
+    devices.find((d) => typeof d.id === "string" && d.id && !d.is_restricted && predicate(d));
 
-  const candidate = pick((d) => d.is_active === true) ?? pick((d) => d.name === "Marinara Engine") ?? pick(() => true);
+  const candidate =
+    options?.mobileOnly === true
+      ? (pick((d) => d.is_active === true && isPersonalMobileSpotifyDeviceType(d.type)) ??
+        pick((d) => isPersonalMobileSpotifyDeviceType(d.type)))
+      : (pick((d) => d.is_active === true) ??
+        pick((d) => d.name !== "Marinara Engine") ??
+        pick((d) => d.name === "Marinara Engine"));
 
   if (!candidate?.id) return null;
   return { deviceId: candidate.id, deviceName: candidate.name ?? "Spotify device" };
@@ -651,6 +672,8 @@ export async function playGameSpotifyTrack(args: {
   storage: AgentsStorage;
   chatMeta: Record<string, unknown>;
   track: SceneSpotifyTrackSelection;
+  deviceId?: string | null;
+  mobileDeviceOnly?: boolean;
 }): Promise<GameSpotifyPlayResult> {
   const source = getGameSpotifySource(args.chatMeta);
   if (!source.enabled) {
@@ -662,10 +685,17 @@ export async function playGameSpotifyTrack(args: {
 
   const credentials = await getCredentials(args.storage);
   const before = await readPlaybackSnapshot(credentials);
-  let targetDeviceId = before?.deviceId ?? null;
-  let targetDeviceName = before?.deviceName ?? null;
+  const canUseCurrentDevice =
+    args.mobileDeviceOnly !== true || isPersonalMobileSpotifyDeviceType(before?.deviceType ?? null);
+  let targetDeviceId = args.deviceId ?? (canUseCurrentDevice ? (before?.deviceId ?? null) : null);
+  let targetDeviceName =
+    args.deviceId && args.deviceId !== before?.deviceId
+      ? null
+      : canUseCurrentDevice
+        ? (before?.deviceName ?? null)
+        : null;
   if (!targetDeviceId) {
-    const fallback = await findAvailablePlaybackDevice(credentials);
+    const fallback = await findAvailablePlaybackDevice(credentials, { mobileOnly: args.mobileDeviceOnly === true });
     if (fallback) {
       targetDeviceId = fallback.deviceId;
       targetDeviceName = fallback.deviceName;
@@ -673,6 +703,12 @@ export async function playGameSpotifyTrack(args: {
   }
 
   if (!targetDeviceId) {
+    if (args.mobileDeviceOnly === true) {
+      spotifyError(
+        404,
+        "No phone or tablet Spotify device is available. Open Spotify on this phone so it appears as a Spotify Connect device, then try again.",
+      );
+    }
     spotifyError(
       404,
       "No Spotify device is available. Enable the Spotify mini player in Settings, or open Spotify on another device, then try again.",

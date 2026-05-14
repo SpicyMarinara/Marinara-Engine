@@ -1897,12 +1897,14 @@ function VectorizeSection({ lorebookId, entries }: { lorebookId: string; entries
   const [selectedConnectionId, setSelectedConnectionId] = useState<string>("");
   const [vectorizing, setVectorizing] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
-  const entryCount = entries.length;
-  const vectorizedCount = entries.filter(
+  const excludedCount = entries.filter((entry) => entry.excludeFromVectorization).length;
+  const vectorizableEntries = entries.filter((entry) => !entry.excludeFromVectorization);
+  const vectorizableEntryCount = vectorizableEntries.length;
+  const vectorizedCount = vectorizableEntries.filter(
     (entry) => Array.isArray(entry.embedding) && entry.embedding.length > 0,
   ).length;
-  const missingCount = Math.max(0, entryCount - vectorizedCount);
-  const allVectorized = entryCount > 0 && missingCount === 0;
+  const missingCount = Math.max(0, vectorizableEntryCount - vectorizedCount);
+  const allVectorized = vectorizableEntryCount > 0 && missingCount === 0;
 
   // Auto-select first embedding connection
   useEffect(() => {
@@ -1954,9 +1956,10 @@ function VectorizeSection({ lorebookId, entries }: { lorebookId: string; entries
           )}
         >
           {allVectorized ? <Check size="0.625rem" /> : <AlertTriangle size="0.625rem" />}
-          {vectorizedCount}/{entryCount} entries vectorized
+          {vectorizedCount}/{vectorizableEntryCount} entries vectorized
         </span>
         {missingCount > 0 && <span>{missingCount} still need embeddings.</span>}
+        {excludedCount > 0 && <span>{excludedCount} excluded.</span>}
       </div>
       {embeddingConnections.length === 0 ? (
         <p className="text-[0.625rem] text-[var(--muted-foreground)]">
@@ -1978,14 +1981,14 @@ function VectorizeSection({ lorebookId, entries }: { lorebookId: string; entries
             </select>
             <button
               onClick={handleVectorize}
-              disabled={vectorizing || entryCount === 0}
+              disabled={vectorizing || vectorizableEntryCount === 0}
               className="flex items-center gap-1.5 rounded-xl bg-violet-500/15 px-3 py-1.5 text-xs font-medium text-violet-400 ring-1 ring-violet-500/30 transition-all hover:bg-violet-500/25 active:scale-[0.98] disabled:opacity-50"
             >
               {vectorizing ? <Loader2 size="0.75rem" className="animate-spin" /> : <Sparkles size="0.75rem" />}
               {vectorizing
                 ? "Vectorizing..."
                 : allVectorized
-                  ? `Re-vectorize ${entryCount} entries`
+                  ? `Re-vectorize ${vectorizableEntryCount} entries`
                   : `Vectorize ${missingCount} missing`}
             </button>
           </div>

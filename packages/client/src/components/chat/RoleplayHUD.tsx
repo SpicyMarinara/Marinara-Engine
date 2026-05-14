@@ -96,6 +96,7 @@ export function RoleplayHUD({
 }: RoleplayHUDProps & { mobileCompact?: boolean }) {
   const [agentsOpen, setAgentsOpen] = useState(false);
   const gameState = useGameStateStore((s) => s.current);
+  const gameStateRefreshing = useGameStateStore((s) => s.isRefreshing);
   const setGameState = useGameStateStore((s) => s.setGameState);
   const { patchField, patchPlayerStats } = useGameStatePatcher(chatId, "roleplay-hud");
 
@@ -141,8 +142,8 @@ export function RoleplayHUD({
   const trackerPanelHideHudWidgets = useUIStore((s) => s.trackerPanelHideHudWidgets);
   const toggleTrackerPanel = useUIStore((s) => s.toggleTrackerPanel);
 
-  const isTrackerBusy = isAgentProcessing || isStreaming;
-  const showHudTrackerWidgets = !(trackerPanelEnabled && trackerPanelHideHudWidgets);
+  const isTrackerBusy = isAgentProcessing || isStreaming || gameStateRefreshing;
+  const showHudTrackerWidgets = !gameStateRefreshing && !(trackerPanelEnabled && trackerPanelHideHudWidgets);
 
   useEffect(() => {
     if (!chatId) return;

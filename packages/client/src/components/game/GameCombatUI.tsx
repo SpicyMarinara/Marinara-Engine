@@ -729,9 +729,7 @@ export function GameCombatUI({
   const stopCombatVoicePlayback = useCallback(() => {
     combatVoiceSequenceRef.current += 1;
     if (combatVoiceAudioRef.current) {
-      combatVoiceAudioRef.current.pause();
-      combatVoiceAudioRef.current.onended = null;
-      combatVoiceAudioRef.current.onerror = null;
+      combatVoiceAudioRef.current.stop();
       combatVoiceAudioRef.current = null;
     }
     setCombatVoicePlaying(false);
@@ -746,6 +744,7 @@ export function GameCombatUI({
       });
       if (playableKeys.length === 0) return;
 
+      audioManager.unlock();
       stopCombatVoicePlayback();
       const sequence = ++combatVoiceSequenceRef.current;
       setLastCombatVoiceKeys(playableKeys);
@@ -780,7 +779,8 @@ export function GameCombatUI({
         }
 
         const audio = new Audio(url);
-        audio.volume = normalizedGameVoiceVolume;
+        audio.preload = "auto";
+        audioManager.setMediaElementVolume(audio, normalizedGameVoiceVolume);
         audio.muted = normalizedGameVoiceVolume <= 0;
         combatVoiceAudioRef.current = audio;
         setCombatVoicePlaying(true);
@@ -841,8 +841,8 @@ export function GameCombatUI({
 
   useEffect(() => {
     if (!combatVoiceAudioRef.current) return;
-    combatVoiceAudioRef.current.volume = normalizedGameVoiceVolume;
-    combatVoiceAudioRef.current.muted = normalizedGameVoiceVolume <= 0;
+    combatVoiceAudioRef.current.setVolume(normalizedGameVoiceVolume);
+    combatVoiceAudioRef.current.setMuted(normalizedGameVoiceVolume <= 0);
   }, [normalizedGameVoiceVolume]);
 
   useEffect(() => {

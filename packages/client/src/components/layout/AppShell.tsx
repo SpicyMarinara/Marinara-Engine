@@ -501,8 +501,10 @@ export function AppShell() {
   const showAmbientDecor = isPageActive && !activeChatId && !detailView && !botBrowserOpen && !gameAssetsBrowserOpen;
   const hasDetailView = detailView != null;
   const trackerPanelActive = trackerPanelEnabled && trackerPanelOpen;
+  const trackerPanelSurfaceAvailable = !botBrowserOpen && !gameAssetsBrowserOpen && !hasDetailView;
+  const trackerPanelVisible = trackerPanelActive && trackerPanelSurfaceAvailable;
   useEffect(() => {
-    if (trackerPanelActive) {
+    if (trackerPanelVisible) {
       trackerPanelWasActiveRef.current = true;
       setTrackerPanelExitLayoutHold(false);
       return;
@@ -513,10 +515,10 @@ export function AppShell() {
     setTrackerPanelExitLayoutHold(true);
     const timeout = window.setTimeout(() => setTrackerPanelExitLayoutHold(false), TRACKER_PANEL_DESKTOP_EXIT_MS);
     return () => window.clearTimeout(timeout);
-  }, [trackerPanelActive]);
+  }, [trackerPanelVisible]);
 
-  const trackerPanelPendingExit = !trackerPanelActive && trackerPanelWasActiveRef.current;
-  const trackerPanelAnchoredForMotion = trackerPanelActive || trackerPanelExitLayoutHold || trackerPanelPendingExit;
+  const trackerPanelPendingExit = !trackerPanelVisible && trackerPanelWasActiveRef.current;
+  const trackerPanelAnchoredForMotion = trackerPanelVisible || trackerPanelExitLayoutHold || trackerPanelPendingExit;
   const trackerPanelDockToEdge = trackerPanelAnchoredForMotion && trackerPanelHideHudWidgets;
   const updateTrackerPanelToggleAnchor = useCallback(() => {
     const root = mainRef.current;
@@ -560,7 +562,7 @@ export function AppShell() {
   }, [trackerPanelDockToEdge]);
 
   useLayoutEffect(() => {
-    if (isMobile || trackerPanelActive || botBrowserOpen || gameAssetsBrowserOpen || hasDetailView) return;
+    if (isMobile || trackerPanelVisible || !trackerPanelSurfaceAvailable) return;
 
     let frame = 0;
     let discoveryObserver: MutationObserver | null = null;
@@ -610,14 +612,14 @@ export function AppShell() {
     botBrowserOpen,
     gameAssetsBrowserOpen,
     centerCompact,
-    hasDetailView,
     isMobile,
-    trackerPanelActive,
+    trackerPanelSurfaceAvailable,
+    trackerPanelVisible,
     updateTrackerPanelToggleAnchor,
   ]);
 
   useLayoutEffect(() => {
-    if (isMobile || !trackerPanelAnchoredForMotion || botBrowserOpen || gameAssetsBrowserOpen || hasDetailView) {
+    if (isMobile || !trackerPanelAnchoredForMotion || !trackerPanelSurfaceAvailable) {
       setTrackerPanelTop(TRACKER_PANEL_EDGE_OFFSET);
       return;
     }
@@ -669,24 +671,24 @@ export function AppShell() {
     botBrowserOpen,
     gameAssetsBrowserOpen,
     centerCompact,
-    hasDetailView,
     isMobile,
     trackerPanelAnchoredForMotion,
     trackerPanelDockToEdge,
+    trackerPanelSurfaceAvailable,
     updateTrackerPanelTop,
   ]);
 
   const trackerPanelChatAvoidance =
-    !isMobile && trackerPanelAnchoredForMotion && !botBrowserOpen && !gameAssetsBrowserOpen && !hasDetailView
+    !isMobile && trackerPanelAnchoredForMotion && trackerPanelSurfaceAvailable
       ? Math.round(liveTrackerPanelWidth * 0.62)
       : 0;
   const trackerPanelHudClearance =
-    !isMobile && trackerPanelAnchoredForMotion && trackerPanelHideHudWidgets && !botBrowserOpen && !gameAssetsBrowserOpen && !hasDetailView
+    !isMobile && trackerPanelAnchoredForMotion && trackerPanelHideHudWidgets && trackerPanelSurfaceAvailable
       ? liveTrackerPanelWidth + TRACKER_PANEL_HUD_GAP
       : 0;
 
   const trackerPanelDesktop = (side: "left" | "right") =>
-    trackerPanelActive && trackerPanelSide === side ? (
+    trackerPanelVisible && trackerPanelSide === side ? (
       <motion.aside
         key={`tracker-${side}`}
         initial={{
@@ -829,7 +831,7 @@ export function AppShell() {
         />
       )}
 
-      <AnimatePresence initial={false}>{!isMobile && !botBrowserOpen && !gameAssetsBrowserOpen && trackerPanelDesktop("left")}</AnimatePresence>
+      <AnimatePresence initial={false}>{!isMobile && trackerPanelSurfaceAvailable && trackerPanelDesktop("left")}</AnimatePresence>
 
       {/* Center content */}
       <main
@@ -867,10 +869,10 @@ export function AppShell() {
         <ChatNotificationBubbles />
       </main>
 
-      <AnimatePresence initial={false}>{!isMobile && !botBrowserOpen && !gameAssetsBrowserOpen && trackerPanelDesktop("right")}</AnimatePresence>
+      <AnimatePresence initial={false}>{!isMobile && trackerPanelSurfaceAvailable && trackerPanelDesktop("right")}</AnimatePresence>
 
       {/* Mobile tracker panel backdrop */}
-      {trackerPanelActive && !botBrowserOpen && !gameAssetsBrowserOpen && (
+      {trackerPanelVisible && (
         <div
           className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm md:hidden"
           onClick={() => setTrackerPanelOpen(false)}
@@ -880,7 +882,7 @@ export function AppShell() {
       {/* Mobile tracker panel */}
       {isMobile && (
         <AnimatePresence mode="wait">
-          {trackerPanelActive && !botBrowserOpen && !gameAssetsBrowserOpen && (
+          {trackerPanelVisible && (
             <motion.aside
               key="mobile-tracker"
               initial={{ x: trackerPanelSide === "left" ? "-100%" : "100%" }}

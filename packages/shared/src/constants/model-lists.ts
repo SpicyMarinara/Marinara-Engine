@@ -450,6 +450,13 @@ export const IMAGE_GENERATION_SOURCES: ImageGenSource[] = [
     requiresApiKey: true,
   },
   {
+    id: "xai",
+    name: "xAI / Grok Imagine",
+    description: "Grok Imagine image generation via xAI's Images API.",
+    defaultBaseUrl: "https://api.x.ai/v1",
+    requiresApiKey: true,
+  },
+  {
     id: "pollinations",
     name: "Pollinations",
     description: "Free, no-key-needed image generation via Pollinations AI.",
@@ -539,6 +546,9 @@ const IMAGE_GEN_MODELS: KnownModel[] = [
     context: 0,
     maxOutput: 0,
   },
+  // xAI / Grok Imagine
+  { id: "grok-imagine-image", name: "Grok Imagine Image", context: 0, maxOutput: 0 },
+  { id: "grok-2-image", name: "Grok 2 Image", context: 0, maxOutput: 0 },
   // NovelAI
   { id: "nai-diffusion-4-curated-preview", name: "NAI Diffusion 4 Curated", context: 0, maxOutput: 0 },
   { id: "nai-diffusion-4-5-full", name: "NAI Diffusion 4.5 Full", context: 0, maxOutput: 0 },
@@ -563,6 +573,7 @@ export function inferImageSource(model: string, baseUrl: string): string {
     m === "horde" ||
     m === "blockentropy" ||
     m === "openrouter" ||
+    m === "xai" ||
     m === "comfyui" ||
     m === "automatic1111" ||
     m === "gemini_image"
@@ -572,6 +583,9 @@ export function inferImageSource(model: string, baseUrl: string): string {
   if (m === "drawthings") return "automatic1111";
   if (u.includes("nano-gpt.com")) return "nanogpt";
   if (u.includes("openrouter.ai")) return "openrouter";
+  if (u.includes("api.x.ai") || u.includes("x.ai")) return "xai";
+  if (m.startsWith("grok-") && m.includes("image")) return "xai";
+  if (m.includes("grok") && m.includes("imagine")) return "xai";
   if (m.startsWith("dall-e") || m.startsWith("gpt-image") || u.includes("openai.com")) return "openai";
   if (m.startsWith("sd3") || u.includes("stability.ai")) return "stability";
   if (m.includes("nai-diffusion") || u.includes("novelai.net")) return "novelai";

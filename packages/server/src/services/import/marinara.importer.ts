@@ -449,6 +449,7 @@ async function importLorebook(data: unknown, db: DB) {
         folderId: newFolderId,
         locked: Boolean(e.locked),
         preventRecursion: Boolean(e.preventRecursion),
+        excludeFromVectorization: Boolean(e.excludeFromVectorization),
         tag: String(e.tag ?? ""),
         relationships: (e.relationships as any) ?? {},
         dynamicState: (e.dynamicState as any) ?? {},

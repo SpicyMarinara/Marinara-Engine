@@ -89,6 +89,17 @@ const HOME_FAQ_ITEMS: HomeFaqItem[] = [
     ],
   },
   {
+    id: "android-apk-termux",
+    category: "Setup",
+    question: "Is the Android APK standalone?",
+    answer: "No. The APK is only a WebView shell for Marinara Engine running locally in Termux.",
+    bullets: [
+      "Install Termux from F-Droid and run Marinara with ./start-termux.sh first.",
+      "The APK opens the same-device local server at 127.0.0.1, so it cannot work if Termux is closed.",
+      "If it stays on the connection screen, go back to Termux and start the server.",
+    ],
+  },
+  {
     id: "pnpm-install-bat",
     category: "Setup",
     question: "'pnpm: not found' or install.bat failed. What now?",

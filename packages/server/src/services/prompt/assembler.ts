@@ -102,6 +102,8 @@ export interface AssemblerInput {
   personaStats?: any;
   /** Chat messages from the DB (user + assistant + narrator etc.) */
   chatMessages: ChatMLMessage[];
+  /** Optional scan-only messages for lorebook matching. Keeps synthetic guidance out of chat history. */
+  lorebookScanMessages?: ChatMLMessage[];
   /** Current chat summary text (if any) */
   chatSummary?: string | null;
   /** Whether agents are enabled for this chat */
@@ -233,6 +235,7 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
     personaFields: input.personaFields,
     personaStats: input.personaStats,
     chatMessages: input.chatMessages,
+    lorebookScanMessages: input.lorebookScanMessages,
     chatSummary: input.chatSummary ?? null,
     wrapFormat,
     enableAgents: input.enableAgents ?? true,

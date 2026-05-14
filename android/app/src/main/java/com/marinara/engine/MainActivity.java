@@ -79,7 +79,7 @@ public class MainActivity extends Activity {
 
         // Status text
         statusText = new TextView(this);
-        statusText.setText("Connecting to Marinara Engine…");
+        statusText.setText("Marinara Engine Android shell\nStart ./start-termux.sh in Termux first.");
         statusText.setTextColor(0xFFCCCCCC);
         statusText.setTextSize(16f);
         statusText.setGravity(android.view.Gravity.CENTER);
@@ -164,12 +164,12 @@ public class MainActivity extends Activity {
     }
 
     private void tryConnect() {
-        statusText.setText("Connecting to Marinara Engine…");
+        statusText.setText("Connecting to Termux server…\nAPK shell only: run ./start-termux.sh in Termux first.");
         webView.loadUrl(SERVER_URL);
     }
 
     private void retryConnection() {
-        statusText.setText("Waiting for server…\nMake sure Marinara Engine is running in Termux.");
+        statusText.setText("Waiting for Termux server…\nThis APK is not standalone. Run ./start-termux.sh in Termux first.");
         handler.postDelayed(this::tryConnect, RETRY_DELAY_MS);
     }
 

@@ -63,6 +63,27 @@ Spotify's OAuth rules only allow `https://` or `http://127.0.0.1` redirect URIs,
 ---
 
 <details>
+<summary><strong>Is the Android APK a standalone app?</strong></summary>
+<br>
+
+No. The Android APK is a WebView shell, not a standalone Marinara Engine server build.
+
+The APK only opens `http://127.0.0.1:<PORT>` on the same Android device. That means Marinara Engine must already be installed and running in Termux before the APK can load anything.
+
+Use this flow:
+
+1. Install Termux from F-Droid.
+2. Follow the [Android (Termux) Installation Guide](installation/android-termux.md).
+3. Start Marinara Engine with `./start-termux.sh`.
+4. Open the APK if you want a dedicated home-screen shell.
+
+If you downloaded only the APK from a GitHub Release and skipped Termux, the app will not start by itself.
+
+</details>
+
+---
+
+<details>
 <summary><strong>What can Professor Mari do?</strong></summary>
 <br>
 
@@ -151,6 +172,22 @@ It depends which retry button you use.
 Individual tracker controls are narrower. If you open a specific HUD widget and rerun it from there, Marinara sends only that tracker through the retry pipeline.
 
 Other retry controls are also scoped to what they say on the button: **Retry Failed Agents** retries the failed agents from the last generation, while Injections-tab re-runs only refresh the selected cached prompt injection for the current assistant message.
+
+</details>
+
+---
+
+<details>
+<summary><strong>Does Marinara Engine have Guided Generation / Swipes / Regen?</strong></summary>
+<br>
+
+Yes. Use `/narrator <direction>` when you want to steer the AI's next reply without speaking as your persona. It sends your text as hidden story direction, like `/narrator make Alex interrupt` or `/narrator move the scene toward the market`.
+
+For swipes and regens, enable **Settings -> Advanced -> Guide swipes/regens with chat input**. Then the current chat-box draft is used as guidance when you click **Regenerate**, create a new swipe/reroll, or manually trigger a character response in a group chat.
+
+Guided `/narrator` requests and guided manual character replies use Chat reply lorebook triggers. If an older lorebook entry was attached to Continue or Autonomous only so it could steer guided replies, move that entry to Chat reply.
+
+If you want to post your persona message first without triggering a reply, enable **Settings -> Advanced -> Quick replies menu** and include **Post only**. The same settings submenu can include **Guide reply** for a quick `/narrator` send and **Impersonate** for generating as your persona.
 
 </details>
 

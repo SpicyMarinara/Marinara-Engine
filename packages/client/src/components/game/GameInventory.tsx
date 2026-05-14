@@ -233,9 +233,9 @@ export function GameInventory({
                         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-gradient-to-b from-white/8 to-white/[0.02] text-sm font-bold text-amber-400/80 ring-1 ring-white/8">
                           {item.name.charAt(0).toUpperCase()}
                         </div>
-                        <div className="mt-1 flex w-full min-w-0 flex-1 flex-col items-center justify-center px-1">
-                          <div className="flex min-w-0 flex-col items-center gap-0.5">
-                            <span className="w-full whitespace-normal break-words text-center text-[0.58rem] font-medium leading-tight text-white/80 [overflow-wrap:anywhere]">
+                        <div className="mt-1 flex min-h-0 w-full min-w-0 flex-1 flex-col items-center justify-center px-1">
+                          <div className="flex max-h-full min-h-0 w-full min-w-0 flex-col items-center gap-0.5 overflow-hidden max-md:overflow-y-auto max-md:overscroll-contain max-md:touch-pan-y">
+                            <span className="block w-full whitespace-normal break-words text-center text-[0.58rem] font-medium leading-tight text-white/80 [overflow-wrap:anywhere]">
                               {item.name}
                             </span>
                             {item.quantity > 1 && (

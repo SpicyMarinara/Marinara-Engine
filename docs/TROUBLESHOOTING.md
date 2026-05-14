@@ -46,6 +46,22 @@ See the [LAN / mobile access FAQ](FAQ.md#how-do-i-access-marinara-engine-from-my
 
 ---
 
+## Android APK Stuck on Connecting or Waiting for Server
+
+The APK is not a standalone Marinara Engine app. It is a WebView shell that opens the local Termux server on the same Android device.
+
+If the APK stays on the connection screen:
+
+1. Open Termux.
+2. Go to the Marinara Engine folder.
+3. Run `./start-termux.sh`.
+4. Wait for the launcher to finish and start the server.
+5. Open the APK again.
+
+Also confirm the APK and Termux use the same port. The default is `7860`; if you built the APK with `MARINARA_PORT=9000`, set `PORT=9000` in Termux's `.env` too.
+
+---
+
 ## Server Starts but Browser Shows a Blank Page
 
 - Clear the browser cache or do a hard refresh (`Ctrl+Shift+R` / `Cmd+Shift+R`).

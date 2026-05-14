@@ -147,6 +147,7 @@ export class AnthropicProvider extends BaseLLMProvider {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify(body),
+      bufferResponse: options.stream === false,
       ...(options.signal ? { signal: options.signal } : {}),
     });
 
