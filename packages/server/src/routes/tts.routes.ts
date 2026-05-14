@@ -493,7 +493,7 @@ async function fetchProviderVoices(cfg: TTSConfig): Promise<TTSVoicesResponse> {
   if (cfg.source === "fishaudio") {
     if (!cfg.apiKey) return fallbackVoices(cfg.source);
 
-    const res = await safeFetch(`${base}/v1/models?page_size=100`, {
+    const res = await safeFetch(`${base}/model?page_size=100&self=true`, {
       headers: openAiHeaders(cfg.apiKey),
       signal: AbortSignal.timeout(10_000),
       policy: {
