@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { zstdCompressSync } from "node:zlib";
 import { AnthropicProvider } from "../src/services/llm/providers/anthropic.provider.js";
 import type { ChatOptions } from "../src/services/llm/base-provider.js";
 
@@ -96,4 +97,48 @@ test("Anthropic prompt caching uses configured conversation depth", async () => 
   const messages = body.messages as Array<{ role: string; content: unknown }>;
   assert.deepEqual(messages[2]?.content, [{ type: "text", text: "u2", cache_control: { type: "ephemeral" } }]);
   assert.equal(messages[4]?.content, "u3");
+});
+
+test("Anthropic non-stream chat decodes raw zstd JSON without content-encoding", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLocalUrls = process.env.PROVIDER_LOCAL_URLS_ENABLED;
+
+  globalThis.fetch = async () =>
+    new Response(
+      zstdCompressSync(
+        Buffer.from(
+          JSON.stringify({
+            content: [{ type: "text", text: "decoded from zstd" }],
+            usage: { input_tokens: 1, output_tokens: 1 },
+          }),
+        ),
+      ),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+
+  try {
+    process.env.PROVIDER_LOCAL_URLS_ENABLED = "true";
+    const provider = new AnthropicProvider("https://api.anthropic.com/v1", "test-key");
+    const chunks: string[] = [];
+
+    for await (const chunk of provider.chat([{ role: "user", content: "Hello" }], {
+      model: "claude-sonnet-4-5",
+      stream: false,
+      maxTokens: 512,
+    })) {
+      chunks.push(chunk);
+    }
+
+    assert.equal(chunks.join(""), "decoded from zstd");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalLocalUrls === undefined) {
+      delete process.env.PROVIDER_LOCAL_URLS_ENABLED;
+    } else {
+      process.env.PROVIDER_LOCAL_URLS_ENABLED = originalLocalUrls;
+    }
+  }
 });

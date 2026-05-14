@@ -610,6 +610,7 @@ export abstract class BaseLLMProvider {
       headers,
       body: JSON.stringify({ input: texts, model }),
       signal: AbortSignal.timeout(60_000),
+      bufferResponse: true,
     });
     if (!res.ok) {
       const body = await res.text();
