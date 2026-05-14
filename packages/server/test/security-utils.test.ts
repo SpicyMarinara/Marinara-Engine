@@ -277,6 +277,31 @@ test("safeFetch leaves raw compressed bodies alone unless decoding is opted in",
   assert.deepEqual(Buffer.from(await response.arrayBuffer()), compressed);
 });
 
+test("safeFetch asks for identity encoding when compressed decoding is opted in", async () => {
+  const originalFetch = globalThis.fetch;
+  const seenAcceptEncodings: Array<string | null> = [];
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+    seenAcceptEncodings.push(new Headers(init?.headers).get("accept-encoding"));
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  try {
+    const response = await safeFetch("https://example.com/models", {
+      policy: { allowLocal: true },
+      decodeCompressedResponse: true,
+    });
+
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.equal(seenAcceptEncodings[0], "identity");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("decodePossiblyCompressedBody handles raw gzip, brotli, and zstd JSON bodies", () => {
   const json = Buffer.from(JSON.stringify({ ok: true }));
   const cases = [gzipSync(json), brotliCompressSync(json), zstdCompressSync(json)];

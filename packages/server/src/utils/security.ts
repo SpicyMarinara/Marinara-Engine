@@ -522,6 +522,14 @@ function tryDecodeCompressedBody(buffer: Buffer, algorithm: "gzip" | "br" | "zst
   }
 }
 
+function requestHeadersWithIdentityEncoding(headersInit: RequestInit["headers"] | undefined): Headers {
+  const headers = new Headers(headersInit);
+  if (!headers.has("accept-encoding")) {
+    headers.set("accept-encoding", "identity");
+  }
+  return headers;
+}
+
 export async function safeFetch(url: string | URL, options: SafeFetchOptions = {}): Promise<Response> {
   const {
     policy,
@@ -531,6 +539,7 @@ export async function safeFetch(url: string | URL, options: SafeFetchOptions = {
     decodeCompressedResponse = false,
     agentOptions,
     dispatcher,
+    headers,
     ...init
   } = options;
   if (dispatcher && !policy?.allowLocal) {
@@ -542,8 +551,10 @@ export async function safeFetch(url: string | URL, options: SafeFetchOptions = {
 
   for (let i = 0; i <= redirects; i += 1) {
     const internalDispatcher = dispatcher ? undefined : current.dispatcher;
+    const requestHeaders = decodeCompressedResponse ? requestHeadersWithIdentityEncoding(headers) : headers;
     const response = await fetch(current.url, {
       ...init,
+      ...(requestHeaders ? { headers: requestHeaders } : {}),
       redirect: "manual",
       dispatcher: dispatcher ?? internalDispatcher,
     } as unknown as RequestInit);
