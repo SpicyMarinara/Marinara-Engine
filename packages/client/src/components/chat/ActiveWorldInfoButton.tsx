@@ -18,6 +18,7 @@ const PANEL_CONTAINER =
 type ButtonClassNameInput = {
   open: boolean;
   hasEntries: boolean;
+  hasSkippedEntries: boolean;
   isLoading: boolean;
   compact: boolean;
 };
@@ -95,17 +96,19 @@ export function ActiveWorldInfoButton({
   if (!chatId) return null;
 
   const entries = data?.entries ?? [];
+  const skippedEntries = data?.budgetSkippedEntries ?? [];
   const hasEntries = entries.length > 0;
+  const hasSkippedEntries = skippedEntries.length > 0;
   const resolvedButtonClassName =
     typeof buttonClassName === "function"
-      ? buttonClassName({ open, hasEntries, isLoading, compact })
+      ? buttonClassName({ open, hasEntries, hasSkippedEntries, isLoading, compact })
       : (buttonClassName ??
         cn(
           "flex items-center justify-center rounded-full border backdrop-blur-md transition-all",
           compact ? "p-1" : "p-1.5",
           open
             ? "bg-foreground/15 border-foreground/20 text-foreground/90"
-            : hasEntries && !isLoading
+            : (hasEntries || hasSkippedEntries) && !isLoading
               ? "bg-foreground/10 border-foreground/25 text-foreground/80 hover:bg-foreground/15 hover:text-foreground"
               : "bg-foreground/5 border-foreground/10 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
         ));

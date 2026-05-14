@@ -18,6 +18,7 @@ import {
   enforceMaxActivatedEntries,
   filterRelevantLorebooks,
   resolveAndBudgetActivatedLorebookEntries,
+  resolveAndBudgetActivatedLorebookEntriesWithDiagnostics,
   resolveActivatedLorebookEntryContent,
   resolveBudgetAndRecursivelyActivateLorebookEntries,
   serializeTimingStateMap,
@@ -422,6 +423,76 @@ test("macro-aware lorebook max-entry selection keeps constants before lower-orde
     selected.map((entry) => entry.entry.id),
     ["constant"],
   );
+});
+
+test("lorebook budget diagnostics report matched entries skipped by per-book caps", () => {
+  const result = resolveAndBudgetActivatedLorebookEntriesWithDiagnostics(
+    [
+      {
+        entry: makeEntry({ id: "included", name: "Included", content: tokenContent(40), order: 10 }),
+        matchedKeys: ["keyword"],
+        injectionOrder: 10,
+      },
+      {
+        entry: makeEntry({ id: "skipped", name: "Skipped", content: tokenContent(30), order: 20 }),
+        matchedKeys: ["keyword"],
+        injectionOrder: 20,
+      },
+    ],
+    new Map([["book-1", makeLorebook({ name: "Tight Lorebook", tokenBudget: 50 })]]),
+    200,
+    10,
+  );
+
+  assert.deepEqual(
+    result.selected.map((entry) => entry.entry.id),
+    ["included"],
+  );
+  assert.deepEqual(result.budgetSkippedEntries, [
+    {
+      id: "skipped",
+      name: "Skipped",
+      lorebookId: "book-1",
+      lorebookName: "Tight Lorebook",
+      matchedKeys: ["keyword"],
+      estimatedTokens: 30,
+      lorebookBudget: 50,
+      lorebookUsedTokens: 40,
+      chatBudget: 200,
+      chatUsedTokens: 40,
+      blockedBy: "lorebook",
+    },
+  ]);
+});
+
+test("lorebook budget diagnostics report matched entries skipped by chat caps", () => {
+  const result = resolveAndBudgetActivatedLorebookEntriesWithDiagnostics(
+    [
+      {
+        entry: makeEntry({ id: "included", name: "Included", content: tokenContent(40), order: 10 }),
+        matchedKeys: ["keyword"],
+        injectionOrder: 10,
+      },
+      {
+        entry: makeEntry({ id: "skipped", name: "Skipped", content: tokenContent(30), order: 20 }),
+        matchedKeys: ["keyword"],
+        injectionOrder: 20,
+      },
+    ],
+    new Map([["book-1", makeLorebook({ name: "Large Lorebook", tokenBudget: 200 })]]),
+    50,
+    10,
+  );
+
+  assert.deepEqual(
+    result.selected.map((entry) => entry.entry.id),
+    ["included"],
+  );
+  assert.deepEqual(
+    result.budgetSkippedEntries.map((entry) => entry.blockedBy),
+    ["chat"],
+  );
+  assert.equal(result.budgetSkippedEntries[0]?.chatBudget, 50);
 });
 
 test("recursive lorebook scans use macro-expanded activated entry content", () => {

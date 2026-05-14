@@ -668,6 +668,7 @@ export async function lorebooksRoutes(app: FastifyInstance) {
       })),
       totalTokens: result.totalTokensEstimate,
       totalEntries: result.totalEntries,
+      budgetSkippedEntries: result.budgetSkippedEntries,
     };
   });
 
