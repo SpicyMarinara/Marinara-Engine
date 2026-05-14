@@ -477,7 +477,7 @@ export async function sceneRoutes(app: FastifyInstance) {
     }
 
     // 5. Disconnect chat; backwards compatibility with old scenes that had a connected chat.
-    await chats.disconnectChat(sceneChatId) 
+    await chats.disconnectChat(sceneChatId)
 
     return {
       summary,
@@ -509,7 +509,7 @@ export async function sceneRoutes(app: FastifyInstance) {
 
     // 2. Delete the scene chat entirely
     // Disconnect first; backwards compatibility with old scenes that had a connected chat.
-    await chats.disconnectChat(sceneChatId) 
+    await chats.disconnectChat(sceneChatId)
     await chats.remove(sceneChatId);
 
     return { originChatId };
