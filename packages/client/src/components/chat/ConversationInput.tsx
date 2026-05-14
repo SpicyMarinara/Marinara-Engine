@@ -226,7 +226,7 @@ export function ConversationInput({
   const [selectedCompletion, setSelectedCompletion] = useState(0);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [pendingAttachmentReads, setPendingAttachmentReads] = useState(0);
+  const [pendingAttachmentReadsByChat, setPendingAttachmentReadsByChat] = useState<Record<string, number>>({});
   const [isTranslatingDraft, setIsTranslatingDraft] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
@@ -283,6 +283,7 @@ export function ConversationInput({
   const updatePersona = useUpdatePersona();
   const qc = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingAttachmentReads = activeChatId ? (pendingAttachmentReadsByChat[activeChatId] ?? 0) : 0;
   const isReadingAttachments = pendingAttachmentReads > 0;
   const hasPendingAttachments = isReadingAttachments || attachments.length > 0;
   const requiresManualGuideTarget = groupResponseOrder === "manual" && characterNames.length > 1;
@@ -329,6 +330,31 @@ export function ConversationInput({
       return next;
     });
   }, []);
+
+  const adjustPendingAttachmentReads = useCallback((chatId: string, delta: number) => {
+    setPendingAttachmentReadsByChat((current) => {
+      const nextCount = Math.max(0, (current[chatId] ?? 0) + delta);
+      const next = { ...current };
+      if (nextCount === 0) {
+        delete next[chatId];
+      } else {
+        next[chatId] = nextCount;
+      }
+      return next;
+    });
+  }, []);
+
+  const appendAttachmentForChat = useCallback(
+    (chatId: string, attachment: Attachment) => {
+      if (useChatStore.getState().activeChatId === chatId) {
+        updateAttachments((prev) => [...prev, attachment]);
+        return;
+      }
+      const pendingAttachments = pendingAttachmentDraftsRef.current.get(chatId) ?? [];
+      pendingAttachmentDraftsRef.current.set(chatId, [...pendingAttachments, attachment]);
+    },
+    [updateAttachments],
+  );
 
   useEffect(() => {
     attachmentsRef.current = attachments;
@@ -407,6 +433,9 @@ export function ConversationInput({
 
   const handleFileUpload = useCallback(async (files: FileList | File[] | null) => {
     if (!files) return;
+    const originChatId = useChatStore.getState().activeChatId;
+    if (!originChatId) return;
+
     const MAX_SIZE = 20 * 1024 * 1024;
     const acceptedFiles = Array.from(files).filter((file) => {
       if (file.size > MAX_SIZE) {
@@ -423,7 +452,7 @@ export function ConversationInput({
     });
 
     if (acceptedFiles.length === 0) return;
-    setPendingAttachmentReads((count) => count + acceptedFiles.length);
+    adjustPendingAttachmentReads(originChatId, acceptedFiles.length);
 
     for (const file of acceptedFiles) {
       const displayName = file.name || "pasted-file";
@@ -431,28 +460,29 @@ export function ConversationInput({
       if (file.type === "image/gif") {
         try {
           const { dataUrl } = await convertToPng(file);
-          updateAttachments((prev) => [
-            ...prev,
-            { type: "image/png", data: dataUrl, name: displayName.replace(/\.gif$/i, ".png") },
-          ]);
+          appendAttachmentForChat(originChatId, {
+            type: "image/png",
+            data: dataUrl,
+            name: displayName.replace(/\.gif$/i, ".png"),
+          });
         } catch {
           toast.error(`Failed to convert ${displayName}`);
         } finally {
-          setPendingAttachmentReads((count) => Math.max(0, count - 1));
+          adjustPendingAttachmentReads(originChatId, -1);
         }
         continue;
       }
 
       try {
         const data = await readFileAsDataUrl(file);
-        updateAttachments((prev) => [...prev, { type: inferAttachmentType(file), data, name: displayName }]);
+        appendAttachmentForChat(originChatId, { type: inferAttachmentType(file), data, name: displayName });
       } catch {
         toast.error(`Failed to read ${displayName}`);
       } finally {
-        setPendingAttachmentReads((count) => Math.max(0, count - 1));
+        adjustPendingAttachmentReads(originChatId, -1);
       }
     }
-  }, [updateAttachments]);
+  }, [adjustPendingAttachmentReads, appendAttachmentForChat]);
 
   const handlePaste = useCallback(
     (e: React.ClipboardEvent) => {
@@ -626,13 +656,51 @@ export function ConversationInput({
         invalidate: () => qc.invalidateQueries({ queryKey: chatKeys.all }),
         characterNames,
       };
-      if (textareaRef.current) textareaRef.current.value = "";
+      const submittedDraft = textareaRef.current?.value ?? "";
+      const submittedHeight = textareaRef.current?.style.height ?? "auto";
+      const submittedAttachments = attachments;
+      const submittedCompletions = completions;
+      const submittedMentionQuery = _mentionQuery;
+      const submittedMentionCompletions = mentionCompletions;
+      if (textareaRef.current) {
+        textareaRef.current.value = "";
+        textareaRef.current.style.height = "auto";
+      }
       clearInputDraft(activeChatId);
       syncInputState("");
       replaceAttachments([]);
-      const result = await matched.command.execute(matched.args, slashCtx);
-      if (result.feedback) {
-        setFeedback(result.feedback);
+      setCompletions([]);
+      setMentionQuery(null);
+      setMentionCompletions([]);
+      try {
+        const result = await matched.command.execute(matched.args, slashCtx);
+        if (result.feedback) {
+          setFeedback(result.feedback);
+        }
+      } catch (error) {
+        const activeChatIdAfterFailure = useChatStore.getState().activeChatId;
+        const currentValue = textareaRef.current?.value ?? "";
+        const canRestoreVisibleDraft = activeChatIdAfterFailure === activeChatId && currentValue.length === 0;
+        if (canRestoreVisibleDraft && textareaRef.current) {
+          textareaRef.current.value = submittedDraft;
+          textareaRef.current.style.height = submittedHeight;
+          syncInputState(submittedDraft);
+          setCompletions(submittedCompletions);
+          setMentionQuery(submittedMentionQuery);
+          setMentionCompletions(submittedMentionCompletions);
+        }
+        if (submittedAttachments.length > 0) {
+          if (activeChatIdAfterFailure === activeChatId) {
+            updateAttachments((current) => (current.length === 0 ? submittedAttachments : current));
+          } else {
+            pendingAttachmentDraftsRef.current.set(activeChatId, submittedAttachments);
+          }
+        }
+        if (submittedDraft && (canRestoreVisibleDraft || activeChatIdAfterFailure !== activeChatId)) {
+          setInputDraft(activeChatId, submittedDraft);
+        }
+        const msg = error instanceof Error ? error.message : "Command failed";
+        toast.error(msg);
       }
       return;
     }
@@ -707,10 +775,15 @@ export function ConversationInput({
     createMessage,
     updateMessageExtra,
     characterNames,
+    completions,
+    _mentionQuery,
+    mentionCompletions,
     groupResponseOrder,
     qc,
     syncInputState,
+    setInputDraft,
     replaceAttachments,
+    updateAttachments,
     onPeekPrompt,
   ]);
 
@@ -897,13 +970,16 @@ export function ConversationInput({
         textareaRef.current.value = submittedDraft;
         textareaRef.current.style.height = submittedHeight;
         syncInputState(submittedDraft);
-        updateAttachments((current) => (current.length === 0 ? submittedAttachments : current));
         setCompletions(submittedCompletions);
         setMentionQuery(submittedMentionQuery);
         setMentionCompletions(submittedMentionCompletions);
       }
-      if (submittedAttachments.length > 0 && activeChatIdAfterFailure !== submittingChatId) {
-        pendingAttachmentDraftsRef.current.set(submittingChatId, submittedAttachments);
+      if (submittedAttachments.length > 0) {
+        if (activeChatIdAfterFailure === submittingChatId) {
+          updateAttachments((current) => (current.length === 0 ? submittedAttachments : current));
+        } else {
+          pendingAttachmentDraftsRef.current.set(submittingChatId, submittedAttachments);
+        }
       }
       if (submittedDraft && (canRestoreVisibleDraft || activeChatIdAfterFailure !== submittingChatId)) {
         setInputDraft(submittingChatId, submittedDraft);

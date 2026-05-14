@@ -139,7 +139,7 @@ export const ChatInput = memo(function ChatInput({
   const [selectedCompletion, setSelectedCompletion] = useState(0);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [pendingAttachmentReads, setPendingAttachmentReads] = useState(0);
+  const [pendingAttachmentReadsByChat, setPendingAttachmentReadsByChat] = useState<Record<string, number>>({});
   const [isTranslatingDraft, setIsTranslatingDraft] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -197,6 +197,31 @@ export const ChatInput = memo(function ChatInput({
       return next;
     });
   }, []);
+
+  const adjustPendingAttachmentReads = useCallback((chatId: string, delta: number) => {
+    setPendingAttachmentReadsByChat((current) => {
+      const nextCount = Math.max(0, (current[chatId] ?? 0) + delta);
+      const next = { ...current };
+      if (nextCount === 0) {
+        delete next[chatId];
+      } else {
+        next[chatId] = nextCount;
+      }
+      return next;
+    });
+  }, []);
+
+  const appendAttachmentForChat = useCallback(
+    (chatId: string, attachment: Attachment) => {
+      if (useChatStore.getState().activeChatId === chatId) {
+        updateAttachments((prev) => [...prev, attachment]);
+        return;
+      }
+      const pendingAttachments = pendingAttachmentDraftsRef.current.get(chatId) ?? [];
+      pendingAttachmentDraftsRef.current.set(chatId, [...pendingAttachments, attachment]);
+    },
+    [updateAttachments],
+  );
 
   useEffect(() => {
     attachmentsRef.current = attachments;
@@ -302,6 +327,7 @@ export const ChatInput = memo(function ChatInput({
 
   const canRetry = !isStreaming && lastMessageRole === "user";
   const canContinue = !isStreaming && mode === "roleplay" && lastMessageRole === "assistant";
+  const pendingAttachmentReads = activeChatId ? (pendingAttachmentReadsByChat[activeChatId] ?? 0) : 0;
   const isReadingAttachments = pendingAttachmentReads > 0;
   const hasPendingAttachments = isReadingAttachments || attachments.length > 0;
   const requiresManualGuideTarget = groupResponseOrder === "manual" && characterNames.length > 1;
@@ -311,6 +337,9 @@ export const ChatInput = memo(function ChatInput({
   };
 
   const addFiles = useCallback(async (files: FileList | File[]) => {
+    const originChatId = useChatStore.getState().activeChatId;
+    if (!originChatId) return;
+
     const acceptedFiles = Array.from(files).filter((file) => {
       if (file.size > 20 * 1024 * 1024) {
         toast.error(`${file.name} is too large (max 20 MB)`);
@@ -326,7 +355,7 @@ export const ChatInput = memo(function ChatInput({
     });
 
     if (acceptedFiles.length === 0) return;
-    setPendingAttachmentReads((count) => count + acceptedFiles.length);
+    adjustPendingAttachmentReads(originChatId, acceptedFiles.length);
 
     for (const file of acceptedFiles) {
       const displayName = file.name || "pasted-file";
@@ -339,28 +368,29 @@ export const ChatInput = memo(function ChatInput({
           ctx.drawImage(bitmap, 0, 0);
           const pngBlob = await canvas.convertToBlob({ type: "image/png" });
           const data = await readFileAsDataUrl(pngBlob);
-          updateAttachments((prev) => [
-            ...prev,
-            { type: "image/png", data, name: displayName.replace(/\.gif$/i, ".png") },
-          ]);
+          appendAttachmentForChat(originChatId, {
+            type: "image/png",
+            data,
+            name: displayName.replace(/\.gif$/i, ".png"),
+          });
         } catch {
           toast.error(`Failed to convert ${displayName}`);
         } finally {
-          setPendingAttachmentReads((count) => Math.max(0, count - 1));
+          adjustPendingAttachmentReads(originChatId, -1);
         }
         continue;
       }
 
       try {
         const data = await readFileAsDataUrl(file);
-        updateAttachments((prev) => [...prev, { type: inferAttachmentType(file), data, name: displayName }]);
+        appendAttachmentForChat(originChatId, { type: inferAttachmentType(file), data, name: displayName });
       } catch {
         toast.error(`Failed to read ${displayName}`);
       } finally {
-        setPendingAttachmentReads((count) => Math.max(0, count - 1));
+        adjustPendingAttachmentReads(originChatId, -1);
       }
     }
-  }, [updateAttachments]);
+  }, [adjustPendingAttachmentReads, appendAttachmentForChat]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -483,6 +513,10 @@ export const ChatInput = memo(function ChatInput({
       const ctx = buildContext();
       if (!ctx) return;
 
+      const submittedDraft = textareaRef.current?.value ?? "";
+      const submittedHeight = textareaRef.current?.style.height ?? "auto";
+      const submittedAttachments = attachments;
+      const submittedCompletions = completions;
       if (textareaRef.current) {
         textareaRef.current.value = "";
         textareaRef.current.style.height = "auto";
@@ -492,9 +526,33 @@ export const ChatInput = memo(function ChatInput({
       replaceAttachments([]);
       clearInputDraft(activeChatId);
 
-      const result = await match.command.execute(match.args, ctx);
-      if (result.feedback) {
-        setFeedback(result.feedback);
+      try {
+        const result = await match.command.execute(match.args, ctx);
+        if (result.feedback) {
+          setFeedback(result.feedback);
+        }
+      } catch (error) {
+        const activeChatIdAfterFailure = useChatStore.getState().activeChatId;
+        const currentValue = textareaRef.current?.value ?? "";
+        const canRestoreVisibleDraft = activeChatIdAfterFailure === activeChatId && currentValue.length === 0;
+        if (canRestoreVisibleDraft && textareaRef.current) {
+          textareaRef.current.value = submittedDraft;
+          textareaRef.current.style.height = submittedHeight;
+          syncInputState(submittedDraft);
+          setCompletions(submittedCompletions);
+        }
+        if (submittedAttachments.length > 0) {
+          if (activeChatIdAfterFailure === activeChatId) {
+            updateAttachments((current) => (current.length === 0 ? submittedAttachments : current));
+          } else {
+            pendingAttachmentDraftsRef.current.set(activeChatId, submittedAttachments);
+          }
+        }
+        if (submittedDraft && (canRestoreVisibleDraft || activeChatIdAfterFailure !== activeChatId)) {
+          setInputDraft(activeChatId, submittedDraft);
+        }
+        const msg = error instanceof Error ? error.message : "Command failed";
+        toast.error(msg);
       }
       return;
     }
@@ -586,6 +644,9 @@ export const ChatInput = memo(function ChatInput({
     updateMessageExtra,
     syncInputState,
     replaceAttachments,
+    updateAttachments,
+    setInputDraft,
+    completions,
     onPeekPrompt,
   ]);
 
@@ -750,10 +811,13 @@ export const ChatInput = memo(function ChatInput({
         textareaRef.current.style.height = submittedHeight;
         syncInputState(submittedDraft);
         setCompletions(submittedCompletions);
-        updateAttachments((current) => (current.length === 0 ? submittedAttachments : current));
       }
-      if (submittedAttachments.length > 0 && activeChatIdAfterFailure !== submittingChatId) {
-        pendingAttachmentDraftsRef.current.set(submittingChatId, submittedAttachments);
+      if (submittedAttachments.length > 0) {
+        if (activeChatIdAfterFailure === submittingChatId) {
+          updateAttachments((current) => (current.length === 0 ? submittedAttachments : current));
+        } else {
+          pendingAttachmentDraftsRef.current.set(submittingChatId, submittedAttachments);
+        }
       }
       if (submittedDraft && (canRestoreVisibleDraft || activeChatIdAfterFailure !== submittingChatId)) {
         setInputDraft(submittingChatId, submittedDraft);
