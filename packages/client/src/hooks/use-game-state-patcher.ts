@@ -14,9 +14,18 @@ export type GameStatePatchField =
   | "personaStats";
 
 type GameStatePatch = Partial<Record<GameStatePatchField, unknown>>;
+type GameStatePatchTarget = {
+  messageId?: string;
+  swipeIndex?: number;
+};
+type QueuedGameStatePatch = {
+  chatId: string;
+  target: GameStatePatchTarget;
+  fields: GameStatePatch;
+};
 
 const PATCH_DEBOUNCE_MS = 500;
-const pendingPatches = new Map<string, GameStatePatch>();
+const pendingPatches = new Map<string, QueuedGameStatePatch>();
 const patchTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let beforeUnloadListeners = 0;
 
@@ -55,27 +64,45 @@ function getCurrentGameStateForChat(chatId: string) {
   return current?.chatId === chatId ? current : null;
 }
 
-function buildPayloadFromLatestState(chatId: string, queued: GameStatePatch) {
-  const current = getCurrentGameStateForChat(chatId);
-  const payload: GameStatePatch = {};
+function getPatchTarget(state: GameState | null): GameStatePatchTarget {
+  if (!state) return {};
+  return {
+    messageId: state.messageId || undefined,
+    swipeIndex:
+      typeof state.swipeIndex === "number" && Number.isInteger(state.swipeIndex) && state.swipeIndex >= 0
+        ? state.swipeIndex
+        : undefined,
+  };
+}
 
-  for (const field of Object.keys(queued) as GameStatePatchField[]) {
-    payload[field] = current ? current[field] : queued[field];
+function getPatchKey(chatId: string, target: GameStatePatchTarget) {
+  return `${chatId}\u0000${target.messageId ?? ""}\u0000${target.swipeIndex ?? ""}`;
+}
+
+function buildPayload(queued: QueuedGameStatePatch) {
+  const payload: GameStatePatch & GameStatePatchTarget = { ...queued.fields };
+  if (queued.target.messageId) {
+    payload.messageId = queued.target.messageId;
+  }
+  if (queued.target.swipeIndex !== undefined) {
+    payload.swipeIndex = queued.target.swipeIndex;
   }
 
   return payload;
 }
 
 function queuePatch(chatId: string, field: GameStatePatchField, value: unknown) {
-  const queued = pendingPatches.get(chatId) ?? {};
-  queued[field] = value;
-  pendingPatches.set(chatId, queued);
+  const target = getPatchTarget(getCurrentGameStateForChat(chatId));
+  const key = getPatchKey(chatId, target);
+  const queued = pendingPatches.get(key) ?? { chatId, target, fields: {} };
+  queued.fields[field] = value;
+  pendingPatches.set(key, queued);
 
-  const existingTimer = patchTimers.get(chatId);
+  const existingTimer = patchTimers.get(key);
   if (existingTimer) clearTimeout(existingTimer);
 
   patchTimers.set(
-    chatId,
+    key,
     setTimeout(() => {
       void flushGameStatePatch(chatId).catch((error) => {
         console.warn("Failed to flush game-state patch", error);
@@ -85,26 +112,34 @@ function queuePatch(chatId: string, field: GameStatePatchField, value: unknown) 
 }
 
 export async function flushGameStatePatch(chatId?: string) {
-  const chatIds = chatId ? [chatId] : Array.from(pendingPatches.keys());
   const errors: unknown[] = [];
+  const entries = Array.from(pendingPatches.entries()).filter(([, queued]) => !chatId || queued.chatId === chatId);
 
-  for (const id of chatIds) {
-    const timer = patchTimers.get(id);
+  for (const [key, queued] of entries) {
+    const timer = patchTimers.get(key);
     if (timer) clearTimeout(timer);
-    patchTimers.delete(id);
+    patchTimers.delete(key);
 
-    const queued = pendingPatches.get(id);
-    if (!queued || Object.keys(queued).length === 0) continue;
-    const queuedSnapshot = { ...queued };
-    pendingPatches.delete(id);
+    if (Object.keys(queued.fields).length === 0) continue;
+    const queuedSnapshot: QueuedGameStatePatch = {
+      chatId: queued.chatId,
+      target: { ...queued.target },
+      fields: { ...queued.fields },
+    };
+    pendingPatches.delete(key);
 
-    const payload = buildPayloadFromLatestState(id, queuedSnapshot);
+    const payload = buildPayload(queuedSnapshot);
     try {
-      await api.patch(`/chats/${id}/game-state`, { ...payload, manual: true });
+      await api.patch(`/chats/${queuedSnapshot.chatId}/game-state`, { ...payload, manual: true });
     } catch (error) {
-      pendingPatches.set(id, {
-        ...queuedSnapshot,
-        ...(pendingPatches.get(id) ?? {}),
+      const existing = pendingPatches.get(key);
+      pendingPatches.set(key, {
+        chatId: queuedSnapshot.chatId,
+        target: queuedSnapshot.target,
+        fields: {
+          ...queuedSnapshot.fields,
+          ...(existing?.fields ?? {}),
+        },
       });
       errors.push(error);
     }
@@ -116,26 +151,30 @@ export async function flushGameStatePatch(chatId?: string) {
 }
 
 export function discardPendingGameStatePatch(chatId?: string) {
-  const chatIds = chatId ? [chatId] : Array.from(pendingPatches.keys());
+  const keys = Array.from(pendingPatches.entries())
+    .filter(([, queued]) => !chatId || queued.chatId === chatId)
+    .map(([key]) => key);
 
-  for (const id of chatIds) {
-    const timer = patchTimers.get(id);
+  for (const key of keys) {
+    const timer = patchTimers.get(key);
     if (timer) clearTimeout(timer);
-    patchTimers.delete(id);
-    pendingPatches.delete(id);
+    patchTimers.delete(key);
+    pendingPatches.delete(key);
   }
 }
 
 function flushGameStatePatchOnUnload() {
-  for (const [chatId, queued] of pendingPatches.entries()) {
-    const timer = patchTimers.get(chatId);
+  for (const [key, queued] of pendingPatches.entries()) {
+    const timer = patchTimers.get(key);
     if (timer) clearTimeout(timer);
-    patchTimers.delete(chatId);
-    pendingPatches.delete(chatId);
+    patchTimers.delete(key);
+    pendingPatches.delete(key);
 
-    if (Object.keys(queued).length === 0) continue;
-    const payload = buildPayloadFromLatestState(chatId, queued);
-    void api.patch(`/chats/${chatId}/game-state`, { ...payload, manual: true }, { keepalive: true }).catch(() => {});
+    if (Object.keys(queued.fields).length === 0) continue;
+    const payload = buildPayload(queued);
+    void api
+      .patch(`/chats/${queued.chatId}/game-state`, { ...payload, manual: true }, { keepalive: true })
+      .catch(() => {});
   }
 }
 

@@ -676,13 +676,20 @@ export function ChatArea() {
   }, [deleteDialogMessageId, deleteMessage]);
 
   const handleDeleteSwipe = useCallback(() => {
-    if (deleteDialogMessageId && deleteDialogCanDeleteSwipe) {
-      deleteSwipe.mutate(
-        { messageId: deleteDialogMessageId, index: deleteDialogActiveSwipeIndex },
-        { onSuccess: refreshVisibleGameState },
-      );
-    }
+    const messageId = deleteDialogMessageId;
+    const index = deleteDialogActiveSwipeIndex;
     setDeleteDialogMessageId(null);
+    if (!messageId || !deleteDialogCanDeleteSwipe) return;
+    void (async () => {
+      try {
+        const flushPatch = useGameStateStore.getState().flushPatch;
+        if (flushPatch) await flushPatch();
+      } catch {
+        toast.error("Could not save tracker changes before deleting the swipe.");
+        return;
+      }
+      deleteSwipe.mutate({ messageId, index }, { onSuccess: refreshVisibleGameState });
+    })();
   }, [
     deleteDialogActiveSwipeIndex,
     deleteDialogCanDeleteSwipe,
@@ -854,12 +861,21 @@ export function ChatArea() {
 
   const handleSetActiveSwipe = useCallback(
     (messageId: string, index: number) => {
-      setActiveSwipe.mutate(
-        { messageId, index },
-        {
-          onSuccess: refreshVisibleGameState,
-        },
-      );
+      void (async () => {
+        try {
+          const flushPatch = useGameStateStore.getState().flushPatch;
+          if (flushPatch) await flushPatch();
+        } catch {
+          toast.error("Could not save tracker changes before switching swipes.");
+          return;
+        }
+        setActiveSwipe.mutate(
+          { messageId, index },
+          {
+            onSuccess: refreshVisibleGameState,
+          },
+        );
+      })();
     },
     [setActiveSwipe, refreshVisibleGameState],
   );

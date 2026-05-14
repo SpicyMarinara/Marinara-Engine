@@ -401,6 +401,34 @@ function getCachedChatMode(qc: QueryClient, chatId: string): Chat["mode"] | unde
   return list?.find((chat) => chat.id === chatId)?.mode;
 }
 
+function getCachedChatForGeneration(qc: QueryClient, chatId: string): Chat | undefined {
+  const activeChat = useChatStore.getState().activeChat;
+  if (activeChat?.id === chatId) return activeChat;
+  const detail = qc.getQueryData<Chat>(chatKeys.detail(chatId));
+  if (detail) return detail;
+  const list = qc.getQueryData<Chat[]>(chatKeys.list());
+  return list?.find((chat) => chat.id === chatId);
+}
+
+function shouldRefreshGameStateAfterGeneration(qc: QueryClient, chatId: string) {
+  const chat = getCachedChatForGeneration(qc, chatId);
+  if (chat?.mode === "game") return true;
+  if (chat?.mode !== "roleplay" && chat?.mode !== "visual_novel") return false;
+  const enableAgents = parseChatMetadata(chat.metadata).enableAgents;
+  return enableAgents === true || enableAgents === "true";
+}
+
+async function refreshVisibleGameStateAfterGeneration(chatId: string) {
+  try {
+    const gs = await api.get<import("@marinara-engine/shared").GameState | null>(`/chats/${chatId}/game-state`);
+    if (useChatStore.getState().activeChatId === chatId) {
+      useGameStateStore.getState().setGameState(gs ?? null);
+    }
+  } catch {
+    /* best-effort — SSE patches already populated the store */
+  }
+}
+
 function slugifyGameMapId(value: string): string {
   return value
     .trim()
@@ -460,11 +488,15 @@ function applyGameMapUpdate(qc: QueryClient, chatId: string, map: GameMap) {
   }
 }
 
-function applyGameStatePatchToStore(chatId: string, patch: Record<string, unknown>) {
+function applyGameStatePatchToStore(
+  chatId: string,
+  patch: Record<string, unknown>,
+  anchor?: { messageId: string; swipeIndex: number } | null,
+) {
   const current = useGameStateStore.getState().current;
 
   if (current?.chatId === chatId) {
-    const merged = { ...current, ...patch, chatId };
+    const merged = { ...current, ...patch, chatId, ...(anchor ?? {}) };
     if (patch.playerStats && typeof patch.playerStats === "object" && current.playerStats) {
       const mergedPS = { ...current.playerStats, ...(patch.playerStats as object) };
       const patchPS = patch.playerStats as Record<string, unknown>;
@@ -483,7 +515,7 @@ function applyGameStatePatchToStore(chatId: string, patch: Record<string, unknow
 
   // Agent data may arrive before the base game state is loaded. Seed a minimal
   // state with chatId so mounted tracker/HUD views recognise it as current.
-  useGameStateStore.getState().setGameState({ ...patch, chatId } as any);
+  useGameStateStore.getState().setGameState({ ...patch, chatId, ...(anchor ?? {}) } as any);
 }
 
 /**
@@ -560,6 +592,7 @@ export function useGenerate() {
       // buffer, etc.) so that a background chat's events don't corrupt the active view.
       const isActiveChat = () => useChatStore.getState().activeChatId === params.chatId;
       const isGameGeneration = getCachedChatMode(qc, params.chatId) === "game";
+      const shouldRefreshGameState = shouldRefreshGameStateAfterGeneration(qc, params.chatId);
 
       // Only touch global streaming UI state if the user is viewing this chat.
       // Background generations (e.g. autonomous messaging) run silently,
@@ -663,6 +696,7 @@ export function useGenerate() {
       let typewriterDone: (() => void) | null = null;
       let rafId = 0;
       const persistedMessages = new Map<string, Message>();
+      let gameStatePatchAnchor: { messageId: string; swipeIndex: number } | null = null;
 
       // ── Streaming think-tag filter ──
       // Models may emit <think>...</think>, <thinking>...</thinking>, or
@@ -1154,7 +1188,7 @@ export function useGenerate() {
               const patch = event.data as Record<string, unknown>;
               console.warn(`[Generate] ${event.type} received:`, patch);
               if (!isActiveChat()) break;
-              applyGameStatePatchToStore(params.chatId, patch);
+              applyGameStatePatchToStore(params.chatId, patch, gameStatePatchAnchor);
               break;
             }
 
@@ -1211,6 +1245,13 @@ export function useGenerate() {
               const savedMessage = event.data as Message;
               await qc.cancelQueries({ queryKey: chatKeys.messages(params.chatId), exact: true });
               persistedMessages.set(savedMessage.id, savedMessage);
+              gameStatePatchAnchor = {
+                messageId: savedMessage.id,
+                swipeIndex:
+                  typeof savedMessage.activeSwipeIndex === "number" && Number.isInteger(savedMessage.activeSwipeIndex)
+                    ? savedMessage.activeSwipeIndex
+                    : 0,
+              };
               // During non-regeneration streaming, defer the cache upsert until
               // streaming ends. Otherwise the saved message appears in the list
               // while the StreamingIndicator is still visible — causing a
@@ -1507,18 +1548,10 @@ export function useGenerate() {
         // Cancel any pending animation frame to prevent leaks
         cancelAnimationFrame(rafId);
 
-        if (isGameGeneration) {
-          // Refresh game state from DB so the HUD shows the correct tracker data
-          // for the active swipe. Conversation and roleplay chats skip this
-          // game-only request; on large chats it can dominate the cleanup tail.
-          try {
-            const gs = await api.get<import("@marinara-engine/shared").GameState | null>(
-              `/chats/${params.chatId}/game-state`,
-            );
-            if (gs) useGameStateStore.getState().setGameState(gs);
-          } catch {
-            /* best-effort — SSE patches already populated the store */
-          }
+        if (shouldRefreshGameState) {
+          // Refresh game state from DB so HUD/sidebar trackers settle on the
+          // persisted active-swipe row after generation-time SSE patches.
+          await refreshVisibleGameStateAfterGeneration(params.chatId);
         }
         // Re-sort sidebar so this chat floats to the top
         qc.invalidateQueries({ queryKey: chatKeys.list() });
@@ -1917,14 +1950,8 @@ export function useGenerate() {
         showError(msg);
       } finally {
         setProcessing(false);
-        if (getCachedChatMode(qc, chatId) === "game") {
-          // Refresh game state from DB for the same reason as normal generation.
-          api
-            .get<import("@marinara-engine/shared").GameState | null>(`/chats/${chatId}/game-state`)
-            .then((gs) => {
-              if (gs) useGameStateStore.getState().setGameState(gs);
-            })
-            .catch(() => {});
+        if (shouldRefreshGameStateAfterGeneration(qc, chatId)) {
+          void refreshVisibleGameStateAfterGeneration(chatId);
         }
       }
     },

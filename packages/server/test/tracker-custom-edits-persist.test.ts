@@ -9,7 +9,7 @@ import type { AgentExecConfig } from "../src/services/agents/agent-executor.js";
 import { executeAgent } from "../src/services/agents/agent-executor.js";
 import type { DB } from "../src/db/connection.js";
 import { runMigrations } from "../src/db/migrate.js";
-import { chats, gameStateSnapshots, messages } from "../src/db/schema/index.js";
+import { chats, gameStateSnapshots, messages, messageSwipes } from "../src/db/schema/index.js";
 import { chatsRoutes } from "../src/routes/chats.routes.js";
 import {
   parseGameStateRow,
@@ -314,6 +314,151 @@ test("visible generation fallback does not use a newer inactive swipe when the a
       visibleAnchor: { messageId: "assistant-missing-visible", swipeIndex: 0 },
     });
     assert.equal(readCustomTrackerValue(fallbackForVisible!, "Bond"), "committed baseline");
+  } finally {
+    client.close();
+  }
+});
+
+test("queued tracker saves keep their original swipe target after the visible swipe changes", async () => {
+  const client = createClient({ url: "file::memory:" });
+  const db = drizzle(client) as unknown as DB;
+
+  try {
+    await runMigrations(db);
+
+    await db.insert(chats).values({
+      id: "chat-queued-swipe-save",
+      name: "Queued swipe save repro",
+      mode: "roleplay",
+      characterIds: "[]",
+      metadata: JSON.stringify({
+        enableAgents: true,
+        activeAgentIds: ["custom-tracker"],
+      }),
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(messages).values({
+      id: "assistant-with-swipes",
+      chatId: "chat-queued-swipe-save",
+      role: "assistant",
+      characterId: null,
+      content: "Second swipe reply.",
+      activeSwipeIndex: 1,
+      extra: "{}",
+      createdAt: "2026-05-14T02:00:00.000Z",
+    });
+    await db.insert(messageSwipes).values([
+      {
+        id: "swipe-first",
+        messageId: "assistant-with-swipes",
+        index: 0,
+        content: "First swipe reply.",
+        extra: "{}",
+        createdAt: "2026-05-14T02:00:00.000Z",
+      },
+      {
+        id: "swipe-second",
+        messageId: "assistant-with-swipes",
+        index: 1,
+        content: "Second swipe reply.",
+        extra: "{}",
+        createdAt: "2026-05-14T02:01:00.000Z",
+      },
+    ]);
+    await db.insert(gameStateSnapshots).values([
+      {
+        id: "snapshot-first-swipe",
+        chatId: "chat-queued-swipe-save",
+        messageId: "assistant-with-swipes",
+        swipeIndex: 0,
+        date: null,
+        time: null,
+        location: null,
+        weather: null,
+        temperature: null,
+        presentCharacters: "[]",
+        recentEvents: "[]",
+        playerStats: JSON.stringify(playerStats([{ name: "Bond", value: "first swipe" }])),
+        personaStats: null,
+        manualOverrides: null,
+        committed: 0,
+        createdAt: "2026-05-14T02:00:00.000Z",
+      },
+      {
+        id: "snapshot-second-swipe",
+        chatId: "chat-queued-swipe-save",
+        messageId: "assistant-with-swipes",
+        swipeIndex: 1,
+        date: null,
+        time: null,
+        location: null,
+        weather: null,
+        temperature: null,
+        presentCharacters: "[]",
+        recentEvents: "[]",
+        playerStats: JSON.stringify(playerStats([{ name: "Bond", value: "second swipe before queued save" }])),
+        personaStats: null,
+        manualOverrides: null,
+        committed: 0,
+        createdAt: "2026-05-14T02:01:00.000Z",
+      },
+    ]);
+
+    const app = Fastify({ logger: false });
+    app.decorate("db", db);
+    try {
+      await app.register(chatsRoutes, { prefix: "/api/chats" });
+      await app.ready();
+
+      const switchToFirst = await app.inject({
+        method: "PUT",
+        url: "/api/chats/chat-queued-swipe-save/messages/assistant-with-swipes/active-swipe",
+        payload: { index: 0 },
+      });
+      assert.equal(switchToFirst.statusCode, 200);
+
+      const queuedSave = await app.inject({
+        method: "PATCH",
+        url: "/api/chats/chat-queued-swipe-save/game-state",
+        payload: {
+          manual: true,
+          messageId: "assistant-with-swipes",
+          swipeIndex: 1,
+          playerStats: playerStats([{ name: "Bond", value: "second swipe queued edit" }]),
+        },
+      });
+      assert.equal(queuedSave.statusCode, 200);
+
+      const activeFirstResponse = await app.inject({
+        method: "GET",
+        url: "/api/chats/chat-queued-swipe-save/game-state",
+      });
+      assert.equal(activeFirstResponse.statusCode, 200);
+      const activeFirst = activeFirstResponse.json<{ playerStats: ReturnType<typeof playerStats> }>();
+      assert.equal(activeFirst.playerStats.customTrackerFields[0]?.value, "first swipe");
+
+      const gameStateStore = createGameStateStorage(db);
+      const secondSwipeRow = await gameStateStore.getByMessage("assistant-with-swipes", 1);
+      assert.equal(readCustomTrackerValue(secondSwipeRow!, "Bond"), "second swipe queued edit");
+
+      const switchBackToSecond = await app.inject({
+        method: "PUT",
+        url: "/api/chats/chat-queued-swipe-save/messages/assistant-with-swipes/active-swipe",
+        payload: { index: 1 },
+      });
+      assert.equal(switchBackToSecond.statusCode, 200);
+
+      const activeSecondResponse = await app.inject({
+        method: "GET",
+        url: "/api/chats/chat-queued-swipe-save/game-state",
+      });
+      assert.equal(activeSecondResponse.statusCode, 200);
+      const activeSecond = activeSecondResponse.json<{ playerStats: ReturnType<typeof playerStats> }>();
+      assert.equal(activeSecond.playerStats.customTrackerFields[0]?.value, "second swipe queued edit");
+    } finally {
+      await app.close();
+    }
   } finally {
     client.close();
   }

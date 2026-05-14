@@ -832,7 +832,13 @@ export async function chatsRoutes(app: FastifyInstance) {
     const manual = body.manual === true;
     // Explicit flag to wipe all manual overrides (e.g. from the Clear button)
     const clearOverrides = body.clearOverrides === true;
-    const fields = body as Partial<{
+    const targetMessageId = typeof body.messageId === "string" && body.messageId ? body.messageId : null;
+    const targetSwipeIndex =
+      typeof body.swipeIndex === "number" && Number.isInteger(body.swipeIndex) && body.swipeIndex >= 0
+        ? body.swipeIndex
+        : null;
+    const hasExplicitTarget = targetMessageId !== null && targetSwipeIndex !== null;
+    const fields: Partial<{
       date: string;
       time: string;
       location: string;
@@ -841,20 +847,42 @@ export async function chatsRoutes(app: FastifyInstance) {
       presentCharacters: any[];
       playerStats: any;
       personaStats: any[];
-    }>;
+    }> = {};
+    if (body.date !== undefined) fields.date = body.date as string;
+    if (body.time !== undefined) fields.time = body.time as string;
+    if (body.location !== undefined) fields.location = body.location as string;
+    if (body.weather !== undefined) fields.weather = body.weather as string;
+    if (body.temperature !== undefined) fields.temperature = body.temperature as string;
+    if (body.presentCharacters !== undefined) fields.presentCharacters = body.presentCharacters as any[];
+    if (body.playerStats !== undefined) fields.playerStats = body.playerStats;
+    if (body.personaStats !== undefined) fields.personaStats = body.personaStats as any[];
     // Target the same snapshot the GET endpoint returns — the one for the last
     // assistant message's active swipe — so edits persist to the row the user
     // actually sees. Falls back to updateLatest when no messages exist yet.
     let updated: Awaited<ReturnType<typeof gameStateStore.updateLatest>> = null;
-    const msgs = await storage.listMessages(req.params.id);
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i]!.role === "assistant") {
-        const msg = msgs[i]!;
-        updated = await gameStateStore.updateByMessage(msg.id, msg.activeSwipeIndex, req.params.id, fields, manual);
-        break;
+    if (hasExplicitTarget) {
+      const targetMessage = await storage.getMessage(targetMessageId);
+      if (targetMessage?.chatId === req.params.id) {
+        updated = await gameStateStore.updateByMessage(
+          targetMessageId,
+          targetSwipeIndex,
+          req.params.id,
+          fields,
+          manual,
+        );
       }
     }
-    if (!updated) {
+    if (!updated && !hasExplicitTarget) {
+      const msgs = await storage.listMessages(req.params.id);
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i]!.role === "assistant") {
+          const msg = msgs[i]!;
+          updated = await gameStateStore.updateByMessage(msg.id, msg.activeSwipeIndex, req.params.id, fields, manual);
+          break;
+        }
+      }
+    }
+    if (!updated && !hasExplicitTarget) {
       updated = await gameStateStore.updateLatest(req.params.id, fields, manual);
     }
     // Wipe all manual overrides when explicitly requested
@@ -868,7 +896,7 @@ export async function chatsRoutes(app: FastifyInstance) {
       updated = { ...updated, manualOverrides: null };
     }
     // If no snapshot exists yet, create one so manual edits aren't lost
-    if (!updated && manual) {
+    if (!updated && manual && !hasExplicitTarget) {
       const manualOverrides: Record<string, string> = {};
       const TRACKABLE = ["date", "time", "location", "weather", "temperature"] as const;
       for (const key of TRACKABLE) {
