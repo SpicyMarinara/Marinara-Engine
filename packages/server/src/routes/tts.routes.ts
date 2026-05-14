@@ -32,6 +32,10 @@ const TTS_SOURCE_DEFAULTS: Record<TTSSource, { baseUrl: string; model: string }>
     baseUrl: "http://localhost:8000",
     model: "pocket-tts",
   },
+  fishaudio: {
+    baseUrl: "https://api.fish.audio",
+    model: "s2-pro",
+  },
 };
 
 const ELEVENLABS_NON_TTS_MODELS = new Set(["eleven_ttv_v3", "eleven_multilingual_ttv_v2"]);
@@ -143,7 +147,7 @@ function responseFromVoiceOptions(
 }
 
 function fallbackVoices(source: TTSSource): TTSVoicesResponse {
-  if (source === "elevenlabs") {
+  if (source === "elevenlabs" || source === "fishaudio") {
     return responseFromVoiceOptions(source, [], false);
   }
 
@@ -486,6 +490,37 @@ async function fetchProviderVoices(cfg: TTSConfig): Promise<TTSVoicesResponse> {
     return voices.length > 0 ? responseFromVoiceOptions(cfg.source, voices, true) : fallbackVoices(cfg.source);
   }
 
+  if (cfg.source === "fishaudio") {
+    if (!cfg.apiKey) return fallbackVoices(cfg.source);
+
+    const res = await safeFetch(`${base}/v1/models?page_size=100`, {
+      headers: openAiHeaders(cfg.apiKey),
+      signal: AbortSignal.timeout(10_000),
+      policy: {
+        allowLocal: false,
+        allowedProtocols: ["https:"],
+        flagName: "TTS_LOCAL_URLS_ENABLED",
+      },
+      maxResponseBytes: 2 * 1024 * 1024,
+    });
+
+    if (!res.ok) return fallbackVoices(cfg.source);
+
+    const data = (await res.json()) as Record<string, unknown>;
+    const items = Array.isArray(data.items) ? (data.items as Array<Record<string, unknown>>) : [];
+    const voiceOptions: VoiceOption[] = items
+      .filter((item) => item.type === "tts" || !item.type)
+      .map((item) => ({
+        id: String(item._id ?? ""),
+        name: String(item.title ?? item._id ?? ""),
+        description: readString(item.description) ?? null,
+        category: "Fish Audio",
+      }))
+      .filter((v) => v.id);
+
+    return voiceOptions.length > 0 ? responseFromVoiceOptions(cfg.source, voiceOptions, true) : fallbackVoices(cfg.source);
+  }
+
   const res = await safeFetch(`${base}/audio/voices`, {
     headers: openAiHeaders(cfg.apiKey),
     signal: AbortSignal.timeout(10_000),
@@ -571,10 +606,18 @@ export async function ttsRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "ElevenLabs API key is not configured" });
     }
 
+    if (cfg.source === "fishaudio" && !cfg.apiKey) {
+      return reply.status(400).send({ error: "Fish Audio API key is not configured" });
+    }
+
     const requestVoice = resolveTTSRequestVoice(cfg.voice, voice);
 
     if (cfg.source === "elevenlabs" && !requestVoice) {
       return reply.status(400).send({ error: "ElevenLabs voice is not selected" });
+    }
+
+    if (cfg.source === "fishaudio" && !requestVoice) {
+      return reply.status(400).send({ error: "Fish Audio voice is not selected" });
     }
 
     const base = configuredBaseUrl(cfg);
@@ -600,7 +643,9 @@ export async function ttsRoutes(app: FastifyInstance) {
         ? `${base}/tts`
         : cfg.source === "elevenlabs"
           ? `${elevenLabsApiRoot(base)}/v1/text-to-speech/${encodeURIComponent(requestVoice)}?output_format=mp3_44100_128`
-          : `${base}/audio/speech`;
+          : cfg.source === "fishaudio"
+            ? `${base}/v1/tts`
+            : `${base}/audio/speech`;
     const providerText = cfg.source === "elevenlabs" ? buildElevenLabsTextInput(text, tone) : text;
     const elevenLabsLanguageCode = cfg.elevenLabsLanguageCode?.trim();
     const includeSpeakerInstructions = cfg.source !== "elevenlabs";
@@ -626,7 +671,9 @@ export async function ttsRoutes(app: FastifyInstance) {
             ? optionalBearerHeaders(cfg.apiKey)
             : cfg.source === "elevenlabs"
               ? elevenLabsHeaders(cfg.apiKey)
-              : openAiHeaders(cfg.apiKey),
+              : cfg.source === "fishaudio"
+                ? { ...openAiHeaders(cfg.apiKey), model: model }
+                : openAiHeaders(cfg.apiKey),
         body: pocketTtsForm
           ? pocketTtsForm
           : useNanoGptSpeech
@@ -648,6 +695,13 @@ export async function ttsRoutes(app: FastifyInstance) {
                     speed: cfg.speed,
                   },
                 })
+              : cfg.source === "fishaudio"
+                ? JSON.stringify({
+                    text: providerText,
+                    reference_id: requestVoice,
+                    format: "mp3",
+                    normalize: true,
+                  })
               : JSON.stringify({
                   model,
                   input: providerText,

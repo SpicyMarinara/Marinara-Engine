@@ -68,12 +68,20 @@ const TTS_SOURCE_DEFAULTS: Record<
     voice: "alba",
     idleText: "Local PocketTTS",
   },
+  fishaudio: {
+    label: "Fish Audio",
+    baseUrl: "https://api.fish.audio",
+    model: "s2-pro",
+    voice: "",
+    idleText: "Fish Audio TTS",
+  },
 };
 
 const TTS_SOURCE_OPTIONS: Array<{ value: TTSSource; label: string }> = [
   { value: "openai", label: "OpenAI-compatible" },
   { value: "elevenlabs", label: "ElevenLabs" },
   { value: "pockettts", label: "PocketTTS" },
+  { value: "fishaudio", label: "Fish Audio" },
 ];
 
 const ELEVENLABS_TTS_MODELS = [
@@ -460,8 +468,8 @@ export function TTSConfigCard() {
         payload.voiceMode === "per-character"
           ? (payload.voiceAssignments.find((assignment) => assignment.voice)?.voice ?? payload.voice)
           : payload.voice;
-      if (payload.source === "elevenlabs" && !previewVoice) {
-        toast.error("Select an ElevenLabs voice before previewing.");
+      if ((payload.source === "elevenlabs" || payload.source === "fishaudio") && !previewVoice) {
+        toast.error("Select a voice before previewing.");
         return;
       }
 
@@ -543,16 +551,16 @@ export function TTSConfigCard() {
   const selectedVoiceLabel =
     voiceMode === "per-character"
       ? `Per character${customVoiceCount > 0 ? ` · ${customVoiceCount} custom` : ""}`
-      : voice || (source === "elevenlabs" ? "No voice selected" : selectedSource.voice);
+      : voice || (source === "elevenlabs" || source === "fishaudio" ? "No voice selected" : selectedSource.voice);
   const previewVoice =
     voiceMode === "per-character" ? (voiceAssignments.find((assignment) => assignment.voice)?.voice ?? voice) : voice;
   const selectedLanguage =
     ELEVENLABS_TTS_LANGUAGE_OPTIONS.find((option) => option.code === elevenLabsLanguageCode) ??
     ELEVENLABS_TTS_LANGUAGE_OPTIONS[0];
-  const previewDisabled = !enabled || ttsState === "loading" || (source === "elevenlabs" && !previewVoice);
+  const previewDisabled = !enabled || ttsState === "loading" || ((source === "elevenlabs" || source === "fishaudio") && !previewVoice);
   const previewTitle =
-    source === "elevenlabs" && !previewVoice
-      ? "Select an ElevenLabs voice first"
+    (source === "elevenlabs" || source === "fishaudio") && !previewVoice
+      ? "Select a voice first"
       : !enabled
         ? "Enable TTS first"
         : ttsState === "playing"
@@ -849,13 +857,15 @@ export function TTSConfigCard() {
                     disabled={fetchingVoices || voiceOptions.length === 0}
                     className={cn(INPUT_CLS, "flex-1 cursor-pointer appearance-none")}
                   >
-                    {source === "elevenlabs" && <option value="">Select an ElevenLabs voice</option>}
+                    {(source === "elevenlabs" || source === "fishaudio") && <option value="">{source === "elevenlabs" ? "Select an ElevenLabs voice" : "Select a Fish Audio voice"}</option>}
                     {fetchingVoices && <option value="">Loading voices…</option>}
                     {!fetchingVoices && voiceOptions.length === 0 && !voicesError && (
                       <option value="">
                         {source === "elevenlabs"
                           ? "Enter API key, save, then refresh voices"
-                          : "Save config to load voices"}
+                          : source === "fishaudio"
+                            ? "Enter API key, save, then refresh voices"
+                            : "Save config to load voices"}
                       </option>
                     )}
                     {!fetchingVoices && voicesError && <option value="">Could not load voices</option>}
@@ -883,6 +893,11 @@ export function TTSConfigCard() {
               {!voicesFromProvider && source === "elevenlabs" && !fetchingVoices && (
                 <p className="text-[0.625rem] text-[var(--muted-foreground)]">
                   ElevenLabs voices load after the connection is saved with an API key
+                </p>
+              )}
+              {!voicesFromProvider && source === "fishaudio" && !fetchingVoices && (
+                <p className="text-[0.625rem] text-[var(--muted-foreground)]">
+                  Fish Audio voices load after the connection is saved with an API key
                 </p>
               )}
               {!voicesFromProvider && source === "pockettts" && voices.length > 0 && (
@@ -933,7 +948,7 @@ export function TTSConfigCard() {
                       disabled={fetchingVoices || voiceOptions.length === 0}
                       className={cn(INPUT_CLS, "cursor-pointer appearance-none py-2 text-xs")}
                     >
-                      {source === "elevenlabs" && <option value="">Select voice</option>}
+                      {(source === "elevenlabs" || source === "fishaudio") && <option value="">Select voice</option>}
                       {voiceOptions.map((option) => (
                         <option key={option.id} value={option.id}>
                           {option.name === option.id ? option.id : `${option.name} (${option.id})`}
