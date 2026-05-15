@@ -50,6 +50,7 @@ type ConversationSurfaceProps = {
   onRegenerate: (messageId: string) => void;
   onEdit: (messageId: string, content: string) => void;
   onSetActiveSwipe: (messageId: string, index: number) => void;
+  onToggleHiddenFromAI: (messageId: string, current: boolean) => void;
   onPeekPrompt: () => void;
   onToggleSelectMessage: (toggle: MessageSelectionToggle) => void;
   onSwitchChat?: () => void;
@@ -112,6 +113,7 @@ export function ChatConversationSurface({
   onRegenerate,
   onEdit,
   onSetActiveSwipe,
+  onToggleHiddenFromAI,
   onPeekPrompt,
   onToggleSelectMessage,
   onSwitchChat,
@@ -163,6 +165,7 @@ export function ChatConversationSurface({
           onRegenerate={onRegenerate}
           onEdit={onEdit}
           onSetActiveSwipe={onSetActiveSwipe}
+          onToggleHiddenFromAI={onToggleHiddenFromAI}
           onPeekPrompt={onPeekPrompt}
           lastAssistantMessageId={lastAssistantMessageId}
           onOpenSettings={onOpenSettings}

@@ -14,6 +14,9 @@ import {
   X,
   User,
   Languages,
+  ChevronRight,
+  Circle,
+  EyeOff,
 } from "lucide-react";
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import type { Message, MessageExtra } from "@marinara-engine/shared";
@@ -46,6 +49,47 @@ function nameColorStyle(color?: string): CSSProperties | undefined {
     };
   }
   return { color };
+}
+
+function HiddenFromAIConversationButton({
+  canCollapse,
+  onExpand,
+  isHiddenExpanded,
+}: {
+  canCollapse: boolean;
+  onExpand: () => void;
+  isHiddenExpanded: boolean;
+}) {
+  if (!canCollapse) {
+    return (
+      <span className="inline-flex items-center gap-1 align-middle text-[0.625rem] font-medium text-amber-500/80" title="Hidden from AI">
+        <EyeOff size="0.7rem" className="shrink-0" />
+        <span className="whitespace-nowrap">Hidden from AI</span>
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1 align-middle">
+      <button
+        type="button"
+        onClick={onExpand}
+        className={cn(
+          "inline-flex items-center gap-1 rounded px-1 py-0.5 text-[0.625rem] font-medium text-amber-500/80 transition-colors hover:bg-amber-500/10 hover:text-amber-400",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/40",
+        )}
+        aria-label={isHiddenExpanded ? "Collapse hidden from AI message" : "Expand hidden from AI message"}
+        title={isHiddenExpanded ? "Collapse hidden from AI message" : "Expand hidden from AI message"}
+      >
+        <ChevronRight
+          size="0.7rem"
+          className={cn("shrink-0 transition-transform", isHiddenExpanded && "rotate-90")}
+        />
+        <EyeOff size="0.7rem" className="shrink-0" />
+        <span className="whitespace-nowrap">Hidden from AI</span>
+      </button>
+    </span>
+  );
 }
 
 /** Regex to detect a message that is just an image/GIF URL */
@@ -229,6 +273,7 @@ interface MessageData {
       duration?: number;
     } | null;
     isConversationStart?: boolean;
+    hiddenFromAI?: boolean;
     thinking?: string | null;
     generationReplay?: MessageExtra["generationReplay"];
     attachments?: Array<{ type: string; url: string; filename?: string; prompt?: string; galleryId?: string }>;
@@ -247,6 +292,7 @@ interface ConversationMessageProps {
   onRegenerate?: (messageId: string) => void;
   onEdit?: (messageId: string, content: string) => void;
   onSetActiveSwipe?: (messageId: string, index: number) => void;
+  onToggleHiddenFromAI?: (messageId: string, current: boolean) => void;
   onPeekPrompt?: () => void;
   isLastAssistantMessage?: boolean;
   characterMap?: CharacterMap;
@@ -274,6 +320,7 @@ export const ConversationMessage = memo(function ConversationMessage({
   onRegenerate,
   onEdit,
   onSetActiveSwipe,
+  onToggleHiddenFromAI,
   onPeekPrompt,
   isLastAssistantMessage,
   characterMap,
@@ -292,6 +339,8 @@ export const ConversationMessage = memo(function ConversationMessage({
   const [copied, setCopied] = useState(false);
   const [showThinking, setShowThinking] = useState(false);
   const [showGenerationReplay, setShowGenerationReplay] = useState(false);
+  const [manuallyExpandedHidden, setManuallyExpandedHidden] = useState(false);
+  const collapseHiddenMessages = useUIStore((s) => s.summaryPopoverSettings.collapseHiddenMessages);
   const [imageLightbox, setImageLightbox] = useState<{ url: string; prompt?: string | null } | null>(null);
   const editRef = useRef<HTMLTextAreaElement>(null);
   const hasInput = useChatStore((s) => s.currentInput.trim().length > 0);
@@ -318,10 +367,19 @@ export const ConversationMessage = memo(function ConversationMessage({
     if (!message.extra) return {} as Record<string, any>;
     return typeof message.extra === "string" ? JSON.parse(message.extra) : message.extra;
   }, [message.extra]);
+  const isHiddenFromAI = extra.hiddenFromAI === true;
   const generationReplay = hasGenerationReplayDetails(extra.generationReplay) ? extra.generationReplay : null;
   // canRegenerate lets assistant messages retry; isUser messages need generationReplay
   // metadata from hasGenerationReplayDetails, such as /impersonate.
   const canRegenerate = !isUser || generationReplay !== null;
+
+  useEffect(() => {
+    setManuallyExpandedHidden(false);
+  }, [message.id]);
+
+  useEffect(() => {
+    if (!isHiddenFromAI || !collapseHiddenMessages) setManuallyExpandedHidden(false);
+  }, [collapseHiddenMessages, isHiddenFromAI]);
 
   useEffect(() => {
     if (!generationReplay) setShowGenerationReplay(false);
@@ -593,6 +651,17 @@ export const ConversationMessage = memo(function ConversationMessage({
     );
   }
 
+  const isHiddenExpanded =
+    isHiddenFromAI && (!collapseHiddenMessages || manuallyExpandedHidden || editing || !!isStreaming);
+  const isHiddenCollapsed = isHiddenFromAI && collapseHiddenMessages && !isHiddenExpanded;
+  const hiddenFromAIHeader = isHiddenFromAI ? (
+    <HiddenFromAIConversationButton
+      canCollapse={collapseHiddenMessages}
+      isHiddenExpanded={isHiddenExpanded}
+      onExpand={() => setManuallyExpandedHidden((value) => !value)}
+    />
+  ) : null;
+
   // ── Render: grouped multi-speaker message (merged group chat) ──
   if (groupedSegments && !editing && !isUser) {
     return (
@@ -823,6 +892,14 @@ export const ConversationMessage = memo(function ConversationMessage({
             title={regenerateButtonTitle}
             className={regenerateGuidedClass}
           />
+          {onToggleHiddenFromAI && (
+            <MsgAction
+              icon={isHiddenFromAI ? <Circle size="0.75rem" /> : <EyeOff size="0.75rem" />}
+              onClick={() => onToggleHiddenFromAI(message.id, isHiddenFromAI)}
+              title={isHiddenFromAI ? "Unhide from AI" : "Hide from AI"}
+              className={isHiddenFromAI ? "text-amber-400" : undefined}
+            />
+          )}
           {isLastAssistantMessage && (
             <MsgAction icon={<Eye size="0.75rem" />} onClick={() => onPeekPrompt?.()} title="Peek prompt" />
           )}
@@ -962,6 +1039,7 @@ export const ConversationMessage = memo(function ConversationMessage({
         {/* Header — name + timestamp (only for first in group) */}
         {!isGrouped && (
           <div className="mari-message-meta flex items-baseline gap-2 mb-0.5">
+            {hiddenFromAIHeader}
             <span
               className="mari-message-name text-[0.9375rem] font-semibold leading-tight hover:underline cursor-default"
               style={nameColorStyle(nameColor)}
@@ -975,7 +1053,7 @@ export const ConversationMessage = memo(function ConversationMessage({
         )}
 
         {/* Message body */}
-        {editing ? (
+        {isHiddenCollapsed ? null : editing ? (
           <div className="space-y-2">
             <textarea
               ref={editRef}
@@ -1122,6 +1200,14 @@ export const ConversationMessage = memo(function ConversationMessage({
               onClick={() => onRegenerate?.(message.id)}
               title={regenerateButtonTitle}
               className={regenerateGuidedClass}
+            />
+          )}
+          {onToggleHiddenFromAI && (
+            <MsgAction
+              icon={isHiddenFromAI ? <Circle size="0.75rem" /> : <EyeOff size="0.75rem" />}
+              onClick={() => onToggleHiddenFromAI(message.id, isHiddenFromAI)}
+              title={isHiddenFromAI ? "Unhide from AI" : "Hide from AI"}
+              className={isHiddenFromAI ? "text-amber-400" : undefined}
             />
           )}
           {isLastAssistantMessage && !isUser && (

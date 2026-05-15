@@ -1811,6 +1811,7 @@ export function ChatArea() {
             onRegenerate={handleRegenerate}
             onEdit={handleEdit}
             onSetActiveSwipe={handleSetActiveSwipe}
+            onToggleHiddenFromAI={handleToggleHiddenFromAI}
             onPeekPrompt={handlePeekPrompt}
             onToggleSelectMessage={handleToggleSelectMessage}
             onSwitchChat={chat?.connectedChatId ? () => setActiveChatId(chat.connectedChatId!) : undefined}
