@@ -733,6 +733,10 @@ export function GameWidgetSessionPrepModal({
     () => draftWidgets.find((widget) => widget.id === editingWidgetId) ?? null,
     [draftWidgets, editingWidgetId],
   );
+  const hasWidgetChanges = useMemo(
+    () => JSON.stringify(draftWidgets) !== JSON.stringify(widgets),
+    [draftWidgets, widgets],
+  );
 
   useEffect(() => {
     if (editingWidgetId && !editingWidget) {
@@ -795,13 +799,18 @@ export function GameWidgetSessionPrepModal({
   );
 
   const handleStart = useCallback(async () => {
+    if (!hasWidgetChanges) {
+      onStartSession();
+      return;
+    }
+
     try {
       await updateGameWidgets.mutateAsync({ chatId, widgets: draftWidgets });
       onStartSession();
     } catch {
       toast.error(copy.savingError);
     }
-  }, [chatId, copy.savingError, draftWidgets, onStartSession, updateGameWidgets]);
+  }, [chatId, copy.savingError, draftWidgets, hasWidgetChanges, onStartSession, updateGameWidgets]);
 
   const interactionsLocked = updateGameWidgets.isPending || isStartingSession;
 
