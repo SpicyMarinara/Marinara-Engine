@@ -412,6 +412,8 @@ export function TrackerCardColorControls({
   const modeLabel = MODE_OPTIONS.find((option) => option.mode === mode)?.label ?? "Chat colors";
   const portraitStageBackgroundLabel =
     PORTRAIT_STAGE_BACKGROUND_OPTIONS.find((option) => option.value === portraitStageBackground)?.label ?? "Ambient";
+  const finishSummary = `${finish.tintIntensity}/${finish.glowIntensity}/${finish.contrastIntensity}`;
+  const paintOpacitySummary = `${paintOpacity.nameColorOpacity}/${paintOpacity.dialogueColorOpacity}/${paintOpacity.boxColorOpacity}`;
   const previewInitial = getPreviewInitial(previewName, entityLabel === "Persona" ? "Y" : "C");
   const previewContrastStyle = {
     background:
@@ -453,21 +455,21 @@ export function TrackerCardColorControls({
   };
 
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-2.5">
       <button
         type="button"
         onClick={() => setCollapsed((open) => !open)}
         aria-expanded={!collapsed}
         title={collapsed ? "Expand tracker card colors" : "Collapse tracker card colors"}
-        className="flex w-full min-w-0 items-center justify-between gap-3 rounded-lg text-left transition-colors hover:bg-[var(--accent)]/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)]/60"
+        className="flex w-full min-w-0 items-center justify-between gap-3 rounded-lg px-1 py-0.5 text-left transition-colors hover:bg-[var(--accent)]/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)]/60"
       >
-        <div className="min-w-0 px-1 py-0.5">
+        <div className="min-w-0">
           <h4 className="text-xs font-semibold text-[var(--foreground)]">{entityLabel} Tracker Card</h4>
           <p className="mt-0.5 text-[0.625rem] text-[var(--muted-foreground)]">
-            {modeLabel} source, {portraitStageBackgroundLabel.toLowerCase()} stage.
+            {modeLabel}, {portraitStageBackgroundLabel.toLowerCase()} stage, finish {finishSummary}.
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5 px-1" aria-hidden="true">
+        <div className="flex shrink-0 items-center gap-1.5" aria-hidden="true">
           <span
             className="h-5 w-5 rounded-md ring-1 ring-[var(--border)]"
             style={getDisplayStyle(effectiveColors.nameColor)}
@@ -491,28 +493,69 @@ export function TrackerCardColorControls({
       </button>
 
       {!collapsed && (
-        <div className="mt-3 space-y-3">
-          <div className="grid grid-cols-3 gap-1 rounded-lg bg-[var(--secondary)] p-1">
-            {MODE_OPTIONS.map((option) => {
-              const Icon = option.icon;
-              const selected = option.mode === mode;
-              return (
-                <button
-                  key={option.mode}
-                  type="button"
-                  onClick={() => updateMode(option.mode)}
-                  className={cn(
-                    "flex min-h-8 items-center justify-center gap-1 rounded-md px-1.5 text-[0.625rem] font-medium transition-all",
-                    selected
-                      ? "bg-[var(--background)] text-[var(--foreground)] shadow-sm ring-1 ring-[var(--border)]"
-                      : "text-[var(--muted-foreground)] hover:bg-[var(--background)]/55 hover:text-[var(--foreground)]",
-                  )}
-                >
-                  {selected ? <Check size="0.6875rem" /> : <Icon size="0.6875rem" />}
-                  <span className="truncate">{option.label}</span>
-                </button>
-              );
-            })}
+        <div className="mt-2.5 space-y-2.5">
+          <div className="grid gap-2 rounded-lg bg-[var(--secondary)]/65 p-2 ring-1 ring-[var(--border)]/40 md:grid-cols-[minmax(0,0.95fr)_minmax(0,1.2fr)]">
+            <div className="min-w-0 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-[0.625rem] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+                  Source
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1 rounded-md bg-[var(--background)]/35 p-0.5">
+                {MODE_OPTIONS.map((option) => {
+                  const Icon = option.icon;
+                  const selected = option.mode === mode;
+                  return (
+                    <button
+                      key={option.mode}
+                      type="button"
+                      onClick={() => updateMode(option.mode)}
+                      className={cn(
+                        "flex min-h-7 min-w-0 items-center justify-center gap-1 rounded-sm px-1 text-[0.5625rem] font-semibold transition-colors",
+                        selected
+                          ? "bg-[var(--primary)]/12 text-[var(--primary)] ring-1 ring-[var(--primary)]/24"
+                          : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]/45 hover:text-[var(--foreground)]",
+                      )}
+                    >
+                      {selected ? <Check size="0.625rem" /> : <Icon size="0.625rem" />}
+                      <span className="truncate">{option.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="min-w-0 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-[0.625rem] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+                  Stage
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1 rounded-md bg-[var(--background)]/35 p-0.5 sm:grid-cols-4">
+                {PORTRAIT_STAGE_BACKGROUND_OPTIONS.map((option) => {
+                  const Icon = option.icon;
+                  const selected = option.value === portraitStageBackground;
+
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      title={option.title}
+                      onClick={() => updatePortraitStageBackground(option.value)}
+                      className={cn(
+                        "flex min-h-7 min-w-0 items-center justify-center gap-1 rounded-sm px-1 text-[0.5625rem] font-semibold transition-colors",
+                        selected
+                          ? "bg-[var(--primary)]/12 text-[var(--primary)] ring-1 ring-[var(--primary)]/24"
+                          : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]/45 hover:text-[var(--foreground)]",
+                      )}
+                    >
+                      {selected ? <Check size="0.625rem" /> : <Icon size="0.625rem" />}
+                      <span className="truncate">{option.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
           <div className="@container mx-auto w-full max-w-[32rem]">
@@ -651,80 +694,52 @@ export function TrackerCardColorControls({
             </div>
           </div>
 
-          <div className="grid gap-2 rounded-lg bg-[var(--secondary)]/70 p-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[0.625rem] font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
-                Portrait stage BG
-              </span>
-              <span className="text-[0.625rem] text-[var(--muted-foreground)]">{portraitStageBackgroundLabel}</span>
-            </div>
-            <div className="grid grid-cols-2 gap-1 rounded-md bg-[var(--background)]/35 p-0.5 sm:grid-cols-4">
-              {PORTRAIT_STAGE_BACKGROUND_OPTIONS.map((option) => {
-                const Icon = option.icon;
-                const selected = option.value === portraitStageBackground;
+          <div className="grid gap-3 rounded-lg bg-[var(--secondary)]/65 p-2 ring-1 ring-[var(--border)]/40 md:grid-cols-[minmax(10rem,0.55fr)_minmax(0,1.45fr)]">
+            <div className="min-w-0 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[0.625rem] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+                  Finish
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1 rounded-md bg-[var(--background)]/35 p-0.5">
+                {FINISH_PRESETS.map((preset) => {
+                  const selected =
+                    finish.tintIntensity === preset.finish.tintIntensity &&
+                    finish.glowIntensity === preset.finish.glowIntensity &&
+                    finish.contrastIntensity === preset.finish.contrastIntensity;
 
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    title={option.title}
-                    onClick={() => updatePortraitStageBackground(option.value)}
-                    className={cn(
-                      "flex min-h-6 min-w-0 items-center justify-center gap-1 rounded-sm px-1 text-[0.5625rem] font-semibold transition-colors",
-                      selected
-                        ? "bg-[var(--primary)]/12 text-[var(--primary)] ring-1 ring-[var(--primary)]/24"
-                        : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]/45 hover:text-[var(--foreground)]",
-                    )}
-                  >
-                    {selected ? <Check size="0.625rem" /> : <Icon size="0.625rem" />}
-                    <span className="truncate">{option.label}</span>
-                  </button>
-                );
-              })}
+                  return (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => updateFinishPreset(preset.finish)}
+                      className={cn(
+                        "min-h-7 rounded-sm px-1 text-[0.5625rem] font-semibold transition-colors",
+                        selected
+                          ? "bg-[var(--primary)]/12 text-[var(--primary)] ring-1 ring-[var(--primary)]/24"
+                          : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]/45 hover:text-[var(--foreground)]",
+                      )}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
 
-          <div className="grid gap-2 rounded-lg bg-[var(--secondary)]/70 p-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[0.625rem] font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
-                Card finish
-              </span>
-              <span className="text-[0.625rem] text-[var(--muted-foreground)]">
-                {finish.tintIntensity}/{finish.glowIntensity}/{finish.contrastIntensity}
-              </span>
-            </div>
-            <div className="grid grid-cols-3 gap-1 rounded-md bg-[var(--background)]/35 p-0.5">
-              {FINISH_PRESETS.map((preset) => {
-                const selected =
-                  finish.tintIntensity === preset.finish.tintIntensity &&
-                  finish.glowIntensity === preset.finish.glowIntensity &&
-                  finish.contrastIntensity === preset.finish.contrastIntensity;
-
-                return (
-                  <button
-                    key={preset.label}
-                    type="button"
-                    onClick={() => updateFinishPreset(preset.finish)}
-                    className={cn(
-                      "min-h-6 rounded-sm px-1 text-[0.5625rem] font-semibold transition-colors",
-                      selected
-                        ? "bg-[var(--primary)]/12 text-[var(--primary)] ring-1 ring-[var(--primary)]/24"
-                        : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]/45 hover:text-[var(--foreground)]",
-                    )}
-                  >
-                    {preset.label}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="grid gap-2 sm:grid-cols-3">
+            <div className="grid min-w-0 gap-1.5 sm:grid-cols-3">
               {FINISH_OPTIONS.map((option) => {
                 const value = finish[option.key];
                 return (
-                  <label key={option.key} className="min-w-0 space-y-1">
+                  <label
+                    key={option.key}
+                    className="min-w-0 space-y-1.5 rounded-md bg-[var(--background)]/24 px-2 py-1.5 ring-1 ring-[var(--border)]/25"
+                  >
                     <span className="flex items-center justify-between gap-2 text-[0.625rem] text-[var(--muted-foreground)]">
-                      <span>{option.label}</span>
-                      <span className="font-mono tabular-nums">{value}%</span>
+                      <span className="font-semibold text-[var(--foreground)]/80">{option.label}</span>
+                      <span className="rounded-full bg-[var(--secondary)] px-1.5 py-0.5 font-mono text-[0.5625rem] tabular-nums text-[var(--muted-foreground)]">
+                        {value}%
+                      </span>
                     </span>
                     <input
                       type="range"
@@ -740,14 +755,14 @@ export function TrackerCardColorControls({
             </div>
           </div>
 
-          {mode !== "default" && (
-            <div className="grid gap-2 rounded-lg bg-[var(--secondary)]/70 p-2">
+          {mode === "chat" && (
+            <div className="grid gap-2 rounded-lg bg-[var(--secondary)]/55 p-2 ring-1 ring-[var(--border)]/35">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[0.625rem] font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
-                  Color opacity
+                <span className="text-[0.625rem] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+                  Source strength
                 </span>
-                <span className="text-[0.625rem] text-[var(--muted-foreground)]">
-                  {paintOpacity.nameColorOpacity}/{paintOpacity.dialogueColorOpacity}/{paintOpacity.boxColorOpacity}
+                <span className="font-mono text-[0.625rem] tabular-nums text-[var(--muted-foreground)]">
+                  {paintOpacitySummary}
                 </span>
               </div>
               <div className="grid gap-2 sm:grid-cols-3">
@@ -775,26 +790,53 @@ export function TrackerCardColorControls({
           )}
 
           {mode === "custom" && (
-            <div className="grid gap-3">
-              <div className="grid gap-3 sm:grid-cols-3">
-                <ColorPicker
-                  value={config.nameColor ?? ""}
-                  onChange={(color) => updateCustomColor("nameColor", color)}
-                  gradient
-                  label="Display"
-                />
-                <ColorPicker
-                  value={config.dialogueColor ?? ""}
-                  onChange={(color) => updateCustomColor("dialogueColor", color)}
-                  gradient
-                  label="Accent"
-                />
-                <ColorPicker
-                  value={config.boxColor ?? ""}
-                  onChange={(color) => updateCustomColor("boxColor", color)}
-                  gradient
-                  label="Surface"
-                />
+            <div className="rounded-lg bg-[var(--secondary)]/55 p-2 ring-1 ring-[var(--border)]/35">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="text-[0.625rem] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+                  Custom paint
+                </span>
+                <span className="font-mono text-[0.625rem] tabular-nums text-[var(--muted-foreground)]">
+                  {paintOpacitySummary}
+                </span>
+              </div>
+              <div className="grid gap-2 lg:grid-cols-3">
+                {PAINT_OPACITY_OPTIONS.map((option) => {
+                  const value = paintOpacity[option.key];
+                  const colorKey =
+                    option.key === "nameColorOpacity"
+                      ? "nameColor"
+                      : option.key === "dialogueColorOpacity"
+                        ? "dialogueColor"
+                        : "boxColor";
+
+                  return (
+                    <div
+                      key={option.key}
+                      className="min-w-0 space-y-2 rounded-lg bg-[var(--background)]/25 p-2 ring-1 ring-[var(--border)]/30"
+                    >
+                      <ColorPicker
+                        value={config[colorKey] ?? ""}
+                        onChange={(color) => updateCustomColor(colorKey, color)}
+                        gradient
+                        label={option.label}
+                      />
+                      <label className="block min-w-0 space-y-1">
+                        <span className="flex items-center justify-between gap-2 text-[0.625rem] text-[var(--muted-foreground)]">
+                          <span>Strength</span>
+                          <span className="font-mono tabular-nums">{value}%</span>
+                        </span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={value}
+                          onChange={(event) => updatePaintOpacity(option.key, Number(event.target.value))}
+                          className="h-1.5 w-full cursor-pointer accent-[var(--primary)]"
+                        />
+                      </label>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

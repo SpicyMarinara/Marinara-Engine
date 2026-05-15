@@ -67,6 +67,10 @@ function buildGradient(angle: number, stops: string[]): string {
   return `linear-gradient(${angle}deg, ${stops.join(", ")})`;
 }
 
+function getNativeColorValue(value: string): string {
+  return /^#[0-9a-f]{6}$/i.test(value) ? value : "#6c5ce7";
+}
+
 export function ColorPicker({ value, onChange, gradient = false, label, helpText }: ColorPickerProps) {
   const isGradient = value.startsWith("linear-gradient");
   const [mode, setMode] = useState<"solid" | "gradient">(isGradient ? "gradient" : "solid");
@@ -231,21 +235,38 @@ export function ColorPicker({ value, onChange, gradient = false, label, helpText
           {/* Solid color mode */}
           {mode === "solid" && (
             <>
-              {/* Native color input */}
-              <div className="flex items-center gap-2">
-                <input
-                  ref={nativeRef}
-                  type="color"
-                  value={value && !value.startsWith("linear-gradient") ? value : "#6c5ce7"}
-                  onChange={(e) => handleSolidChange(e.target.value)}
-                  className="h-9 w-9 cursor-pointer rounded-lg border-0 bg-transparent p-0"
-                />
-                <input
-                  value={value && !value.startsWith("linear-gradient") ? value : ""}
-                  onChange={(e) => handleSolidChange(e.target.value)}
-                  placeholder="#hex or color name"
-                  className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-2.5 py-1.5 font-mono text-xs outline-none focus:border-[var(--primary)]/40"
-                />
+              {/* Native color picker + typed CSS value */}
+              <div className="grid gap-2">
+                <label className="group relative flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-2.5 transition-all hover:border-[var(--primary)]/35 hover:bg-[var(--accent)]/25">
+                  <span
+                    className="h-6 w-6 shrink-0 rounded-md ring-1 ring-[var(--border)]"
+                    style={{
+                      backgroundColor:
+                        value && !value.startsWith("linear-gradient") ? getNativeColorValue(value) : "#6c5ce7",
+                    }}
+                  />
+                  <span className="min-w-0 text-xs font-medium text-[var(--foreground)]">Pick color</span>
+                  <Pipette size="0.75rem" className="ml-auto shrink-0 text-[var(--muted-foreground)]" />
+                  <input
+                    ref={nativeRef}
+                    type="color"
+                    aria-label={`Pick ${label} color`}
+                    value={value && !value.startsWith("linear-gradient") ? getNativeColorValue(value) : "#6c5ce7"}
+                    onChange={(e) => handleSolidChange(e.target.value)}
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                  />
+                </label>
+
+                <label className="min-w-0 space-y-1">
+                  <span className="block text-[0.625rem] font-medium text-[var(--muted-foreground)]">Hex / CSS</span>
+                  <input
+                    aria-label={`${label} hex or CSS color`}
+                    value={value && !value.startsWith("linear-gradient") ? value : ""}
+                    onChange={(e) => handleSolidChange(e.target.value)}
+                    placeholder="#hex or color name"
+                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-2.5 py-1.5 font-mono text-xs outline-none transition-colors focus:border-[var(--primary)]/50"
+                  />
+                </label>
               </div>
 
               {/* Preset palette */}
