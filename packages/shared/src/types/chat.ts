@@ -77,6 +77,13 @@ export interface WeekSummaryEntry {
   keyDetails: string[];
 }
 
+/** A chat-scoped prompt template used by manual rolling summary generation. */
+export interface ChatSummaryPromptTemplate {
+  id: string;
+  name: string;
+  prompt: string;
+}
+
 /** A vectorized recall fragment created from one chat's messages. */
 export interface ChatMemoryChunk {
   id: string;
@@ -98,6 +105,10 @@ export interface ChatMetadata {
   summary: string | null;
   /** Recent message count used by manual rolling summary generation and the automated summary agent. */
   summaryContextSize?: number;
+  /** Chat-scoped manual summary prompt templates. Missing or empty uses the built-in default. */
+  summaryPromptTemplates?: ChatSummaryPromptTemplate[];
+  /** Selected manual summary prompt template ID. Null/omitted uses the built-in default. */
+  activeSummaryPromptTemplateId?: string | null;
   /** Custom tags for organisation */
   tags: string[];
   /** Whether agents are enabled for this chat */

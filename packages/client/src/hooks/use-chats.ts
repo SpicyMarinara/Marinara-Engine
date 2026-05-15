@@ -776,6 +776,7 @@ export type GenerateSummaryInput = {
   rangeEndMessageId?: string;
   rangeStartIndex?: number;
   rangeEndIndex?: number;
+  promptTemplateId?: string | null;
 };
 
 export function useGenerateSummary() {
@@ -788,6 +789,7 @@ export function useGenerateSummary() {
       rangeEndMessageId,
       rangeStartIndex,
       rangeEndIndex,
+      promptTemplateId,
     }: GenerateSummaryInput) =>
       api.post<{ summary: string; messageIds: string[] }>(`/chats/${chatId}/generate-summary`, {
         contextSize,
@@ -795,6 +797,7 @@ export function useGenerateSummary() {
         rangeEndMessageId,
         rangeStartIndex,
         rangeEndIndex,
+        promptTemplateId,
       }),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: chatKeys.detail(vars.chatId) });

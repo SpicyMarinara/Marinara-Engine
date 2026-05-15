@@ -326,11 +326,15 @@ function SummaryButton({
   chatId,
   summary,
   summaryContextSize,
+  summaryPromptTemplates,
+  activeSummaryPromptTemplateId,
   totalMessageCount,
 }: {
   chatId: string | null;
   summary: string | null;
   summaryContextSize: number;
+  summaryPromptTemplates?: ComponentProps<typeof SummaryPopover>["promptTemplates"];
+  activeSummaryPromptTemplateId?: string | null;
   totalMessageCount: number;
 }) {
   const [open, setOpen] = useState(false);
@@ -361,6 +365,8 @@ function SummaryButton({
             chatId={chatId}
             summary={summary}
             contextSize={summaryContextSize}
+            promptTemplates={summaryPromptTemplates}
+            activePromptTemplateId={activeSummaryPromptTemplateId}
             totalMessageCount={totalMessageCount}
             onClose={() => setOpen(false)}
           />
@@ -742,6 +748,12 @@ export function ChatRoleplaySurface({
                       chatId={chat?.id ?? null}
                       summary={chatMeta.summary ?? null}
                       summaryContextSize={summaryContextSize}
+                      summaryPromptTemplates={Array.isArray(chatMeta.summaryPromptTemplates) ? chatMeta.summaryPromptTemplates : []}
+                      activeSummaryPromptTemplateId={
+                        typeof chatMeta.activeSummaryPromptTemplateId === "string"
+                          ? chatMeta.activeSummaryPromptTemplateId
+                          : null
+                      }
                       totalMessageCount={totalMessageCount}
                     />
                     <ActiveWorldInfoButton chatId={chat?.id ?? null} />
@@ -828,6 +840,14 @@ export function ChatRoleplaySurface({
                           chatId={chat?.id ?? null}
                           summary={chatMeta.summary ?? null}
                           summaryContextSize={summaryContextSize}
+                          summaryPromptTemplates={
+                            Array.isArray(chatMeta.summaryPromptTemplates) ? chatMeta.summaryPromptTemplates : []
+                          }
+                          activeSummaryPromptTemplateId={
+                            typeof chatMeta.activeSummaryPromptTemplateId === "string"
+                              ? chatMeta.activeSummaryPromptTemplateId
+                              : null
+                          }
                           totalMessageCount={totalMessageCount}
                         />
                         <ActiveWorldInfoButton chatId={chat?.id ?? null} />
@@ -886,6 +906,14 @@ export function ChatRoleplaySurface({
                         chatId={chat?.id ?? null}
                         summary={chatMeta.summary ?? null}
                         summaryContextSize={summaryContextSize}
+                        summaryPromptTemplates={
+                          Array.isArray(chatMeta.summaryPromptTemplates) ? chatMeta.summaryPromptTemplates : []
+                        }
+                        activeSummaryPromptTemplateId={
+                          typeof chatMeta.activeSummaryPromptTemplateId === "string"
+                            ? chatMeta.activeSummaryPromptTemplateId
+                            : null
+                        }
                         totalMessageCount={totalMessageCount}
                       />
                       <ActiveWorldInfoButton chatId={chat?.id ?? null} />

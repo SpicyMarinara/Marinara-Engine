@@ -1958,7 +1958,27 @@ export async function chatsRoutes(app: FastifyInstance) {
     const chatLog = selectedMessages.map((m: any) => `[${m.role}]: ${(m.content as string).slice(0, 2000)}`).join("\n\n");
 
     const previousSummary = chatMeta.summary ?? null;
-    const summaryPrompt = getDefaultAgentPrompt("chat-summary");
+    const requestedPromptTemplateId =
+      typeof body.promptTemplateId === "string" && body.promptTemplateId.trim()
+        ? body.promptTemplateId.trim()
+        : typeof chatMeta.activeSummaryPromptTemplateId === "string" && chatMeta.activeSummaryPromptTemplateId.trim()
+          ? chatMeta.activeSummaryPromptTemplateId.trim()
+          : null;
+    const summaryPromptTemplates = Array.isArray(chatMeta.summaryPromptTemplates)
+      ? (chatMeta.summaryPromptTemplates as Array<Record<string, unknown>>)
+      : [];
+    const selectedSummaryPrompt = requestedPromptTemplateId
+      ? summaryPromptTemplates.find(
+          (template) =>
+            template.id === requestedPromptTemplateId &&
+            typeof template.prompt === "string" &&
+            template.prompt.trim().length > 0,
+        )
+      : null;
+    const summaryPrompt =
+      typeof selectedSummaryPrompt?.prompt === "string"
+        ? selectedSummaryPrompt.prompt.trim()
+        : (summaryAgentCfg?.promptTemplate as string | undefined)?.trim() || getDefaultAgentPrompt("chat-summary");
 
     const messages: Array<{ role: "system" | "user"; content: string }> = [
       { role: "system", content: summaryPrompt },
