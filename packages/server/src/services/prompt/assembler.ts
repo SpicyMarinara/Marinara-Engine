@@ -503,9 +503,17 @@ async function resolveSection(
         : null;
     const runtimeAgentData =
       runtimeAgentType !== null ? ctx.runtimeAgentData[runtimeAgentType] : undefined;
-    runtimeAgentText = typeof runtimeAgentData === "string" ? runtimeAgentData : (runtimeAgentData?.text ?? "");
-    runtimeAgentStartToken = typeof runtimeAgentData === "string" ? undefined : runtimeAgentData?.startToken;
-    runtimeAgentEndToken = typeof runtimeAgentData === "string" ? undefined : runtimeAgentData?.endToken;
+    const normalizedRuntimeAgentData: RuntimeAgentData =
+      typeof runtimeAgentData === "string"
+        ? { text: runtimeAgentData }
+        : {
+            text: runtimeAgentData?.text ?? "",
+            startToken: runtimeAgentData?.startToken,
+            endToken: runtimeAgentData?.endToken,
+          };
+    runtimeAgentText = normalizedRuntimeAgentData.text;
+    runtimeAgentStartToken = normalizedRuntimeAgentData.startToken;
+    runtimeAgentEndToken = normalizedRuntimeAgentData.endToken;
     const hasRuntimeAgentData =
       runtimeAgentType !== null && Object.prototype.hasOwnProperty.call(ctx.runtimeAgentData, runtimeAgentType);
     const expanded = hasRuntimeAgentData ? { content: runtimeAgentText } : await expandMarker(markerConfig, ctx.markerCtx);
