@@ -244,6 +244,16 @@ export function shouldEnableAgentsForGeneration({
   return chatEnableAgents && chatMode !== "conversation" && !(impersonate && impersonateBlockAgents);
 }
 
+export function shouldInjectIdentityFallback({
+  chatMode,
+  presetId,
+}: {
+  chatMode: string;
+  presetId: string | null | undefined;
+}): boolean {
+  return chatMode !== "game" && !presetId;
+}
+
 /** Parse connection/chat stored generation parameters without injecting schema defaults. */
 export function parseStoredGenerationParameters(raw: unknown): StoredGenerationParameters | null {
   let parsed = raw;
