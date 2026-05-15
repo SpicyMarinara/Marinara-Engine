@@ -700,7 +700,7 @@ function replaceRuntimeAgentSection(
   return replaced;
 }
 
-function splitRuntimeHandledAgentInjections(
+export function splitRuntimeHandledAgentInjectionsForTest(
   messages: Array<{ content: string }>,
   tokenMap: ReadonlyMap<RuntimeAgentSectionType, RuntimeAgentSectionTokens>,
   injections: AgentInjection[],
@@ -719,6 +719,8 @@ function splitRuntimeHandledAgentInjections(
   }
   return { fallbackInjections, handledTypes };
 }
+
+const splitRuntimeHandledAgentInjections = splitRuntimeHandledAgentInjectionsForTest;
 
 export function clearUnusedRuntimeAgentSectionsForTest(
   messages: Array<{ content: string }>,
@@ -5336,7 +5338,6 @@ export async function generateRoutes(app: FastifyInstance) {
           runtimeAgentSectionTokens,
           contextInjections,
         );
-        contextInjections = runtimeHandledPreGen.fallbackInjections;
 
         // Inject pre-gen agent context at depth 0 (very bottom of prompt)
         if (runtimeHandledPreGen.fallbackInjections.length > 0) {

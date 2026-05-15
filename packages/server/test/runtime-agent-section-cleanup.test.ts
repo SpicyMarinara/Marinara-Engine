@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clearUnusedRuntimeAgentSectionsForTest } from "../src/routes/generate.routes.js";
+import {
+  clearUnusedRuntimeAgentSectionsForTest,
+  splitRuntimeHandledAgentInjectionsForTest,
+} from "../src/routes/generate.routes.js";
 
 test("unused runtime agent section cleanup removes empty XML group wrappers", () => {
   const messages = [
@@ -15,6 +18,28 @@ test("unused runtime agent section cleanup removes empty XML group wrappers", ()
   ]);
 
   assert.deepEqual(messages, []);
+});
+
+test("runtime handled agent injections stay available for persistence", () => {
+  const messages = [{ content: "Before __start____placeholder____end__ After" }];
+  const contextInjections = [
+    { agentType: "prose-guardian", agentName: "Prose Guardian", text: "Keep the prose crisp." },
+    { agentType: "style-mirror", agentName: "Style Mirror", text: "Match the user's cadence." },
+  ];
+
+  const result = splitRuntimeHandledAgentInjectionsForTest(
+    messages,
+    new Map([["prose-guardian", { placeholder: "__placeholder__", start: "__start__", end: "__end__" }]]),
+    contextInjections,
+  );
+
+  assert.equal(messages[0]?.content, "Before Keep the prose crisp. After");
+  assert.deepEqual(result.fallbackInjections, [contextInjections[1]]);
+  assert.deepEqual(Array.from(result.handledTypes), ["prose-guardian"]);
+  assert.deepEqual(contextInjections, [
+    { agentType: "prose-guardian", agentName: "Prose Guardian", text: "Keep the prose crisp." },
+    { agentType: "style-mirror", agentName: "Style Mirror", text: "Match the user's cadence." },
+  ]);
 });
 
 test("removes empty XML group wrapper but preserves surrounding content", () => {
