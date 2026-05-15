@@ -159,6 +159,7 @@ export function ColorPicker({ value, onChange, gradient = false, label, helpText
         <span className="text-xs font-medium text-[var(--muted-foreground)]">{label}</span>
         {value && (
           <button
+            type="button"
             onClick={clearColor}
             className="flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-[0.625rem] text-[var(--muted-foreground)] transition-all hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)]"
           >
@@ -171,6 +172,7 @@ export function ColorPicker({ value, onChange, gradient = false, label, helpText
 
       {/* Preview + trigger */}
       <button
+        type="button"
         onClick={() => setExpanded(!expanded)}
         className={cn(
           "flex w-full items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--secondary)] p-2.5 transition-all hover:border-[var(--primary)]/30",
@@ -200,6 +202,7 @@ export function ColorPicker({ value, onChange, gradient = false, label, helpText
           {gradient && (
             <div className="flex rounded-lg bg-[var(--secondary)] p-0.5">
               <button
+                type="button"
                 onClick={() => {
                   setMode("solid");
                   if (gradientStops[0]) handleSolidChange(gradientStops[0]);
@@ -215,6 +218,7 @@ export function ColorPicker({ value, onChange, gradient = false, label, helpText
                 Solid
               </button>
               <button
+                type="button"
                 onClick={() => {
                   setMode("gradient");
                   onChange(buildGradient(gradientAngle, gradientStops));
@@ -241,8 +245,7 @@ export function ColorPicker({ value, onChange, gradient = false, label, helpText
                   <span
                     className="h-6 w-6 shrink-0 rounded-md ring-1 ring-[var(--border)]"
                     style={{
-                      backgroundColor:
-                        value && !value.startsWith("linear-gradient") ? getNativeColorValue(value) : "#6c5ce7",
+                      backgroundColor: value && !value.startsWith("linear-gradient") ? value : "#6c5ce7",
                     }}
                   />
                   <span className="min-w-0 text-xs font-medium text-[var(--foreground)]">Pick color</span>
@@ -276,6 +279,7 @@ export function ColorPicker({ value, onChange, gradient = false, label, helpText
                   {PRESETS.map((color) => (
                     <button
                       key={color}
+                      type="button"
                       onClick={() => handleSolidChange(color)}
                       className={cn(
                         "h-6 w-6 rounded-md ring-1 ring-[var(--border)] transition-all hover:scale-110 hover:ring-2 hover:ring-[var(--primary)]/50",
@@ -304,6 +308,7 @@ export function ColorPicker({ value, onChange, gradient = false, label, helpText
                 <div className="flex items-center justify-between">
                   <p className="text-[0.625rem] font-medium text-[var(--muted-foreground)]">Color Stops</p>
                   <button
+                    type="button"
                     onClick={addStop}
                     className="flex items-center gap-0.5 rounded-md bg-[var(--secondary)] px-2 py-0.5 text-[0.625rem] text-[var(--muted-foreground)] transition-all hover:text-[var(--foreground)]"
                   >
@@ -328,6 +333,7 @@ export function ColorPicker({ value, onChange, gradient = false, label, helpText
                     />
                     {gradientStops.length > 2 && (
                       <button
+                        type="button"
                         onClick={() => removeStop(i)}
                         className="rounded-md p-1 text-[var(--muted-foreground)] hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)]"
                       >
@@ -364,6 +370,7 @@ export function ColorPicker({ value, onChange, gradient = false, label, helpText
                   {GRADIENT_PRESETS.map((g) => (
                     <button
                       key={g}
+                      type="button"
                       onClick={() => {
                         setGradientStops(parseGradientStops(g));
                         const angleMatch = g.match(/linear-gradient\((\d+)deg/);

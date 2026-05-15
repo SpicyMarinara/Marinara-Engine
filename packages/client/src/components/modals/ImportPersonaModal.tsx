@@ -240,6 +240,7 @@ export function ImportPersonaModal({ open, onClose }: Props) {
         {/* Footer */}
         <div className="flex justify-end border-t border-[var(--border)] pt-3">
           <button
+            type="button"
             onClick={() => {
               reset();
               onClose();

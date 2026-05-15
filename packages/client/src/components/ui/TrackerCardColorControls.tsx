@@ -18,13 +18,12 @@ import type {
 } from "@marinara-engine/shared";
 import { cn } from "../../lib/utils";
 import {
-  applyTrackerCardPaintOpacity,
   cleanTrackerCardColorConfig,
   getTrackerCardFinish,
   getTrackerCardPaintOpacity,
   getTrackerCardPortraitStageBackground,
-  getTrackerCardPortraitStageVars,
-  getTrackerCardSkinFinish,
+  getTrackerCardStylePalette,
+  getTrackerCardStyleVars,
   normalizeTrackerCardColorMode,
   parseTrackerCardColorConfig,
   type TrackerCardFinish,
@@ -111,66 +110,6 @@ function getDisplayStyle(value: string | null | undefined) {
   return value.includes("gradient(") ? { background: value } : { backgroundColor: value };
 }
 
-function getCssPaintValue(value: string | null | undefined) {
-  const text = value?.trim();
-  if (!text || /url\(|;|expression\(/i.test(text)) return null;
-  return text;
-}
-
-function getGradientPaintLayer(value: string | null | undefined, opacity = 100) {
-  const text = getCssPaintValue(value);
-  return text?.toLowerCase().includes("gradient(") ? applyTrackerCardPaintOpacity(text, opacity) : null;
-}
-
-function clampPercent(value: number) {
-  return Math.max(0, Math.min(100, Math.round(value)));
-}
-
-function opacityWeight(value: number) {
-  return clampPercent(value) / 100;
-}
-
-function scalePercent(value: number, opacity: number) {
-  return Math.round(value * opacityWeight(opacity));
-}
-
-function scaleOpacity(value: string, opacity: number) {
-  return (Number(value) * opacityWeight(opacity)).toFixed(3);
-}
-
-function getBackgroundPaintLayer(value: string, opacity = 100) {
-  return value.toLowerCase().includes("gradient(")
-    ? applyTrackerCardPaintOpacity(value, opacity)
-    : `linear-gradient(${applyTrackerCardPaintOpacity(value, opacity)}, ${applyTrackerCardPaintOpacity(value, opacity)})`;
-}
-
-function getOpacityPaintLayer(value: string | null | undefined, opacity: number) {
-  const text = getCssPaintValue(value);
-  if (!text) return null;
-  return getBackgroundPaintLayer(text, opacity);
-}
-
-function getPaintedBackground(base: string, layers: Array<string | null | undefined>) {
-  const activeLayers = layers.filter((layer): layer is string => !!layer);
-  return activeLayers.length ? `${activeLayers.join(", ")}, ${base}` : base;
-}
-
-function getBackgroundBlendMode(layers: Array<string | null | undefined>, mode = "soft-light") {
-  const activeLayerCount = layers.filter(Boolean).length;
-  return activeLayerCount ? `${Array.from({ length: activeLayerCount }, () => mode).join(", ")}, normal` : "normal";
-}
-
-function getPaintSolidFallback(value: string | null | undefined) {
-  const text = getCssPaintValue(value);
-  if (!text) return null;
-  if (!text.toLowerCase().includes("gradient(")) return text;
-  return (
-    text.match(
-      /#[0-9a-f]{3,8}\b|rgba?\([^)]+\)|hsla?\([^)]+\)|oklch\([^)]+\)|oklab\([^)]+\)|lch\([^)]+\)|lab\([^)]+\)|var\(--[\w-]+\)/i,
-    )?.[0] ?? null
-  );
-}
-
 type TrackerPreviewStyle = CSSProperties & {
   "--tracker-preview-accent": string;
   "--tracker-preview-accent-layer": string;
@@ -230,153 +169,68 @@ function getTrackerPreviewStyle(
   paintOpacity: TrackerCardPaintOpacity,
   portraitStageBackground: TrackerCardPortraitStageBackground,
 ): TrackerPreviewStyle {
-  const skin = getTrackerCardSkinFinish(finish);
-  const displayOpacity = paintOpacity.nameColorOpacity;
-  const accentOpacity = paintOpacity.dialogueColorOpacity;
-  const boxOpacity = paintOpacity.boxColorOpacity;
-  const borderOpacity = scalePercent(skin.borderOpacity, Math.max(accentOpacity, boxOpacity));
-  const rowRuleOpacity = scalePercent(skin.rowRuleOpacity, Math.max(accentOpacity, boxOpacity));
-  const surfaceBoxMix = scalePercent(skin.surfaceBoxMix, boxOpacity);
-  const surfaceDisplayMix = scalePercent(skin.surfaceDisplayMix, displayOpacity);
-  const panelBoxMix = scalePercent(skin.panelBoxMix, boxOpacity);
-  const panelDisplayMix = scalePercent(skin.panelDisplayMix, displayOpacity);
-  const accentPanelMix = scalePercent(skin.accentPanelMix, accentOpacity);
-  const statTrackAccentMix = scalePercent(skin.statTrackAccentMix, accentOpacity);
-  const statTrackBoxMix = scalePercent(skin.statTrackBoxMix, boxOpacity);
-  const displaySolid =
-    getPaintSolidFallback(colors.nameColor) ??
-    getPaintSolidFallback(colors.dialogueColor) ??
-    getPaintSolidFallback(colors.boxColor) ??
-    "var(--primary)";
-  const accent = getPaintSolidFallback(colors.dialogueColor) ?? displaySolid;
-  const box = getPaintSolidFallback(colors.boxColor) ?? displaySolid;
-  const displayLayer =
-    getOpacityPaintLayer(colors.nameColor, displayOpacity) ?? getBackgroundPaintLayer(displaySolid, displayOpacity);
-  const accentLayer =
-    getOpacityPaintLayer(colors.dialogueColor, accentOpacity) ?? getBackgroundPaintLayer(accent, accentOpacity);
-  const boxLayer = getOpacityPaintLayer(colors.boxColor, boxOpacity) ?? getBackgroundPaintLayer(box, boxOpacity);
-  const displayGradientLayer = getGradientPaintLayer(colors.nameColor, displayOpacity);
-  const accentGradientLayer = getGradientPaintLayer(colors.dialogueColor, accentOpacity);
-  const boxGradientLayer = getGradientPaintLayer(colors.boxColor, boxOpacity);
-  const framePaintLayers = [boxGradientLayer, displayGradientLayer, accentGradientLayer];
-  const mutedPanelPaintLayers = [boxGradientLayer, displayGradientLayer];
-  const panelPaintLayers = [accentGradientLayer, boxGradientLayer, displayGradientLayer];
-  const panelStrongPaintLayers = [displayGradientLayer, accentGradientLayer, boxGradientLayer];
-  const statTrackPaintLayers = [boxGradientLayer, displayGradientLayer, accentGradientLayer];
-  const surfacePaintLayers = [boxGradientLayer, displayGradientLayer, accentGradientLayer];
-  const slotPaintLayers = [boxGradientLayer, displayGradientLayer];
-  const slotTopBoxMix = scalePercent(skin.slotBoxTopMix, boxOpacity);
-  const slotBottomBoxMix = scalePercent(skin.slotBoxBottomMix, boxOpacity);
-  const slotTopLiftMix = Math.round(skin.slotBackgroundTopMix * 0.08);
-  const slotBottomLiftMix = Math.round(skin.slotBackgroundBottomMix * 0.05);
-  const slotTopBase = `color-mix(in srgb, var(--background) ${100 - slotTopBoxMix}%, ${box} ${slotTopBoxMix}%)`;
-  const slotBottomBase = `color-mix(in srgb, var(--background) ${100 - slotBottomBoxMix}%, ${box} ${slotBottomBoxMix}%)`;
-  const portraitStage = getTrackerCardPortraitStageVars({
-    background: portraitStageBackground,
-    displaySolid,
-    accent,
-    box,
-    opacity: paintOpacity,
+  const vars = getTrackerCardStyleVars({
+    palette: getTrackerCardStylePalette({
+      colors,
+      finish,
+      opacity: paintOpacity,
+      portraitStageBackground,
+    }),
   });
-  const ambienceBoxMix = scalePercent(Math.min(34, Math.round(skin.surfaceBoxMix * 0.95)), boxOpacity);
-  const ambienceDisplayMix = scalePercent(Math.min(30, Math.round(skin.surfaceDisplayMix * 0.9)), displayOpacity);
-  const ambienceRadialMix = scalePercent(Math.min(28, Math.round(skin.surfaceDisplayMix * 0.8)), displayOpacity);
-  const mutedBoxMix = Math.round(panelBoxMix * 0.55);
-  const mutedDisplayMix = Math.round(panelDisplayMix * 0.45);
 
   return {
-    "--tracker-preview-accent": accent,
-    "--tracker-preview-accent-layer": accentLayer,
-    "--tracker-preview-box": box,
-    "--tracker-preview-box-layer": boxLayer,
-    "--tracker-preview-dialogue-glow": `color-mix(in srgb, ${accent} ${scalePercent(skin.glowMix, accentOpacity)}%, transparent)`,
-    "--tracker-preview-display-layer": displayLayer,
-    "--tracker-preview-display-opacity": scaleOpacity(skin.displayOpacity, displayOpacity),
-    "--tracker-preview-display-solid": displaySolid,
-    "--tracker-preview-frame": getPaintedBackground(
-      `linear-gradient(135deg, ` +
-        `color-mix(in srgb, var(--card) ${100 - surfaceBoxMix}%, ${box} ${surfaceBoxMix}%), ` +
-        `color-mix(in srgb, var(--background) ${100 - surfaceDisplayMix}%, ${displaySolid} ${surfaceDisplayMix}%))`,
-      framePaintLayers,
-    ),
-    "--tracker-preview-frame-blend": getBackgroundBlendMode(framePaintLayers),
-    "--tracker-preview-muted-panel": getPaintedBackground(
-      `linear-gradient(135deg, ` +
-        `color-mix(in srgb, var(--background) ${100 - mutedBoxMix}%, ${box} ${mutedBoxMix}%), ` +
-        `color-mix(in srgb, var(--card) ${100 - mutedDisplayMix}%, ${displaySolid} ${mutedDisplayMix}%))`,
-      mutedPanelPaintLayers,
-    ),
-    "--tracker-preview-muted-panel-blend": getBackgroundBlendMode(mutedPanelPaintLayers),
-    "--tracker-preview-panel": getPaintedBackground(
-      `linear-gradient(135deg, ` +
-        `color-mix(in srgb, var(--background) ${100 - panelBoxMix}%, ${box} ${panelBoxMix}%), ` +
-        `color-mix(in srgb, var(--card) ${100 - panelDisplayMix}%, ${displaySolid} ${panelDisplayMix}%))`,
-      panelPaintLayers,
-    ),
-    "--tracker-preview-panel-blend": getBackgroundBlendMode(panelPaintLayers, "overlay"),
-    "--tracker-preview-panel-strong": getPaintedBackground(
-      `linear-gradient(135deg, ` +
-        `color-mix(in srgb, color-mix(in srgb, var(--background) ${100 - panelBoxMix}%, ${box} ${panelBoxMix}%) ${100 - accentPanelMix}%, ${accent} ${accentPanelMix}%), ` +
-        `color-mix(in srgb, var(--card) ${100 - panelDisplayMix}%, ${displaySolid} ${panelDisplayMix}%))`,
-      panelStrongPaintLayers,
-    ),
-    "--tracker-preview-panel-strong-blend": getBackgroundBlendMode(panelStrongPaintLayers, "overlay"),
-    "--tracker-preview-portrait-base": portraitStage.base,
-    "--tracker-preview-portrait-bottom-glow-opacity": portraitStage.bottomGlowOpacity,
-    "--tracker-preview-portrait-bottom-rule-opacity": portraitStage.bottomRuleOpacity,
-    "--tracker-preview-portrait-media-blur": portraitStage.mediaBlur,
-    "--tracker-preview-portrait-media-opacity": portraitStage.mediaOpacity,
-    "--tracker-preview-portrait-media-saturate": portraitStage.mediaSaturate,
-    "--tracker-preview-portrait-light": portraitStage.light,
-    "--tracker-preview-portrait-light-opacity": portraitStage.lightOpacity,
-    "--tracker-preview-portrait-rim": portraitStage.rim,
-    "--tracker-preview-portrait-rim-opacity": portraitStage.rimOpacity,
-    "--tracker-preview-portrait-side-mask-opacity": portraitStage.sideMaskOpacity,
-    "--tracker-preview-portrait-veil": portraitStage.veil,
-    "--tracker-preview-rule": `color-mix(in srgb, color-mix(in srgb, ${box} 58%, ${accent} 42%) ${borderOpacity}%, transparent)`,
-    "--tracker-preview-surface": getPaintedBackground(
-      `linear-gradient(135deg, ` +
-        `color-mix(in srgb, var(--card) ${100 - surfaceDisplayMix}%, ${displaySolid} ${surfaceDisplayMix}%), ` +
-        `color-mix(in srgb, var(--background) ${100 - surfaceBoxMix}%, ${box} ${surfaceBoxMix}%))`,
-      surfacePaintLayers,
-    ),
-    "--tracker-preview-surface-blend": getBackgroundBlendMode(surfacePaintLayers),
-    "--tracker-preview-slot-rule": `color-mix(in srgb, color-mix(in srgb, ${box} 50%, var(--foreground) 50%) ${skin.slotRuleOpacity}%, transparent)`,
-    "--tracker-preview-slot-shadow": `rgba(0, 0, 0, ${skin.slotShadowOpacity})`,
-    "--tracker-preview-slot-surface": getPaintedBackground(
-      `linear-gradient(180deg, ` +
-        `color-mix(in srgb, ${slotTopBase} ${100 - slotTopLiftMix}%, var(--foreground) ${slotTopLiftMix}%), ` +
-        `color-mix(in srgb, ${slotBottomBase} ${100 - slotBottomLiftMix}%, var(--foreground) ${slotBottomLiftMix}%))`,
-      slotPaintLayers,
-    ),
-    "--tracker-preview-slot-surface-blend": getBackgroundBlendMode(slotPaintLayers, "soft-light"),
-    "--tracker-preview-tint-opacity": scaleOpacity(skin.tintOpacity, boxOpacity),
-    "--tracker-preview-glow-opacity": scaleOpacity(skin.displayOpacity, displayOpacity),
-    "--tracker-preview-contrast-top": `${skin.strongContrastTop}%`,
-    "--tracker-preview-contrast-mid": `${skin.strongContrastMid}%`,
-    "--tracker-preview-contrast-bottom": `${skin.strongContrastBottom}%`,
-    "--tracker-preview-muted-text": `color-mix(in srgb, var(--foreground) ${skin.mutedTextMix}%, var(--muted-foreground) ${100 - skin.mutedTextMix}%)`,
-    "--tracker-preview-number-text": `color-mix(in srgb, var(--foreground) ${skin.numberTextMix}%, var(--muted-foreground) ${100 - skin.numberTextMix}%)`,
-    "--tracker-preview-row-rule": `color-mix(in srgb, color-mix(in srgb, ${box} 54%, ${accent} 46%) ${rowRuleOpacity}%, transparent)`,
-    "--tracker-preview-stat-fill-glow": `color-mix(in srgb, color-mix(in srgb, ${accent} 42%, var(--foreground) 58%) ${scalePercent(skin.statFillGlowMix, accentOpacity)}%, transparent)`,
-    "--tracker-preview-stat-fill-highlight": `color-mix(in srgb, var(--foreground) ${skin.statFillHighlightMix}%, transparent)`,
-    "--tracker-preview-stat-track": getPaintedBackground(
-      `linear-gradient(90deg, ` +
-        `color-mix(in srgb, color-mix(in srgb, var(--background) ${skin.statTrackBackgroundMix}%, ${box} ${100 - skin.statTrackBackgroundMix}%) ${100 - statTrackBoxMix}%, ${box} ${statTrackBoxMix}%), ` +
-        `color-mix(in srgb, color-mix(in srgb, var(--secondary) ${skin.statTrackBackgroundMix}%, ${displaySolid} ${100 - skin.statTrackBackgroundMix}%) ${100 - statTrackAccentMix}%, ${accent} ${statTrackAccentMix}%))`,
-      statTrackPaintLayers,
-    ),
-    "--tracker-preview-stat-track-blend": getBackgroundBlendMode(statTrackPaintLayers, "overlay"),
-    "--tracker-preview-stat-track-ring": `color-mix(in srgb, color-mix(in srgb, ${accent} 52%, var(--foreground) 48%) ${scalePercent(skin.statTrackRingOpacity, accentOpacity)}%, transparent)`,
-    "--tracker-preview-stat-track-shadow": `rgba(0, 0, 0, ${skin.statTrackShadowOpacity})`,
-    "--tracker-preview-text": `color-mix(in srgb, var(--foreground) ${skin.textMix}%, var(--muted-foreground) ${100 - skin.textMix}%)`,
-    background: getPaintedBackground(
-      `radial-gradient(circle at 78% 18%, color-mix(in srgb, ${displaySolid} ${ambienceRadialMix}%, transparent) 0%, transparent 54%), ` +
-        `linear-gradient(135deg, color-mix(in srgb, var(--card) ${100 - ambienceBoxMix}%, ${box} ${ambienceBoxMix}%), ` +
-        `color-mix(in srgb, var(--background) ${100 - ambienceDisplayMix}%, ${displaySolid} ${ambienceDisplayMix}%))`,
-      framePaintLayers,
-    ),
-    backgroundBlendMode: getBackgroundBlendMode(framePaintLayers),
+    "--tracker-preview-accent": vars.accent,
+    "--tracker-preview-accent-layer": vars.accentLayer,
+    "--tracker-preview-box": vars.box,
+    "--tracker-preview-box-layer": vars.boxLayer,
+    "--tracker-preview-dialogue-glow": vars.dialogueGlow,
+    "--tracker-preview-display-layer": vars.displayLayer,
+    "--tracker-preview-display-opacity": vars.displayOpacity,
+    "--tracker-preview-display-solid": vars.displaySolid,
+    "--tracker-preview-frame": vars.frame,
+    "--tracker-preview-frame-blend": vars.frameBlend,
+    "--tracker-preview-muted-panel": vars.mutedPanel,
+    "--tracker-preview-muted-panel-blend": vars.mutedPanelBlend,
+    "--tracker-preview-panel": vars.panel,
+    "--tracker-preview-panel-blend": vars.panelBlend,
+    "--tracker-preview-panel-strong": vars.panelStrong,
+    "--tracker-preview-panel-strong-blend": vars.panelStrongBlend,
+    "--tracker-preview-portrait-base": vars.portraitBase,
+    "--tracker-preview-portrait-bottom-glow-opacity": vars.portraitBottomGlowOpacity,
+    "--tracker-preview-portrait-bottom-rule-opacity": vars.portraitBottomRuleOpacity,
+    "--tracker-preview-portrait-media-blur": vars.portraitMediaBlur,
+    "--tracker-preview-portrait-media-opacity": vars.portraitMediaOpacity,
+    "--tracker-preview-portrait-media-saturate": vars.portraitMediaSaturate,
+    "--tracker-preview-portrait-light": vars.portraitLight,
+    "--tracker-preview-portrait-light-opacity": vars.portraitLightOpacity,
+    "--tracker-preview-portrait-rim": vars.portraitRim,
+    "--tracker-preview-portrait-rim-opacity": vars.portraitRimOpacity,
+    "--tracker-preview-portrait-side-mask-opacity": vars.portraitSideMaskOpacity,
+    "--tracker-preview-portrait-veil": vars.portraitVeil,
+    "--tracker-preview-rule": vars.rule,
+    "--tracker-preview-surface": vars.surface,
+    "--tracker-preview-surface-blend": vars.surfaceBlend,
+    "--tracker-preview-slot-rule": vars.slotRule,
+    "--tracker-preview-slot-shadow": vars.slotShadow,
+    "--tracker-preview-slot-surface": vars.slotSurface,
+    "--tracker-preview-slot-surface-blend": vars.slotSurfaceBlend,
+    "--tracker-preview-tint-opacity": vars.tintOpacity,
+    "--tracker-preview-glow-opacity": vars.displayOpacity,
+    "--tracker-preview-contrast-top": vars.contrastStrongTop,
+    "--tracker-preview-contrast-mid": vars.contrastStrongMid,
+    "--tracker-preview-contrast-bottom": vars.contrastStrongBottom,
+    "--tracker-preview-muted-text": vars.mutedText,
+    "--tracker-preview-number-text": vars.numberText,
+    "--tracker-preview-row-rule": vars.rowRule,
+    "--tracker-preview-stat-fill-glow": vars.statFillGlow,
+    "--tracker-preview-stat-fill-highlight": vars.statFillHighlight,
+    "--tracker-preview-stat-track": vars.statTrack,
+    "--tracker-preview-stat-track-blend": vars.statTrackBlend,
+    "--tracker-preview-stat-track-ring": vars.statTrackRing,
+    "--tracker-preview-stat-track-shadow": vars.statTrackShadow,
+    "--tracker-preview-text": vars.text,
+    background: vars.background,
+    backgroundBlendMode: vars.backgroundBlendMode,
   };
 }
 
