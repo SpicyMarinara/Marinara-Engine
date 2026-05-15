@@ -147,6 +147,7 @@ import {
   resolveRegenerationGameStateAnchor,
   resolveVisibleGameStateAnchor,
   shouldPreferLatestVisibleGameState,
+  shouldAbortOnPassiveGenerationDisconnect,
   shouldEnableAgentsForGeneration,
   shouldInjectIdentityFallback,
   wrapFields,
@@ -884,8 +885,24 @@ export async function generateRoutes(app: FastifyInstance) {
     startSseReply(reply, { "X-Accel-Buffering": "no" });
 
     let generationComplete = false;
+    let clientDisconnected = false;
+    const originalSseWrite = reply.raw.write.bind(reply.raw);
+    reply.raw.write = ((chunk: any, encodingOrCallback?: any, callback?: any) => {
+      if (clientDisconnected || reply.raw.destroyed) return false;
+      try {
+        return originalSseWrite(chunk, encodingOrCallback, callback);
+      } catch {
+        return false;
+      }
+    }) as typeof reply.raw.write;
+
     const onClose = () => {
       if (generationComplete) return;
+      clientDisconnected = true;
+      if (!shouldAbortOnPassiveGenerationDisconnect({ chatMode: requestChatMode, impersonate: input.impersonate })) {
+        logger.info("[generate] Conversation client disconnected; generation will continue for chat: %s", input.chatId);
+        return;
+      }
       logger.info("[abort] Client disconnected — aborting generation");
       abortController.abort();
       if (activeGenerations) activeGenerations.delete(input.chatId);
@@ -9380,7 +9397,9 @@ export async function generateRoutes(app: FastifyInstance) {
       }
       reply.raw.off("close", onClose);
       if (activeGenerations) activeGenerations.delete(input.chatId);
-      reply.raw.end();
+      if (!clientDisconnected && !reply.raw.destroyed) {
+        reply.raw.end();
+      }
     }
   });
 
