@@ -163,19 +163,45 @@ export function CharacterEditor() {
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const loadedCharacterIdRef = useRef<string | null>(null);
+  const activeCharacterIdRef = useRef<string | null>(characterId);
+  const dirtyRef = useRef(false);
+  const editRevisionRef = useRef(0);
   const setEditorDirty = useUIStore((s) => s.setEditorDirty);
+  const setDirtyState = useCallback((nextDirty: boolean) => {
+    dirtyRef.current = nextDirty;
+    setDirty(nextDirty);
+  }, []);
+  const markDirty = useCallback(() => {
+    editRevisionRef.current += 1;
+    setDirtyState(true);
+  }, [setDirtyState]);
   useEffect(() => {
+    dirtyRef.current = dirty;
     setEditorDirty(dirty);
   }, [dirty, setEditorDirty]);
   const [saving, setSaving] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [avatarGeneratorOpen, setAvatarGeneratorOpen] = useState(false);
   const [newTag, setNewTag] = useState("");
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const latestAvatarUploadRef = useRef<{ token: string; characterId: string } | null>(null);
+  const avatarUploadInFlightRef = useRef(false);
   const imageGenerationAvailable =
     Array.isArray(connectionsList) &&
     (connectionsList as Array<{ provider?: string }>).some((connection) => connection.provider === "image_generation");
+
+  activeCharacterIdRef.current = characterId;
+
+  useEffect(() => {
+    const upload = latestAvatarUploadRef.current;
+    if (upload && upload.characterId !== characterId) {
+      latestAvatarUploadRef.current = null;
+      avatarUploadInFlightRef.current = false;
+      setAvatarUploading(false);
+    }
+  }, [characterId]);
 
   // Parse the character when it first loads, or when switching characters.
   // Avoid overwriting unsaved local edits when a refetch follows avatar upload.
@@ -183,7 +209,7 @@ export function CharacterEditor() {
     if (!rawCharacter) return;
     const char = rawCharacter as ParsedCharacter;
     const isSwitchingCharacter = loadedCharacterIdRef.current !== char.id;
-    if (!isSwitchingCharacter && dirty) return;
+    if (!isSwitchingCharacter && dirtyRef.current) return;
 
     loadedCharacterIdRef.current = char.id;
 
@@ -192,41 +218,81 @@ export function CharacterEditor() {
       setFormData(parsed as CharacterData);
       setCharacterComment(char.comment ?? "");
       setAvatarPreview(char.avatarPath);
-      setDirty(false);
+      setDirtyState(false);
     } catch {
       setFormData(null);
       setCharacterComment("");
       setAvatarPreview(null);
-      setDirty(false);
+      setDirtyState(false);
     }
-  }, [rawCharacter, dirty]);
+  }, [rawCharacter, setDirtyState]);
 
   const updateField = useCallback(<K extends keyof CharacterData>(key: K, value: CharacterData[K]) => {
     setFormData((prev) => (prev ? { ...prev, [key]: value } : prev));
-    setDirty(true);
-  }, []);
+    markDirty();
+  }, [markDirty]);
 
-  const updateExtension = useCallback((key: string, value: unknown) => {
+  const setExtensionValue = useCallback((key: string, value: unknown) => {
     setFormData((prev) => {
       if (!prev) return prev;
       return { ...prev, extensions: { ...(prev.extensions ?? {}), [key]: value } };
     });
-    setDirty(true);
+  }, []);
+
+  const updateExtension = useCallback(
+    (key: string, value: unknown) => {
+      setExtensionValue(key, value);
+      markDirty();
+    },
+    [markDirty, setExtensionValue],
+  );
+
+  const beginAvatarUpload = useCallback(() => {
+    if (avatarUploadInFlightRef.current) return false;
+    avatarUploadInFlightRef.current = true;
+    setAvatarUploading(true);
+    return true;
+  }, []);
+
+  const isCurrentAvatarUpload = useCallback((uploadToken: string, uploadCharacterId: string) => {
+    const upload = latestAvatarUploadRef.current;
+    return (
+      upload?.token === uploadToken &&
+      upload.characterId === uploadCharacterId &&
+      activeCharacterIdRef.current === uploadCharacterId
+    );
+  }, []);
+
+  const finishAvatarUpload = useCallback((uploadToken: string, uploadCharacterId: string) => {
+    const upload = latestAvatarUploadRef.current;
+    if (upload?.token !== uploadToken || upload.characterId !== uploadCharacterId) return;
+    latestAvatarUploadRef.current = null;
+    avatarUploadInFlightRef.current = false;
+    setAvatarUploading(false);
   }, []);
 
   const handleSave = async () => {
-    if (!characterId || !formData) return;
+    if (!characterId || !formData) return false;
+    if (avatarUploadInFlightRef.current) {
+      toast.error("Wait for the current avatar upload to finish before saving.");
+      return false;
+    }
     setSaving(true);
+    const editRevisionAtSaveStart = editRevisionRef.current;
     try {
       await updateCharacter.mutateAsync({
         id: characterId,
         data: formData as unknown as Record<string, unknown>,
         comment: characterComment,
       });
-      setDirty(false);
+      if (editRevisionRef.current === editRevisionAtSaveStart) {
+        setDirtyState(false);
+      }
+      return true;
     } catch (err: any) {
       console.error("[CharacterEditor] Save failed:", err);
       toast.error(err?.message ?? "Failed to save character. Check the console for details.");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -235,33 +301,126 @@ export function CharacterEditor() {
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !characterId) return;
+    if (saving) {
+      e.target.value = "";
+      toast.error("Wait for the current save to finish before uploading an avatar.");
+      return;
+    }
+    if (!beginAvatarUpload()) {
+      e.target.value = "";
+      toast.error("Wait for the current avatar upload to finish.");
+      return;
+    }
+
+    const uploadCharacterId = characterId;
+    const uploadToken = generateClientId();
+    latestAvatarUploadRef.current = { token: uploadToken, characterId: uploadCharacterId };
+    const fallbackAvatarPreview = avatarPreview;
+    const fallbackAvatarCrop = formData?.extensions.avatarCrop;
+    const shouldClearAvatarCrop = fallbackAvatarCrop !== undefined;
+    const fallbackDirty = dirtyRef.current;
+    const editRevisionAtUploadStart = editRevisionRef.current;
 
     const reader = new FileReader();
     reader.onload = async () => {
+      if (!isCurrentAvatarUpload(uploadToken, uploadCharacterId)) return;
       const dataUrl = reader.result as string;
       setAvatarPreview(dataUrl);
       // Clear any saved avatarCrop — the new image almost certainly has different
       // framing, so the prior normalized crop coords are meaningless and would
       // produce a stale framing on the new file.
-      updateExtension("avatarCrop", undefined);
+      if (shouldClearAvatarCrop) {
+        setExtensionValue("avatarCrop", undefined);
+      }
+      if (fallbackDirty || shouldClearAvatarCrop) {
+        setDirtyState(true);
+      }
       try {
-        await uploadAvatar.mutateAsync({ id: characterId, avatar: dataUrl });
+        await uploadAvatar.mutateAsync({ id: uploadCharacterId, avatar: dataUrl });
       } catch {
-        // revert on failure
+        if (!isCurrentAvatarUpload(uploadToken, uploadCharacterId)) return;
+        setAvatarPreview(fallbackAvatarPreview);
+        if (shouldClearAvatarCrop) {
+          setExtensionValue("avatarCrop", fallbackAvatarCrop);
+        }
+        if (editRevisionRef.current === editRevisionAtUploadStart) {
+          setDirtyState(fallbackDirty);
+        }
+      } finally {
+        finishAvatarUpload(uploadToken, uploadCharacterId);
       }
     };
-    reader.readAsDataURL(file);
+    reader.onerror = () => {
+      if (!isCurrentAvatarUpload(uploadToken, uploadCharacterId)) return;
+      toast.error("Failed to read avatar image.");
+      finishAvatarUpload(uploadToken, uploadCharacterId);
+    };
+    e.target.value = "";
+    try {
+      reader.readAsDataURL(file);
+    } catch {
+      toast.error("Failed to read avatar image.");
+      finishAvatarUpload(uploadToken, uploadCharacterId);
+    }
   };
 
   const handleGeneratedAvatar = useCallback(
     async (avatarDataUrl: string) => {
       if (!characterId) return;
+      if (saving) {
+        throw new Error("Wait for the current save to finish before uploading an avatar.");
+      }
+      if (!beginAvatarUpload()) {
+        throw new Error("Wait for the current avatar upload to finish.");
+      }
+      const uploadCharacterId = characterId;
+      const uploadToken = generateClientId();
+      latestAvatarUploadRef.current = { token: uploadToken, characterId: uploadCharacterId };
+      const fallbackAvatarPreview = avatarPreview;
+      const fallbackAvatarCrop = formData?.extensions.avatarCrop;
+      const shouldClearAvatarCrop = fallbackAvatarCrop !== undefined;
+      const fallbackDirty = dirtyRef.current;
+      const editRevisionAtUploadStart = editRevisionRef.current;
+
       setAvatarPreview(avatarDataUrl);
-      updateExtension("avatarCrop", undefined);
-      await uploadAvatar.mutateAsync({ id: characterId, avatar: avatarDataUrl });
-      toast.success("Character avatar generated.");
+      if (shouldClearAvatarCrop) {
+        setExtensionValue("avatarCrop", undefined);
+      }
+      if (fallbackDirty || shouldClearAvatarCrop) {
+        setDirtyState(true);
+      }
+      try {
+        await uploadAvatar.mutateAsync({ id: uploadCharacterId, avatar: avatarDataUrl });
+        if (isCurrentAvatarUpload(uploadToken, uploadCharacterId)) {
+          toast.success("Character avatar generated.");
+        }
+      } catch (error) {
+        if (isCurrentAvatarUpload(uploadToken, uploadCharacterId)) {
+          setAvatarPreview(fallbackAvatarPreview);
+          if (shouldClearAvatarCrop) {
+            setExtensionValue("avatarCrop", fallbackAvatarCrop);
+          }
+          if (editRevisionRef.current === editRevisionAtUploadStart) {
+            setDirtyState(fallbackDirty);
+          }
+        }
+        throw error;
+      } finally {
+        finishAvatarUpload(uploadToken, uploadCharacterId);
+      }
     },
-    [characterId, updateExtension, uploadAvatar],
+    [
+      avatarPreview,
+      beginAvatarUpload,
+      characterId,
+      finishAvatarUpload,
+      formData?.extensions.avatarCrop,
+      isCurrentAvatarUpload,
+      saving,
+      setDirtyState,
+      setExtensionValue,
+      uploadAvatar,
+    ],
   );
 
   const handleDelete = async () => {
@@ -373,18 +532,26 @@ export function CharacterEditor() {
   }, [avatarPreview, createPersona, formData, getAvatarDataUrl, uploadPersonaAvatar]);
 
   const handleClose = useCallback(() => {
+    if (avatarUploading) {
+      toast.error("Wait for the current avatar upload to finish.");
+      return;
+    }
     if (dirty) {
       setShowUnsavedWarning(true);
       return;
     }
     closeDetail();
-  }, [dirty, closeDetail]);
+  }, [avatarUploading, dirty, closeDetail]);
 
   const forceClose = useCallback(() => {
+    if (avatarUploading) {
+      toast.error("Wait for the current avatar upload to finish.");
+      return;
+    }
     setShowUnsavedWarning(false);
-    setDirty(false);
+    setDirtyState(false);
     closeDetail();
-  }, [closeDetail]);
+  }, [avatarUploading, closeDetail, setDirtyState]);
 
   const addTag = () => {
     const tag = newTag.trim();
@@ -420,6 +587,7 @@ export function CharacterEditor() {
 
   const headerActionButtonClass =
     "rounded-xl p-2 text-[var(--muted-foreground)] transition-all hover:bg-[var(--accent)] hover:text-[var(--foreground)] max-md:rounded-lg max-md:p-1.5";
+  const saveDisabled = !dirty || saving || avatarUploading;
 
   const headerActions = (
     <>
@@ -592,7 +760,7 @@ export function CharacterEditor() {
               value={characterComment}
               onChange={(e) => {
                 setCharacterComment(e.target.value);
-                setDirty(true);
+                markDirty();
               }}
               className="w-full bg-transparent text-xs text-[var(--muted-foreground)] outline-none"
               placeholder="Title / comment (e.g. 'Modern AU version')"
@@ -608,16 +776,16 @@ export function CharacterEditor() {
         {/* Save */}
         <button
           onClick={handleSave}
-          disabled={!dirty || saving}
+          disabled={saveDisabled}
           className={cn(
             "flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-medium transition-all",
-            dirty
+            !saveDisabled
               ? "bg-gradient-to-r from-pink-400 to-purple-500 text-white shadow-md shadow-pink-500/20 hover:shadow-lg active:scale-[0.98]"
               : "bg-[var(--secondary)] text-[var(--muted-foreground)] cursor-not-allowed",
           )}
         >
           <Save size="0.8125rem" />
-          <span className="max-md:hidden">{saving ? "Saving…" : "Save"}</span>
+          <span className="max-md:hidden">{avatarUploading ? "Uploading…" : saving ? "Saving…" : "Save"}</span>
         </button>
 
         <div className="flex w-full items-center justify-end gap-1 md:hidden">{headerActions}</div>
@@ -636,16 +804,19 @@ export function CharacterEditor() {
           </button>
           <button
             onClick={forceClose}
-            className="rounded-lg bg-amber-500/15 px-3 py-1 text-xs font-medium text-amber-500 transition-all hover:bg-amber-500/25"
+            disabled={avatarUploading}
+            className="rounded-lg bg-amber-500/15 px-3 py-1 text-xs font-medium text-amber-500 transition-all hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Discard & close
           </button>
           <button
             onClick={async () => {
-              await handleSave();
-              closeDetail();
+              if (await handleSave()) {
+                closeDetail();
+              }
             }}
-            className="rounded-lg bg-gradient-to-r from-pink-400 to-purple-500 px-3 py-1 text-xs font-medium text-white shadow-sm transition-all hover:shadow-md"
+            disabled={saving || avatarUploading}
+            className="rounded-lg bg-gradient-to-r from-pink-400 to-purple-500 px-3 py-1 text-xs font-medium text-white shadow-sm transition-all hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
           >
             Save & close
           </button>
