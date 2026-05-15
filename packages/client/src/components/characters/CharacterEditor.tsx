@@ -2913,14 +2913,6 @@ function ColorsTab({
         helpText="Background color for this character's chat message bubbles. Use a semi-transparent color for best results (e.g. rgba)."
       />
 
-      <TrackerCardColorControls
-        value={trackerCardColors}
-        onChange={(value) => updateExtension("trackerCardColors", value)}
-        chatColors={{ nameColor, dialogueColor, boxColor }}
-        entityLabel="Character"
-        previewName={formData.name || "Character"}
-      />
-
       {/* Info */}
       <div className="rounded-xl bg-[var(--card)] p-4 ring-1 ring-[var(--border)]">
         <h4 className="mb-1.5 text-xs font-semibold">How colors work</h4>
@@ -2940,6 +2932,14 @@ function ColorsTab({
           <li>&bull; Leave any field empty to use the default theme colors.</li>
         </ul>
       </div>
+
+      <TrackerCardColorControls
+        value={trackerCardColors}
+        onChange={(value) => updateExtension("trackerCardColors", value)}
+        chatColors={{ nameColor, dialogueColor, boxColor }}
+        entityLabel="Character"
+        previewName={formData.name || "Character"}
+      />
     </div>
   );
 }

@@ -1486,18 +1486,6 @@ function PersonaColorsTab({
         helpText="Background color for your persona's chat message bubbles. Use a semi-transparent color for best results (e.g. rgba)."
       />
 
-      <TrackerCardColorControls
-        value={formData.trackerCardColors}
-        onChange={(value) => updateField("trackerCardColors", value)}
-        chatColors={{
-          nameColor: formData.nameColor,
-          dialogueColor: formData.dialogueColor,
-          boxColor: formData.boxColor,
-        }}
-        entityLabel="Persona"
-        previewName={formData.name || "You"}
-      />
-
       <div className="rounded-xl bg-[var(--card)] p-4 ring-1 ring-[var(--border)]">
         <h4 className="mb-1.5 text-xs font-semibold">How colors work</h4>
         <ul className="space-y-1 text-[0.6875rem] text-[var(--muted-foreground)]">
@@ -1516,6 +1504,18 @@ function PersonaColorsTab({
           <li>&bull; Leave any field empty to use the default theme colors.</li>
         </ul>
       </div>
+
+      <TrackerCardColorControls
+        value={formData.trackerCardColors}
+        onChange={(value) => updateField("trackerCardColors", value)}
+        chatColors={{
+          nameColor: formData.nameColor,
+          dialogueColor: formData.dialogueColor,
+          boxColor: formData.boxColor,
+        }}
+        entityLabel="Persona"
+        previewName={formData.name || "You"}
+      />
     </div>
   );
 }

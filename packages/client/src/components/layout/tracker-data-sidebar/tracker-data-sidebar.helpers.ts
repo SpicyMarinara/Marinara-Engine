@@ -597,8 +597,8 @@ function withTrackerProfileStyle(palette: TrackerProfilePalette, background: str
   const statTrackPaintLayers = [palette.boxGradientLayer, palette.displayGradientLayer, palette.accentGradientLayer];
   const surfacePaintLayers = [palette.boxGradientLayer, palette.displayGradientLayer, palette.accentGradientLayer];
   const slotPaintLayers = [palette.boxGradientLayer, palette.displayGradientLayer];
-  const slotTopBoxMix = scalePercent(24, boxOpacity);
-  const slotBottomBoxMix = scalePercent(20, boxOpacity);
+  const slotTopBoxMix = scalePercent(finish.slotBoxTopMix, boxOpacity);
+  const slotBottomBoxMix = scalePercent(finish.slotBoxBottomMix, boxOpacity);
   const slotTopLiftMix = Math.round(finish.slotBackgroundTopMix * 0.08);
   const slotBottomLiftMix = Math.round(finish.slotBackgroundBottomMix * 0.05);
   const slotTopBase = `color-mix(in srgb, var(--background) ${100 - slotTopBoxMix}%, ${palette.box} ${slotTopBoxMix}%)`;

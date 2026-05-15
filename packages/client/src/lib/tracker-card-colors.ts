@@ -57,6 +57,8 @@ export interface TrackerCardSkinFinish {
   softContrastTop: number;
   slotBackgroundBottomMix: number;
   slotBackgroundTopMix: number;
+  slotBoxBottomMix: number;
+  slotBoxTopMix: number;
   slotRuleOpacity: number;
   slotShadowOpacity: string;
   statTrackAccentMix: number;
@@ -482,6 +484,8 @@ export function getTrackerCardSkinFinish(finish: TrackerCardFinish): TrackerCard
     softContrastTop: getRange(12, contrast, 0.44, 64),
     slotBackgroundBottomMix: getRange(38, contrast, 0.4, 78),
     slotBackgroundTopMix: getRange(30, contrast, 0.36, 70),
+    slotBoxBottomMix: getMix(tint, 0.18, 20),
+    slotBoxTopMix: getMix(tint, 0.22, 24),
     slotRuleOpacity: getRange(18, contrast, 0.42, 64),
     slotShadowOpacity: getOpacity(0.06, contrast, 0.0022, 0.28),
     statTrackAccentMix: Math.min(24, Math.round(2 + tint * 0.08 + glow * 0.12)),
