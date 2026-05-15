@@ -14,7 +14,6 @@ interface SummaryPopoverProps {
   summary: string | null;
   contextSize: number;
   totalMessageCount: number;
-  messageIdByOrderIndex: Map<number, string>;
   onClose: () => void;
 }
 
@@ -37,7 +36,6 @@ export function SummaryPopover({
   summary,
   contextSize,
   totalMessageCount,
-  messageIdByOrderIndex,
   onClose,
 }: SummaryPopoverProps) {
   const [editing, setEditing] = useState(false);
@@ -126,10 +124,7 @@ export function SummaryPopover({
   const selectedRangeCount = rangeHigh - rangeLow + 1;
   const hasMessages = totalMessageCount > 0;
   const rangeTooLarge = sourceMode === "range" && selectedRangeCount > MAX_SUMMARY_MESSAGES;
-  const rangeStartMessageId = messageIdByOrderIndex.get(rangeLow - 1);
-  const rangeEndMessageId = messageIdByOrderIndex.get(rangeHigh - 1);
-  const rangeMessagesLoaded = sourceMode !== "range" || (!!rangeStartMessageId && !!rangeEndMessageId);
-  const canGenerate = hasMessages && !rangeTooLarge && rangeMessagesLoaded;
+  const canGenerate = hasMessages && !rangeTooLarge;
   const sourceSummary =
     sourceMode === "range"
       ? `Messages ${rangeLow}-${rangeHigh}`
@@ -140,9 +135,7 @@ export function SummaryPopover({
       : totalMessageCount > 0
         ? `Using ${Math.min(normalizedLastSize, totalMessageCount)} of ${totalMessageCount} messages`
         : "No messages yet";
-  const rangeStatusText = !rangeMessagesLoaded
-    ? "Load this range in the chat before generating."
-    : rangeTooLarge
+  const rangeStatusText = rangeTooLarge
       ? `Choose ${MAX_SUMMARY_MESSAGES} messages or fewer.`
       : `${selectedRangeCount} ${selectedRangeCount === 1 ? "message" : "messages"} selected.`;
 
@@ -168,9 +161,8 @@ export function SummaryPopover({
     if (sourceMode === "range") {
       setRangeStart(String(rangeLow));
       setRangeEnd(String(rangeHigh));
-      if (!rangeStartMessageId || !rangeEndMessageId) return;
       generateSummary.mutate(
-        { chatId, rangeStartMessageId, rangeEndMessageId },
+        { chatId, rangeStartIndex: rangeLow, rangeEndIndex: rangeHigh },
         {
           onSuccess: (data) => {
             setDraft(data.summary);
@@ -201,8 +193,6 @@ export function SummaryPopover({
     normalizedLastSize,
     rangeHigh,
     rangeLow,
-    rangeEndMessageId,
-    rangeStartMessageId,
     setSummaryPopoverSettings,
     sourceMode,
     summaryPopoverSettings.hideSummarisedMessages,
@@ -387,7 +377,7 @@ export function SummaryPopover({
                   <p
                     className={cn(
                       "text-[0.625rem]",
-                      rangeTooLarge || !rangeMessagesLoaded ? "text-red-300" : "text-[var(--muted-foreground)]",
+                      rangeTooLarge ? "text-red-300" : "text-[var(--muted-foreground)]",
                     )}
                   >
                     {rangeStatusText}

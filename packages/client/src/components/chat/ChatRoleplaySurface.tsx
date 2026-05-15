@@ -327,13 +327,11 @@ function SummaryButton({
   summary,
   summaryContextSize,
   totalMessageCount,
-  messageIdByOrderIndex,
 }: {
   chatId: string | null;
   summary: string | null;
   summaryContextSize: number;
   totalMessageCount: number;
-  messageIdByOrderIndex: Map<number, string>;
 }) {
   const [open, setOpen] = useState(false);
   const compact = useUIStore((s) => s.centerCompact);
@@ -364,7 +362,6 @@ function SummaryButton({
             summary={summary}
             contextSize={summaryContextSize}
             totalMessageCount={totalMessageCount}
-            messageIdByOrderIndex={messageIdByOrderIndex}
             onClose={() => setOpen(false)}
           />
         </Suspense>
@@ -508,7 +505,6 @@ type RoleplaySurfaceProps = {
   shouldAnimateMessages: boolean;
   summaryContextSize: number;
   totalMessageCount: number;
-  messageIdByOrderIndex: Map<number, string>;
   lastAssistantMessageId: string | null;
   settingsOpen: boolean;
   filesOpen: boolean;
@@ -608,7 +604,6 @@ export function ChatRoleplaySurface({
   shouldAnimateMessages,
   summaryContextSize,
   totalMessageCount,
-  messageIdByOrderIndex,
   lastAssistantMessageId,
   settingsOpen,
   filesOpen,
@@ -748,7 +743,6 @@ export function ChatRoleplaySurface({
                       summary={chatMeta.summary ?? null}
                       summaryContextSize={summaryContextSize}
                       totalMessageCount={totalMessageCount}
-                      messageIdByOrderIndex={messageIdByOrderIndex}
                     />
                     <ActiveWorldInfoButton chatId={chat?.id ?? null} />
                     <AuthorNotesButton chatId={chat?.id ?? null} chatMeta={chatMeta} />
@@ -835,7 +829,6 @@ export function ChatRoleplaySurface({
                           summary={chatMeta.summary ?? null}
                           summaryContextSize={summaryContextSize}
                           totalMessageCount={totalMessageCount}
-                          messageIdByOrderIndex={messageIdByOrderIndex}
                         />
                         <ActiveWorldInfoButton chatId={chat?.id ?? null} />
                         <AuthorNotesButton chatId={chat?.id ?? null} chatMeta={chatMeta} />
@@ -894,7 +887,6 @@ export function ChatRoleplaySurface({
                         summary={chatMeta.summary ?? null}
                         summaryContextSize={summaryContextSize}
                         totalMessageCount={totalMessageCount}
-                        messageIdByOrderIndex={messageIdByOrderIndex}
                       />
                       <ActiveWorldInfoButton chatId={chat?.id ?? null} />
                       <AuthorNotesButton chatId={chat?.id ?? null} chatMeta={chatMeta} />

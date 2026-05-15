@@ -1899,7 +1899,6 @@ export function ChatArea() {
           shouldAnimateMessages={shouldAnimateMessages}
           summaryContextSize={summaryContextSize}
           totalMessageCount={totalMessageCount}
-          messageIdByOrderIndex={messageIdByOrderIndex}
           lastAssistantMessageId={lastAssistantMessageId}
           settingsOpen={settingsOpen}
           filesOpen={filesOpen}

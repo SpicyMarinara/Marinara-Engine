@@ -774,16 +774,27 @@ export type GenerateSummaryInput = {
   contextSize?: number;
   rangeStartMessageId?: string;
   rangeEndMessageId?: string;
+  rangeStartIndex?: number;
+  rangeEndIndex?: number;
 };
 
 export function useGenerateSummary() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ chatId, contextSize, rangeStartMessageId, rangeEndMessageId }: GenerateSummaryInput) =>
+    mutationFn: ({
+      chatId,
+      contextSize,
+      rangeStartMessageId,
+      rangeEndMessageId,
+      rangeStartIndex,
+      rangeEndIndex,
+    }: GenerateSummaryInput) =>
       api.post<{ summary: string; messageIds: string[] }>(`/chats/${chatId}/generate-summary`, {
         contextSize,
         rangeStartMessageId,
         rangeEndMessageId,
+        rangeStartIndex,
+        rangeEndIndex,
       }),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: chatKeys.detail(vars.chatId) });

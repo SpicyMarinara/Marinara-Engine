@@ -36,6 +36,7 @@ import { normalizeTimestampOverrides } from "../services/import/import-timestamp
 import {
   findLastIndex,
   parseExtra,
+  isMessageHiddenFromAI,
   resolveVisibleGameStateAnchor,
   shouldEnableAgentsForGeneration,
 } from "./generate/generate-route-utils.js";
@@ -1855,7 +1856,15 @@ export async function chatsRoutes(app: FastifyInstance) {
     const requestedRangeStartMessageId =
       typeof body.rangeStartMessageId === "string" ? body.rangeStartMessageId : null;
     const requestedRangeEndMessageId = typeof body.rangeEndMessageId === "string" ? body.rangeEndMessageId : null;
-    const hasRange = !!requestedRangeStartMessageId && !!requestedRangeEndMessageId;
+    const requestedRangeStartIndex =
+      typeof body.rangeStartIndex === "number" && Number.isInteger(body.rangeStartIndex)
+        ? body.rangeStartIndex
+        : null;
+    const requestedRangeEndIndex =
+      typeof body.rangeEndIndex === "number" && Number.isInteger(body.rangeEndIndex) ? body.rangeEndIndex : null;
+    const hasRangeByMessageId = !!requestedRangeStartMessageId && !!requestedRangeEndMessageId;
+    const hasRangeByIndex = requestedRangeStartIndex !== null && requestedRangeEndIndex !== null;
+    const hasRange = hasRangeByMessageId || hasRangeByIndex;
 
     const chatConnId = chat.connectionId;
 
@@ -1913,14 +1922,23 @@ export async function chatsRoutes(app: FastifyInstance) {
       model = conn.model;
     }
 
-    // Build conversation context (use contextSize from popover, or a custom range)
+    // Build conversation context (use contextSize from popover, or a custom range).
+    // Hidden-from-AI messages are excluded from summary generation even when
+    // they fall inside the selected range.
     const allMessages = await storage.listMessages(req.params.id);
     const selectedMessages = hasRange
       ? (() => {
-          const startIndex = allMessages.findIndex((message) => message.id === requestedRangeStartMessageId);
-          const endIndex = allMessages.findIndex((message) => message.id === requestedRangeEndMessageId);
+          const startIndex = hasRangeByIndex
+            ? requestedRangeStartIndex! - 1
+            : allMessages.findIndex((message) => message.id === requestedRangeStartMessageId);
+          const endIndex = hasRangeByIndex
+            ? requestedRangeEndIndex! - 1
+            : allMessages.findIndex((message) => message.id === requestedRangeEndMessageId);
           if (startIndex === -1 || endIndex === -1) {
             return { error: "Summary range messages were not found in this chat" as const };
+          }
+          if (startIndex < 0 || endIndex < 0 || startIndex >= allMessages.length || endIndex >= allMessages.length) {
+            return { error: "Summary range is outside this chat's message history" as const };
           }
           const from = Math.min(startIndex, endIndex);
           const to = Math.max(startIndex, endIndex);
@@ -1928,14 +1946,14 @@ export async function chatsRoutes(app: FastifyInstance) {
           if (count > 200) {
             return { error: "Summary ranges cannot include more than 200 messages" as const };
           }
-          return allMessages.slice(from, to + 1);
+          return allMessages.slice(from, to + 1).filter((message) => !isMessageHiddenFromAI(message));
         })()
-      : allMessages.slice(-contextSize);
+      : allMessages.slice(-contextSize).filter((message) => !isMessageHiddenFromAI(message));
     if (selectedMessages && "error" in selectedMessages) {
       return reply.status(400).send({ error: selectedMessages.error });
     }
     if (selectedMessages.length === 0) {
-      return reply.status(400).send({ error: "No messages available for the requested summary range" });
+      return reply.status(400).send({ error: "No non-hidden messages available for the requested summary range" });
     }
     const chatLog = selectedMessages.map((m: any) => `[${m.role}]: ${(m.content as string).slice(0, 2000)}`).join("\n\n");
 
