@@ -162,6 +162,7 @@ export function CharacterEditor() {
   const [characterComment, setCharacterComment] = useState("");
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const loadedCharacterIdRef = useRef<string | null>(null);
   const setEditorDirty = useUIStore((s) => s.setEditorDirty);
   useEffect(() => {
     setEditorDirty(dirty);
@@ -176,20 +177,29 @@ export function CharacterEditor() {
     Array.isArray(connectionsList) &&
     (connectionsList as Array<{ provider?: string }>).some((connection) => connection.provider === "image_generation");
 
-  // Parse the character when it loads
+  // Parse the character when it first loads, or when switching characters.
+  // Avoid overwriting unsaved local edits when a refetch follows avatar upload.
   useEffect(() => {
     if (!rawCharacter) return;
     const char = rawCharacter as ParsedCharacter;
+    const isSwitchingCharacter = loadedCharacterIdRef.current !== char.id;
+    if (!isSwitchingCharacter && dirty) return;
+
+    loadedCharacterIdRef.current = char.id;
+
     try {
       const parsed = typeof char.data === "string" ? JSON.parse(char.data) : char.data;
       setFormData(parsed as CharacterData);
       setCharacterComment(char.comment ?? "");
       setAvatarPreview(char.avatarPath);
+      setDirty(false);
     } catch {
       setFormData(null);
       setCharacterComment("");
+      setAvatarPreview(null);
+      setDirty(false);
     }
-  }, [rawCharacter]);
+  }, [rawCharacter, dirty]);
 
   const updateField = useCallback(<K extends keyof CharacterData>(key: K, value: CharacterData[K]) => {
     setFormData((prev) => (prev ? { ...prev, [key]: value } : prev));
