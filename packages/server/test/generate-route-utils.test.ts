@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { shouldEnableAgentsForGeneration } from "../src/routes/generate/generate-route-utils.js";
+import {
+  shouldEnableAgentsForGeneration,
+  shouldInjectIdentityFallback,
+} from "../src/routes/generate/generate-route-utils.js";
 
 test("disables agents before resolution when impersonate blocks agents", () => {
   assert.equal(
@@ -82,4 +85,16 @@ test("keeps conversation mode agent pipeline disabled", () => {
     }),
     false,
   );
+});
+
+test("injects identity fallback only when no prompt preset is active", () => {
+  assert.equal(shouldInjectIdentityFallback({ chatMode: "roleplay", presetId: null }), true);
+  assert.equal(shouldInjectIdentityFallback({ chatMode: "roleplay", presetId: undefined }), true);
+  assert.equal(shouldInjectIdentityFallback({ chatMode: "visual_novel", presetId: null }), true);
+  assert.equal(shouldInjectIdentityFallback({ chatMode: "conversation", presetId: null }), true);
+
+  assert.equal(shouldInjectIdentityFallback({ chatMode: "roleplay", presetId: "preset-1" }), false);
+  assert.equal(shouldInjectIdentityFallback({ chatMode: "visual_novel", presetId: "preset-1" }), false);
+  assert.equal(shouldInjectIdentityFallback({ chatMode: "conversation", presetId: "preset-1" }), false);
+  assert.equal(shouldInjectIdentityFallback({ chatMode: "game", presetId: null }), false);
 });

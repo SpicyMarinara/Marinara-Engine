@@ -148,6 +148,7 @@ import {
   resolveVisibleGameStateAnchor,
   shouldPreferLatestVisibleGameState,
   shouldEnableAgentsForGeneration,
+  shouldInjectIdentityFallback,
   wrapFields,
   type PromptAttachment,
   type SimpleMessage,
@@ -3134,10 +3135,10 @@ export async function generateRoutes(app: FastifyInstance) {
         return "Narrator";
       };
 
-      // ── Fallback: inject character & persona info if the preset didn't include them ──
+      // ── Fallback: inject character & persona info only when no prompt preset is active ──
       // In game mode the GM prompt already includes party members and player persona
       // in the <party> section, so skip fallback injection to avoid duplication.
-      if (chatMode !== "game") {
+      if (shouldInjectIdentityFallback({ chatMode, presetId })) {
         const allContent = finalMessages.map((m) => m.content).join("\n");
         const fallbackCharInfo = manualPromptTargetCharId
           ? charInfo.filter((c) => c.id === manualPromptTargetCharId)
