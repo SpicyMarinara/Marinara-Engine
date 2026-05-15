@@ -59,3 +59,4 @@ export * from "./utils/regex-replacement.js";
 export * from "./utils/skill-check-format.js";
 export * from "./utils/generation-guide.js";
 export * from "./utils/lorebook-keyword-matching.js";
+export * from "./utils/regex-safety.js";

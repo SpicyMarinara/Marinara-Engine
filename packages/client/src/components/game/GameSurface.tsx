@@ -5217,6 +5217,38 @@ export function GameSurface({
     [activeChatId, inventoryItems, updateChatMetadata],
   );
 
+  const handleReorderInventoryItem = useCallback(
+    async (fromIndex: number, toIndex: number) => {
+      if (!activeChatId) return;
+      if (fromIndex === toIndex) return;
+      if (fromIndex < 0 || toIndex < 0) return;
+      if (fromIndex >= inventoryItems.length || toIndex >= inventoryItems.length) return;
+
+      const previousInventory = inventoryItems;
+      const updatedInventory = inventoryItems.slice();
+      [updatedInventory[fromIndex], updatedInventory[toIndex]] = [updatedInventory[toIndex], updatedInventory[fromIndex]];
+
+      // Optimistic local update so the swap feels instant; rollback on error.
+      // Only the visible gameInventory order is persisted — playerStats.inventory
+      // is name-indexed by the agent, so its array order is not observable.
+      setInventoryItems(updatedInventory);
+
+      try {
+        await updateChatMetadata.mutateAsync({
+          id: activeChatId,
+          gameInventory: updatedInventory,
+        });
+      } catch (error) {
+        // Rollback only if no newer reorder superseded this one — otherwise
+        // a late failure from an older request would clobber newer state.
+        setInventoryItems((current) => (current === updatedInventory ? previousInventory : current));
+        const message = error instanceof Error ? error.message : "Failed to reorder inventory.";
+        toast.error(message);
+      }
+    },
+    [activeChatId, inventoryItems, updateChatMetadata],
+  );
+
   const handleEditSegment = useCallback(
     (messageId: string, segmentIndex: number, edit: GameSegmentEdit) => {
       if (!messageId) return;
@@ -8529,6 +8561,7 @@ export function GameSurface({
                 onRenameItem={handleRenameInventoryItem}
                 onRemoveItem={handleRemoveInventoryItem}
                 onIncrementItem={handleIncrementInventoryItem}
+                onReorderItem={handleReorderInventoryItem}
                 canInteract={sessionInteractive && narrationDone && !isStreaming}
                 onUseItem={(itemName) => {
                   setInventoryOpen(false);

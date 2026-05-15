@@ -1,5 +1,15 @@
 // Game: Inventory Panel
 import { useState, useCallback, useEffect } from "react";
+import {
+  DndContext,
+  type DragEndEvent,
+  MouseSensor,
+  TouchSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
 import { Check, ChevronLeft, ChevronRight, Minus, Package, Plus, Wand2, X } from "lucide-react";
 import { cn } from "../../lib/utils";
 
@@ -22,6 +32,8 @@ interface GameInventoryProps {
   onRemoveItem?: (itemName: string) => void | Promise<void>;
   /** Called when the user wants to manually add one unit of an item */
   onIncrementItem?: (itemName: string) => void | Promise<void>;
+  /** Called when the user drags one item onto another to swap their positions */
+  onReorderItem?: (fromIndex: number, toIndex: number) => void | Promise<void>;
   /** Whether the player can interact (input phase) */
   canInteract?: boolean;
 }
@@ -37,6 +49,7 @@ export function GameInventory({
   onRenameItem,
   onRemoveItem,
   onIncrementItem,
+  onReorderItem,
   canInteract,
 }: GameInventoryProps) {
   const [selectedItem, setSelectedItem] = useState<string | null>(null);
@@ -45,6 +58,13 @@ export function GameInventory({
   const [addPending, setAddPending] = useState(false);
   const [amountPending, setAmountPending] = useState<"increment" | "decrement" | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
+
+  // Mouse: 4px distance threshold so quick clicks still select.
+  // Touch: 200ms hold within 5px so swipe-to-scroll still works on mobile.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+  );
 
   const handleItemClick = useCallback(
     (item: InventoryItem) => {
@@ -157,6 +177,18 @@ export function GameInventory({
     [onRemoveItem],
   );
 
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      if (!onReorderItem) return;
+      const fromIndex = event.active.data.current?.index;
+      const toIndex = event.over?.data.current?.index;
+      if (typeof fromIndex !== "number" || typeof toIndex !== "number") return;
+      if (fromIndex === toIndex) return;
+      void onReorderItem(fromIndex, toIndex);
+    },
+    [onReorderItem],
+  );
+
   if (!open) return null;
 
   const slots: Array<InventoryItem | null> = [];
@@ -211,45 +243,23 @@ export function GameInventory({
                   </button>
                 </div>
               )}
-              <div className="grid grid-cols-5 gap-1.5">
-                {slots.map((item, i) => (
-                  <button
-                    key={`slot-${pageStart + i}`}
-                    onClick={() => item && handleItemClick(item)}
-                    disabled={!item}
-                    title={item ? (item.quantity > 1 ? `${item.name} ×${item.quantity}` : item.name) : undefined}
-                    aria-label={item ? (item.quantity > 1 ? `${item.name} x${item.quantity}` : item.name) : undefined}
-                    className={cn(
-                      "group relative flex aspect-square flex-col items-center justify-center overflow-hidden rounded border transition-all",
-                      item
-                        ? selectedItem === item.name
-                          ? "border-amber-500/50 bg-amber-500/10 shadow-[inset_0_0_12px_rgba(245,158,11,0.08)]"
-                          : "border-white/8 bg-white/[0.03] hover:border-white/15 hover:bg-white/[0.06]"
-                        : "cursor-default border-white/5 bg-white/[0.015]",
-                    )}
-                  >
-                    {item && (
-                      <>
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-gradient-to-b from-white/8 to-white/[0.02] text-sm font-bold text-amber-400/80 ring-1 ring-white/8">
-                          {item.name.charAt(0).toUpperCase()}
-                        </div>
-                        <div className="mt-1 flex min-h-0 w-full min-w-0 flex-1 flex-col items-center justify-center px-1">
-                          <div className="flex max-h-full min-h-0 w-full min-w-0 flex-col items-center gap-0.5 overflow-hidden max-md:overflow-y-auto max-md:overscroll-contain max-md:touch-pan-y">
-                            <span className="block w-full whitespace-normal break-words text-center text-[0.58rem] font-medium leading-tight text-white/80 [overflow-wrap:anywhere]">
-                              {item.name}
-                            </span>
-                            {item.quantity > 1 && (
-                              <span className="shrink-0 rounded bg-white/15 px-1.5 py-0.5 text-[0.55rem] font-semibold tabular-nums text-white/80">
-                                x{item.quantity}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </button>
-                ))}
-              </div>
+              <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+                <div className="grid grid-cols-5 gap-1.5">
+                  {slots.map((item, i) => {
+                    const globalIndex = pageStart + i;
+                    return (
+                      <InventorySlot
+                        key={`slot-${globalIndex}`}
+                        item={item}
+                        globalIndex={globalIndex}
+                        selected={Boolean(item && selectedItem === item.name)}
+                        reorderEnabled={Boolean(onReorderItem)}
+                        onClick={() => item && handleItemClick(item)}
+                      />
+                    );
+                  })}
+                </div>
+              </DndContext>
             </>
           ) : (
             <div className="flex min-h-40 flex-col items-center justify-center rounded border border-dashed border-white/10 bg-white/[0.02] px-4 text-center">
@@ -363,5 +373,83 @@ export function GameInventory({
         )}
       </div>
     </div>
+  );
+}
+
+interface InventorySlotProps {
+  item: InventoryItem | null;
+  globalIndex: number;
+  selected: boolean;
+  reorderEnabled: boolean;
+  onClick: () => void;
+}
+
+function InventorySlot({ item, globalIndex, selected, reorderEnabled, onClick }: InventorySlotProps) {
+  const enabled = reorderEnabled && Boolean(item);
+  const slotData = { index: globalIndex };
+  const {
+    setNodeRef: setDragRef,
+    attributes,
+    listeners,
+    isDragging,
+  } = useDraggable({ id: `slot-drag-${globalIndex}`, data: slotData, disabled: !enabled });
+  const { setNodeRef: setDropRef, isOver } = useDroppable({
+    id: `slot-drop-${globalIndex}`,
+    data: slotData,
+    disabled: !enabled,
+  });
+  const setRefs = useCallback(
+    (node: HTMLButtonElement | null) => {
+      setDragRef(node);
+      setDropRef(node);
+    },
+    [setDragRef, setDropRef],
+  );
+
+  return (
+    <button
+      ref={setRefs}
+      {...attributes}
+      {...listeners}
+      onClick={onClick}
+      disabled={!item}
+      title={item ? (item.quantity > 1 ? `${item.name} ×${item.quantity}` : item.name) : undefined}
+      aria-label={item ? (item.quantity > 1 ? `${item.name} x${item.quantity}` : item.name) : undefined}
+      aria-pressed={enabled ? isDragging : undefined}
+      className={cn(
+        "group relative flex aspect-square flex-col items-center justify-center overflow-hidden rounded border transition-all",
+        // touch-action: none lets the TouchSensor activate without browser scroll-gestures stealing the touch.
+        // Scrolling the inventory panel is still possible by touching the modal background / pagination row.
+        enabled && "touch-none",
+        item
+          ? selected
+            ? "border-amber-500/50 bg-amber-500/10 shadow-[inset_0_0_12px_rgba(245,158,11,0.08)]"
+            : "border-white/8 bg-white/[0.03] hover:border-white/15 hover:bg-white/[0.06]"
+          : "cursor-default border-white/5 bg-white/[0.015]",
+        enabled && "cursor-grab active:cursor-grabbing",
+        isDragging && "opacity-40",
+        isOver && !isDragging && "border-amber-400/70 ring-2 ring-amber-400/60",
+      )}
+    >
+      {item && (
+        <>
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-gradient-to-b from-white/8 to-white/[0.02] text-sm font-bold text-amber-400/80 ring-1 ring-white/8">
+            {item.name.charAt(0).toUpperCase()}
+          </div>
+          <div className="mt-1 flex min-h-0 w-full min-w-0 flex-1 flex-col items-center justify-center px-1">
+            <div className="flex max-h-full min-h-0 w-full min-w-0 flex-col items-center gap-0.5 overflow-hidden max-md:overflow-y-auto max-md:overscroll-contain max-md:touch-pan-y">
+              <span className="block w-full whitespace-normal break-words text-center text-[0.58rem] font-medium leading-tight text-white/80 [overflow-wrap:anywhere]">
+                {item.name}
+              </span>
+              {item.quantity > 1 && (
+                <span className="shrink-0 rounded bg-white/15 px-1.5 py-0.5 text-[0.55rem] font-semibold tabular-nums text-white/80">
+                  x{item.quantity}
+                </span>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </button>
   );
 }

@@ -12,6 +12,7 @@ import type {
   LorebookSchedule,
 } from "@marinara-engine/shared";
 import { testPrimaryKeys, testSecondaryKeys } from "@marinara-engine/shared";
+import { vmRegexExecutor } from "./regex-timeout.js";
 
 /** Compute cosine similarity between two vectors. Returns 0 for empty/mismatched vectors. */
 function cosineSimilarity(a: number[], b: number[]): number {
@@ -463,6 +464,7 @@ export function scanForActivatedEntries(
       useRegex: entry.useRegex,
       matchWholeWords: entry.matchWholeWords,
       caseSensitive: entry.caseSensitive,
+      regexExecutor: vmRegexExecutor,
     };
 
     // Test primary keys
