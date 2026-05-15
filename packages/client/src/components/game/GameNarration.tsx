@@ -2822,8 +2822,8 @@ export function GameNarration({
 
   useEffect(() => {
     if (!active) return;
-    // Pause typewriter while direction effects (fades, flashes, etc.) are playing
-    if (directionsActive || scenePreparing) return;
+    // Pause typewriter while overlays/effects cover the narration so the background does not repaint behind them.
+    if (directionsActive || scenePreparing || logsOpen) return;
     const dispLen = effectDisplayLength(active.content);
 
     // Sync internal position with React state (handles restore / skip / segment change)
@@ -2853,7 +2853,7 @@ export function GameNarration({
     }, TICK_MS);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, gameInstantTextReveal, gameTextSpeed, directionsActive, scenePreparing]); // visibleChars intentionally excluded — managed internally
+  }, [active, gameInstantTextReveal, gameTextSpeed, directionsActive, scenePreparing, logsOpen]); // visibleChars intentionally excluded — managed internally
 
   const assetManifest = useGameAssetStore((s) => s.manifest);
 
@@ -4026,7 +4026,7 @@ export function GameNarration({
       {/* Logs modal */}
       {logsOpen && showLogsButton && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
           data-game-skip-bg-nav="true"
           role="dialog"
           aria-modal="true"
