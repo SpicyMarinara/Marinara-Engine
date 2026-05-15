@@ -7496,8 +7496,6 @@ export function GameSurface({
             </div>
           </div>
         </div>
-        {/* Widget prep modal — must be available on the Start Game screen because
-            handleStartGameRequest opens it before handleStartGameNow runs. */}
         <GameWidgetSessionPrepModal
           open={prepareInitialWidgetsOpen}
           widgets={normalizedWidgets}
