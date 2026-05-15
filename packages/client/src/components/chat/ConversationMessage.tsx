@@ -9,13 +9,13 @@ import {
   Copy,
   RefreshCw,
   Eye,
+  Search,
   ScrollText,
   Brain,
   X,
   User,
   Languages,
   ChevronRight,
-  Circle,
   EyeOff,
 } from "lucide-react";
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
@@ -64,7 +64,6 @@ function HiddenFromAIConversationButton({
     return (
       <span className="inline-flex items-center gap-1 align-middle text-[0.625rem] font-medium text-amber-500/80" title="Hidden from AI">
         <EyeOff size="0.7rem" className="shrink-0" />
-        <span className="whitespace-nowrap">Hidden from AI</span>
       </span>
     );
   }
@@ -86,7 +85,6 @@ function HiddenFromAIConversationButton({
           className={cn("shrink-0 transition-transform", isHiddenExpanded && "rotate-90")}
         />
         <EyeOff size="0.7rem" className="shrink-0" />
-        <span className="whitespace-nowrap">Hidden from AI</span>
       </button>
     </span>
   );
@@ -894,14 +892,14 @@ export const ConversationMessage = memo(function ConversationMessage({
           />
           {onToggleHiddenFromAI && (
             <MsgAction
-              icon={isHiddenFromAI ? <Circle size="0.75rem" /> : <EyeOff size="0.75rem" />}
+              icon={isHiddenFromAI ? <Eye size="0.75rem" /> : <EyeOff size="0.75rem" />}
               onClick={() => onToggleHiddenFromAI(message.id, isHiddenFromAI)}
               title={isHiddenFromAI ? "Unhide from AI" : "Hide from AI"}
               className={isHiddenFromAI ? "text-amber-400" : undefined}
             />
           )}
           {isLastAssistantMessage && (
-            <MsgAction icon={<Eye size="0.75rem" />} onClick={() => onPeekPrompt?.()} title="Peek prompt" />
+            <MsgAction icon={<Search size="0.75rem" />} onClick={() => onPeekPrompt?.()} title="Peek prompt" />
           )}
           {generationReplay && (
             <MsgAction
@@ -1204,14 +1202,14 @@ export const ConversationMessage = memo(function ConversationMessage({
           )}
           {onToggleHiddenFromAI && (
             <MsgAction
-              icon={isHiddenFromAI ? <Circle size="0.75rem" /> : <EyeOff size="0.75rem" />}
+              icon={isHiddenFromAI ? <Eye size="0.75rem" /> : <EyeOff size="0.75rem" />}
               onClick={() => onToggleHiddenFromAI(message.id, isHiddenFromAI)}
               title={isHiddenFromAI ? "Unhide from AI" : "Hide from AI"}
               className={isHiddenFromAI ? "text-amber-400" : undefined}
             />
           )}
           {isLastAssistantMessage && !isUser && (
-            <MsgAction icon={<Eye size="0.75rem" />} onClick={() => onPeekPrompt?.()} title="Peek prompt" />
+            <MsgAction icon={<Search size="0.75rem" />} onClick={() => onPeekPrompt?.()} title="Peek prompt" />
           )}
           {generationReplay && (
             <MsgAction

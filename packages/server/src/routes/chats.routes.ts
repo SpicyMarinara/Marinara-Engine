@@ -1985,6 +1985,6 @@ export async function chatsRoutes(app: FastifyInstance) {
     });
     if (!updatedChat) return reply.status(404).send({ error: "Chat not found" });
 
-    return { summary: combined };
+    return { summary: combined, messageIds: selectedMessages.map((message) => message.id) };
   });
 }

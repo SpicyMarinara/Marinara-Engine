@@ -22,8 +22,8 @@ import {
   X,
   Flag,
   Eye,
+  Search,
   ScrollText,
-  Circle,
   Brain,
   Languages,
   Volume2,
@@ -79,7 +79,6 @@ function HiddenFromAIMessageButton({
     return (
       <span className={cn(statusClassName, "align-middle")} title="Hidden from AI">
         <EyeOff size="0.7rem" className="shrink-0" />
-        <span className="whitespace-nowrap">Hidden from AI</span>
       </span>
     );
   }
@@ -99,7 +98,6 @@ function HiddenFromAIMessageButton({
       >
         <ChevronRight size="0.7rem" className={cn("shrink-0 transition-transform", isHiddenExpanded && "rotate-90")} />
         <EyeOff size="0.7rem" className="shrink-0" />
-        <span className="whitespace-nowrap">Hidden from AI</span>
       </button>
     </span>
   );
@@ -1808,7 +1806,7 @@ export const ChatMessage = memo(function ChatMessage({
                 <ActionBtn
                   icon={
                     isHiddenFromAI ? (
-                      <Circle size={MESSAGE_ACTION_ICON_SIZE} />
+                      <Eye size={MESSAGE_ACTION_ICON_SIZE} />
                     ) : (
                       <EyeOff size={MESSAGE_ACTION_ICON_SIZE} />
                     )
@@ -1821,7 +1819,7 @@ export const ChatMessage = memo(function ChatMessage({
               )}
               {isLastAssistantMessage && !isUser && (
                 <ActionBtn
-                  icon={<Eye size={MESSAGE_ACTION_ICON_SIZE} />}
+                  icon={<Search size={MESSAGE_ACTION_ICON_SIZE} />}
                   onClick={() => onPeekPrompt?.()}
                   title="Peek prompt"
                   dark
@@ -2240,7 +2238,7 @@ export const ChatMessage = memo(function ChatMessage({
             />
             {isLastAssistantMessage && !isUser && (
               <ActionBtn
-                icon={<Eye size={MESSAGE_ACTION_ICON_SIZE} />}
+                icon={<Search size={MESSAGE_ACTION_ICON_SIZE} />}
                 onClick={() => onPeekPrompt?.()}
                 title="Peek prompt"
               />
@@ -2277,7 +2275,7 @@ export const ChatMessage = memo(function ChatMessage({
             {onToggleHiddenFromAI && (
               <ActionBtn
                 icon={
-                  isHiddenFromAI ? <Circle size={MESSAGE_ACTION_ICON_SIZE} /> : <EyeOff size={MESSAGE_ACTION_ICON_SIZE} />
+                  isHiddenFromAI ? <Eye size={MESSAGE_ACTION_ICON_SIZE} /> : <EyeOff size={MESSAGE_ACTION_ICON_SIZE} />
                 }
                 onClick={() => onToggleHiddenFromAI(message.id, isHiddenFromAI)}
                 title={isHiddenFromAI ? "Unhide from AI" : "Hide from AI"}

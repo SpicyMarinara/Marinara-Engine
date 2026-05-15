@@ -4,7 +4,7 @@
 // ──────────────────────────────────────────────
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { useGenerateSummary, useUpdateChatMetadata } from "../../hooks/use-chats";
+import { useBulkSetMessagesHiddenFromAI, useGenerateSummary, useUpdateChatMetadata } from "../../hooks/use-chats";
 import { Info, Loader2, Save, ScrollText, Settings2, Sparkles, X } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { useUIStore } from "../../stores/ui.store";
@@ -57,6 +57,7 @@ export function SummaryPopover({
   const sizeInputFocused = useRef(false);
   const rangeInputFocused = useRef(false);
   const generateSummary = useGenerateSummary();
+  const bulkSetMessagesHiddenFromAI = useBulkSetMessagesHiddenFromAI();
   const updateMeta = useUpdateChatMetadata();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -160,6 +161,10 @@ export function SummaryPopover({
 
   const handleGenerate = useCallback(() => {
     if (!canGenerate) return;
+    const maybeHideSummarisedMessages = (messageIds: string[] | undefined) => {
+      if (!summaryPopoverSettings.hideSummarisedMessages || !messageIds?.length) return;
+      bulkSetMessagesHiddenFromAI.mutate({ chatId, messageIds, hidden: true });
+    };
     if (sourceMode === "range") {
       setRangeStart(String(rangeLow));
       setRangeEnd(String(rangeHigh));
@@ -170,6 +175,7 @@ export function SummaryPopover({
           onSuccess: (data) => {
             setDraft(data.summary);
             setEditing(false);
+            maybeHideSummarisedMessages(data.messageIds);
           },
         },
       );
@@ -183,10 +189,12 @@ export function SummaryPopover({
         onSuccess: (data) => {
           setDraft(data.summary);
           setEditing(false);
+          maybeHideSummarisedMessages(data.messageIds);
         },
       },
     );
   }, [
+    bulkSetMessagesHiddenFromAI,
     canGenerate,
     chatId,
     generateSummary,
@@ -197,6 +205,7 @@ export function SummaryPopover({
     rangeStartMessageId,
     setSummaryPopoverSettings,
     sourceMode,
+    summaryPopoverSettings.hideSummarisedMessages,
   ]);
 
   const handleSave = useCallback(() => {
