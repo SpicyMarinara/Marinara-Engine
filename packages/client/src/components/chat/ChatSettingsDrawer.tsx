@@ -88,6 +88,7 @@ import {
   chatKeys,
 } from "../../hooks/use-chats";
 import { api } from "../../lib/api-client";
+import { filterLanguageGenerationConnections } from "../../lib/connection-filters";
 import { getConnectedChatDisplayName } from "../../lib/chat-display";
 import {
   getAgentRunIntervalMeta,
@@ -300,8 +301,8 @@ export function ChatSettingsDrawer({
   );
   const textConnectionsList = useMemo(
     () =>
-      ((connections as Array<{ id: string; name: string; model?: string; provider?: string }>) ?? []).filter(
-        (c) => c.provider !== "image_generation",
+      filterLanguageGenerationConnections(
+        (connections as Array<{ id: string; name: string; model?: string; provider?: string }>) ?? [],
       ),
     [connections],
   );
@@ -1700,7 +1701,7 @@ export function ChatSettingsDrawer({
                   >
                     <option value="">None</option>
                     <option value="random">🎲 Random</option>
-                    {((connections ?? []) as Array<{ id: string; name: string; model?: string }>).map((c) => (
+                    {textConnectionsList.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
                         {c.model ? ` — ${c.model}` : ""}
@@ -1718,7 +1719,7 @@ export function ChatSettingsDrawer({
                 >
                   <option value="">None</option>
                   <option value="random">🎲 Random</option>
-                  {((connections ?? []) as Array<{ id: string; name: string }>).map((c) => (
+                  {textConnectionsList.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
                     </option>
@@ -4939,7 +4940,7 @@ export function ChatSettingsDrawer({
                     className="mt-0.5 w-full rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs outline-none ring-1 ring-transparent transition-shadow focus:ring-[var(--primary)]/40"
                   >
                     <option value="">Select connection…</option>
-                    {((connections ?? []) as Array<{ id: string; name: string }>).map((c) => (
+                    {textConnectionsList.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
                       </option>

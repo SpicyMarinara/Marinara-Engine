@@ -9,6 +9,7 @@ import { useConnections, useUpdateConnection } from "../../hooks/use-connections
 import { usePersonas, usePersonaGroups } from "../../hooks/use-characters";
 import { useUpdateChat, useChat } from "../../hooks/use-chats";
 import { useChatStore } from "../../stores/chat.store";
+import { filterLanguageGenerationConnections } from "../../lib/connection-filters";
 import { cn, getAvatarCropStyle, parseAvatarCropJson } from "../../lib/utils";
 
 interface Persona {
@@ -52,9 +53,9 @@ export function QuickSwitcherMobile() {
   const activePersonaId = (chat as unknown as Record<string, unknown>)?.personaId as string | null;
   const isRandom = activeConnectionId === "random";
 
-  const sortedConnections = ((connections ?? []) as Array<{ id: string; name: string; useForRandom?: string }>)
-    .slice()
-    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const sortedConnections = filterLanguageGenerationConnections(
+    (connections ?? []) as Array<{ id: string; name: string; provider?: string; useForRandom?: string }>,
+  ).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 
   const sortedPersonas = ((rawPersonas ?? []) as Persona[])
     .slice()
