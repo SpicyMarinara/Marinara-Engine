@@ -13,7 +13,7 @@ import {
 import { cn } from "../../lib/utils";
 import { useExtensions, useCreateExtension, useDeleteExtension, useUpdateExtension } from "../../hooks/use-extensions";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ADMIN_SECRET_STORAGE_KEY, api, getAdminSecretHeader } from "../../lib/api-client";
+import { ADMIN_SECRET_STORAGE_KEY, ApiError, api, getAdminSecretHeader } from "../../lib/api-client";
 import { chatBackgroundUrlToMetadata } from "../../lib/backgrounds";
 import { forceRefreshSpa } from "@/lib/browser-runtime";
 import React, { useRef, useState, useCallback, useEffect } from "react";
@@ -3002,6 +3002,7 @@ function AdvancedSettings() {
     applyAvailable?: boolean;
     updatesApplyEnabled?: boolean;
     applyUnavailableReason?: "disabled" | "unsupported-install" | null;
+    manualUpdateCommand?: string | null;
   }>({
     queryKey: ["update-check"],
     queryFn: () => api.get("/updates/check"),
@@ -3027,7 +3028,16 @@ function AdvancedSettings() {
       }
     },
     onError: (err: unknown) => {
-      const message = err instanceof Error ? err.message : "Update failed";
+      const message =
+        err instanceof ApiError &&
+        err.payload &&
+        typeof err.payload === "object" &&
+        "message" in err.payload &&
+        typeof err.payload.message === "string"
+          ? err.payload.message
+          : err instanceof Error
+            ? err.message
+            : "Update failed";
       toast.error(message);
     },
   });
@@ -3037,9 +3047,10 @@ function AdvancedSettings() {
   const currentBuildLabel = currentCommit ? `Build: ${currentCommit.slice(0, 7)}` : "Build: unavailable";
   const commitsBehind = updateCheck.data?.commitsBehind ?? 0;
   const applyUnavailableReason = updateCheck.data?.applyUnavailableReason ?? null;
+  const manualUpdateCommand = updateCheck.data?.manualUpdateCommand ?? null;
   const applyUnavailableCopy =
     applyUnavailableReason === "disabled"
-      ? "This install can check for updates, but applying them from the browser is disabled. Relaunch the app if you use the launcher, or update manually. Advanced git installs can enable server-side apply with UPDATES_APPLY_ENABLED=true."
+      ? "This install can check for updates, but applying them from the browser is disabled. Update manually with the command below. Advanced git installs can enable server-side apply with UPDATES_APPLY_ENABLED=true."
       : "This install can check for updates, but it cannot apply them from the browser. Relaunch the app if you use the launcher, or update manually for your install type.";
   const isClearing = clearAllData.isPending || expungeData.isPending;
   const isAllScopesSelected = selectedScopes.length === EXPUNGE_SCOPE_OPTIONS.length;
@@ -3214,11 +3225,11 @@ function AdvancedSettings() {
                     Android APK assets are WebView shells, not standalone apps. Start Marinara in Termux first.
                   </span>
                 )}
-                {applyUnavailableReason === "unsupported-install" && (
+                {manualUpdateCommand && (
                   <span className="text-[0.625rem] text-[var(--muted-foreground)]">
-                    Docker users:{" "}
-                    <code className="rounded bg-[var(--background)] px-1 py-0.5">
-                      docker compose pull && docker compose up -d
+                    Manual update:{" "}
+                    <code className="break-all rounded bg-[var(--background)] px-1 py-0.5">
+                      {manualUpdateCommand}
                     </code>
                   </span>
                 )}

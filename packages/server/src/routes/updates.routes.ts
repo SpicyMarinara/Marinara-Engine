@@ -23,6 +23,8 @@ const UPDATE_REMOTE = "origin";
 const UPDATE_BRANCH = "main";
 const UPDATE_REF = `${UPDATE_REMOTE}/${UPDATE_BRANCH}`;
 const DEFAULT_PNPM_VERSION = "10.33.2";
+const MANUAL_GIT_UPDATE_COMMAND = "git pull && pnpm install && pnpm build && pnpm start";
+const DOCKER_UPDATE_COMMAND = "docker compose pull && docker compose up -d";
 const ANDROID_APK_NOTICE =
   "> [!IMPORTANT]\n" +
   "> **Android APK notice:** The APK is not a standalone Marinara Engine app yet. It is a WebView shell for the local Marinara server, so Termux must be installed and `./start-termux.sh` must be running on the same Android device before you open the APK.";
@@ -320,6 +322,7 @@ function getApplyAvailability(gitInstall: boolean) {
       applyAvailable: false,
       updatesApplyEnabled: enabled,
       applyUnavailableReason: "unsupported-install",
+      manualUpdateCommand: DOCKER_UPDATE_COMMAND,
     };
   }
   if (!enabled) {
@@ -327,12 +330,14 @@ function getApplyAvailability(gitInstall: boolean) {
       applyAvailable: false,
       updatesApplyEnabled: false,
       applyUnavailableReason: "disabled",
+      manualUpdateCommand: MANUAL_GIT_UPDATE_COMMAND,
     };
   }
   return {
     applyAvailable: true,
     updatesApplyEnabled: true,
     applyUnavailableReason: null,
+    manualUpdateCommand: null,
   };
 }
 
@@ -422,10 +427,23 @@ export async function updatesRoutes(app: FastifyInstance) {
   // POST /api/updates/apply
   // Fast-forwards to origin/main, installs, rebuilds, then signals the process to restart.
   app.post<{ Body: ApplyUpdateBody }>("/apply", async (req, reply) => {
+    if (!isGitInstall()) {
+      return reply.status(400).send({
+        error: "Auto-update apply is unavailable for this install type",
+        message: `Auto-update is only available for git-based installs. For Docker, run: ${DOCKER_UPDATE_COMMAND}`,
+        installType: "standalone",
+        applyUnavailableReason: "unsupported-install",
+        manualUpdateCommand: DOCKER_UPDATE_COMMAND,
+      });
+    }
+
     if (!isUpdatesApplyEnabled()) {
       return reply.status(403).send({
-        error: "Auto-update apply is disabled",
-        message: "Set UPDATES_APPLY_ENABLED=true to enable server-side update application.",
+        error: "Auto-update apply is disabled for this install",
+        message: `Update manually with: ${MANUAL_GIT_UPDATE_COMMAND}. Advanced git installs can enable server-side update application with UPDATES_APPLY_ENABLED=true.`,
+        installType: "git",
+        applyUnavailableReason: "disabled",
+        manualUpdateCommand: MANUAL_GIT_UPDATE_COMMAND,
       });
     }
 
@@ -436,14 +454,6 @@ export async function updatesRoutes(app: FastifyInstance) {
       })
     ) {
       return;
-    }
-
-    if (!isGitInstall()) {
-      return reply.status(400).send({
-        error:
-          "Auto-update is only available for git-based installs. For Docker, run: docker compose pull && docker compose up -d",
-        installType: "standalone",
-      });
     }
 
     const root = getMonorepoRoot();
