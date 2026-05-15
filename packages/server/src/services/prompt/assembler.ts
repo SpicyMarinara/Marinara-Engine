@@ -552,7 +552,12 @@ async function resolveSection(
   content = contentMacrosResolved ? content : resolveMacros(content, ctx.macroCtx);
   if (!content.trim()) return null;
   const shouldWrapRuntimeAgentSection =
-    Boolean(runtimeAgentStartToken && runtimeAgentEndToken) && content.includes(runtimeAgentText);
+    Boolean(
+      runtimeAgentStartToken &&
+        runtimeAgentEndToken &&
+        runtimeAgentText.trim().length > 0 &&
+        content.includes(runtimeAgentText),
+    );
 
   // Auto-wrap in the preset's format
   const wrapped = wrapContent(content, section.name, ctx.wrapFormat);
