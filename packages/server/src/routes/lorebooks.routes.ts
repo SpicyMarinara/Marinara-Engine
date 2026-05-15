@@ -169,6 +169,7 @@ function buildTransferredEntryInput(
     groupWeight: entry.groupWeight,
     folderId: null,
     preventRecursion: entry.preventRecursion,
+    excludeFromVectorization: entry.excludeFromVectorization,
     locked: entry.locked,
     tag: entry.tag,
     relationships: entry.relationships,
@@ -668,6 +669,7 @@ export async function lorebooksRoutes(app: FastifyInstance) {
       })),
       totalTokens: result.totalTokensEstimate,
       totalEntries: result.totalEntries,
+      budgetSkippedEntries: result.budgetSkippedEntries,
     };
   });
 
@@ -685,12 +687,15 @@ export async function lorebooksRoutes(app: FastifyInstance) {
 
     const allEntries = await storage.listEntries(req.params.id);
     if (!allEntries.length) return { vectorized: 0, total: 0, skipped: 0 };
+    const vectorizableEntries = allEntries.filter(
+      (entry) => !(entry as Record<string, unknown>).excludeFromVectorization,
+    );
     const entries = body.onlyMissing
-      ? allEntries.filter((entry) => {
+      ? vectorizableEntries.filter((entry) => {
           const embedding = (entry as Record<string, unknown>).embedding;
           return !Array.isArray(embedding) || embedding.length === 0;
         })
-      : allEntries;
+      : vectorizableEntries;
     if (!entries.length) return { vectorized: 0, total: allEntries.length, skipped: allEntries.length };
 
     // Use dedicated embedding base URL if configured, otherwise the connection's base URL

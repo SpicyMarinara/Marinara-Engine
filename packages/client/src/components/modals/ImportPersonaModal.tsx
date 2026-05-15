@@ -13,6 +13,16 @@ interface Props {
   onClose: () => void;
 }
 
+function stringField(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function jsonStringField(value: unknown, fallback?: string) {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) || (value && typeof value === "object")) return JSON.stringify(value);
+  return fallback;
+}
+
 export function ImportPersonaModal({ open, onClose }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "done">("idle");
@@ -81,13 +91,21 @@ export function ImportPersonaModal({ open, onClose }: Props) {
         const name = typeof json.name === "string" ? json.name : "Imported Persona";
         const data = await api.post<{ id?: string; error?: string }>("/characters/personas", {
           name,
-          description: json.description ?? "",
-          personality: json.personality ?? "",
-          scenario: json.scenario ?? "",
-          backstory: json.backstory ?? "",
-          appearance: json.appearance ?? "",
-          comment: json.comment ?? "",
-          tags: json.tags ?? undefined,
+          description: stringField(json.description),
+          personality: stringField(json.personality),
+          scenario: stringField(json.scenario),
+          backstory: stringField(json.backstory),
+          appearance: stringField(json.appearance),
+          comment: stringField(json.comment),
+          nameColor: stringField(json.nameColor),
+          dialogueColor: stringField(json.dialogueColor),
+          boxColor: stringField(json.boxColor),
+          trackerCardColors: jsonStringField(json.trackerCardColors),
+          personaStats: stringField(json.personaStats),
+          altDescriptions: jsonStringField(json.altDescriptions, "[]"),
+          tags: jsonStringField(json.tags, "[]"),
+          savedStatusOptions: jsonStringField(json.savedStatusOptions, "[]"),
+          avatarCrop: jsonStringField(json.avatarCrop, ""),
           createdAt: file.lastModified,
           updatedAt: file.lastModified,
         });
@@ -222,6 +240,7 @@ export function ImportPersonaModal({ open, onClose }: Props) {
         {/* Footer */}
         <div className="flex justify-end border-t border-[var(--border)] pt-3">
           <button
+            type="button"
             onClick={() => {
               reset();
               onClose();

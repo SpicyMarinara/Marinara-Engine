@@ -13,8 +13,6 @@ import { applyInlineMarkdown, renderMarkdownBlocks, applyInlineMarkdownHTML } fr
 import {
   User,
   Bot,
-  ChevronLeft,
-  ChevronRight,
   Copy,
   RefreshCw,
   Trash2,
@@ -24,6 +22,7 @@ import {
   X,
   Flag,
   Eye,
+  ScrollText,
   Circle,
   Brain,
   Languages,
@@ -51,7 +50,9 @@ import { buildTTSMessageText, resolveTTSVoiceForSpeaker } from "../../lib/tts-di
 import { DIALOGUE_QUOTE_PATTERN_SOURCE, HTML_SAFE_DIALOGUE_QUOTE_PATTERN_SOURCE } from "../../lib/dialogue-quotes";
 import DOMPurify from "dompurify";
 import type { CharacterMap, MessageSelectionToggle, PersonaInfo } from "./chat-area.types";
+import { GenerationReplayDetailsModal, hasGenerationReplayDetails } from "./GenerationReplayDetailsModal";
 import { ImagePromptPanel } from "./ImagePromptPanel";
+import { SwipeJumpControl } from "./SwipeJumpControl";
 
 const MESSAGE_ACTION_ICON_SIZE = "1em";
 const MESSAGE_SWIPE_ICON_SIZE = "1.15em";
@@ -710,6 +711,7 @@ export const ChatMessage = memo(function ChatMessage({
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [showThinking, setShowThinking] = useState(false);
+  const [showGenerationReplay, setShowGenerationReplay] = useState(false);
   const [showActions, setShowActions] = useState(false);
   const [avatarLightbox, setAvatarLightbox] = useState<string | null>(null);
   const [avatarLightboxPrompt, setAvatarLightboxPrompt] = useState<string | null>(null);
@@ -825,6 +827,11 @@ export const ChatMessage = memo(function ChatMessage({
   const isConversationStart = !!extra.isConversationStart;
   const isHiddenFromAI = extra.hiddenFromAI === true;
   const thinking = extra.thinking as string | undefined;
+  const generationReplay = hasGenerationReplayDetails(extra.generationReplay) ? extra.generationReplay : null;
+
+  useEffect(() => {
+    if (!generationReplay) setShowGenerationReplay(false);
+  }, [generationReplay]);
 
   // Remove an attachment from this message (keeps it in gallery)
   const qc = useQueryClient();
@@ -1147,18 +1154,6 @@ export const ChatMessage = memo(function ChatMessage({
   // ─── Swipe navigation ───
   const swipeCount = message.swipeCount ?? 0;
   const hasSwipes = swipeCount > 1;
-
-  const handleSwipePrev = useCallback(() => {
-    if (message.activeSwipeIndex > 0) {
-      onSetActiveSwipe?.(message.id, message.activeSwipeIndex - 1);
-    }
-  }, [message.id, message.activeSwipeIndex, onSetActiveSwipe]);
-
-  const handleSwipeNext = useCallback(() => {
-    if (message.activeSwipeIndex < swipeCount - 1) {
-      onSetActiveSwipe?.(message.id, message.activeSwipeIndex + 1);
-    }
-  }, [message.id, message.activeSwipeIndex, swipeCount, onSetActiveSwipe]);
 
   const useCompactRectangleAvatar = isRoleplay && roleplayAvatarStyle === "rectangles";
   const compactAvatarFrameClass = useCompactRectangleAvatar
@@ -1688,29 +1683,16 @@ export const ChatMessage = memo(function ChatMessage({
 
             {/* Swipes */}
             {hasSwipes && (
-              <div className="mari-message-swipes flex items-center gap-1.5 px-1 text-[0.75rem] text-white/40">
-                <button
-                  type="button"
-                  className="rounded-md p-[0.25em] transition-colors hover:bg-white/10 disabled:opacity-30"
-                  onClick={handleSwipePrev}
-                  disabled={message.activeSwipeIndex <= 0}
-                  aria-label="Previous swipe"
-                >
-                  <ChevronLeft size={MESSAGE_SWIPE_ICON_SIZE} />
-                </button>
-                <span className="tabular-nums">
-                  {message.activeSwipeIndex + 1}/{swipeCount}
-                </span>
-                <button
-                  type="button"
-                  className="rounded-md p-[0.25em] transition-colors hover:bg-white/10 disabled:opacity-30"
-                  onClick={handleSwipeNext}
-                  disabled={message.activeSwipeIndex >= swipeCount - 1}
-                  aria-label="Next swipe"
-                >
-                  <ChevronRight size={MESSAGE_SWIPE_ICON_SIZE} />
-                </button>
-              </div>
+              <SwipeJumpControl
+                messageId={message.id}
+                activeSwipeIndex={message.activeSwipeIndex}
+                swipeCount={swipeCount}
+                onSetActiveSwipe={(index) => onSetActiveSwipe?.(message.id, index)}
+                className="px-1 text-[0.75rem] text-white/40"
+                buttonClassName="rounded-md p-[0.25em] transition-colors hover:bg-white/10 disabled:opacity-30"
+                inputClassName="border-white/10 bg-white/5 text-white/70 [color-scheme:dark]"
+                iconSize={MESSAGE_SWIPE_ICON_SIZE}
+              />
             )}
 
             {/* Hover actions (tap to toggle on mobile) */}
@@ -1765,6 +1747,14 @@ export const ChatMessage = memo(function ChatMessage({
                   icon={<Eye size={MESSAGE_ACTION_ICON_SIZE} />}
                   onClick={() => onPeekPrompt?.()}
                   title="Peek prompt"
+                  dark
+                />
+              )}
+              {generationReplay && (
+                <ActionBtn
+                  icon={<ScrollText size={MESSAGE_ACTION_ICON_SIZE} />}
+                  onClick={() => setShowGenerationReplay(true)}
+                  title="Stored guidance"
                   dark
                 />
               )}
@@ -1858,6 +1848,13 @@ export const ChatMessage = memo(function ChatMessage({
 
         {/* Thinking modal */}
         {showThinking && thinking && <ThinkingModal thinking={thinking} onClose={() => setShowThinking(false)} />}
+        {generationReplay && (
+          <GenerationReplayDetailsModal
+            open={showGenerationReplay}
+            replay={generationReplay}
+            onClose={() => setShowGenerationReplay(false)}
+          />
+        )}
 
         {/* Avatar lightbox */}
         {avatarLightbox && (
@@ -2118,29 +2115,15 @@ export const ChatMessage = memo(function ChatMessage({
 
           {/* Swipes */}
           {hasSwipes && (
-            <div className="mari-message-swipes flex items-center gap-1.5 px-2 text-[0.75rem] text-[var(--muted-foreground)]">
-              <button
-                type="button"
-                className="rounded p-[0.25em] transition-colors hover:bg-[var(--accent)] disabled:opacity-30"
-                onClick={handleSwipePrev}
-                disabled={message.activeSwipeIndex <= 0}
-                aria-label="Previous swipe"
-              >
-                <ChevronLeft size={MESSAGE_SWIPE_ICON_SIZE} />
-              </button>
-              <span className="tabular-nums">
-                {message.activeSwipeIndex + 1}/{swipeCount}
-              </span>
-              <button
-                type="button"
-                className="rounded p-[0.25em] transition-colors hover:bg-[var(--accent)] disabled:opacity-30"
-                onClick={handleSwipeNext}
-                disabled={message.activeSwipeIndex >= swipeCount - 1}
-                aria-label="Next swipe"
-              >
-                <ChevronRight size={MESSAGE_SWIPE_ICON_SIZE} />
-              </button>
-            </div>
+            <SwipeJumpControl
+              messageId={message.id}
+              activeSwipeIndex={message.activeSwipeIndex}
+              swipeCount={swipeCount}
+              onSetActiveSwipe={(index) => onSetActiveSwipe?.(message.id, index)}
+              className="px-2 text-[0.75rem] text-[var(--muted-foreground)]"
+              buttonClassName="rounded p-[0.25em] transition-colors hover:bg-[var(--accent)] disabled:opacity-30"
+              iconSize={MESSAGE_SWIPE_ICON_SIZE}
+            />
           )}
 
           {/* Hover actions (tap to toggle on mobile) */}
@@ -2180,6 +2163,13 @@ export const ChatMessage = memo(function ChatMessage({
                 icon={<Eye size={MESSAGE_ACTION_ICON_SIZE} />}
                 onClick={() => onPeekPrompt?.()}
                 title="Peek prompt"
+              />
+            )}
+            {generationReplay && (
+              <ActionBtn
+                icon={<ScrollText size={MESSAGE_ACTION_ICON_SIZE} />}
+                onClick={() => setShowGenerationReplay(true)}
+                title="Stored guidance"
               />
             )}
             {thinking && !isUser && (
@@ -2265,6 +2255,13 @@ export const ChatMessage = memo(function ChatMessage({
 
       {/* Thinking modal */}
       {showThinking && thinking && <ThinkingModal thinking={thinking} onClose={() => setShowThinking(false)} />}
+      {generationReplay && (
+        <GenerationReplayDetailsModal
+          open={showGenerationReplay}
+          replay={generationReplay}
+          onClose={() => setShowGenerationReplay(false)}
+        />
+      )}
 
       {/* Avatar lightbox */}
       {avatarLightbox && (

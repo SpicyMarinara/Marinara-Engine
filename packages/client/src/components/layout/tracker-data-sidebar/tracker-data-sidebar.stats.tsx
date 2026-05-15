@@ -107,7 +107,7 @@ function StatBar({
           ? "grid-cols-[max-content_max-content]"
           : "grid-cols-[minmax(0,1fr)_max-content]";
   const valueGroupClass = cn(
-    "flex shrink-0 items-baseline justify-end gap-0 whitespace-nowrap tabular-nums text-[var(--muted-foreground)]",
+    "flex shrink-0 items-baseline justify-end gap-0 whitespace-nowrap tabular-nums text-[color:var(--tracker-profile-number-text)]",
     numberClass,
   );
   const valueInputClass = cn("min-w-0 px-0 py-0 text-right tabular-nums", numberClass);
@@ -115,7 +115,7 @@ function StatBar({
   return (
     <div
       className={cn(
-        "border-b border-[var(--border)]/18 last:border-b-0",
+        "border-b border-[var(--tracker-profile-row-rule)] last:border-b-0",
         isTight ? "py-0" : isCompact ? "py-px" : isRoomy ? "py-1" : "py-0.5",
         fillAvailable && "flex min-h-0 flex-col justify-center",
         isRoomy && "gap-1",
@@ -137,7 +137,7 @@ function StatBar({
           />
         ) : nameMode === "truncate" ? (
           <FittedText
-            className={cn("w-full font-medium text-[var(--foreground)]", nameTextClass)}
+            className={cn("w-full font-medium text-[color:var(--tracker-profile-text)]", nameTextClass)}
             title={visibleText(stat.name, "Stat")}
             minScale={0.56}
           >
@@ -146,7 +146,7 @@ function StatBar({
         ) : (
           <span
             className={cn(
-              "font-medium text-[var(--foreground)]",
+              "font-medium text-[color:var(--tracker-profile-text)]",
               nameTextClass,
               nameMode === "full" ? "whitespace-nowrap" : "min-w-0 truncate",
             )}
@@ -158,13 +158,17 @@ function StatBar({
         {onUpdateValue && onUpdateMax ? (
           <div className={valueGroupClass}>
             <InlineNumber value={stat.value} onChange={onUpdateValue} title="Value" className={valueInputClass} />
-            <span className="px-px text-[var(--muted-foreground)]/60">/</span>
+            <span className="px-px text-[color:color-mix(in_srgb,var(--tracker-profile-number-text)_58%,transparent)]">
+              /
+            </span>
             <InlineNumber value={stat.max} onChange={onUpdateMax} min={0} title="Max" className={valueInputClass} />
           </div>
         ) : (
           <div className={valueGroupClass} title={`${stat.value} / ${stat.max}`}>
             <span>{stat.value}</span>
-            <span className="px-px text-[var(--muted-foreground)]/60">/</span>
+            <span className="px-px text-[color:color-mix(in_srgb,var(--tracker-profile-number-text)_58%,transparent)]">
+              /
+            </span>
             <span>{stat.max}</span>
           </div>
         )}
@@ -183,13 +187,13 @@ function StatBar({
       </div>
       <div
         className={cn(
-          "relative isolate shrink-0 overflow-hidden bg-[color-mix(in_srgb,var(--background)_78%,var(--secondary)_22%)] ring-1 ring-[color-mix(in_srgb,var(--foreground)_9%,transparent)] shadow-[inset_0_1px_2px_rgba(0,0,0,0.36)]",
+          "relative isolate shrink-0 overflow-hidden bg-[image:var(--tracker-profile-stat-track)] ring-1 ring-[var(--tracker-profile-stat-track-ring)] shadow-[inset_0_1px_2px_var(--tracker-profile-stat-track-shadow)] [background-blend-mode:var(--tracker-profile-stat-track-blend)]",
           isRoomy ? "mt-0.5" : "mt-0",
           barClass,
         )}
       >
         <div
-          className="h-full rounded-[inherit] bg-[var(--primary)] shadow-[inset_0_1px_0_color-mix(in_srgb,var(--foreground)_22%,transparent),0_0_7px_color-mix(in_srgb,var(--foreground)_10%,transparent)] transition-[width] duration-200"
+          className="h-full rounded-[inherit] bg-[var(--primary)] shadow-[inset_0_1px_0_var(--tracker-profile-stat-fill-highlight),0_0_7px_var(--tracker-profile-stat-fill-glow)] transition-[width] duration-200"
           style={{ width: `${percent}%`, backgroundColor: stat.color || "var(--primary)" }}
         />
       </div>

@@ -6,6 +6,7 @@
 // The active chat's autonomous messaging is handled by ConversationView.
 
 import { useEffect, useRef } from "react";
+import type { Chat } from "@marinara-engine/shared";
 import type { AvatarCropValue } from "../lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -156,6 +157,15 @@ export function useBackgroundAutonomousPolling() {
                 // message isn't there even though it was saved.
                 qc.resetQueries({ queryKey: chatKeys.messages(chat.id) });
                 qc.invalidateQueries({ queryKey: characterKeys.list() });
+                void api
+                  .post<Chat>(`/chats/${chat.id}/autonomous-unread`, { characterId })
+                  .then((updatedChat) => {
+                    qc.setQueryData(chatKeys.detail(chat.id), updatedChat);
+                    qc.invalidateQueries({ queryKey: chatKeys.list() });
+                  })
+                  .catch(() => {
+                    /* persistence is best-effort; keep the local notification */
+                  });
 
                 // Resolve character name for the notification
                 let charName = "Someone";

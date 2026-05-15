@@ -1,8 +1,10 @@
 import { promises as dns } from "node:dns";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { basename, extname, relative, resolve, sep, win32 } from "node:path";
+import { brotliDecompressSync, gunzipSync, zstdDecompressSync } from "node:zlib";
 import { Agent } from "undici";
 import { isLoopbackIp, isPrivateNetworkIp } from "../middleware/ip-allowlist.js";
+import { logger } from "../lib/logger.js";
 import { CSRF_HEADER, CSRF_HEADER_VALUE } from "@marinara-engine/shared";
 
 export { CSRF_HEADER, CSRF_HEADER_VALUE };
@@ -45,6 +47,7 @@ export interface SafeFetchOptions extends Omit<RequestInit, "dispatcher"> {
   maxResponseBytes?: number;
   allowedContentTypes?: string[];
   bufferResponse?: boolean;
+  decodeCompressedResponse?: boolean;
   agentOptions?: Omit<AgentOptions, "connect">;
   dispatcher?: unknown;
 }
@@ -364,7 +367,12 @@ async function validateOutboundUrlForFetch(
   return { url: parsed, dispatcher };
 }
 
-async function readCappedResponse(response: Response, maxBytes: number, dispatcher?: Agent): Promise<Response> {
+async function readCappedResponse(
+  response: Response,
+  maxBytes: number,
+  dispatcher?: Agent,
+  decodeCompressedResponse = false,
+): Promise<Response> {
   if (!response.body) {
     await dispatcher?.close().catch(() => undefined);
     return response;
@@ -386,11 +394,37 @@ async function readCappedResponse(response: Response, maxBytes: number, dispatch
   } finally {
     await dispatcher?.close().catch(() => undefined);
   }
-  return new Response(Buffer.concat(chunks), {
+  const rawBody = Buffer.concat(chunks);
+  const normalized = decodeCompressedResponse
+    ? normalizeCompressedBody(rawBody, response.headers, maxBytes)
+    : { body: rawBody, headers: response.headers };
+  return new Response(normalized.body, {
     status: response.status,
     statusText: response.statusText,
-    headers: response.headers,
+    headers: normalized.headers,
   });
+}
+
+function normalizeCompressedBody(body: Buffer, headers: Headers, maxBytes: number): { body: Buffer; headers: Headers } {
+  const encoding = headers.get("content-encoding");
+  const normalized = decodePossiblyCompressedBody(body, maxBytes);
+  const shouldStripCompressionHeaders = normalized !== body || encoding != null;
+  if (normalized !== body) {
+    logger.debug(
+      "Decoded compressed outbound response body; contentEncoding=%s compressedBytes=%d decodedBytes=%d maxBytes=%d",
+      encoding?.trim() || "sniffed",
+      body.length,
+      normalized.length,
+      maxBytes,
+    );
+  }
+  if (shouldStripCompressionHeaders) {
+    const normalizedHeaders = new Headers(headers);
+    normalizedHeaders.delete("content-encoding");
+    normalizedHeaders.delete("content-length");
+    return { body: normalized, headers: normalizedHeaders };
+  }
+  return { body, headers };
 }
 
 function capStreamingResponse(response: Response, maxBytes: number, dispatcher?: Agent): Response {
@@ -434,14 +468,78 @@ function capStreamingResponse(response: Response, maxBytes: number, dispatcher?:
   });
 }
 
+export function decodePossiblyCompressedBody(buffer: Buffer, maxBytes = DEFAULT_MAX_RESPONSE_BYTES): Buffer {
+  let current = buffer;
+  let decoded = false;
+
+  for (let i = 0; i < 2; i += 1) {
+    const next = decodeByMagicBytes(current, maxBytes);
+    if (!next) break;
+    current = next;
+    decoded = true;
+  }
+
+  return decoded ? current : buffer;
+}
+
+function decodeByMagicBytes(buffer: Buffer, maxBytes: number): Buffer | null {
+  if (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b) {
+    return tryDecodeCompressedBody(buffer, "gzip", maxBytes);
+  }
+  if (buffer.length >= 4 && buffer[0] === 0x28 && buffer[1] === 0xb5 && buffer[2] === 0x2f && buffer[3] === 0xfd) {
+    return tryDecodeCompressedBody(buffer, "zstd", maxBytes);
+  }
+  if (!looksLikeProviderJsonOrSseBody(buffer)) {
+    const brotli = tryDecodeCompressedBody(buffer, "br", maxBytes);
+    if (brotli && looksLikeProviderJsonOrSseBody(brotli)) {
+      return brotli;
+    }
+  }
+  return null;
+}
+
+function looksLikeProviderJsonOrSseBody(buffer: Buffer): boolean {
+  const preview = buffer.subarray(0, 32).toString("utf8").trimStart();
+  return preview.startsWith("{") || preview.startsWith("[") || preview.startsWith("data:");
+}
+
+function tryDecodeCompressedBody(buffer: Buffer, algorithm: "gzip" | "br" | "zstd", maxBytes: number): Buffer | null {
+  try {
+    switch (algorithm) {
+      case "gzip":
+        return gunzipSync(buffer, { maxOutputLength: maxBytes });
+      case "br":
+        return brotliDecompressSync(buffer, { maxOutputLength: maxBytes });
+      case "zstd":
+        return zstdDecompressSync(buffer, { maxOutputLength: maxBytes });
+    }
+    return null;
+  } catch (err) {
+    if (err instanceof Error && "code" in err && err.code === "ERR_BUFFER_TOO_LARGE") {
+      throw new Error(`Outbound response exceeded ${maxBytes} bytes`);
+    }
+    return null;
+  }
+}
+
+export function requestHeadersWithIdentityEncoding(headersInit: RequestInit["headers"] | undefined): Headers {
+  const headers = new Headers(headersInit);
+  if (!headers.has("accept-encoding")) {
+    headers.set("accept-encoding", "identity");
+  }
+  return headers;
+}
+
 export async function safeFetch(url: string | URL, options: SafeFetchOptions = {}): Promise<Response> {
   const {
     policy,
     maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES,
     allowedContentTypes,
     bufferResponse = true,
+    decodeCompressedResponse = false,
     agentOptions,
     dispatcher,
+    headers,
     ...init
   } = options;
   if (dispatcher && !policy?.allowLocal) {
@@ -453,8 +551,10 @@ export async function safeFetch(url: string | URL, options: SafeFetchOptions = {
 
   for (let i = 0; i <= redirects; i += 1) {
     const internalDispatcher = dispatcher ? undefined : current.dispatcher;
+    const requestHeaders = decodeCompressedResponse ? requestHeadersWithIdentityEncoding(headers) : headers;
     const response = await fetch(current.url, {
       ...init,
+      ...(requestHeaders ? { headers: requestHeaders } : {}),
       redirect: "manual",
       dispatcher: dispatcher ?? internalDispatcher,
     } as unknown as RequestInit);
@@ -479,7 +579,7 @@ export async function safeFetch(url: string | URL, options: SafeFetchOptions = {
     }
 
     return bufferResponse
-      ? readCappedResponse(response, maxResponseBytes, internalDispatcher)
+      ? readCappedResponse(response, maxResponseBytes, internalDispatcher, decodeCompressedResponse)
       : capStreamingResponse(response, maxResponseBytes, internalDispatcher);
   }
 

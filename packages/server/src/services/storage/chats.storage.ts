@@ -7,6 +7,7 @@ import {
   chats,
   messages,
   messageSwipes,
+  gameStateSnapshots,
   chatImages,
   oocInfluences,
   conversationNotes,
@@ -24,6 +25,7 @@ import {
   normalizeTimestampOverrides,
   type TimestampOverrides,
 } from "../import/import-timestamps.js";
+import { scheduleNeedsRefresh, type CharacterSchedules, type WeekSchedule } from "../conversation/schedule.service.js";
 
 const GALLERY_DIR = join(DATA_DIR, "gallery");
 
@@ -76,6 +78,40 @@ function parseMetadata(raw: unknown): MetadataPatch {
   return typeof raw === "object" ? (raw as MetadataPatch) : {};
 }
 
+function readUnreadCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+function readCharacterIds(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+    : [];
+}
+
+function hasConversationSchedules(value: unknown): value is CharacterSchedules {
+  return !!value && typeof value === "object" && Object.keys(value as Record<string, unknown>).length > 0;
+}
+
+function areConversationSchedulesEnabled(meta: MetadataPatch): boolean {
+  if (typeof meta.conversationSchedulesEnabled === "boolean") return meta.conversationSchedulesEnabled;
+  return hasConversationSchedules(meta.characterSchedules);
+}
+
+function parseCharacterIds(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.filter((id): id is string => typeof id === "string" && id.length > 0);
+  if (typeof raw !== "string") return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string" && id.length > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+function firstScheduleWeekStart(schedules: CharacterSchedules): string | undefined {
+  return Object.values(schedules).find((schedule): schedule is WeekSchedule => !!schedule)?.weekStart;
+}
+
 function resolveTimestamps(overrides?: TimestampOverrides | null) {
   const normalized = normalizeTimestampOverrides(overrides);
   const createdAt = normalized?.createdAt ?? now();
@@ -110,6 +146,31 @@ async function invalidateMemoryChunksFrom(db: DB, chatId: string, createdAt: str
 
 /** Create the chat storage facade used by routes and importers. */
 export function createChatsStorage(db: DB) {
+  async function collectFreshConversationSchedules(
+    characterIds: string[],
+    excludeChatId?: string,
+  ): Promise<CharacterSchedules> {
+    const wanted = new Set(characterIds);
+    const sharedSchedules: CharacterSchedules = {};
+    if (wanted.size === 0) return sharedSchedules;
+
+    const allChats = await db.select().from(chats).orderBy(desc(chats.updatedAt));
+    for (const chat of allChats) {
+      if (chat.id === excludeChatId || chat.mode !== "conversation") continue;
+      const meta = parseMetadata(chat.metadata);
+      if (!areConversationSchedulesEnabled(meta) || !hasConversationSchedules(meta.characterSchedules)) continue;
+
+      for (const [characterId, schedule] of Object.entries(meta.characterSchedules)) {
+        if (!wanted.has(characterId) || sharedSchedules[characterId] || scheduleNeedsRefresh(schedule)) continue;
+        sharedSchedules[characterId] = schedule;
+      }
+
+      if (Object.keys(sharedSchedules).length === wanted.size) break;
+    }
+
+    return sharedSchedules;
+  }
+
   return {
     async list() {
       return db.select().from(chats).orderBy(desc(chats.updatedAt));
@@ -123,6 +184,22 @@ export function createChatsStorage(db: DB) {
     async create(input: CreateChatInput, timestampOverrides?: TimestampOverrides | null) {
       const id = newId();
       const timestamp = resolveTimestamps(timestampOverrides);
+      const inheritedSchedules =
+        input.mode === "conversation" ? await collectFreshConversationSchedules(input.characterIds) : {};
+      const metadata: MetadataPatch = {
+        summary: null,
+        tags: [],
+        enableAgents: true,
+        agentOverrides: {},
+        activeAgentIds: [],
+        activeToolIds: [],
+      };
+      if (hasConversationSchedules(inheritedSchedules)) {
+        metadata.conversationSchedulesEnabled = true;
+        metadata.characterSchedules = inheritedSchedules;
+        const scheduleWeekStart = firstScheduleWeekStart(inheritedSchedules);
+        if (scheduleWeekStart) metadata.scheduleWeekStart = scheduleWeekStart;
+      }
       await db.insert(chats).values({
         id,
         name: input.name,
@@ -132,18 +209,40 @@ export function createChatsStorage(db: DB) {
         personaId: input.personaId,
         promptPresetId: input.mode === "conversation" ? null : input.promptPresetId,
         connectionId: input.connectionId,
-        metadata: JSON.stringify({
-          summary: null,
-          tags: [],
-          enableAgents: true,
-          agentOverrides: {},
-          activeAgentIds: [],
-          activeToolIds: [],
-        }),
+        metadata: JSON.stringify(metadata),
         createdAt: timestamp.createdAt,
         updatedAt: timestamp.updatedAt,
       });
       return this.getById(id);
+    },
+
+    async inheritFreshConversationSchedules(id: string) {
+      const chat = await this.getById(id);
+      if (!chat || chat.mode !== "conversation") return {};
+
+      const meta = parseMetadata(chat.metadata);
+      if (meta.conversationSchedulesEnabled === false) return {};
+
+      const characterIds = parseCharacterIds(chat.characterIds);
+      const currentSchedules = hasConversationSchedules(meta.characterSchedules) ? meta.characterSchedules : {};
+      const missingOrStaleIds = characterIds.filter((characterId) => {
+        const existing = currentSchedules[characterId];
+        return !existing || scheduleNeedsRefresh(existing);
+      });
+      if (missingOrStaleIds.length === 0) return currentSchedules;
+
+      const sharedSchedules = await collectFreshConversationSchedules(missingOrStaleIds, id);
+      if (!hasConversationSchedules(sharedSchedules)) return currentSchedules;
+
+      const nextSchedules: CharacterSchedules = { ...currentSchedules, ...sharedSchedules };
+      const scheduleWeekStart = firstScheduleWeekStart(nextSchedules);
+      await this.patchMetadata(id, {
+        conversationSchedulesEnabled: true,
+        characterSchedules: nextSchedules,
+        ...(scheduleWeekStart ? { scheduleWeekStart } : {}),
+      });
+
+      return nextSchedules;
     },
 
     async update(
@@ -212,7 +311,11 @@ export function createChatsStorage(db: DB) {
       return this.getById(id);
     },
 
-    async patchMetadata(id: string, patchOrUpdater: MetadataPatch | MetadataUpdater) {
+    async patchMetadata(
+      id: string,
+      patchOrUpdater: MetadataPatch | MetadataUpdater,
+      opts: { touchUpdatedAt?: boolean } = {},
+    ) {
       return withMetadataPatchQueue(id, async () => {
         const existing = await this.getById(id);
         if (!existing) return null;
@@ -223,10 +326,52 @@ export function createChatsStorage(db: DB) {
 
         await db
           .update(chats)
-          .set({ metadata: JSON.stringify(merged), updatedAt: now() })
+          .set({
+            metadata: JSON.stringify(merged),
+            ...(opts.touchUpdatedAt !== false && { updatedAt: now() }),
+          })
           .where(eq(chats.id, id));
         return this.getById(id);
       });
+    },
+
+    async markAutonomousUnread(id: string, input?: { characterId?: string | null; count?: number }) {
+      const timestamp = now();
+      return this.patchMetadata(id, (current) => {
+        const increment = Math.max(1, Math.floor(input?.count ?? 1));
+        const currentCount = readUnreadCount(current.autonomousUnreadCount);
+        const characterIds = new Set(readCharacterIds(current.autonomousUnreadCharacterIds));
+        if (input?.characterId) characterIds.add(input.characterId);
+
+        return {
+          ...current,
+          autonomousUnreadCount: currentCount + increment,
+          autonomousUnreadCharacterIds: Array.from(characterIds),
+          autonomousUnreadAt: timestamp,
+        };
+      });
+    },
+
+    async clearAutonomousUnread(id: string) {
+      return this.patchMetadata(
+        id,
+        (current) => {
+          if (
+            current.autonomousUnreadCount === undefined &&
+            current.autonomousUnreadCharacterIds === undefined &&
+            current.autonomousUnreadAt === undefined
+          ) {
+            return current;
+          }
+
+          return {
+            autonomousUnreadCount: undefined,
+            autonomousUnreadCharacterIds: undefined,
+            autonomousUnreadAt: undefined,
+          };
+        },
+        { touchUpdatedAt: false },
+      );
     },
 
     async removeLorebookFromChatMetadata(lorebookId: string) {
@@ -615,6 +760,7 @@ export function createChatsStorage(db: DB) {
               thinking: null,
               generationInfo: null,
               attachments: null,
+              generationReplay: null,
             }
           : {};
         await db
@@ -690,6 +836,10 @@ export function createChatsStorage(db: DB) {
       }
 
       await db.delete(messageSwipes).where(eq(messageSwipes.id, target.id));
+      await db
+        .delete(gameStateSnapshots)
+        .where(and(eq(gameStateSnapshots.messageId, messageId), eq(gameStateSnapshots.swipeIndex, index)));
+
       const swipesToShift = await db
         .select()
         .from(messageSwipes)
@@ -699,6 +849,17 @@ export function createChatsStorage(db: DB) {
           .update(messageSwipes)
           .set({ index: swipe.index - 1 })
           .where(eq(messageSwipes.id, swipe.id));
+      }
+
+      const snapshotsToShift = await db
+        .select()
+        .from(gameStateSnapshots)
+        .where(and(eq(gameStateSnapshots.messageId, messageId), gt(gameStateSnapshots.swipeIndex, index)));
+      for (const snapshot of snapshotsToShift) {
+        await db
+          .update(gameStateSnapshots)
+          .set({ swipeIndex: snapshot.swipeIndex - 1 })
+          .where(eq(gameStateSnapshots.id, snapshot.id));
       }
 
       await db

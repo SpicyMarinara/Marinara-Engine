@@ -27,7 +27,7 @@ interface ChatFilesDrawerProps {
 }
 
 export function ChatFilesDrawer({ chat, open, onClose }: ChatFilesDrawerProps) {
-  const groupId = (chat as any).groupId as string | null;
+  const groupId = chat.groupId;
   const { data: groupChats, refetch: refetchGroupChats } = useChatGroup(groupId);
   const deleteChat = useDeleteChat();
   const deleteChatGroup = useDeleteChatGroup();
@@ -48,8 +48,8 @@ export function ChatFilesDrawer({ chat, open, onClose }: ChatFilesDrawerProps) {
     setIsImporting(true);
     try {
       const formData = new FormData();
-      formData.append("file", file);
       formData.append("chatId", chat.id);
+      formData.append("file", file);
       const res = await fetch("/api/import/st-chat-into-group", { method: "POST", body: formData });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data?.success === false || data?.error) {
@@ -107,10 +107,12 @@ export function ChatFilesDrawer({ chat, open, onClose }: ChatFilesDrawerProps) {
     ) {
       return;
     }
-    deleteChat.mutate(chatId);
-    if (chatId === activeChatId && chatFiles.length > 1) {
-      const next = chatFiles.find((c) => c.id !== chatId);
-      if (next) setActiveChatId(next.id);
+    const nextActiveChatId = chatId === activeChatId ? chatFiles.find((c) => c.id !== chatId)?.id : null;
+    try {
+      await deleteChat.mutateAsync({ id: chatId, groupId });
+      if (nextActiveChatId) setActiveChatId(nextActiveChatId);
+    } catch (err) {
+      toast.error(err instanceof Error ? `Delete failed: ${err.message}` : "Delete failed.");
     }
   };
 
@@ -320,8 +322,9 @@ export function ChatFilesDrawer({ chat, open, onClose }: ChatFilesDrawerProps) {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleDelete(cf.id);
+                          void handleDelete(cf.id);
                         }}
+                        disabled={deleteChat.isPending}
                         className="rounded-lg p-1.5 transition-all hover:bg-[var(--destructive)]/15"
                         title="Delete branch"
                       >

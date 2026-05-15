@@ -20,6 +20,7 @@ import {
   SectionHeader,
   TrackerProfileDisplayWash,
   TrackerProfileEdgeHighlight,
+  TrackerReadabilityVeil,
   TrackerPortraitStageBackdrop,
 } from "./tracker-data-sidebar.controls";
 import { StatList } from "./tracker-data-sidebar.stats";
@@ -45,12 +46,12 @@ function PersonaPortraitStage({
   return (
     <div
       className={cn(
-        "relative flex min-w-0 flex-col overflow-hidden rounded-b-md bg-[var(--background)]/18 ring-1 ring-[var(--tracker-profile-dialogue-border)] shadow-[0_0_10px_var(--tracker-profile-dialogue-glow),inset_0_-16px_24px_color-mix(in_srgb,var(--background)_58%,transparent)] @min-[380px]:col-start-2 @min-[380px]:row-start-1",
+        "relative flex min-w-0 flex-col overflow-hidden rounded-b-md bg-[image:var(--tracker-profile-surface)] ring-1 ring-[color-mix(in_srgb,var(--tracker-profile-rule)_58%,var(--border)_42%)] shadow-[inset_0_-16px_24px_color-mix(in_srgb,var(--background)_58%,transparent)] [background-blend-mode:var(--tracker-profile-surface-blend)] @min-[380px]:col-start-2 @min-[380px]:row-start-1",
         usingExpression ? "h-[12.25rem] self-start @min-[380px]:row-span-2 @min-[380px]:h-[13.25rem]" : "self-stretch",
       )}
     >
-      <div className="relative flex h-5 shrink-0 items-center gap-1 overflow-hidden border-b border-[var(--tracker-profile-dialogue-border)] bg-[color-mix(in_srgb,var(--background)_88%,var(--tracker-profile-box)_12%)] px-1">
-        <TrackerProfileDisplayWash className="opacity-[0.14]" />
+      <div className="relative flex h-5 shrink-0 items-center gap-1 overflow-hidden border-b border-[var(--tracker-profile-rule)] bg-[image:var(--tracker-profile-panel)] px-1 [background-blend-mode:var(--tracker-profile-panel-blend)]">
+        <TrackerProfileDisplayWash />
         <HeartPulse size="0.6875rem" className="relative z-[1] shrink-0 text-[var(--primary)]/80" />
         <InlineEdit
           value={status}
@@ -131,34 +132,36 @@ export function PersonaInventoryPanel({
   const fillPersonaStats = personaStatDensity === "normal" && personaStats.length >= 3;
 
   return (
-    <div
-      className="relative z-10 overflow-hidden border-b border-[var(--border)]/16 shadow-inner transition-colors duration-200"
-      style={getPersonaAmbienceStyle(persona)}
-    >
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-[image:var(--tracker-profile-display-layer)] opacity-20 [mask-image:linear-gradient(90deg,transparent_0%,black_18%,black_82%,transparent_100%)]" />
+    <div className="relative z-10 overflow-hidden border-b border-[color-mix(in_srgb,var(--border)_72%,transparent)] bg-[color-mix(in_srgb,var(--card)_5%,transparent)] shadow-inner transition-colors duration-200">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-[color-mix(in_srgb,var(--foreground)_6%,transparent)]" />
 
       <SectionHeader
         icon={<Sparkles size="0.6875rem" />}
         title="Persona"
         action={action}
+        className="bg-[color-mix(in_srgb,var(--background)_86%,var(--card)_14%)] [--primary:var(--sidebar-accent-foreground)] [--tracker-profile-display-solid:var(--sidebar-accent-foreground)]"
         collapsed={collapsed}
         onToggle={onToggleCollapsed}
       />
 
       {!collapsed && (
         <div className="relative pb-1 @min-[380px]:px-1 @min-[380px]:pb-1.5">
-          <div className="relative overflow-hidden rounded-md border border-[var(--tracker-profile-box)]/18 bg-[image:var(--tracker-profile-surface)] shadow-[inset_0_1px_0_color-mix(in_srgb,var(--foreground)_5%,transparent)]">
-            <div className="grid grid-cols-[minmax(0,1fr)_clamp(5.75rem,42cqw,7.35rem)] @min-[380px]:grid-cols-[minmax(0,1fr)_9rem] @min-[380px]:grid-rows-[auto_minmax(0,1fr)]">
+          <div
+            className="relative overflow-hidden rounded-md border border-[var(--tracker-profile-rule)] bg-[image:var(--tracker-profile-surface)] shadow-[inset_0_1px_0_color-mix(in_srgb,var(--foreground)_5%,transparent)] [background-blend-mode:var(--tracker-profile-surface-blend)]"
+            style={getPersonaAmbienceStyle(persona, { paintBackground: false })}
+          >
+            <TrackerReadabilityVeil strength="strong" />
+            <div className="relative z-[1] grid grid-cols-[minmax(0,1fr)_clamp(5.75rem,42cqw,7.35rem)] @min-[380px]:grid-cols-[minmax(0,1fr)_9rem] @min-[380px]:grid-rows-[auto_minmax(0,1fr)]">
               <div
                 className={cn(
-                  "min-w-0 border-r border-[var(--tracker-profile-box)]/16",
+                  "min-w-0 border-r border-[var(--tracker-profile-rule)]",
                   fillPersonaStats && "flex flex-col",
                 )}
               >
-                <div className="relative flex min-h-5 items-center justify-center overflow-hidden border-b border-[var(--tracker-profile-box)]/16 bg-[color-mix(in_srgb,var(--background)_88%,var(--tracker-profile-box)_12%)] px-1.5 py-0">
-                  <TrackerProfileDisplayWash className="opacity-[0.16]" />
+                <div className="relative flex min-h-5 items-center justify-center overflow-hidden border-b border-[var(--tracker-profile-rule)] bg-[image:var(--tracker-profile-panel-strong)] px-1.5 py-0 [background-blend-mode:var(--tracker-profile-panel-strong-blend)]">
+                  <TrackerProfileDisplayWash />
                   <FittedText
-                    className="relative z-[1] w-full text-sm font-semibold leading-5 text-[var(--foreground)]"
+                    className="relative z-[1] w-full text-sm font-semibold leading-5 text-[color:var(--tracker-profile-text)]"
                     title={personaName}
                     align="center"
                     minScale={0.58}
@@ -198,16 +201,16 @@ export function PersonaInventoryPanel({
 
               <div
                 className={cn(
-                  "col-span-2 border-t border-[var(--border)]/30 px-1 pb-1 pt-0.5",
+                  "col-span-2 border-t border-[var(--tracker-profile-rule)] px-1 pb-1 pt-0.5",
                   personaPortraitMode === "expression" &&
-                    "@min-[380px]:col-span-1 @min-[380px]:col-start-1 @min-[380px]:row-start-2 @min-[380px]:border-r @min-[380px]:border-r-[var(--border)]/34",
+                    "@min-[380px]:col-span-1 @min-[380px]:col-start-1 @min-[380px]:row-start-2 @min-[380px]:border-r @min-[380px]:border-r-[var(--tracker-profile-rule)]",
                 )}
               >
                 <div className="flex min-h-0 min-w-0 flex-col @min-[380px]:h-full">
-                  <div className="relative flex h-5 items-center gap-1 overflow-hidden bg-[color-mix(in_srgb,var(--background)_92%,var(--tracker-profile-box)_8%)] px-0.5 text-[0.6875rem] leading-[0.875rem]">
-                    <TrackerProfileDisplayWash className="opacity-[0.07] [mask-image:linear-gradient(90deg,transparent_0%,black_13%,black_87%,transparent_100%)]" />
+                  <div className="relative flex h-5 items-center gap-1 overflow-hidden bg-[image:var(--tracker-profile-panel)] px-0.5 text-[0.6875rem] leading-[0.875rem] [background-blend-mode:var(--tracker-profile-panel-blend)]">
+                    <TrackerProfileDisplayWash className="[mask-image:linear-gradient(90deg,transparent_0%,black_13%,black_87%,transparent_100%)]" />
                     <Package size="0.75rem" className="relative z-[1] shrink-0 text-[var(--primary)]/78" />
-                    <span className="relative z-[1] min-w-0 flex-1 truncate font-medium text-[color-mix(in_srgb,var(--foreground)_78%,var(--primary)_22%)]">
+                    <span className="relative z-[1] min-w-0 flex-1 truncate font-medium text-[color-mix(in_srgb,var(--tracker-profile-text)_78%,var(--primary)_22%)]">
                       Inventory
                     </span>
                     {addMode && (
@@ -246,7 +249,8 @@ export function PersonaInventoryPanel({
             </div>
             <TrackerProfileEdgeHighlight
               strength="strong"
-              className="[mask-image:linear-gradient(180deg,black_0%,black_84%,transparent_100%)]"
+              showBottom={false}
+              className="[mask-image:linear-gradient(180deg,black_0%,black_78%,transparent_100%)]"
             />
           </div>
         </div>
@@ -271,7 +275,7 @@ function CompactInventoryRow({
   return (
     <div
       className={cn(
-        "relative min-w-0 rounded-[2px] border border-[var(--border)]/24 bg-[var(--background)]/10 px-1 py-px",
+        "relative min-w-0 rounded-[2px] border border-[var(--tracker-profile-slot-rule)] bg-[image:var(--tracker-profile-slot-surface)] px-1 py-px shadow-[inset_0_1px_2px_var(--tracker-profile-slot-shadow)] [background-blend-mode:var(--tracker-profile-slot-surface-blend)]",
         fullWidth && "col-span-full",
         deleteMode && "pr-5",
       )}
@@ -280,7 +284,7 @@ function CompactInventoryRow({
         <InlineEdit
           value={item.name}
           onSave={(name) => onUpdate({ ...item, name: name || "Item" })}
-          className="h-4 w-full min-w-0 px-0.5 py-0 text-[0.625rem] font-medium leading-4 text-[var(--foreground)]/90 hover:bg-[var(--accent)]/25"
+          className="h-4 w-full min-w-0 px-0.5 py-0 text-[0.625rem] font-medium leading-4 text-[color:var(--tracker-profile-text)] hover:bg-[var(--accent)]/25"
           placeholder="Item"
           title={visibleText(item.name, "Item")}
           scrollOnHover
@@ -291,7 +295,7 @@ function CompactInventoryRow({
             value={item.quantity}
             onChange={(quantity) => onUpdate({ ...item, quantity })}
             min={0}
-            className="justify-self-end px-0 text-right text-[0.625rem] leading-4 text-[var(--foreground)]/85 hover:bg-transparent focus:bg-transparent focus:ring-0"
+            className="justify-self-end px-0 text-right text-[0.625rem] leading-4 text-[color:var(--tracker-profile-number-text)] hover:bg-transparent focus:bg-transparent focus:ring-0"
             title={`${item.name} quantity`}
           />
         </div>

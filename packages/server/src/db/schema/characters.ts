@@ -53,6 +53,8 @@ export const personas = sqliteTable("personas", {
   dialogueColor: text("dialogue_color").notNull().default(""),
   /** Chat bubble background color */
   boxColor: text("box_color").notNull().default(""),
+  /** Tracker card color source + optional custom palette (JSON) */
+  trackerCardColors: text("tracker_card_colors").notNull().default('{"mode":"chat"}'),
   /** Persona stats config (JSON) */
   personaStats: text("persona_stats").notNull().default(""),
   /** Alternative descriptions (JSON array of {id, label, content, active}) */

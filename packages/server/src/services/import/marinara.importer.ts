@@ -311,6 +311,10 @@ async function importPersona(data: unknown, db: DB) {
       nameColor: String(d.nameColor ?? ""),
       dialogueColor: String(d.dialogueColor ?? ""),
       boxColor: String(d.boxColor ?? ""),
+      trackerCardColors:
+        typeof d.trackerCardColors === "string"
+          ? d.trackerCardColors
+          : JSON.stringify(d.trackerCardColors ?? { mode: "chat" }),
       personaStats: typeof d.personaStats === "string" ? d.personaStats : "",
       altDescriptions: stringifyJsonField(d.altDescriptions, "[]"),
       tags: stringifyJsonField(d.tags, "[]"),
@@ -449,6 +453,7 @@ async function importLorebook(data: unknown, db: DB) {
         folderId: newFolderId,
         locked: Boolean(e.locked),
         preventRecursion: Boolean(e.preventRecursion),
+        excludeFromVectorization: Boolean(e.excludeFromVectorization),
         tag: String(e.tag ?? ""),
         relationships: (e.relationships as any) ?? {},
         dynamicState: (e.dynamicState as any) ?? {},

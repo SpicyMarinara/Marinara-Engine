@@ -41,12 +41,13 @@ import {
   mergeCustomParameters,
   parseExtra,
   parseStoredGenerationParameters,
+  resolveRegenerationGameStateAnchor,
+  resolveVisibleGameStateAnchor,
   resolveBaseUrl,
   type PromptAttachment,
 } from "../generate/generate-route-utils.js";
 import { buildGenerationPromptPresetCandidates, type PromptPresetCandidateSource } from "./prompt-preset-selection.js";
-import { gameStateSnapshots as gameStateSnapshotsTable } from "../../db/schema/index.js";
-import { and, desc, eq } from "drizzle-orm";
+import { createGameStateStorage, type GameStateVisibleAnchor } from "../../services/storage/game-state.storage.js";
 import { logger } from "../../lib/logger.js";
 
 type WrapFormat = "xml" | "markdown" | "none";
@@ -82,26 +83,17 @@ function resolveDryRunLorebookTokenBudget(chatMeta: Record<string, unknown>): nu
   return typeof raw === "number" && Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : undefined;
 }
 
-async function loadLatestGameSnapshot(app: FastifyInstance, chatId: string): Promise<any | null> {
-  const committedRows = await app.db
-    .select()
-    .from(gameStateSnapshotsTable)
-    .where(and(eq(gameStateSnapshotsTable.chatId, chatId), eq(gameStateSnapshotsTable.committed, 1)))
-    .orderBy(desc(gameStateSnapshotsTable.createdAt))
-    .limit(1);
-
-  let snap: any = committedRows[0];
-  if (!snap) {
-    const anyRows = await app.db
-      .select()
-      .from(gameStateSnapshotsTable)
-      .where(eq(gameStateSnapshotsTable.chatId, chatId))
-      .orderBy(desc(gameStateSnapshotsTable.createdAt))
-      .limit(1);
-    snap = anyRows[0];
-  }
-
-  return snap ?? null;
+async function loadLatestGameSnapshot(
+  app: FastifyInstance,
+  chatId: string,
+  visibleAnchor?: GameStateVisibleAnchor | null,
+  excludeMessageId?: string | null,
+): Promise<any | null> {
+  return createGameStateStorage(app.db).getForGeneration(chatId, {
+    preferLatestVisible: true,
+    visibleAnchor,
+    excludeMessageId,
+  });
 }
 
 function formatTrackersContextBlock(args: {
@@ -649,6 +641,13 @@ export async function registerDryRunRoute(app: FastifyInstance) {
     let chatMessages = supportsHiddenFromAI
       ? scopedMessages.filter((message: any) => !isMessageHiddenFromAI(message))
       : scopedMessages;
+    const regenerateMessageId =
+      typeof body.regenerateMessageId === "string" && body.regenerateMessageId.trim()
+        ? body.regenerateMessageId.trim()
+        : null;
+    const visibleGameStateAnchor = regenerateMessageId
+      ? resolveRegenerationGameStateAnchor(scopedMessages, regenerateMessageId)
+      : resolveVisibleGameStateAnchor(allChatMessages);
     const contextMessageLimit = chatMeta.contextMessageLimit as number | null;
     if (contextMessageLimit && contextMessageLimit > 0 && chatMessages.length > contextMessageLimit) {
       chatMessages = chatMessages.slice(-contextMessageLimit);
@@ -1073,7 +1072,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
 
       const trackersBlock = includeTrackers
         ? await (async () => {
-            const snap = await loadLatestGameSnapshot(app, chatId);
+            const snap = await loadLatestGameSnapshot(app, chatId, visibleGameStateAnchor, regenerateMessageId);
             if (!snap) return null;
             return formatTrackersContextBlock({ wrapFormat, snap, chatMeta });
           })()
@@ -1362,7 +1361,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
     // Optional injection: tracker context (read-only snapshot)
     const resolvedInjectTrackersForRun = usePromptParts ? false : resolvedInjectTrackers;
     if (resolvedInjectTrackersForRun) {
-      const snap = await loadLatestGameSnapshot(app, chatId);
+      const snap = await loadLatestGameSnapshot(app, chatId, visibleGameStateAnchor, regenerateMessageId);
       const contextBlock = snap ? formatTrackersContextBlock({ wrapFormat, snap, chatMeta }) : null;
       if (contextBlock) {
         finalMessages = injectTrackerContext(finalMessages, contextBlock, "beforeLastUser");

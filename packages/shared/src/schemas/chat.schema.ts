@@ -37,10 +37,12 @@ export const generateRequestSchema = z.object({
   mentionedCharacterNames: z.array(z.string()).optional().default([]),
   forCharacterId: z.string().nullable().optional().default(null),
   generationGuide: z.string().nullable().optional().default(null),
+  generationGuideSource: z.enum(["narrator", "guide", "game_start"]).nullable().optional().default(null),
   agentInjectionOverrides: z
     .array(
       z.object({
         agentType: z.string().min(1).max(100),
+        agentName: z.string().min(1).max(200).optional(),
         text: z.string().max(50_000),
       }),
     )
@@ -78,7 +80,13 @@ export const summariesPatchSchema = z.object({
   weekSummaries: z.record(z.string(), summaryEntrySchema).optional(),
 });
 
+export const markAutonomousUnreadSchema = z.object({
+  characterId: z.string().min(1).nullable().optional().default(null),
+  count: z.number().int().positive().max(100).optional().default(1),
+});
+
 export type CreateChatInput = z.infer<typeof createChatSchema>;
 export type CreateMessageInput = z.infer<typeof createMessageSchema>;
 export type GenerateRequestInput = z.infer<typeof generateRequestSchema>;
 export type SummariesPatchInput = z.infer<typeof summariesPatchSchema>;
+export type MarkAutonomousUnreadInput = z.infer<typeof markAutonomousUnreadSchema>;

@@ -146,6 +146,16 @@ interface ChatState {
   clearInputDraft: (chatId: string) => void;
   setCurrentInput: (text: string) => void;
   incrementUnread: (chatId: string) => void;
+  hydrateUnread: (
+    unread: Array<{
+      chatId: string;
+      count: number;
+      characterName: string;
+      avatarUrl: string | null;
+      avatarCrop?: NotificationAvatarCrop;
+    }>,
+    knownChatIds?: string[],
+  ) => void;
   clearUnread: (chatId: string) => void;
   addNotification: (
     chatId: string,
@@ -462,6 +472,43 @@ export const useChatStore = create<ChatState>()(
         const m = new Map(state.unreadCounts);
         m.set(chatId, (m.get(chatId) || 0) + 1);
         return { unreadCounts: m };
+      }),
+    hydrateUnread: (unread, knownChatIds) =>
+      set((state) => {
+        const unreadCounts = new Map(state.unreadCounts);
+        const chatNotifications = new Map(state.chatNotifications);
+        const serverChatIds = new Set<string>();
+        const known = knownChatIds ? new Set(knownChatIds) : null;
+
+        for (const item of unread) {
+          if (item.count <= 0 || state.activeChatId === item.chatId) continue;
+          serverChatIds.add(item.chatId);
+          unreadCounts.set(item.chatId, item.count);
+          if (!state.dismissedNotifications.has(item.chatId)) {
+            chatNotifications.set(item.chatId, {
+              chatId: item.chatId,
+              characterName: item.characterName,
+              avatarUrl: item.avatarUrl,
+              avatarCrop: item.avatarCrop ?? null,
+              count: item.count,
+            });
+          }
+        }
+
+        if (known) {
+          for (const chatId of Array.from(unreadCounts.keys())) {
+            if (!known.has(chatId) || !serverChatIds.has(chatId)) {
+              unreadCounts.delete(chatId);
+            }
+          }
+          for (const chatId of Array.from(chatNotifications.keys())) {
+            if (!known.has(chatId) || !serverChatIds.has(chatId)) {
+              chatNotifications.delete(chatId);
+            }
+          }
+        }
+
+        return { unreadCounts, chatNotifications };
       }),
     clearUnread: (chatId: string) =>
       set((state) => {

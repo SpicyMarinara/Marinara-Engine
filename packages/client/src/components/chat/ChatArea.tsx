@@ -42,7 +42,13 @@ import { chatBackgroundMetadataToUrl, chatBackgroundUrlToMetadata } from "../../
 import { useGameStateStore } from "../../stores/game-state.store";
 import { toast } from "sonner";
 import { BookOpen, Check, HelpCircle, MessageSquare, Theater, X } from "lucide-react";
-import type { SpritePlacement, SpriteSide } from "@marinara-engine/shared";
+import {
+  APP_VERSION,
+  BUILT_IN_AGENTS,
+  buildGuidedGenerationInstructionMessage,
+  type SpritePlacement,
+  type SpriteSide,
+} from "@marinara-engine/shared";
 import { useUIStore } from "../../stores/ui.store";
 import { useAgentStore } from "../../stores/agent.store";
 import { cn, parseAvatarCropJson } from "../../lib/utils";
@@ -50,8 +56,6 @@ import { Modal } from "../ui/Modal";
 import { useEncounter } from "../../hooks/use-encounter";
 import { useScene } from "../../hooks/use-scene";
 import { useEncounterStore } from "../../stores/encounter.store";
-import { APP_VERSION } from "@marinara-engine/shared";
-import { BUILT_IN_AGENTS } from "@marinara-engine/shared";
 import { useTranslationStore } from "../../stores/translation.store";
 import { ttsService } from "../../lib/tts-service";
 import { useTTSConfig } from "../../hooks/use-tts";
@@ -140,6 +144,8 @@ export function ChatArea() {
   const prevScrollHeightRef = useRef(0);
   const isLoadingMoreRef = useRef(false);
   const intuitiveTouchStartRef = useRef<{ x: number; y: number; target: EventTarget | null } | null>(null);
+  const swipeActionSeq = useRef(0);
+  const pendingSwipeMutationsRef = useRef(new Map<string, Promise<void>>());
   // Tracks whether the initial load stagger animation has played.
   // After the first render with messages, new/re-mounted messages
   // skip the entry animation to avoid a visible flash on refetch.
@@ -237,6 +243,7 @@ export function ChatArea() {
     if (!agentInjectionReview) return;
     const overrides = agentInjectionReview.injections.map((injection) => ({
       agentType: injection.agentType,
+      agentName: injection.agentName,
       text: agentInjectionDrafts[injection.agentType] ?? injection.text,
     }));
     const chatId = agentInjectionReview.chatId;
@@ -643,6 +650,18 @@ export function ChatArea() {
 
   const combatAgentEnabled = enabledAgentTypes.has("combat");
   const expressionAgentEnabled = enabledAgentTypes.has("expression");
+  const shouldRefreshGameStateOnSwipe = isGameChat || Boolean(chatMeta.enableAgents);
+
+  const refreshVisibleGameState = useCallback(async () => {
+    if (!shouldRefreshGameStateOnSwipe || !activeChatId) return;
+    try {
+      const gs = await api.get<import("@marinara-engine/shared").GameState | null>(`/chats/${activeChatId}/game-state`);
+      if (useChatStore.getState().activeChatId !== activeChatId) return;
+      useGameStateStore.getState().setGameState(gs ?? null);
+    } catch {
+      // Non-critical refresh failure; the next tracker load will fetch again.
+    }
+  }, [activeChatId, shouldRefreshGameStateOnSwipe]);
 
   const handleDelete = useCallback((messageId: string) => {
     setDeleteDialogMessageId(messageId);
@@ -664,11 +683,49 @@ export function ChatArea() {
   }, [deleteDialogMessageId, deleteMessage]);
 
   const handleDeleteSwipe = useCallback(() => {
-    if (deleteDialogMessageId && deleteDialogCanDeleteSwipe) {
-      deleteSwipe.mutate({ messageId: deleteDialogMessageId, index: deleteDialogActiveSwipeIndex });
-    }
+    const messageId = deleteDialogMessageId;
+    const index = deleteDialogActiveSwipeIndex;
     setDeleteDialogMessageId(null);
-  }, [deleteDialogActiveSwipeIndex, deleteDialogCanDeleteSwipe, deleteDialogMessageId, deleteSwipe]);
+    if (!messageId || !deleteDialogCanDeleteSwipe) return;
+    const actionId = ++swipeActionSeq.current;
+    const refreshChatId = activeChatId;
+    void (async () => {
+      const gameStateStore = useGameStateStore.getState();
+      if (shouldRefreshGameStateOnSwipe && refreshChatId) gameStateStore.setRefreshingChat(refreshChatId);
+      try {
+        const flushPatch = useGameStateStore.getState().flushPatch;
+        if (flushPatch) {
+          try {
+            await flushPatch();
+          } catch {
+            if (swipeActionSeq.current === actionId) {
+              toast.error("Could not save tracker changes before deleting the swipe.");
+            }
+            return;
+          }
+        }
+        if (swipeActionSeq.current !== actionId) return;
+        await deleteSwipe.mutateAsync({ messageId, index });
+        if (swipeActionSeq.current !== actionId) return;
+        await refreshVisibleGameState();
+      } catch {
+        if (swipeActionSeq.current !== actionId) return;
+        toast.error("Could not delete the swipe.");
+      } finally {
+        if (swipeActionSeq.current === actionId) {
+          useGameStateStore.getState().clearRefreshingChat(refreshChatId);
+        }
+      }
+    })();
+  }, [
+    activeChatId,
+    deleteDialogActiveSwipeIndex,
+    deleteDialogCanDeleteSwipe,
+    deleteDialogMessageId,
+    deleteSwipe,
+    refreshVisibleGameState,
+    shouldRefreshGameStateOnSwipe,
+  ]);
 
   const handleDeleteMore = useCallback(() => {
     if (deleteDialogMessageId) {
@@ -797,7 +854,8 @@ export function ChatArea() {
                 chatId: activeChatId,
                 connectionId: null,
                 regenerateMessageId: messageId,
-                generationGuide: currentInput?.toString(),
+                generationGuide: buildGuidedGenerationInstructionMessage(currentInput.toString()),
+                generationGuideSource: "guide",
               }
             : { chatId: activeChatId, connectionId: null, regenerateMessageId: messageId },
         );
@@ -833,24 +891,59 @@ export function ChatArea() {
 
   const handleSetActiveSwipe = useCallback(
     (messageId: string, index: number) => {
-      setActiveSwipe.mutate(
-        { messageId, index },
-        {
-          onSuccess: () => {
-            // Refetch game state so the HUD shows trackers for the active swipe
-            if (isGameChat && activeChatId) {
-              api
-                .get<import("@marinara-engine/shared").GameState | null>(`/chats/${activeChatId}/game-state`)
-                .then((gs) => {
-                  useGameStateStore.getState().setGameState(gs ?? null);
-                })
-                .catch(() => {});
+      const actionId = ++swipeActionSeq.current;
+      const refreshChatId = activeChatId;
+      void (async () => {
+        const gameStateStore = useGameStateStore.getState();
+        if (shouldRefreshGameStateOnSwipe && refreshChatId) gameStateStore.setRefreshingChat(refreshChatId);
+        try {
+          const flushPatch = useGameStateStore.getState().flushPatch;
+          if (flushPatch) {
+            try {
+              await flushPatch();
+            } catch {
+              if (swipeActionSeq.current === actionId) {
+                toast.error("Could not save tracker changes before switching swipes.");
+              }
+              return;
             }
-          },
-        },
-      );
+          }
+          if (swipeActionSeq.current !== actionId) return;
+          const previousMutation = pendingSwipeMutationsRef.current.get(messageId);
+          if (previousMutation) {
+            try {
+              await previousMutation;
+            } catch {
+              // The active action below will report its own failure if needed.
+            }
+          }
+          if (swipeActionSeq.current !== actionId) return;
+          const mutation = setActiveSwipe.mutateAsync({ messageId, index });
+          const trackedMutation = mutation.then(
+            () => undefined,
+            () => undefined,
+          );
+          pendingSwipeMutationsRef.current.set(messageId, trackedMutation);
+          try {
+            await mutation;
+          } finally {
+            if (pendingSwipeMutationsRef.current.get(messageId) === trackedMutation) {
+              pendingSwipeMutationsRef.current.delete(messageId);
+            }
+          }
+          if (swipeActionSeq.current !== actionId) return;
+          await refreshVisibleGameState();
+        } catch {
+          if (swipeActionSeq.current !== actionId) return;
+          toast.error("Could not switch swipes.");
+        } finally {
+          if (swipeActionSeq.current === actionId) {
+            useGameStateStore.getState().clearRefreshingChat(refreshChatId);
+          }
+        }
+      })();
     },
-    [setActiveSwipe, isGameChat, activeChatId],
+    [activeChatId, setActiveSwipe, refreshVisibleGameState, shouldRefreshGameStateOnSwipe],
   );
 
   const handleEdit = useCallback(

@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import Fastify from "fastify";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import type { DB } from "../src/db/connection.js";
 import { runMigrations } from "../src/db/migrate.js";
 import {
+  agentConfigs,
   apiConnections,
   characters,
   chats,
@@ -42,6 +44,47 @@ function buildCharacterData(id: string, name: string) {
 
 function timestamp(index: number) {
   return `2026-05-12T12:${String(index).padStart(2, "0")}:00.000Z`;
+}
+
+function readRequestBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      try {
+        resolve(body ? (JSON.parse(body) as Record<string, unknown>) : {});
+      } catch (error) {
+        reject(error);
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+function writeChatCompletion(res: ServerResponse, content: string) {
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(
+    JSON.stringify({
+      id: "chatcmpl-test",
+      object: "chat.completion",
+      created: 0,
+      model: "test-model",
+      choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    }),
+  );
+}
+
+function closeServer(server: ReturnType<typeof createServer>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.close((error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
 }
 
 test("regenerating a hidden roleplay assistant message does not treat the target as missing", async () => {
@@ -151,5 +194,154 @@ test("regenerating a hidden roleplay assistant message does not treat the target
     }
   } finally {
     client.close();
+  }
+});
+
+test("smart group selector uses the configured Response Orchestrator connection and budget", async () => {
+  const selectorRequests: Record<string, unknown>[] = [];
+  const mainRequests: Record<string, unknown>[] = [];
+  const selectorServer = createServer(async (req, res) => {
+    const body = await readRequestBody(req);
+    selectorRequests.push(body);
+    writeChatCompletion(res, JSON.stringify({ characterIds: ["char-alpha"], reason: "most relevant" }));
+  });
+  const mainServer = createServer(async (req, res) => {
+    const body = await readRequestBody(req);
+    mainRequests.push(body);
+    writeChatCompletion(res, "Alpha replies from the main model.");
+  });
+  const selectorUrl = await new Promise<string>((resolve, reject) => {
+    selectorServer.once("error", reject);
+    selectorServer.listen(0, "127.0.0.1", () => {
+      const address = selectorServer.address();
+      assert.ok(address && typeof address === "object");
+      resolve(`http://127.0.0.1:${address.port}/v1`);
+    });
+  });
+  const mainUrl = await new Promise<string>((resolve, reject) => {
+    mainServer.once("error", reject);
+    mainServer.listen(0, "127.0.0.1", () => {
+      const address = mainServer.address();
+      assert.ok(address && typeof address === "object");
+      resolve(`http://127.0.0.1:${address.port}/v1`);
+    });
+  });
+  const client = createClient({ url: "file::memory:" });
+  const db = drizzle(client) as unknown as DB;
+
+  try {
+    await runMigrations(db);
+
+    await db.insert(apiConnections).values([
+      {
+        id: "conn-main",
+        name: "Main connection",
+        provider: "custom",
+        baseUrl: mainUrl,
+        apiKeyEncrypted: "",
+        model: "main-model",
+        maxContext: 4096,
+        isDefault: "false",
+        useForRandom: "false",
+        enableCaching: "false",
+        defaultForAgents: "false",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: "conn-orchestrator",
+        name: "Orchestrator connection",
+        provider: "custom",
+        baseUrl: selectorUrl,
+        apiKeyEncrypted: "",
+        model: "orchestrator-model",
+        maxContext: 4096,
+        isDefault: "false",
+        useForRandom: "false",
+        enableCaching: "false",
+        defaultForAgents: "false",
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+
+    await db.insert(agentConfigs).values({
+      id: "agent-response-orchestrator",
+      type: "response-orchestrator",
+      name: "Response Orchestrator",
+      description: "Selects group speakers",
+      phase: "pre_generation",
+      enabled: "true",
+      connectionId: "conn-orchestrator",
+      promptTemplate: "",
+      settings: JSON.stringify({ maxTokens: 2048, temperature: 0.4 }),
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await db.insert(characters).values([
+      {
+        id: "char-alpha",
+        data: JSON.stringify(buildCharacterData("char-alpha", "Alpha")),
+        comment: "",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: "char-beta",
+        data: JSON.stringify(buildCharacterData("char-beta", "Beta")),
+        comment: "",
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+
+    await db.insert(chats).values({
+      id: "chat-smart-selector",
+      name: "Smart selector repro",
+      mode: "roleplay",
+      characterIds: JSON.stringify(["char-alpha", "char-beta"]),
+      connectionId: "conn-main",
+      metadata: JSON.stringify({
+        enableAgents: true,
+        activeAgentIds: [],
+        groupChatMode: "individual",
+        groupResponseOrder: "smart",
+      }),
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const app = Fastify({ logger: false });
+    app.decorate("db", db);
+    try {
+      await app.register(generateRoutes, { prefix: "/api/generate" });
+      await app.ready();
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/generate/",
+        payload: {
+          chatId: "chat-smart-selector",
+          connectionId: "conn-main",
+          userMessage: "Who wants to answer this?",
+          streaming: true,
+        },
+      });
+
+      assert.equal(response.statusCode, 200);
+      assert.equal(selectorRequests.length, 1);
+      assert.equal(mainRequests.length, 1);
+      assert.equal(selectorRequests[0]!.model, "orchestrator-model");
+      assert.equal(selectorRequests[0]!.max_tokens, 2048);
+      assert.equal(selectorRequests[0]!.temperature, 0.4);
+      assert.equal(selectorRequests[0]!.stream, false);
+      assert.equal(mainRequests[0]!.model, "main-model");
+    } finally {
+      await app.close();
+    }
+  } finally {
+    client.close();
+    await Promise.all([closeServer(selectorServer), closeServer(mainServer)]);
   }
 });

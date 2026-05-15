@@ -4,8 +4,10 @@ import { promises as dns } from "node:dns";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join, resolve, win32 } from "node:path";
 import { tmpdir } from "node:os";
+import { brotliCompressSync, gzipSync, zstdCompressSync } from "node:zlib";
 import {
   assertInsideDir,
+  decodePossiblyCompressedBody,
   isAllowedImageBuffer,
   normalizeLoopbackUrl,
   safeFetch,
@@ -188,6 +190,156 @@ test("safeFetch can return a streaming capped response without buffering", async
   assert.ok(reader);
   const first = await reader.read();
   assert.equal(Buffer.from(first.value ?? []).toString("utf8"), "hello");
+});
+
+test("safeFetch decodes raw gzip bodies when providers omit content-encoding", async () => {
+  const response = await safeFetch("https://example.com/models", {
+    policy: { allowLocal: true },
+    decodeCompressedResponse: true,
+    dispatcher: {
+      dispatch(
+        _options: unknown,
+        handler: {
+          onConnect: (abort: () => void) => void;
+          onHeaders: (status: number, headers: string[], resume: () => void) => void;
+          onData: (chunk: Buffer) => void;
+          onComplete: (trailers: string[]) => void;
+        },
+      ) {
+        handler.onConnect(() => undefined);
+        handler.onHeaders(200, ["content-type", "application/json"], () => undefined);
+        handler.onData(gzipSync(Buffer.from(JSON.stringify({ models: [{ id: "openrouter/test" }] }))));
+        handler.onComplete([]);
+        return true;
+      },
+    },
+  });
+
+  assert.deepEqual(await response.json(), { models: [{ id: "openrouter/test" }] });
+});
+
+test("safeFetch decodes raw zstd bodies and clears stale compression headers", async () => {
+  const compressed = zstdCompressSync(Buffer.from(JSON.stringify({ models: [{ id: "venice/test" }] })));
+  const response = await safeFetch("https://example.com/models", {
+    policy: { allowLocal: true },
+    decodeCompressedResponse: true,
+    dispatcher: {
+      dispatch(
+        _options: unknown,
+        handler: {
+          onConnect: (abort: () => void) => void;
+          onHeaders: (status: number, headers: string[], resume: () => void) => void;
+          onData: (chunk: Buffer) => void;
+          onComplete: (trailers: string[]) => void;
+        },
+      ) {
+        handler.onConnect(() => undefined);
+        handler.onHeaders(
+          200,
+          ["content-type", "application/json", "content-encoding", "zstd", "content-length", String(compressed.length)],
+          () => undefined,
+        );
+        handler.onData(compressed);
+        handler.onComplete([]);
+        return true;
+      },
+    },
+  });
+
+  assert.equal(response.headers.get("content-encoding"), null);
+  assert.equal(response.headers.get("content-length"), null);
+  assert.deepEqual(await response.json(), { models: [{ id: "venice/test" }] });
+});
+
+test("safeFetch leaves raw compressed bodies alone unless decoding is opted in", async () => {
+  const compressed = gzipSync(Buffer.from(JSON.stringify({ models: [{ id: "openrouter/test" }] })));
+  const response = await safeFetch("https://example.com/models", {
+    policy: { allowLocal: true },
+    dispatcher: {
+      dispatch(
+        _options: unknown,
+        handler: {
+          onConnect: (abort: () => void) => void;
+          onHeaders: (status: number, headers: string[], resume: () => void) => void;
+          onData: (chunk: Buffer) => void;
+          onComplete: (trailers: string[]) => void;
+        },
+      ) {
+        handler.onConnect(() => undefined);
+        handler.onHeaders(200, ["content-type", "application/json"], () => undefined);
+        handler.onData(compressed);
+        handler.onComplete([]);
+        return true;
+      },
+    },
+  });
+
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), compressed);
+});
+
+test("safeFetch asks for identity encoding when compressed decoding is opted in", async () => {
+  const originalFetch = globalThis.fetch;
+  const seenAcceptEncodings: Array<string | null> = [];
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+    seenAcceptEncodings.push(new Headers(init?.headers).get("accept-encoding"));
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  try {
+    const response = await safeFetch("https://example.com/models", {
+      policy: { allowLocal: true },
+      decodeCompressedResponse: true,
+    });
+
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.equal(seenAcceptEncodings[0], "identity");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("decodePossiblyCompressedBody handles raw gzip, brotli, and zstd JSON bodies", () => {
+  const json = Buffer.from(JSON.stringify({ ok: true }));
+  const cases = [gzipSync(json), brotliCompressSync(json), zstdCompressSync(json)];
+
+  for (const body of cases) {
+    assert.deepEqual(JSON.parse(decodePossiblyCompressedBody(body).toString("utf8")), { ok: true });
+  }
+
+  assert.equal(decodePossiblyCompressedBody(json).toString("utf8"), json.toString("utf8"));
+});
+
+test("safeFetch caps decoded raw gzip bodies when providers omit content-encoding", async () => {
+  await assert.rejects(
+    () =>
+      safeFetch("https://example.com/models", {
+        policy: { allowLocal: true },
+        maxResponseBytes: 64,
+        decodeCompressedResponse: true,
+        dispatcher: {
+          dispatch(
+            _options: unknown,
+            handler: {
+              onConnect: (abort: () => void) => void;
+              onHeaders: (status: number, headers: string[], resume: () => void) => void;
+              onData: (chunk: Buffer) => void;
+              onComplete: (trailers: string[]) => void;
+            },
+          ) {
+            handler.onConnect(() => undefined);
+            handler.onHeaders(200, ["content-type", "application/json"], () => undefined);
+            handler.onData(gzipSync(Buffer.from("x".repeat(512))));
+            handler.onComplete([]);
+            return true;
+          },
+        },
+      }),
+    /Outbound response exceeded 64 bytes/,
+  );
 });
 
 test("safeFetch rejects missing content-type when a content gate is configured", async () => {

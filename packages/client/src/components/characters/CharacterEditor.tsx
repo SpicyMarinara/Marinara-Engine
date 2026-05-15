@@ -81,12 +81,14 @@ import { extractColorsFromImage } from "../../lib/avatar-color-extraction";
 import { HelpTooltip } from "../ui/HelpTooltip";
 import { api } from "../../lib/api-client";
 import { ColorPicker } from "../ui/ColorPicker";
+import { TrackerCardColorControls } from "../ui/TrackerCardColorControls";
 import { ExpandedTextarea } from "../ui/ExpandedTextarea";
 import { Modal } from "../ui/Modal";
 import { SpriteFrameEditor } from "../ui/SpriteFrameEditor";
 import { SpriteWandCleanupEditor } from "../ui/SpriteWandCleanupEditor";
 import { ExportFormatDialog, type ExportFormatChoice } from "../ui/ExportFormatDialog";
 import type { CharacterCardVersion, CharacterData, RPGStatsConfig } from "@marinara-engine/shared";
+import { parseTrackerCardColorConfig, serializeTrackerCardColorConfig } from "../../lib/tracker-card-colors";
 
 // ── Tabs ──
 const TABS = [
@@ -328,6 +330,9 @@ export function CharacterEditor() {
         nameColor: (formData.extensions.nameColor as string) ?? "",
         dialogueColor: (formData.extensions.dialogueColor as string) ?? "",
         boxColor: (formData.extensions.boxColor as string) ?? "",
+        trackerCardColors: serializeTrackerCardColorConfig(
+          parseTrackerCardColorConfig(formData.extensions.trackerCardColors),
+        ),
         personaStats,
         altDescriptions: "[]",
         tags: JSON.stringify(formData.tags ?? []),
@@ -434,6 +439,7 @@ export function CharacterEditor() {
       </button>
 
       <button
+        type="button"
         onClick={() => updateExtension("fav", !formData.extensions.fav)}
         className={cn(
           "rounded-xl p-2 transition-all max-md:rounded-lg max-md:p-1.5",
@@ -444,7 +450,7 @@ export function CharacterEditor() {
         {formData.extensions.fav ? <Star size="1rem" fill="currentColor" /> : <StarOff size="1rem" />}
       </button>
 
-      <button onClick={() => setExportDialogOpen(true)} className={headerActionButtonClass} title="Export character">
+      <button type="button" onClick={() => setExportDialogOpen(true)} className={headerActionButtonClass} title="Export character">
         <svg width="1rem" height="1rem" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path
             d="M10 13V3m0 0l-4 4m4-4l4 4"
@@ -458,6 +464,7 @@ export function CharacterEditor() {
       </button>
 
       <button
+        type="button"
         onClick={handleImportAsPersona}
         disabled={createPersona.isPending || uploadPersonaAvatar.isPending}
         className="rounded-xl p-2 text-[var(--muted-foreground)] transition-all hover:bg-emerald-500/10 hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-50 max-md:rounded-lg max-md:p-1.5"
@@ -471,6 +478,7 @@ export function CharacterEditor() {
       </button>
 
       <button
+        type="button"
         onClick={() => {
           if (!characterId) return;
           duplicateCharacter.mutate(characterId, {
@@ -486,6 +494,7 @@ export function CharacterEditor() {
       </button>
 
       <button
+        type="button"
         onClick={handleDelete}
         className="rounded-xl p-2 text-[var(--muted-foreground)] transition-all hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)] max-md:rounded-lg max-md:p-1.5"
         title="Delete character"
@@ -530,6 +539,7 @@ export function CharacterEditor() {
       <div className="flex flex-wrap items-start gap-3 border-b border-[var(--border)] bg-[var(--card)] px-4 py-3 max-md:gap-2 max-md:px-3">
         <div className="flex min-w-0 flex-1 items-center gap-3 max-md:min-w-full">
           <button
+            type="button"
             onClick={handleClose}
             className="rounded-xl p-2 transition-all hover:bg-[var(--accent)] active:scale-95 max-md:rounded-lg max-md:p-1.5"
             title="Back"
@@ -597,6 +607,7 @@ export function CharacterEditor() {
 
         {/* Save */}
         <button
+          type="button"
           onClick={handleSave}
           disabled={!dirty || saving}
           className={cn(
@@ -619,18 +630,21 @@ export function CharacterEditor() {
           <AlertTriangle size="0.9375rem" className="shrink-0 text-amber-500" />
           <p className="flex-1 text-xs font-medium text-amber-500">You have unsaved changes. Close without saving?</p>
           <button
+            type="button"
             onClick={() => setShowUnsavedWarning(false)}
             className="rounded-lg px-3 py-1 text-xs font-medium text-[var(--muted-foreground)] transition-all hover:bg-[var(--accent)]"
           >
             Keep editing
           </button>
           <button
+            type="button"
             onClick={forceClose}
             className="rounded-lg bg-amber-500/15 px-3 py-1 text-xs font-medium text-amber-500 transition-all hover:bg-amber-500/25"
           >
             Discard & close
           </button>
           <button
+            type="button"
             onClick={async () => {
               await handleSave();
               closeDetail();
@@ -650,6 +664,7 @@ export function CharacterEditor() {
             const Icon = tab.icon;
             return (
               <button
+                type="button"
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={cn(
@@ -966,6 +981,7 @@ function TextareaTab({
       <div className="flex items-start justify-between gap-2 mb-4">
         <SectionHeader title={title} subtitle={subtitle} />
         <button
+          type="button"
           onClick={() => setExpanded(true)}
           className="mt-0.5 shrink-0 rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
           title="Expand editor"
@@ -1123,6 +1139,7 @@ function MetadataTab({
               <Tag size="0.625rem" />
               {tag}
               <button
+                type="button"
                 onClick={() => removeTag(tag)}
                 className="ml-0.5 rounded-full transition-colors hover:text-[var(--destructive)]"
               >
@@ -1140,6 +1157,7 @@ function MetadataTab({
             className="flex-1 rounded-xl border border-[var(--border)] bg-[var(--secondary)] px-3 py-1.5 text-xs outline-none focus:border-[var(--primary)]/40"
           />
           <button
+            type="button"
             onClick={addTag}
             className="rounded-xl bg-[var(--primary)]/15 px-3 py-1.5 text-xs font-medium text-[var(--primary)] transition-all hover:bg-[var(--primary)]/25"
           >
@@ -1445,6 +1463,7 @@ function DialogueTab({
             <HelpTooltip text="The character's opening message when a new chat starts. Good first messages set the scene and establish the character's voice." />
           </span>
           <button
+            type="button"
             onClick={() => setExpandedField("first_mes")}
             className="shrink-0 rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
             title="Expand editor"
@@ -1469,6 +1488,7 @@ function DialogueTab({
             <HelpTooltip text="Alternative first messages for variety. When starting a new chat, you can pick which greeting to use." />
           </span>
           <button
+            type="button"
             onClick={addGreeting}
             className="rounded-xl bg-[var(--primary)]/15 px-3 py-1 text-xs font-medium text-[var(--primary)] transition-all hover:bg-[var(--primary)]/25"
           >
@@ -1486,6 +1506,7 @@ function DialogueTab({
             />
             <div className="absolute right-2 top-2 flex items-center gap-0.5">
               <button
+                type="button"
                 onClick={() => setExpandedField(i)}
                 className="rounded-lg p-1 text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)]"
                 title="Expand editor"
@@ -1493,6 +1514,7 @@ function DialogueTab({
                 <Maximize2 size="0.75rem" />
               </button>
               <button
+                type="button"
                 onClick={() => removeGreeting(i)}
                 className="rounded-lg p-1 text-[var(--muted-foreground)] transition-colors hover:text-[var(--destructive)]"
               >
@@ -1511,6 +1533,7 @@ function DialogueTab({
             <HelpTooltip text="Sample conversations showing how the character talks. Helps the AI learn the character's speaking style, vocabulary, and mannerisms." />
           </span>
           <button
+            type="button"
             onClick={() => setExpandedField("mes_example")}
             className="shrink-0 rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
             title="Expand editor"
@@ -1587,6 +1610,7 @@ function AdvancedTab({
             <HelpTooltip text="Overrides or appends to the main system prompt when this character is active. Use this for character-specific instructions the AI must follow." />
           </span>
           <button
+            type="button"
             onClick={() => setExpandedField("system_prompt")}
             className="shrink-0 rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
             title="Expand editor"
@@ -1610,6 +1634,7 @@ function AdvancedTab({
             <HelpTooltip text="Text inserted after the chat history, right before the AI generates. Great for reminders like 'stay in character' or 'respond in 2 paragraphs'." />
           </span>
           <button
+            type="button"
             onClick={() => setExpandedField("post_history")}
             className="shrink-0 rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
             title="Expand editor"
@@ -1634,6 +1659,7 @@ function AdvancedTab({
             <HelpTooltip text="Injects text at a specific position in the chat history. Depth 0 = at the end, depth 4 = 4 messages back. Useful for persistent reminders." />
           </span>
           <button
+            type="button"
             onClick={() => setExpandedField("depth_prompt")}
             className="shrink-0 rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
             title="Expand editor"
@@ -1756,6 +1782,7 @@ function CharacterGalleryTab({ characterId, characterName }: { characterId: stri
       <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleUpload} />
 
       <button
+        type="button"
         onClick={() => fileInputRef.current?.click()}
         disabled={upload.isPending}
         className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[var(--border)] px-4 py-6 text-xs text-[var(--muted-foreground)] transition-all hover:border-[var(--primary)] hover:text-[var(--primary)] disabled:opacity-50"
@@ -1777,7 +1804,7 @@ function CharacterGalleryTab({ characterId, characterName }: { characterId: stri
               key={image.id}
               className="group relative overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] transition-all hover:border-[var(--primary)]/30 hover:shadow-md"
             >
-              <button className="block aspect-square w-full bg-[var(--secondary)]" onClick={() => setLightbox(image)}>
+              <button type="button" className="block aspect-square w-full bg-[var(--secondary)]" onClick={() => setLightbox(image)}>
                 <img
                   src={image.url}
                   alt={image.prompt || characterName || "Character image"}
@@ -1799,6 +1826,7 @@ function CharacterGalleryTab({ characterId, characterName }: { characterId: stri
                     <Download size="0.75rem" />
                   </a>
                   <button
+                    type="button"
                     onClick={() => void handleDelete(image)}
                     className="rounded-lg bg-red-500/35 p-1.5 text-white transition-colors hover:bg-red-500/55"
                     title="Delete"
@@ -1851,6 +1879,7 @@ function CharacterGalleryTab({ characterId, characterName }: { characterId: stri
                 <Download size="0.875rem" />
               </a>
               <button
+                type="button"
                 onClick={() => setLightbox(null)}
                 className="rounded-lg bg-black/60 p-2 text-white transition-colors hover:bg-black/80"
               >
@@ -2213,6 +2242,7 @@ function SpritesTab({
 
       <div className="inline-flex rounded-xl bg-[var(--secondary)] p-1 ring-1 ring-[var(--border)]">
         <button
+          type="button"
           onClick={() => setCategory("expressions")}
           className={cn(
             "rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
@@ -2224,6 +2254,7 @@ function SpritesTab({
           Facial Expressions
         </button>
         <button
+          type="button"
           onClick={() => setCategory("full-body")}
           className={cn(
             "rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
@@ -2257,6 +2288,7 @@ function SpritesTab({
           </h4>
           <div className="flex flex-wrap items-center gap-2 md:justify-end">
             <button
+              type="button"
               onClick={() => setSpriteGenOpen(true)}
               disabled={spriteGenerationUnavailable}
               className="flex min-w-0 items-center justify-center gap-1.5 rounded-lg bg-purple-500/10 px-3 py-1.5 text-center text-[0.6875rem] font-medium leading-tight text-purple-400 ring-1 ring-purple-500/20 transition-all hover:bg-purple-500/20 disabled:cursor-not-allowed disabled:opacity-40 max-md:flex-1 max-md:basis-[calc(50%-0.25rem)] max-md:px-2.5"
@@ -2268,6 +2300,7 @@ function SpritesTab({
               Generate Sprite
             </button>
             <button
+              type="button"
               onClick={() => folderInputRef.current?.click()}
               disabled={!!folderProgress}
               className="flex min-w-0 items-center justify-center gap-1.5 rounded-lg bg-[var(--secondary)] px-3 py-1.5 text-center text-[0.6875rem] font-medium leading-tight text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] hover:text-[var(--foreground)] disabled:opacity-40 max-md:flex-1 max-md:basis-[calc(50%-0.25rem)] max-md:px-2.5"
@@ -2277,6 +2310,7 @@ function SpritesTab({
               Upload Folder
             </button>
             <button
+              type="button"
               onClick={() => void handleCleanVisibleSprites()}
               disabled={
                 cleaningSprites ||
@@ -2298,6 +2332,7 @@ function SpritesTab({
             </button>
             <div className="relative max-md:flex-1 max-md:basis-[calc(50%-0.25rem)]">
               <button
+                type="button"
                 onClick={() => setExportMenuOpen((open) => !open)}
                 disabled={exporting || allSprites.length === 0}
                 className="flex w-full min-w-0 items-center justify-center gap-1.5 rounded-lg bg-[var(--secondary)] px-3 py-1.5 text-center text-[0.6875rem] font-medium leading-tight text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] hover:text-[var(--foreground)] disabled:opacity-40 max-md:px-2.5"
@@ -2309,6 +2344,7 @@ function SpritesTab({
               {exportMenuOpen && !exporting && (
                 <div className="absolute right-0 top-[calc(100%+0.35rem)] z-30 min-w-44 rounded-lg border border-[var(--border)] bg-[var(--card)] p-1 text-xs shadow-xl">
                   <button
+                    type="button"
                     onClick={() => {
                       setExportMenuOpen(false);
                       void handleExportSprites(visibleSprites, "visible");
@@ -2320,6 +2356,7 @@ function SpritesTab({
                     {category === "full-body" ? "Full-body only" : "Expressions only"}
                   </button>
                   <button
+                    type="button"
                     onClick={() => {
                       setExportMenuOpen(false);
                       void handleExportSprites(allSprites, "all");
@@ -2372,6 +2409,7 @@ function SpritesTab({
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
             <span>Last cleanup has a restore point.</span>
             <button
+              type="button"
               onClick={() => void handleRestoreLastCleanup()}
               disabled={restoringCleanup}
               className="flex items-center gap-1.5 rounded-md bg-[var(--card)] px-2.5 py-1 text-[0.6875rem] font-medium text-[var(--foreground)] ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--accent)] disabled:opacity-40"
@@ -2413,6 +2451,7 @@ function SpritesTab({
             }}
           />
           <button
+            type="button"
             onClick={() => newExpression.trim() && startUpload(normalizeExpressionForCategory(newExpression))}
             disabled={!newExpression.trim() || uploading}
             className="flex items-center gap-1.5 rounded-xl bg-[var(--primary)] px-4 py-2 text-xs font-medium text-[var(--primary-foreground)] shadow-sm transition-all hover:shadow-md disabled:opacity-40"
@@ -2429,6 +2468,7 @@ function SpritesTab({
             <div className="flex flex-wrap gap-1">
               {suggestedExpressions.slice(0, 12).map((expr) => (
                 <button
+                  type="button"
                   key={expr}
                   onClick={() => startUpload(expr)}
                   className="rounded-lg bg-[var(--secondary)] px-2.5 py-1 text-[0.6875rem] font-medium text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
@@ -2495,6 +2535,7 @@ function SpritesTab({
                 </span>
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 max-md:opacity-100 transition-opacity">
                   <button
+                    type="button"
                     onClick={() => setFramingSprite(sprite)}
                     className="rounded-lg p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
                     title="Frame"
@@ -2502,6 +2543,7 @@ function SpritesTab({
                     <Crop size="0.6875rem" />
                   </button>
                   <button
+                    type="button"
                     onClick={() => void downloadSpriteFile(sprite)}
                     className="rounded-lg p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
                     title="Download"
@@ -2509,6 +2551,7 @@ function SpritesTab({
                     <ImageDown size="0.6875rem" />
                   </button>
                   <button
+                    type="button"
                     onClick={() => startUpload(sprite.expression)}
                     className="rounded-lg p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
                     title="Replace"
@@ -2516,6 +2559,7 @@ function SpritesTab({
                     <Upload size="0.6875rem" />
                   </button>
                   <button
+                    type="button"
                     onClick={() => setDeleteSpriteRequest(sprite)}
                     className="rounded-lg p-1 text-[var(--muted-foreground)] hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)]"
                     title="Delete"
@@ -2722,6 +2766,7 @@ function StatsTab({
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold">Attributes</h3>
               <button
+                type="button"
                 onClick={addAttribute}
                 className="flex items-center gap-1 rounded-lg bg-purple-500/15 px-2.5 py-1 text-[0.6875rem] font-medium text-purple-400 transition-colors hover:bg-purple-500/25"
               >
@@ -2749,6 +2794,7 @@ function StatsTab({
                     className="w-16 rounded-lg border border-[var(--border)] bg-[var(--input)] px-2 py-1 text-center text-xs"
                   />
                   <button
+                    type="button"
                     onClick={() => removeAttribute(i)}
                     className="rounded-lg p-1 text-[var(--muted-foreground)] transition-colors hover:bg-red-500/15 hover:text-red-400"
                   >
@@ -2798,6 +2844,7 @@ function ColorsTab({
   const nameColor = (formData.extensions.nameColor as string) ?? "";
   const dialogueColor = (formData.extensions.dialogueColor as string) ?? "";
   const boxColor = (formData.extensions.boxColor as string) ?? "";
+  const trackerCardColors = parseTrackerCardColorConfig(formData.extensions.trackerCardColors);
   const [extracting, setExtracting] = useState(false);
 
   const handleExtract = async () => {
@@ -2926,6 +2973,14 @@ function ColorsTab({
           <li>&bull; Leave any field empty to use the default theme colors.</li>
         </ul>
       </div>
+
+      <TrackerCardColorControls
+        value={trackerCardColors}
+        onChange={(value) => updateExtension("trackerCardColors", value)}
+        chatColors={{ nameColor, dialogueColor, boxColor }}
+        entityLabel="Character"
+        previewName={formData.name || "Character"}
+      />
     </div>
   );
 }

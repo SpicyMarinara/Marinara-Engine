@@ -3,7 +3,7 @@
 // ──────────────────────────────────────────────
 import { logger } from "../../lib/logger.js";
 import { isProviderLocalUrlsEnabled } from "../../config/runtime-config.js";
-import { safeFetch } from "../../utils/security.js";
+import { requestHeadersWithIdentityEncoding, safeFetch, type SafeFetchOptions } from "../../utils/security.js";
 
 /**
  * Shared undici Agent with a 5-minute headers timeout (time to first byte)
@@ -17,9 +17,14 @@ const llmAgentOptions = { bodyTimeout: 0, headersTimeout: LLM_HEADERS_TIMEOUT };
  * Drop-in replacement for `fetch()` that uses a custom undici dispatcher
  * with no body/headers timeout. Use this for all outgoing LLM requests.
  */
-export function llmFetch(url: string | URL, init?: RequestInit): Promise<Response> {
+export function llmFetch(
+  url: string | URL,
+  init?: RequestInit & Pick<SafeFetchOptions, "bufferResponse" | "decodeCompressedResponse">,
+): Promise<Response> {
+  const bufferResponse = init?.bufferResponse ?? false;
   return safeFetch(url, {
     ...(init ?? {}),
+    headers: requestHeadersWithIdentityEncoding(init?.headers),
     agentOptions: llmAgentOptions,
     policy: {
       allowLocal: isProviderLocalUrlsEnabled(),
@@ -29,7 +34,8 @@ export function llmFetch(url: string | URL, init?: RequestInit): Promise<Respons
       flagName: "PROVIDER_LOCAL_URLS_ENABLED",
     },
     maxResponseBytes: 50 * 1024 * 1024,
-    bufferResponse: false,
+    bufferResponse,
+    decodeCompressedResponse: init?.decodeCompressedResponse ?? bufferResponse,
   });
 }
 
@@ -605,6 +611,7 @@ export abstract class BaseLLMProvider {
       headers,
       body: JSON.stringify({ input: texts, model }),
       signal: AbortSignal.timeout(60_000),
+      bufferResponse: true,
     });
     if (!res.ok) {
       const body = await res.text();

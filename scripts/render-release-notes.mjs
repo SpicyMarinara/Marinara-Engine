@@ -5,6 +5,11 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
 
+const ANDROID_APK_NOTICE = `> [!IMPORTANT]
+> **Android APK notice:** The APK is not a standalone Marinara Engine app yet. It is a WebView shell for the local Marinara server, so Termux must be installed and \`./start-termux.sh\` must be running on the same Android device before you open the APK. Follow the [Android (Termux) installation guide](https://github.com/Pasta-Devs/Marinara-Engine/blob/main/docs/installation/android-termux.md) first; the APK is only an optional home-screen shell.
+
+`;
+
 function parseArgs(args) {
   // pnpm 10 forwards a literal `--` separator into argv; skip any leading `--` entries.
   const filtered = args.filter((arg) => arg !== "--");
@@ -57,7 +62,7 @@ function extractReleaseEntry(changelog, version) {
 try {
   const { version, outputPath } = parseArgs(process.argv.slice(2));
   const changelog = await readFile(resolve(REPO_ROOT, "CHANGELOG.md"), "utf8");
-  const notes = extractReleaseEntry(changelog, version);
+  const notes = ANDROID_APK_NOTICE + extractReleaseEntry(changelog, version);
 
   if (outputPath) {
     await writeFile(outputPath, notes);

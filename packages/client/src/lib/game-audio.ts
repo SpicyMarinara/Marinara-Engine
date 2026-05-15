@@ -8,8 +8,39 @@
 
 const CROSSFADE_MS = 2000;
 const SFX_POOL_SIZE = 8;
+const SILENT_AUDIO_DATA_URI =
+  "data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
 
 type AssetMap = Record<string, { path: string }>;
+type AudioSessionType = "auto" | "ambient" | "playback" | "transient" | "transient-solo" | "play-and-record";
+type NavigatorWithAudioSession = Navigator & {
+  audioSession?: {
+    type: AudioSessionType;
+  };
+};
+
+interface LoopingAudioLayer {
+  ready: Promise<void>;
+  setVolume: (volume: number) => void;
+  getVolume: () => number;
+  setMuted: (muted: boolean) => void;
+  stop: () => void;
+}
+
+export interface OneShotAudioLayer {
+  ready: Promise<void>;
+  setVolume: (volume: number) => void;
+  setMuted: (muted: boolean) => void;
+  stop: () => void;
+}
+
+interface OneShotAudioOptions {
+  volume: number;
+  muted?: boolean;
+  onStarted?: () => void;
+  onEnded?: () => void;
+  onError?: () => void;
+}
 
 /** Release an audio element without triggering an "Invalid URI" console error. */
 function releaseAudio(el: HTMLAudioElement): void {
@@ -26,14 +57,36 @@ function assetTagToPath(tag: string): string {
   return normalizeAssetTag(tag).replace(/:/g, "/");
 }
 
+function clampUnit(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function setAmbientAudioSession(): void {
+  if (typeof navigator === "undefined") return;
+  const audioSession = (navigator as NavigatorWithAudioSession).audioSession;
+  if (!audioSession) return;
+
+  try {
+    if (audioSession.type !== "ambient") {
+      audioSession.type = "ambient";
+    }
+  } catch {
+    // Audio Session API support is platform-specific. Unsupported browsers can
+    // still play normally; they just cannot request mix-with-others behavior.
+  }
+}
+
 /** Singleton audio manager for game mode. */
 class GameAudioManager {
-  private musicElement: HTMLAudioElement | null = null;
-  private nextMusicElement: HTMLAudioElement | null = null;
-  private ambientElement: HTMLAudioElement | null = null;
+  private musicElement: LoopingAudioLayer | null = null;
+  private nextMusicElement: LoopingAudioLayer | null = null;
+  private ambientElement: LoopingAudioLayer | null = null;
   private sfxPool: HTMLAudioElement[] = [];
   private sfxIndex = 0;
   private sfxAudioContext: AudioContext | null = null;
+  private mediaUnlockElement: HTMLAudioElement | null = null;
+  private mediaNodes = new WeakMap<HTMLAudioElement, { source: MediaElementAudioSourceNode; gain: GainNode }>();
+  private audioContextUnlocked = false;
   private musicVolume = 0.5;
   private sfxVolume = 0.5;
   private ambientVolume = 0.35;
@@ -50,6 +103,7 @@ class GameAudioManager {
   private interactionListenerAttached = false;
 
   constructor() {
+    setAmbientAudioSession();
     // Pre-create SFX pool
     for (let i = 0; i < SFX_POOL_SIZE; i++) {
       const el = new Audio();
@@ -64,7 +118,7 @@ class GameAudioManager {
     if (this.interactionListenerAttached) return;
     this.interactionListenerAttached = true;
     const handler = () => {
-      this.userHasInteracted = true;
+      this.unlock();
       document.removeEventListener("click", handler, true);
       document.removeEventListener("touchstart", handler, true);
       document.removeEventListener("keydown", handler, true);
@@ -88,6 +142,7 @@ class GameAudioManager {
       document.removeEventListener("keydown", handler, true);
       document.removeEventListener("pointerdown", handler, true);
       this.gestureListenerAttached = false;
+      this.unlock();
       this.retryPending();
     };
     document.addEventListener("click", handler, true);
@@ -139,9 +194,334 @@ class GameAudioManager {
       this.sfxAudioContext = new AudioContextCtor();
     }
     if (this.sfxAudioContext.state === "suspended") {
-      void this.sfxAudioContext.resume();
+      void this.sfxAudioContext.resume().catch(() => {});
     }
     return this.sfxAudioContext;
+  }
+
+  private async resumeAudioContext(ctx: AudioContext): Promise<boolean> {
+    if (ctx.state === "running") {
+      this.audioContextUnlocked = true;
+      return true;
+    }
+
+    await ctx.resume().catch(() => undefined);
+    this.audioContextUnlocked = (ctx.state as string) === "running";
+    return this.audioContextUnlocked;
+  }
+
+  private primeMediaElement(): void {
+    if (typeof window === "undefined") return;
+    if (!this.mediaUnlockElement) {
+      const audio = new Audio(SILENT_AUDIO_DATA_URI);
+      audio.preload = "auto";
+      audio.muted = true;
+      audio.volume = 0;
+      this.mediaUnlockElement = audio;
+    }
+
+    const audio = this.mediaUnlockElement;
+    try {
+      audio.currentTime = 0;
+    } catch {
+      // Some browsers do not allow seeking before metadata is ready.
+    }
+    void audio
+      .play()
+      .then(() => {
+        audio.pause();
+        try {
+          audio.currentTime = 0;
+        } catch {
+          // Ignore unlock cleanup failures.
+        }
+      })
+      .catch(() => {});
+  }
+
+  /** Unlock Web Audio from a user gesture, especially for mobile Safari. */
+  unlock(): void {
+    this.userHasInteracted = true;
+    setAmbientAudioSession();
+    this.primeMediaElement();
+    const ctx = this.getSfxAudioContext();
+    if (!ctx || (this.audioContextUnlocked && ctx.state === "running")) return;
+
+    try {
+      const source = ctx.createBufferSource();
+      source.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+      source.connect(ctx.destination);
+      source.start(0);
+      if (ctx.state === "running") {
+        this.audioContextUnlocked = true;
+      } else {
+        void ctx
+          .resume()
+          .then(() => {
+            this.audioContextUnlocked = ctx.state === "running";
+          })
+          .catch(() => {
+            this.audioContextUnlocked = false;
+          });
+      }
+    } catch {
+      // If the unlock pulse fails, normal playback can still fall back to media element audio.
+      this.audioContextUnlocked = false;
+    }
+  }
+
+  private getMediaGain(audio: HTMLAudioElement): GainNode | null {
+    const existing = this.mediaNodes.get(audio);
+    if (existing) return existing.gain;
+
+    const ctx = this.getSfxAudioContext();
+    if (!ctx) return null;
+
+    try {
+      const source = ctx.createMediaElementSource(audio);
+      const gain = ctx.createGain();
+      source.connect(gain);
+      gain.connect(ctx.destination);
+      this.mediaNodes.set(audio, { source, gain });
+      return gain;
+    } catch {
+      return null;
+    }
+  }
+
+  private setElementLayerVolume(audio: HTMLAudioElement | null, volume: number): void {
+    if (!audio) return;
+    const nextVolume = Math.max(0, Math.min(1, volume));
+    const gain = this.getMediaGain(audio);
+    if (gain) {
+      // iOS ignores HTMLMediaElement.volume for media playback, so keep the
+      // element open and use the Web Audio gain node as the exact volume control.
+      audio.volume = 1;
+      gain.gain.setValueAtTime(nextVolume, gain.context.currentTime);
+      return;
+    }
+    audio.volume = nextVolume;
+  }
+
+  private createLoopingAudioLayer(url: string, volume: number, muted: boolean): LoopingAudioLayer {
+    let currentVolume = clampUnit(volume);
+    let currentMuted = muted;
+    let stopped = false;
+    let source: AudioBufferSourceNode | null = null;
+    let gain: GainNode | null = null;
+    let fallbackAudio: HTMLAudioElement | null = null;
+
+    const applyVolume = () => {
+      const effectiveVolume = currentMuted ? 0 : currentVolume;
+      if (gain) {
+        gain.gain.setValueAtTime(effectiveVolume, gain.context.currentTime);
+      }
+      if (fallbackAudio) {
+        this.setElementLayerVolume(fallbackAudio, effectiveVolume);
+        fallbackAudio.muted = currentMuted;
+      }
+    };
+
+    const startFallbackAudio = async () => {
+      const audio = new Audio(url);
+      audio.loop = true;
+      fallbackAudio = audio;
+      applyVolume();
+      await audio.play();
+    };
+
+    const ready = (async () => {
+      const ctx = this.getSfxAudioContext();
+      if (!ctx) {
+        await startFallbackAudio();
+        return;
+      }
+
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Audio fetch failed (${response.status})`);
+        const buffer = await ctx.decodeAudioData(await response.arrayBuffer());
+        if (stopped) return;
+        if (!(await this.resumeAudioContext(ctx))) {
+          throw new Error("Audio context is not running");
+        }
+
+        const nextSource = ctx.createBufferSource();
+        const nextGain = ctx.createGain();
+        nextSource.buffer = buffer;
+        nextSource.loop = true;
+        nextSource.connect(nextGain);
+        nextGain.connect(ctx.destination);
+        source = nextSource;
+        gain = nextGain;
+        applyVolume();
+        nextSource.start();
+      } catch {
+        if (stopped) return;
+        await startFallbackAudio();
+      }
+    })();
+
+    return {
+      ready,
+      setVolume: (nextVolume: number) => {
+        currentVolume = clampUnit(nextVolume);
+        applyVolume();
+      },
+      getVolume: () => currentVolume,
+      setMuted: (nextMuted: boolean) => {
+        currentMuted = nextMuted;
+        applyVolume();
+      },
+      stop: () => {
+        stopped = true;
+        if (source) {
+          try {
+            source.stop();
+          } catch {
+            // Already stopped.
+          }
+          source.disconnect();
+          source = null;
+        }
+        if (gain) {
+          gain.disconnect();
+          gain = null;
+        }
+        if (fallbackAudio) {
+          releaseAudio(fallbackAudio);
+          fallbackAudio = null;
+        }
+      },
+    };
+  }
+
+  playOneShot(url: string, options: OneShotAudioOptions): OneShotAudioLayer {
+    let currentVolume = clampUnit(options.volume);
+    let currentMuted = options.muted ?? false;
+    let stopped = false;
+    let started = false;
+    let source: AudioBufferSourceNode | null = null;
+    let gain: GainNode | null = null;
+    let fallbackAudio: HTMLAudioElement | null = null;
+
+    const applyVolume = () => {
+      const effectiveVolume = currentMuted ? 0 : currentVolume;
+      if (gain) {
+        gain.gain.setValueAtTime(effectiveVolume, gain.context.currentTime);
+      }
+      if (fallbackAudio) {
+        this.setMediaElementVolume(fallbackAudio, effectiveVolume);
+        fallbackAudio.muted = currentMuted;
+      }
+    };
+
+    const cleanup = () => {
+      if (source) {
+        source.onended = null;
+        source.disconnect();
+        source = null;
+      }
+      if (gain) {
+        gain.disconnect();
+        gain = null;
+      }
+      if (fallbackAudio) {
+        fallbackAudio.onended = null;
+        fallbackAudio.onerror = null;
+        releaseAudio(fallbackAudio);
+        fallbackAudio = null;
+      }
+    };
+
+    const finish = () => {
+      if (stopped) return;
+      stopped = true;
+      cleanup();
+      options.onEnded?.();
+    };
+
+    const fail = () => {
+      if (stopped) return;
+      stopped = true;
+      cleanup();
+      options.onError?.();
+    };
+
+    const markStarted = () => {
+      if (started || stopped) return;
+      started = true;
+      options.onStarted?.();
+    };
+
+    const startFallbackAudio = async () => {
+      const audio = new Audio(url);
+      fallbackAudio = audio;
+      audio.onended = finish;
+      audio.onerror = fail;
+      applyVolume();
+      await audio.play();
+      markStarted();
+    };
+
+    const ready = (async () => {
+      const ctx = this.getSfxAudioContext();
+      if (!ctx) {
+        await startFallbackAudio();
+        return;
+      }
+
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Audio fetch failed (${response.status})`);
+        const buffer = await ctx.decodeAudioData(await response.arrayBuffer());
+        if (stopped) return;
+        if (!(await this.resumeAudioContext(ctx))) {
+          throw new Error("Audio context is not running");
+        }
+
+        const nextSource = ctx.createBufferSource();
+        const nextGain = ctx.createGain();
+        nextSource.buffer = buffer;
+        nextSource.connect(nextGain);
+        nextGain.connect(ctx.destination);
+        nextSource.onended = finish;
+        source = nextSource;
+        gain = nextGain;
+        applyVolume();
+        nextSource.start();
+        markStarted();
+      } catch {
+        if (stopped) return;
+        await startFallbackAudio();
+      }
+    })().catch(() => {
+      fail();
+    });
+
+    return {
+      ready,
+      setVolume: (nextVolume: number) => {
+        currentVolume = clampUnit(nextVolume);
+        applyVolume();
+      },
+      setMuted: (nextMuted: boolean) => {
+        currentMuted = nextMuted;
+        applyVolume();
+      },
+      stop: () => {
+        if (stopped) return;
+        stopped = true;
+        if (source) {
+          try {
+            source.stop();
+          } catch {
+            // Already stopped.
+          }
+        }
+        cleanup();
+      },
+    };
   }
 
   private playTone(
@@ -275,10 +655,7 @@ class GameAudioManager {
     }
 
     const url = this.resolveAssetUrl(tag, manifest);
-    const newAudio = new Audio(url);
-    newAudio.loop = true;
-    newAudio.volume = 0;
-    newAudio.muted = this.isMuted;
+    const newAudio = this.createLoopingAudioLayer(url, 0, this.isMuted);
 
     if (this.fadeInterval) {
       clearInterval(this.fadeInterval);
@@ -287,20 +664,19 @@ class GameAudioManager {
 
     const oldAudio = this.musicElement;
     if (this.nextMusicElement && this.nextMusicElement !== oldAudio) {
-      releaseAudio(this.nextMusicElement);
+      this.nextMusicElement.stop();
       this.nextMusicElement = null;
     }
     if (oldAudio) {
-      oldAudio.volume = this.isMuted ? 0 : this.musicVolume;
-      oldAudio.muted = this.isMuted;
+      oldAudio.setMuted(this.isMuted);
+      oldAudio.setVolume(this.musicVolume);
     }
     this.nextMusicElement = newAudio;
 
-    newAudio
-      .play()
+    newAudio.ready
       .then(() => {
         if (this.nextMusicElement !== newAudio) {
-          releaseAudio(newAudio);
+          newAudio.stop();
           return;
         }
         // Playback started — clear any pending retry
@@ -313,23 +689,25 @@ class GameAudioManager {
           if (this.nextMusicElement !== newAudio) {
             clearInterval(interval);
             if (this.fadeInterval === interval) this.fadeInterval = null;
-            releaseAudio(newAudio);
+            newAudio.stop();
             return;
           }
 
           step++;
           // Fade in new
-          newAudio.volume = Math.min(this.isMuted ? 0 : this.musicVolume, fadeStep * step);
+          newAudio.setMuted(this.isMuted);
+          newAudio.setVolume(Math.min(this.musicVolume, fadeStep * step));
           // Fade out old
           if (oldAudio) {
-            oldAudio.volume = Math.max(0, (this.isMuted ? 0 : this.musicVolume) - fadeStep * step);
+            oldAudio.setMuted(this.isMuted);
+            oldAudio.setVolume(Math.max(0, this.musicVolume - fadeStep * step));
           }
 
           if (step >= steps) {
             clearInterval(interval);
             if (this.fadeInterval === interval) this.fadeInterval = null;
             if (oldAudio) {
-              releaseAudio(oldAudio);
+              oldAudio.stop();
             }
             this.musicElement = newAudio;
             this.nextMusicElement = null;
@@ -340,19 +718,19 @@ class GameAudioManager {
       })
       .catch(() => {
         if (this.nextMusicElement !== newAudio) {
-          releaseAudio(newAudio);
+          newAudio.stop();
           return;
         }
 
         this.nextMusicElement = null;
-        releaseAudio(newAudio);
+        newAudio.stop();
 
         // Autoplay blocked — queue for retry on user gesture
         this.pendingMusic = { tag, manifest };
         this.currentMusicTag = previousMusicTag;
         if (oldAudio) {
-          oldAudio.volume = this.isMuted ? 0 : this.musicVolume;
-          oldAudio.muted = this.isMuted;
+          oldAudio.setMuted(this.isMuted);
+          oldAudio.setVolume(this.musicVolume);
         }
         this.ensureGestureListener();
       });
@@ -369,7 +747,7 @@ class GameAudioManager {
       this.fadeInterval = null;
     }
     if (this.nextMusicElement) {
-      releaseAudio(this.nextMusicElement);
+      this.nextMusicElement.stop();
       this.nextMusicElement = null;
     }
 
@@ -378,15 +756,15 @@ class GameAudioManager {
     const audio = this.musicElement;
     this.musicElement = null;
     const steps = CROSSFADE_MS / 50;
-    const fadeStep = audio.volume / steps;
+    const fadeStep = audio.getVolume() / steps;
     let step = 0;
 
     const interval = setInterval(() => {
       step++;
-      audio.volume = Math.max(0, audio.volume - fadeStep);
+      audio.setVolume(Math.max(0, audio.getVolume() - fadeStep));
       if (step >= steps) {
         clearInterval(interval);
-        releaseAudio(audio);
+        audio.stop();
       }
     }, 50);
   }
@@ -402,7 +780,7 @@ class GameAudioManager {
       this.playProceduralSfx(tag);
     };
     audio.src = url;
-    audio.volume = this.sfxVolume;
+    this.setElementLayerVolume(audio, this.sfxVolume);
     audio.muted = false;
     audio.currentTime = 0;
     audio.play().catch(() => {
@@ -424,26 +802,22 @@ class GameAudioManager {
     }
 
     const url = this.resolveAssetUrl(tag, manifest);
-    const nextAmbient = new Audio(url);
-    nextAmbient.loop = true;
-    nextAmbient.volume = this.isMuted ? 0 : this.ambientVolume;
-    nextAmbient.muted = this.isMuted;
-    nextAmbient
-      .play()
+    const nextAmbient = this.createLoopingAudioLayer(url, this.ambientVolume, this.isMuted);
+    nextAmbient.ready
       .then(() => {
         if (this.currentAmbientTag !== tag) {
-          releaseAudio(nextAmbient);
+          nextAmbient.stop();
           return;
         }
 
         if (previousAmbient && previousAmbient !== nextAmbient) {
-          releaseAudio(previousAmbient);
+          previousAmbient.stop();
         }
         this.ambientElement = nextAmbient;
         this.pendingAmbient = null;
       })
       .catch((err) => {
-        releaseAudio(nextAmbient);
+        nextAmbient.stop();
         if (this.currentAmbientTag !== tag) {
           return;
         }
@@ -453,8 +827,8 @@ class GameAudioManager {
         this.currentAmbientTag = previousAmbientTag;
         this.ambientElement = previousAmbient ?? null;
         if (previousAmbient) {
-          previousAmbient.volume = this.isMuted ? 0 : this.ambientVolume;
-          previousAmbient.muted = this.isMuted;
+          previousAmbient.setMuted(this.isMuted);
+          previousAmbient.setVolume(this.ambientVolume);
         }
         this.ensureGestureListener();
       });
@@ -465,7 +839,7 @@ class GameAudioManager {
     this.currentAmbientTag = null;
     this.pendingAmbient = null;
     if (this.ambientElement) {
-      releaseAudio(this.ambientElement);
+      this.ambientElement.stop();
       this.ambientElement = null;
     }
   }
@@ -474,19 +848,17 @@ class GameAudioManager {
   setMuted(muted: boolean): void {
     this.isMuted = muted;
     if (this.musicElement) {
-      this.musicElement.volume = muted ? 0 : this.musicVolume;
-      this.musicElement.muted = muted;
+      this.musicElement.setMuted(muted);
     }
     if (this.nextMusicElement) {
-      this.nextMusicElement.volume = muted ? 0 : this.musicVolume;
-      this.nextMusicElement.muted = muted;
+      this.nextMusicElement.setMuted(muted);
     }
     if (this.ambientElement) {
-      this.ambientElement.volume = muted ? 0 : this.ambientVolume;
-      this.ambientElement.muted = muted;
+      this.ambientElement.setMuted(muted);
     }
     // Mute any currently-playing SFX
     for (const el of this.sfxPool) {
+      this.setElementLayerVolume(el, muted ? 0 : this.sfxVolume);
       el.muted = muted;
     }
   }
@@ -497,11 +869,24 @@ class GameAudioManager {
     this.sfxVolume = Math.max(0, Math.min(1, sfx));
     this.ambientVolume = Math.max(0, Math.min(1, ambient));
     if (!this.isMuted) {
-      if (this.musicElement) this.musicElement.volume = this.musicVolume;
-      if (this.ambientElement) this.ambientElement.volume = this.ambientVolume;
+      this.musicElement?.setVolume(this.musicVolume);
+      this.nextMusicElement?.setVolume(this.musicVolume);
+      this.ambientElement?.setVolume(this.ambientVolume);
     }
     for (const el of this.sfxPool) {
-      el.volume = this.sfxVolume;
+      this.setElementLayerVolume(el, this.sfxVolume);
+    }
+  }
+
+  /** Set externally owned game audio without forcing it through Web Audio. */
+  setMediaElementVolume(audio: HTMLAudioElement | null, volume: number): void {
+    if (!audio) return;
+    const nextVolume = clampUnit(volume);
+    audio.volume = nextVolume;
+
+    const gain = this.mediaNodes.get(audio)?.gain;
+    if (gain) {
+      gain.gain.setValueAtTime(nextVolume, gain.context.currentTime);
     }
   }
 

@@ -75,7 +75,7 @@ jobs:
             exit 1
           fi
           VERSION=$(node -p "require('../package.json').version")
-          OUT_NAME="marinara-engine-${VERSION}.apk"
+          OUT_NAME="marinara-engine-${VERSION}-android-webview-shell-requires-termux.apk"
           cp "$APK_PATH" "$OUT_NAME"
           echo "apk=android/${OUT_NAME}" >> "$GITHUB_OUTPUT"
           echo "name=${OUT_NAME}" >> "$GITHUB_OUTPUT"
@@ -86,6 +86,22 @@ jobs:
         with:
           name: ${{ steps.locate.outputs.name }}
           path: ${{ steps.locate.outputs.apk }}
+
+      - name: Ensure release APK notice
+        if: github.event_name == 'release' || github.event.inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+        run: |
+          gh release view "$TAG" --json body -q .body > release-body.md
+          if ! grep -Eiq "Android APK notice|not a standalone Marinara Engine app|requires Termux" release-body.md; then
+            printf '%s\n' \
+              '> [!IMPORTANT]' \
+              '> **Android APK notice:** The APK is not a standalone Marinara Engine app yet. It is a WebView shell for the local Marinara server, so Termux must be installed and `./start-termux.sh` must be running on the same Android device before you open the APK. Follow the [Android (Termux) installation guide](https://github.com/Pasta-Devs/Marinara-Engine/blob/main/docs/installation/android-termux.md) first; the APK is only an optional home-screen shell.' \
+              '' > release-body-with-apk-notice.md
+            cat release-body.md >> release-body-with-apk-notice.md
+            gh release edit "$TAG" --notes-file release-body-with-apk-notice.md
+          fi
 
       - name: Attach APK to release
         if: github.event_name == 'release' || github.event.inputs.tag != ''

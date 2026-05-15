@@ -1,2 +1,9 @@
 packages:
   - "packages/*"
+
+# Supply-chain guardrails: delay newly published package versions long enough for
+# registry takedowns and advisory systems to catch common compromise waves.
+minimumReleaseAge: 1440
+minimumReleaseAgeIgnoreMissingTime: false
+trustPolicy: no-downgrade
+blockExoticSubdeps: true

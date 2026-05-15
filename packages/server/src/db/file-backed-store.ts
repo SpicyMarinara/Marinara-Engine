@@ -1099,6 +1099,7 @@ class FileTableStore {
     const existingPaths = [...new Set(dbPaths.filter((path) => existsSync(path)))];
     if (existingPaths.length === 0) return false;
 
+    legacyReaderUsed = null;
     const counts: Record<string, number> = {};
     let totalRows = 0;
     for (const table of FILE_BACKED_TABLES) {
@@ -1110,10 +1111,17 @@ class FileTableStore {
 
     if (totalRows === 0) return false;
 
+    const importedAt = new Date().toISOString();
     this.migratedFromSqlite = {
       path: existingPaths[0],
       paths: existingPaths,
-      importedAt: new Date().toISOString(),
+      importedAt,
+    };
+    this.legacyRepair = {
+      paths: existingPaths,
+      repairedAt: importedAt,
+      tables: {},
+      reader: legacyReaderUsed ?? undefined,
     };
     for (const table of FILE_BACKED_TABLES) this.dirtyTables.add(table);
     this.dirty = true;

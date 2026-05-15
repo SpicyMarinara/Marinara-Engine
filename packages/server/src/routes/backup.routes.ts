@@ -534,6 +534,10 @@ export async function backupRoutes(app: FastifyInstance) {
               nameColor: p.nameColor,
               dialogueColor: p.dialogueColor,
               boxColor: p.boxColor,
+              trackerCardColors:
+                typeof p.trackerCardColors === "string"
+                  ? p.trackerCardColors
+                  : JSON.stringify(p.trackerCardColors ?? { mode: "chat" }),
               personaStats: p.personaStats,
               altDescriptions:
                 typeof p.altDescriptions === "string" ? p.altDescriptions : JSON.stringify(p.altDescriptions ?? []),

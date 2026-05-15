@@ -56,7 +56,7 @@ function CompactCharacterField({
   return (
     <div
       className={cn(
-        "grid min-h-3.5 min-w-0 grid-cols-[0.75rem_minmax(0,1fr)] items-center gap-0.5 rounded-[2px] px-0.5 py-px text-[0.5625rem] leading-[0.875rem] text-[var(--muted-foreground)] hover:bg-[var(--accent)]/14 @min-[176px]:min-h-4 @min-[176px]:grid-cols-[0.875rem_minmax(0,1fr)] @min-[176px]:text-[0.625rem] @min-[176px]:leading-4",
+        "grid min-h-3.5 min-w-0 grid-cols-[0.75rem_minmax(0,1fr)] items-center gap-0.5 rounded-[2px] px-0.5 py-px text-[0.5625rem] leading-[0.875rem] text-[color:var(--tracker-profile-muted-text)] hover:bg-[var(--accent)]/14 @min-[176px]:min-h-4 @min-[176px]:grid-cols-[0.875rem_minmax(0,1fr)] @min-[176px]:text-[0.625rem] @min-[176px]:leading-4",
         className,
       )}
     >
@@ -82,7 +82,9 @@ function CompactCharacterField({
           showEditHint={false}
         />
       ) : (
-        <span className="min-w-0 truncate text-[var(--foreground)]/90">{visibleText(value, placeholder)}</span>
+        <span className="min-w-0 truncate text-[color:var(--tracker-profile-text)]">
+          {visibleText(value, placeholder)}
+        </span>
       )}
     </div>
   );
@@ -172,11 +174,11 @@ export function CharacterTrackerCard({
   };
   return (
     <article
-      className="group/character @container relative isolate min-w-0 overflow-hidden rounded-md border border-[var(--tracker-profile-box)]/20 bg-[color-mix(in_srgb,var(--card)_16%,transparent)] p-0.5 shadow-[inset_0_1px_0_color-mix(in_srgb,var(--foreground)_5%,transparent)] transition-colors duration-200 hover:border-[var(--primary)]/28"
+      className="group/character @container relative isolate min-w-0 overflow-hidden rounded-md border border-[var(--tracker-profile-rule)] bg-[image:var(--tracker-profile-frame)] p-0.5 shadow-[inset_0_1px_0_color-mix(in_srgb,var(--foreground)_5%,transparent)] transition-colors duration-200 hover:border-[var(--primary)]/28 [background-blend-mode:var(--tracker-profile-frame-blend)]"
       style={getCharacterAmbienceStyle(character, profileColors)}
     >
-      <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(135deg,color-mix(in_srgb,var(--foreground)_4%,transparent),transparent_46%,color-mix(in_srgb,var(--primary)_6%,transparent))]" />
-      <TrackerProfileDisplayWash className="z-0 opacity-[0.055]" />
+      <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(135deg,color-mix(in_srgb,var(--foreground)_4%,transparent),transparent_46%,color-mix(in_srgb,var(--tracker-profile-accent)_6%,transparent))]" />
+      <TrackerProfileDisplayWash className="z-0" />
       <TrackerReadabilityVeil strength={hasDenseContent || hasDetailRows ? "strong" : "soft"} />
       <TrackerProfileEdgeHighlight className="z-[2]" />
       {hasDeleteAction && (
@@ -228,7 +230,7 @@ export function CharacterTrackerCard({
               title="Feature character card"
               aria-label="Feature character card"
               aria-pressed={false}
-              className="absolute -left-0.5 -top-0.5 z-[2] flex h-3.5 w-3.5 items-center justify-center rounded-sm border border-[var(--tracker-profile-box)]/22 bg-[color-mix(in_srgb,var(--background)_42%,transparent)] text-[var(--muted-foreground)]/45 opacity-60 shadow-[0_1px_3px_rgba(0,0,0,0.14)] backdrop-blur-sm transition-all hover:border-[var(--primary)]/24 hover:bg-[var(--primary)]/7 hover:text-[var(--tracker-profile-display-solid)]/72 hover:opacity-95 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)]/55 focus-visible:opacity-100 active:scale-95"
+              className="absolute -left-0.5 -top-0.5 z-[2] flex h-3.5 w-3.5 items-center justify-center rounded-sm border border-[color-mix(in_srgb,var(--tracker-profile-rule)_70%,transparent)] bg-[color-mix(in_srgb,var(--background)_42%,transparent)] text-[var(--muted-foreground)]/45 opacity-60 shadow-[0_1px_3px_rgba(0,0,0,0.14)] backdrop-blur-sm transition-all hover:border-[var(--primary)]/24 hover:bg-[var(--primary)]/7 hover:text-[var(--tracker-profile-display-solid)]/72 hover:opacity-95 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)]/55 focus-visible:opacity-100 active:scale-95"
             >
               <Maximize2 size="0.5625rem" />
             </button>
@@ -240,14 +242,14 @@ export function CharacterTrackerCard({
               value={character.name}
               onSave={(name) => onUpdate({ ...character, name: name || "Character" })}
               placeholder="Character"
-              className="h-4 w-full min-w-0 overflow-hidden px-0.5 py-0 text-[0.6875rem] font-semibold leading-4 text-[var(--foreground)] @min-[176px]:h-5 @min-[176px]:text-xs @min-[176px]:leading-5"
+              className="h-4 w-full min-w-0 overflow-hidden px-0.5 py-0 text-[0.6875rem] font-semibold leading-4 text-[color:var(--tracker-profile-text)] @min-[176px]:h-5 @min-[176px]:text-xs @min-[176px]:leading-5"
               showEditHint={false}
               fitPreview
               fitMinScale={0.58}
             />
           ) : (
             <FittedText
-              className="w-full text-[0.6875rem] font-semibold leading-4 text-[var(--foreground)] @min-[176px]:text-xs @min-[176px]:leading-5"
+              className="w-full text-[0.6875rem] font-semibold leading-4 text-[color:var(--tracker-profile-text)] @min-[176px]:text-xs @min-[176px]:leading-5"
               title={visibleText(character.name, "Character")}
               minScale={0.58}
             >
@@ -291,7 +293,7 @@ export function CharacterTrackerCard({
       </div>
 
       {hasDetailRows && (
-        <div className="relative z-[1] mt-0.5 grid grid-cols-1 gap-px border-t border-[var(--tracker-profile-box)]/16 pt-0.5">
+        <div className="relative z-[1] mt-0.5 grid grid-cols-1 gap-px border-t border-[var(--tracker-profile-rule)] pt-0.5">
           {showAppearance && (
             <CompactCharacterField
               icon={<Eye size="0.6875rem" />}
@@ -327,7 +329,7 @@ export function CharacterTrackerCard({
       )}
 
       {(characterStats.length > 0 || (onUpdate && addMode)) && (
-        <div className="group/statbox relative z-[1] mt-0.5 border-t border-[var(--tracker-profile-box)]/16 pt-0.5">
+        <div className="group/statbox relative z-[1] mt-0.5 border-t border-[var(--tracker-profile-rule)] pt-0.5">
           <StatList
             stats={characterStats}
             onUpdate={onUpdate ? (stats) => onUpdate({ ...character, stats }) : undefined}
@@ -340,7 +342,7 @@ export function CharacterTrackerCard({
       )}
 
       {customFields.length > 0 && (
-        <div className="relative z-[1] mt-0.5 grid gap-px border-t border-[var(--tracker-profile-box)]/16 pt-0.5 text-[0.5625rem] @min-[176px]:text-[0.625rem]">
+        <div className="relative z-[1] mt-0.5 grid gap-px border-t border-[var(--tracker-profile-rule)] pt-0.5 text-[0.5625rem] @min-[176px]:text-[0.625rem]">
           {customFields.map(([name, value]) => (
             <div
               key={name}
@@ -355,7 +357,7 @@ export function CharacterTrackerCard({
                   scrollOnHover
                 />
               ) : (
-                <span className="truncate font-medium text-[var(--muted-foreground)]">{name}</span>
+                <span className="truncate font-medium text-[color:var(--tracker-profile-muted-text)]">{name}</span>
               )}
               {onUpdate ? (
                 <InlineEdit
@@ -366,7 +368,7 @@ export function CharacterTrackerCard({
                   scrollOnHover
                 />
               ) : (
-                <span className="min-w-0 truncate text-[var(--foreground)]">{value}</span>
+                <span className="min-w-0 truncate text-[color:var(--tracker-profile-text)]">{value}</span>
               )}
             </div>
           ))}

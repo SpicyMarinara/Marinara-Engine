@@ -159,6 +159,9 @@ export const lorebookEntries = sqliteTable("lorebook_entries", {
   /** When true, this entry's content won't trigger further entries during recursive scanning */
   preventRecursion: text("prevent_recursion").notNull().default("false"),
 
+  /** When true, bulk vectorization skips this entry and semantic matching ignores stored vectors */
+  excludeFromVectorization: text("exclude_from_vectorization").notNull().default("false"),
+
   /** Pre-computed embedding vector (JSON array of floats) for semantic matching */
   embedding: text("embedding"),
 

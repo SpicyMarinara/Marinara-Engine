@@ -259,6 +259,10 @@ interface UIState {
   showTokenUsage: boolean;
   showMessageNumbers: boolean;
   guideGenerations: boolean;
+  showQuickRepliesMenu: boolean;
+  showQuickReplyPostOnly: boolean;
+  showQuickReplyGuide: boolean;
+  showQuickReplyImpersonate: boolean;
   confirmBeforeDelete: boolean;
   /** Number of messages to load per page (0 = load all) */
   messagesPerPage: number;
@@ -467,6 +471,10 @@ interface UIState {
   setShowTokenUsage: (v: boolean) => void;
   setShowMessageNumbers: (v: boolean) => void;
   setGuideGenerations: (v: boolean) => void;
+  setShowQuickRepliesMenu: (v: boolean) => void;
+  setShowQuickReplyPostOnly: (v: boolean) => void;
+  setShowQuickReplyGuide: (v: boolean) => void;
+  setShowQuickReplyImpersonate: (v: boolean) => void;
   setConfirmBeforeDelete: (v: boolean) => void;
   setMessagesPerPage: (n: number) => void;
   setBoldDialogue: (v: boolean) => void;
@@ -580,6 +588,10 @@ export function pickSyncedSettings(state: UIState) {
     showTokenUsage: state.showTokenUsage,
     showMessageNumbers: state.showMessageNumbers,
     guideGenerations: state.guideGenerations,
+    showQuickRepliesMenu: state.showQuickRepliesMenu,
+    showQuickReplyPostOnly: state.showQuickReplyPostOnly,
+    showQuickReplyGuide: state.showQuickReplyGuide,
+    showQuickReplyImpersonate: state.showQuickReplyImpersonate,
     confirmBeforeDelete: state.confirmBeforeDelete,
     messagesPerPage: state.messagesPerPage,
     boldDialogue: state.boldDialogue,
@@ -691,6 +703,10 @@ export const useUIStore = create<UIState>()(
       showTokenUsage: false,
       showMessageNumbers: false,
       guideGenerations: false,
+      showQuickRepliesMenu: false,
+      showQuickReplyPostOnly: true,
+      showQuickReplyGuide: true,
+      showQuickReplyImpersonate: true,
       confirmBeforeDelete: true,
       messagesPerPage: 20,
       boldDialogue: true,
@@ -1037,6 +1053,10 @@ export const useUIStore = create<UIState>()(
       setShowTokenUsage: (v) => set({ showTokenUsage: v }),
       setShowMessageNumbers: (v) => set({ showMessageNumbers: v }),
       setGuideGenerations: (v) => set({ guideGenerations: v }),
+      setShowQuickRepliesMenu: (v) => set({ showQuickRepliesMenu: v }),
+      setShowQuickReplyPostOnly: (v) => set({ showQuickReplyPostOnly: v }),
+      setShowQuickReplyGuide: (v) => set({ showQuickReplyGuide: v }),
+      setShowQuickReplyImpersonate: (v) => set({ showQuickReplyImpersonate: v }),
       setConfirmBeforeDelete: (v) => set({ confirmBeforeDelete: v }),
       setMessagesPerPage: (n) => set({ messagesPerPage: n }),
       setBoldDialogue: (v) => set({ boldDialogue: v }),
@@ -1154,7 +1174,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "marinara-engine-ui",
-      version: 28,
+      version: 29,
       // Debounce localStorage writes to avoid sync I/O on every state change
       storage: createJSONStorage(() => {
         let timer: ReturnType<typeof setTimeout> | null = null;
@@ -1409,6 +1429,17 @@ export const useUIStore = create<UIState>()(
         if (version <= 27 && persisted.editLastMessageOnArrowUp === undefined) {
           persisted.editLastMessageOnArrowUp = true;
         }
+        // v28 -> v29: preserve existing Impersonate quick-button users by moving them into Quick replies.
+        if (
+          version <= 28 &&
+          persisted.showQuickRepliesMenu === undefined &&
+          persisted.impersonateShowQuickButton === true
+        ) {
+          persisted.showQuickRepliesMenu = true;
+          persisted.showQuickReplyPostOnly = false;
+          persisted.showQuickReplyGuide = false;
+          persisted.showQuickReplyImpersonate = true;
+        }
         return persisted;
       },
       partialize: (state) => ({
@@ -1451,6 +1482,10 @@ export const useUIStore = create<UIState>()(
         showTokenUsage: state.showTokenUsage,
         showMessageNumbers: state.showMessageNumbers,
         guideGenerations: state.guideGenerations,
+        showQuickRepliesMenu: state.showQuickRepliesMenu,
+        showQuickReplyPostOnly: state.showQuickReplyPostOnly,
+        showQuickReplyGuide: state.showQuickReplyGuide,
+        showQuickReplyImpersonate: state.showQuickReplyImpersonate,
         confirmBeforeDelete: state.confirmBeforeDelete,
         messagesPerPage: state.messagesPerPage,
         boldDialogue: state.boldDialogue,
