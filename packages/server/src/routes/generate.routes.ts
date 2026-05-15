@@ -648,9 +648,8 @@ const REVIEWABLE_WRITER_AGENT_TYPES = new Set(
   ).map((agent) => agent.id),
 );
 
-type RuntimeAgentSectionType = "knowledge-retrieval" | "knowledge-router";
+type RuntimeAgentSectionType = string;
 
-const RUNTIME_AGENT_SECTION_TYPES = new Set<string>(["knowledge-retrieval", "knowledge-router"]);
 const RUNTIME_AGENT_SECTION_TOKEN_PREFIX = "__MARINARA_RUNTIME_AGENT_SECTION__";
 
 interface RuntimeAgentSectionTokens {
@@ -659,8 +658,11 @@ interface RuntimeAgentSectionTokens {
   end: string;
 }
 
-function toRuntimeAgentSectionType(agentType: string): RuntimeAgentSectionType | null {
-  return RUNTIME_AGENT_SECTION_TYPES.has(agentType) ? (agentType as RuntimeAgentSectionType) : null;
+function toRuntimeAgentSectionType(
+  agentType: string,
+  eligibleAgentTypes: ReadonlySet<string>,
+): RuntimeAgentSectionType | null {
+  return eligibleAgentTypes.has(agentType) ? agentType : null;
 }
 
 function makeRuntimeAgentSectionTokens(
@@ -696,6 +698,26 @@ function replaceRuntimeAgentSection(
     replaced = true;
   }
   return replaced;
+}
+
+function splitRuntimeHandledAgentInjections(
+  messages: Array<{ content: string }>,
+  tokenMap: ReadonlyMap<RuntimeAgentSectionType, RuntimeAgentSectionTokens>,
+  injections: AgentInjection[],
+): { fallbackInjections: AgentInjection[]; handledTypes: Set<string> } {
+  const fallbackInjections: AgentInjection[] = [];
+  const handledTypes = new Set<string>();
+  for (const injection of injections) {
+    const tokens = tokenMap.get(injection.agentType);
+    const handledByPresetSection =
+      tokens !== undefined && replaceRuntimeAgentSection(messages, tokens, injection.text);
+    if (handledByPresetSection) {
+      handledTypes.add(injection.agentType);
+    } else {
+      fallbackInjections.push(injection);
+    }
+  }
+  return { fallbackInjections, handledTypes };
 }
 
 export function clearUnusedRuntimeAgentSectionsForTest(
@@ -1272,6 +1294,16 @@ export async function generateRoutes(app: FastifyInstance) {
       const chatActiveAgentIds: string[] = filterGameInternalAgentIds(chatMode, persistedChatActiveAgentIds).filter(
         (agentId) => !(gameSpotifyMusicEnabled && agentId === "spotify"),
       );
+      const runtimeSectionEligibleAgentTypes = new Set(
+        BUILT_IN_AGENTS.filter(
+          (agent) =>
+            chatActiveAgentIds.includes(agent.id) &&
+            agent.phase === "pre_generation" &&
+            agent.id !== "html" &&
+            resolveAgentResultType({ type: agent.id, settings: getDefaultBuiltInAgentSettings(agent.id) }) ===
+              "context_injection",
+        ).map((agent) => agent.id),
+      );
       const chatActiveLorebookIds: string[] = Array.isArray(chatMeta.activeLorebookIds)
         ? (chatMeta.activeLorebookIds as string[])
         : [];
@@ -1413,7 +1445,7 @@ export async function generateRoutes(app: FastifyInstance) {
             const markerConfig = JSON.parse(section.markerConfig) as { type?: unknown; agentType?: unknown };
             const runtimeType =
               markerConfig.type === "agent_data" && typeof markerConfig.agentType === "string"
-                ? toRuntimeAgentSectionType(markerConfig.agentType)
+                ? toRuntimeAgentSectionType(markerConfig.agentType, runtimeSectionEligibleAgentTypes)
                 : null;
             if (runtimeType) runtimeAgentSectionTypes.add(runtimeType);
           } catch {
@@ -5299,9 +5331,16 @@ export async function generateRoutes(app: FastifyInstance) {
           }
         }
 
+        const runtimeHandledPreGen = splitRuntimeHandledAgentInjections(
+          finalMessages,
+          runtimeAgentSectionTokens,
+          contextInjections,
+        );
+        contextInjections = runtimeHandledPreGen.fallbackInjections;
+
         // Inject pre-gen agent context at depth 0 (very bottom of prompt)
-        if (contextInjections.length > 0) {
-          const wrapped = formatAgentInjections(contextInjections, wrapFormat);
+        if (runtimeHandledPreGen.fallbackInjections.length > 0) {
+          const wrapped = formatAgentInjections(runtimeHandledPreGen.fallbackInjections, wrapFormat);
           finalMessages = injectAtDepth(finalMessages, [{ content: wrapped, role: "system", depth: 0 }]);
         }
 
@@ -5312,7 +5351,9 @@ export async function generateRoutes(app: FastifyInstance) {
           if (krText) {
             const tokens = runtimeAgentSectionTokens.get("knowledge-retrieval");
             const handledByPresetSection =
-              tokens !== undefined && replaceRuntimeAgentSection(finalMessages, tokens, krText);
+              !runtimeHandledPreGen.handledTypes.has("knowledge-retrieval") &&
+              tokens !== undefined &&
+              replaceRuntimeAgentSection(finalMessages, tokens, krText);
             if (!handledByPresetSection) {
               appendSeparateAgentInjection("knowledge-retrieval", krText);
             }
@@ -5329,7 +5370,9 @@ export async function generateRoutes(app: FastifyInstance) {
           if (routerText) {
             const tokens = runtimeAgentSectionTokens.get("knowledge-router");
             const handledByPresetSection =
-              tokens !== undefined && replaceRuntimeAgentSection(finalMessages, tokens, routerText);
+              !runtimeHandledPreGen.handledTypes.has("knowledge-router") &&
+              tokens !== undefined &&
+              replaceRuntimeAgentSection(finalMessages, tokens, routerText);
             if (!handledByPresetSection) {
               appendSeparateAgentInjection("knowledge-router", routerText);
             }
@@ -5412,10 +5455,16 @@ export async function generateRoutes(app: FastifyInstance) {
         // Without this split, KR/Router cached output would be replayed in the wrong prompt
         // position with different wrapping than the original generation, subtly changing the
         // model's behavior on regenerate/swipe.
-        const cachedPipelineInjections = contextInjections.filter(
+        const runtimeHandledCached = splitRuntimeHandledAgentInjections(
+          finalMessages,
+          runtimeAgentSectionTokens,
+          contextInjections,
+        );
+
+        const cachedPipelineInjections = runtimeHandledCached.fallbackInjections.filter(
           (inj) => !SEPARATE_INJECTION_AGENTS.has(inj.agentType),
         );
-        const cachedSeparateInjections = contextInjections.filter((inj) =>
+        const cachedSeparateInjections = runtimeHandledCached.fallbackInjections.filter((inj) =>
           SEPARATE_INJECTION_AGENTS.has(inj.agentType),
         );
 
@@ -5425,7 +5474,7 @@ export async function generateRoutes(app: FastifyInstance) {
         }
 
         for (const inj of cachedSeparateInjections) {
-          const runtimeType = toRuntimeAgentSectionType(inj.agentType);
+          const runtimeType = toRuntimeAgentSectionType(inj.agentType, runtimeSectionEligibleAgentTypes);
           const tokens = runtimeType ? runtimeAgentSectionTokens.get(runtimeType) : undefined;
           const handledByPresetSection =
             tokens !== undefined && replaceRuntimeAgentSection(finalMessages, tokens, inj.text);

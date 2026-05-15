@@ -749,6 +749,71 @@ test("agent_data marker uses runtime agent data when supplied", async () => {
   }
 });
 
+test("agent_data marker accepts runtime data for generic context injection agents", async () => {
+  const client = createClient({ url: "file::memory:" });
+  const db = drizzle(client) as unknown as DB;
+
+  try {
+    await runMigrations(db);
+
+    const result = await assemblePrompt({
+      db,
+      preset: {
+        id: "preset-1",
+        name: "Preset",
+        sectionOrder: JSON.stringify(["prose-section"]),
+        groupOrder: "[]",
+        wrapFormat: "xml",
+        parameters: JSON.stringify(DEFAULT_GENERATION_PARAMS),
+        variableGroups: "[]",
+        variableValues: "{}",
+      },
+      sections: [
+        {
+          id: "prose-section",
+          presetId: "preset-1",
+          identifier: "agent_prose-guardian",
+          name: "Prose Guardian (Agent)",
+          content: "Writing guidance:\n{{agent::prose-guardian}}",
+          role: "system",
+          enabled: "true",
+          isMarker: "true",
+          groupId: null,
+          markerConfig: JSON.stringify({ type: "agent_data", agentType: "prose-guardian" }),
+          injectionPosition: "ordered",
+          injectionDepth: 0,
+          injectionOrder: 0,
+          forbidOverrides: "false",
+        },
+      ],
+      groups: [],
+      choiceBlocks: [],
+      chatChoices: {},
+      chatId: "chat-1",
+      characterIds: [],
+      personaName: "User",
+      personaDescription: "",
+      chatMessages: [{ role: "user", content: "hello" }],
+      runtimeAgentData: {
+        "prose-guardian": {
+          text: "Avoid repeating doorway imagery.",
+          startToken: "__runtime_start__",
+          endToken: "__runtime_end__",
+        },
+      },
+    });
+
+    const content = result.messages.map((message) => message.content).join("\n");
+    assert.match(content, /__runtime_start__/);
+    assert.match(content, /Writing guidance:/);
+    assert.match(content, /Avoid repeating doorway imagery\./);
+    assert.match(content, /__runtime_end__/);
+    assert.deepEqual(result.runtimeAgentTypesUsed, ["prose-guardian"]);
+  } finally {
+    client.close();
+  }
+});
+
 test("runtime agent section boundaries are skipped when the macro is absent", async () => {
   const client = createClient({ url: "file::memory:" });
   const db = drizzle(client) as unknown as DB;

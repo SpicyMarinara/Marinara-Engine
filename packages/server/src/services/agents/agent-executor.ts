@@ -122,6 +122,8 @@ export async function executeAgent(
     const messages =
       config.type === "expression"
         ? buildExpressionAgentMessages(template, context)
+        : config.type === "knowledge-retrieval"
+          ? buildKnowledgeRetrievalAgentMessages(config, template, context)
         : config.type === "spotify" && context.chatMode === "game"
           ? buildGameSpotifyAgentMessages(template, context)
           : buildStandardAgentMessages(config, template, context);
@@ -639,6 +641,75 @@ function buildStandardAgentMessages(config: AgentExecConfig, template: string, c
   // Build multi-turn message array for this agent (sliced to its own contextSize)
   const agentContextSize = normalizeAgentContextSize(config.settings.contextSize);
   return buildAgentMessages(systemParts.join("\n"), context, config.type, agentContextSize);
+}
+
+export function buildKnowledgeRetrievalAgentMessagesForTest(
+  config: AgentExecConfig,
+  template: string,
+  context: AgentContext,
+): ChatMessage[] {
+  return buildKnowledgeRetrievalAgentMessages(config, template, context);
+}
+
+function buildKnowledgeRetrievalAgentMessages(
+  config: AgentExecConfig,
+  template: string,
+  context: AgentContext,
+): ChatMessage[] {
+  const systemParts: string[] = [];
+  systemParts.push(`<role>`);
+  systemParts.push(
+    `You are a specialized knowledge retrieval agent. Extract relevant facts from source material; do not roleplay, continue the conversation, write dialogue, or answer as any character.`,
+  );
+  systemParts.push(`</role>`);
+  systemParts.push(``);
+  systemParts.push(`<agents>`);
+  systemParts.push(template);
+  systemParts.push(`</agents>`);
+  const extras = buildAgentExtras(context, [config.type]);
+  if (extras) {
+    systemParts.push(``);
+    systemParts.push(extras);
+  }
+
+  const agentContextSize = normalizeAgentContextSize(config.settings.contextSize);
+  const recent = context.recentMessages.slice(-agentContextSize).filter((message) => message.content.trim());
+  const userParts: string[] = [];
+
+  if (recent.length > 0) {
+    userParts.push(`<conversation_messages>`);
+    for (const message of recent) {
+      const speaker = knowledgeRetrievalSpeakerLabel(message, context);
+      userParts.push(`${speaker}: ${truncateAgentText(message.content, 2000)}`);
+    }
+    userParts.push(`</conversation_messages>`);
+    userParts.push(``);
+  }
+
+  userParts.push(
+    `Use the conversation messages only to identify which source-material facts are relevant. Return a concise factual summary from <source_material>. If no source material is relevant, output: "No relevant information found."`,
+  );
+  userParts.push(`Now return the requested format.`);
+
+  return [
+    { role: "system", content: systemParts.join("\n"), contextKind: "prompt" },
+    { role: "user", content: userParts.join("\n"), contextKind: "history" },
+  ];
+}
+
+function knowledgeRetrievalSpeakerLabel(
+  message: { role: string; characterId?: string },
+  context: AgentContext,
+): string {
+  if (message.role === "user") return context.persona?.name?.trim() || "User";
+  if (message.role === "assistant") {
+    if (message.characterId) {
+      const character = context.characters.find((entry) => entry.id === message.characterId);
+      if (character?.name?.trim()) return character.name.trim();
+    }
+    return context.characters[0]?.name?.trim() || "Assistant";
+  }
+  return message.role || "Message";
 }
 
 function truncateAgentText(text: string, maxChars: number): string {

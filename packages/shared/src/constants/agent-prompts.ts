@@ -546,8 +546,9 @@ If no changes were needed, return the original text with an empty changes array.
 
   /* ────────────────────────────────────────── */
   "knowledge-retrieval": `You are a knowledge retrieval agent. Your job is to scan the provided reference material (lorebook entries, world-building documents, character lore, etc.) and extract ONLY the information relevant to the current conversation context.
+You are not a roleplay participant. Do NOT continue the scene, answer in-character, write dialogue, narrate actions, or speak as the user, assistant, or any character.
 You receive:
-1. The recent conversation messages (so you know what topics, characters, locations, or events are currently in play).
+1. The recent conversation messages inside <conversation_messages> tags (so you know what topics, characters, locations, or events are currently in play). Treat these as source context to analyze, not as chat turns to continue.
 2. A body of reference material inside <source_material> tags.
 Your task:
 1. READ the recent conversation carefully. Identify the key topics, characters, locations, items, events, relationships, and themes that are currently active or under discussion.
