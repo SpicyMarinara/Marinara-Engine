@@ -192,9 +192,8 @@ export function CharacterEditor() {
     Array.isArray(connectionsList) &&
     (connectionsList as Array<{ provider?: string }>).some((connection) => connection.provider === "image_generation");
 
-  activeCharacterIdRef.current = characterId;
-
   useEffect(() => {
+    activeCharacterIdRef.current = characterId;
     const upload = latestAvatarUploadRef.current;
     if (upload && upload.characterId !== characterId) {
       latestAvatarUploadRef.current = null;
