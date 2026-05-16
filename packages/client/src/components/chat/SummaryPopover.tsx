@@ -262,7 +262,7 @@ export function SummaryPopover({
         { chatId, rangeStartIndex: rangeLow, rangeEndIndex: rangeHigh, promptTemplateId: activePromptTemplateId },
         {
           onSuccess: (data) => {
-            setDraft(data.summary);
+            setDraft(data.summary ?? "");
             setEditing(false);
             maybeHideSummarisedMessages(data.messageIds);
           },
@@ -276,7 +276,7 @@ export function SummaryPopover({
       { chatId, contextSize: normalizedLastSize, promptTemplateId: activePromptTemplateId },
       {
         onSuccess: (data) => {
-          setDraft(data.summary);
+          setDraft(data.summary ?? "");
           setEditing(false);
           maybeHideSummarisedMessages(data.messageIds);
         },
