@@ -256,7 +256,7 @@ Two diagnostic steps:
 Long contexts compress when they hit the model's window. Things to try:
 
 - Bump to a model with a larger context window.
-- Use the **Summary** panel (toolbar button) to write down major events explicitly — the summary is injected into prompts and survives compression.
+- Use the **Summary** panel (toolbar button) to write down major events explicitly. Marinara stores rolling summary entries for manual and automated updates, then compiles enabled entries into the summary text injected into prompts.
 - Author key facts into a lorebook as **constant** entries — they'll always be in scope regardless of where they were established in chat.
 
 ### Regenerating a reply keeps using the wrong guidance

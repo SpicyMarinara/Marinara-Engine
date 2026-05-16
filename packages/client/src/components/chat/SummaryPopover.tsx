@@ -22,12 +22,19 @@ import {
 } from "lucide-react";
 import { cn, generateClientId } from "../../lib/utils";
 import { useUIStore } from "../../stores/ui.store";
-import { DEFAULT_AGENT_PROMPTS, type ChatSummaryPromptTemplate } from "@marinara-engine/shared";
+import {
+  DEFAULT_AGENT_PROMPTS,
+  createChatSummaryEntry,
+  normalizeChatSummaryEntries,
+  type ChatSummaryEntry,
+  type ChatSummaryPromptTemplate,
+} from "@marinara-engine/shared";
 import { showConfirmDialog } from "../../lib/app-dialogs";
 
 interface SummaryPopoverProps {
   chatId: string;
   summary: string | null;
+  summaryEntries?: ChatSummaryEntry[];
   contextSize: number;
   promptTemplates?: ChatSummaryPromptTemplate[];
   activePromptTemplateId?: string | null;
@@ -95,9 +102,44 @@ function parseSummarySections(value: string): SummarySection[] {
   return sections;
 }
 
+function createSingleEditableSummaryEntry(args: {
+  content: string;
+  summary: string | null;
+  summaryEntries?: ChatSummaryEntry[];
+}): ChatSummaryEntry[] {
+  const content = args.content.trim();
+  if (!content) return [];
+
+  const now = new Date().toISOString();
+  const existingEntries = normalizeChatSummaryEntries(args.summaryEntries, {
+    legacySummary: args.summary,
+    now,
+  });
+  const existing = existingEntries.length === 1 ? existingEntries[0] : null;
+
+  return [
+    createChatSummaryEntry(
+      {
+        ...(existing ?? {}),
+        id: existing?.id ?? generateClientId(),
+        kind: "rolling",
+        origin: "manual",
+        title: existing?.title && existing.origin !== "automated" ? existing.title : "Manual summary",
+        content,
+        enabled: true,
+        sourceMode: existing?.sourceMode ?? "last",
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      },
+      { createId: generateClientId, now },
+    ),
+  ];
+}
+
 export function SummaryPopover({
   chatId,
   summary,
+  summaryEntries,
   contextSize,
   promptTemplates = [],
   activePromptTemplateId = null,
@@ -297,9 +339,14 @@ export function SummaryPopover({
   ]);
 
   const handleSave = useCallback(() => {
-    updateMeta.mutate({ id: chatId, summary: draft || null });
+    const content = draft.trim();
+    updateMeta.mutate({
+      id: chatId,
+      summary: content || null,
+      summaryEntries: createSingleEditableSummaryEntry({ content, summary, summaryEntries }),
+    });
     setEditing(false);
-  }, [chatId, draft, updateMeta]);
+  }, [chatId, draft, summary, summaryEntries, updateMeta]);
 
   const persistPromptTemplates = useCallback(
     (templates: ChatSummaryPromptTemplate[], activeId: string | null) => {

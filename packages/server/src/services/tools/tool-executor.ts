@@ -42,7 +42,6 @@ export type MetadataUpdater = (current: MetadataPatch) => MetadataPatch | Promis
 export type MetadataPatchInput = MetadataPatch | MetadataUpdater;
 
 const MAX_APPEND_BYTES = 16 * 1024;
-const MAX_TOTAL_SUMMARY_BYTES = 64 * 1024;
 const MAX_CHAT_VARIABLE_KEY_LENGTH = 128;
 const MAX_CHAT_VARIABLE_VALUE_BYTES = 64 * 1024;
 const MAX_CHAT_VARIABLES = 256;
@@ -475,8 +474,7 @@ async function appendChatSummary(
         enabled: true,
       },
     );
-    const summary = trimToUtf8Bytes(result.summary ?? "", MAX_TOTAL_SUMMARY_BYTES, true).trim() || null;
-    return { summary, summaryEntries: result.entries };
+    return { summary: result.summary, summaryEntries: result.entries };
   });
   return { summary: typeof updated.summary === "string" ? updated.summary : sanitizedText };
 }
