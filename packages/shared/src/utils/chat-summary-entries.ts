@@ -9,6 +9,8 @@ const VALID_KINDS = new Set<ChatSummaryEntryKind>(["rolling"]);
 const VALID_ORIGINS = new Set<ChatSummaryEntryOrigin>(["manual", "automated", "legacy"]);
 const VALID_SOURCES = new Set<ChatSummaryEntrySource>(["last", "range", "agent"]);
 
+export const COMPILED_CHAT_SUMMARY_MAX_BYTES = 64 * 1024;
+
 export type ChatSummaryEntryInput = Partial<ChatSummaryEntry> & {
   content: string;
 };
@@ -34,6 +36,49 @@ function fallbackId(prefix: string, seed: string) {
 
 function trimString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function utf8ByteLength(text: string): number {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code < 0x80) {
+      bytes += 1;
+    } else if (code < 0x800) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length) {
+      const next = text.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        i += 1;
+      } else {
+        bytes += 3;
+      }
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
+}
+
+function trimToUtf8Bytes(text: string, maxBytes: number, fromStart = true): string {
+  if (maxBytes <= 0) return "";
+  if (utf8ByteLength(text) <= maxBytes) return text;
+
+  let low = 0;
+  let high = text.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    const candidate = fromStart ? text.slice(text.length - mid) : text.slice(0, mid);
+    if (utf8ByteLength(candidate) <= maxBytes) {
+      low = mid;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  const trimmed = fromStart ? text.slice(text.length - low) : text.slice(0, low);
+  return fromStart ? trimmed.replace(/^[\uDC00-\uDFFF]/, "") : trimmed.replace(/[\uD800-\uDBFF]$/, "");
 }
 
 function normalizeIsoTimestamp(value: unknown, fallback: string) {
@@ -214,7 +259,8 @@ export function compileChatSummaryEntries(entries: ChatSummaryEntry[]): string |
     .filter(Boolean)
     .join("\n\n")
     .trim();
-  return compiled || null;
+  if (!compiled) return null;
+  return trimToUtf8Bytes(compiled, COMPILED_CHAT_SUMMARY_MAX_BYTES, true).trim() || null;
 }
 
 export function appendChatSummaryEntryToMetadata(

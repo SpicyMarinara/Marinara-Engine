@@ -10,7 +10,12 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { type SceneForkMode, type SpritePlacement, type SpriteSide } from "@marinara-engine/shared";
+import {
+  type ChatSummaryEntry,
+  type SceneForkMode,
+  type SpritePlacement,
+  type SpriteSide,
+} from "@marinara-engine/shared";
 import {
   FolderOpen,
   Image,
@@ -325,6 +330,7 @@ function ToolbarMenu({ children }: { children: ReactNode }) {
 function SummaryButton({
   chatId,
   summary,
+  summaryEntries,
   summaryContextSize,
   summaryPromptTemplates,
   activeSummaryPromptTemplateId,
@@ -332,6 +338,7 @@ function SummaryButton({
 }: {
   chatId: string | null;
   summary: string | null;
+  summaryEntries?: ChatSummaryEntry[];
   summaryContextSize: number;
   summaryPromptTemplates?: ComponentProps<typeof SummaryPopover>["promptTemplates"];
   activeSummaryPromptTemplateId?: string | null;
@@ -364,6 +371,7 @@ function SummaryButton({
           <SummaryPopover
             chatId={chatId}
             summary={summary}
+            summaryEntries={summaryEntries}
             contextSize={summaryContextSize}
             promptTemplates={summaryPromptTemplates}
             activePromptTemplateId={activeSummaryPromptTemplateId}
@@ -747,6 +755,9 @@ export function ChatRoleplaySurface({
                     <SummaryButton
                       chatId={chat?.id ?? null}
                       summary={chatMeta.summary ?? null}
+                      summaryEntries={
+                        Array.isArray(chatMeta.summaryEntries) ? (chatMeta.summaryEntries as ChatSummaryEntry[]) : []
+                      }
                       summaryContextSize={summaryContextSize}
                       summaryPromptTemplates={Array.isArray(chatMeta.summaryPromptTemplates) ? chatMeta.summaryPromptTemplates : []}
                       activeSummaryPromptTemplateId={
@@ -839,6 +850,9 @@ export function ChatRoleplaySurface({
                         <SummaryButton
                           chatId={chat?.id ?? null}
                           summary={chatMeta.summary ?? null}
+                          summaryEntries={
+                            Array.isArray(chatMeta.summaryEntries) ? (chatMeta.summaryEntries as ChatSummaryEntry[]) : []
+                          }
                           summaryContextSize={summaryContextSize}
                           summaryPromptTemplates={
                             Array.isArray(chatMeta.summaryPromptTemplates) ? chatMeta.summaryPromptTemplates : []
@@ -905,6 +919,9 @@ export function ChatRoleplaySurface({
                       <SummaryButton
                         chatId={chat?.id ?? null}
                         summary={chatMeta.summary ?? null}
+                        summaryEntries={
+                          Array.isArray(chatMeta.summaryEntries) ? (chatMeta.summaryEntries as ChatSummaryEntry[]) : []
+                        }
                         summaryContextSize={summaryContextSize}
                         summaryPromptTemplates={
                           Array.isArray(chatMeta.summaryPromptTemplates) ? chatMeta.summaryPromptTemplates : []
