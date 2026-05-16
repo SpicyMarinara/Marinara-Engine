@@ -2,12 +2,20 @@
 // Summary Popover — View / edit / generate chat summary
 // Shown via the scroll icon in the chat header bar.
 // ──────────────────────────────────────────────
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { useBulkSetMessagesHiddenFromAI, useGenerateSummary, useUpdateChatMetadata } from "../../hooks/use-chats";
+import {
+  useBulkSetMessagesHiddenFromAI,
+  useDeleteSummaryEntry,
+  useGenerateSummary,
+  useToggleSummaryEntry,
+  useUpdateChatMetadata,
+  useUpdateSummaryEntry,
+} from "../../hooks/use-chats";
 import {
   Check,
   ChevronDown,
+  ChevronRight,
   Copy,
   Info,
   Loader2,
@@ -20,11 +28,12 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn, generateClientId } from "../../lib/utils";
 import { useUIStore } from "../../stores/ui.store";
 import {
   DEFAULT_AGENT_PROMPTS,
-  createChatSummaryEntry,
+  estimateChatSummaryTokens,
   normalizeChatSummaryEntries,
   type ChatSummaryEntry,
   type ChatSummaryPromptTemplate,
@@ -46,6 +55,7 @@ type SummarySourceMode = "last" | "range";
 
 const MIN_SUMMARY_MESSAGES = 5;
 const MAX_SUMMARY_MESSAGES = 200;
+const SUMMARY_TOKEN_WARNING_THRESHOLD = 1800;
 const SUMMARY_HEADING_PATTERN = /^(?:#{1,6}\s*)?(?:\*\*)?([^:\n]{3,80})(?:\*\*)?:\s*$/;
 const SUMMARY_BULLET_PATTERN = /^[-*•]\s+/;
 
@@ -99,38 +109,39 @@ function parseSummarySections(value: string): SummarySection[] {
   return sections;
 }
 
-function createSingleEditableSummaryEntry(args: {
-  content: string;
-  summary: string | null;
-  summaryEntries?: ChatSummaryEntry[];
-}): ChatSummaryEntry[] {
-  const content = args.content.trim();
-  if (!content) return [];
+function formatTokenCount(tokens: number): string {
+  if (tokens >= 1000) {
+    const rounded = Math.round(tokens / 100) / 10;
+    return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}k`;
+  }
+  return String(tokens);
+}
 
+function getSummaryEntrySourceLabel(entry: ChatSummaryEntry): string | null {
+  if (entry.sourceMode === "range" && entry.rangeStartIndex && entry.rangeEndIndex) {
+    return `Messages ${entry.rangeStartIndex}-${entry.rangeEndIndex}`;
+  }
+  if (entry.sourceMode === "last" && entry.messageCount) {
+    return `${entry.messageCount} ${entry.messageCount === 1 ? "message" : "messages"}`;
+  }
+  if (entry.sourceMode === "agent") return "Agent";
+  return null;
+}
+
+function createBlankManualSummaryEntry(): ChatSummaryEntry {
   const now = new Date().toISOString();
-  const existingEntries = normalizeChatSummaryEntries(args.summaryEntries, {
-    legacySummary: args.summary,
-    now,
-  });
-  const existing = existingEntries.length === 1 ? existingEntries[0] : null;
-
-  return [
-    createChatSummaryEntry(
-      {
-        ...(existing ?? {}),
-        id: existing?.id ?? generateClientId(),
-        kind: "rolling",
-        origin: "manual",
-        title: existing?.title && existing.origin !== "automated" ? existing.title : "Manual summary",
-        content,
-        enabled: true,
-        sourceMode: existing?.sourceMode ?? "last",
-        createdAt: existing?.createdAt ?? now,
-        updatedAt: now,
-      },
-      { createId: generateClientId, now },
-    ),
-  ];
+  return {
+    id: generateClientId(),
+    kind: "rolling",
+    origin: "manual",
+    title: "Manual summary",
+    content: "",
+    enabled: true,
+    sourceMode: "last",
+    tokenEstimate: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 export function SummaryPopover({
@@ -143,8 +154,9 @@ export function SummaryPopover({
   totalMessageCount,
   onClose,
 }: SummaryPopoverProps) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(summary ?? "");
+  const [expandedEntryIds, setExpandedEntryIds] = useState<Set<string>>(() => new Set());
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  const [draftEntry, setDraftEntry] = useState<ChatSummaryEntry | null>(null);
   const [templateEditorOpen, setTemplateEditorOpen] = useState(false);
   const [templateSelectOpen, setTemplateSelectOpen] = useState(false);
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
@@ -167,7 +179,10 @@ export function SummaryPopover({
   const generateSummary = useGenerateSummary();
   const bulkSetMessagesHiddenFromAI = useBulkSetMessagesHiddenFromAI();
   const updateMeta = useUpdateChatMetadata();
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const updateSummaryEntry = useUpdateSummaryEntry();
+  const deleteSummaryEntry = useDeleteSummaryEntry();
+  const toggleSummaryEntry = useToggleSummaryEntry();
+  const entryTextareaRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   // Close on click outside — defer by one frame so the synthesised
@@ -197,11 +212,6 @@ export function SummaryPopover({
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  // Sync draft when summary changes (e.g. after generation)
-  useEffect(() => {
-    setDraft(summary ?? "");
-  }, [summary]);
-
   // Sync local size when the persisted/default context size changes externally.
   useEffect(() => {
     if (!sizeInputFocused.current) {
@@ -216,12 +226,12 @@ export function SummaryPopover({
     setRangeEnd(String(Math.max(1, totalMessageCount)));
   }, [persistedContextSize, sourceMode, totalMessageCount]);
 
-  // Focus textarea when entering edit mode
+  // Focus textarea when entering entry edit mode.
   useEffect(() => {
-    if (editing) {
-      setTimeout(() => textareaRef.current?.focus(), 50);
+    if (editingEntryId) {
+      setTimeout(() => entryTextareaRef.current?.focus(), 50);
     }
-  }, [editing]);
+  }, [editingEntryId]);
 
   const normalizedLastSize = clampSummaryCount(parsePositiveInteger(localSize) ?? persistedContextSize ?? 50);
   const normalizedRangeStart = Math.max(1, Math.min(totalMessageCount || 1, parsePositiveInteger(rangeStart) ?? 1));
@@ -262,7 +272,27 @@ export function SummaryPopover({
   const promptTemplateSummary = activePromptTemplate?.name ?? "Built-in default";
   const isEditingExistingTemplate = !!editingTemplateId;
   const hasTemplateDraft = templateNameDraft.trim().length > 0 && templatePromptDraft.trim().length > 0;
-  const summarySections = parseSummarySections(draft);
+  const displayEntries = useMemo(
+    () =>
+      normalizeChatSummaryEntries(summaryEntries, {
+        legacySummary: summary,
+      }),
+    [summary, summaryEntries],
+  );
+  const visibleEntries = useMemo(() => {
+    if (!draftEntry || displayEntries.some((entry) => entry.id === draftEntry.id)) return displayEntries;
+    return [...displayEntries, draftEntry];
+  }, [displayEntries, draftEntry]);
+  const enabledEntryCount = displayEntries.filter((entry) => entry.enabled).length;
+  const enabledTokenEstimate = displayEntries.reduce(
+    (total, entry) => (entry.enabled ? total + entry.tokenEstimate : total),
+    0,
+  );
+  const hasEntries = visibleEntries.length > 0;
+  const allEntriesDisabled = hasEntries && enabledEntryCount === 0;
+  const tokenWarning = enabledTokenEstimate > SUMMARY_TOKEN_WARNING_THRESHOLD;
+  const entryMutationPending =
+    updateSummaryEntry.isPending || deleteSummaryEntry.isPending || toggleSummaryEntry.isPending;
 
   const handleSourceModeChange = useCallback(
     (mode: SummarySourceMode) => {
@@ -290,10 +320,14 @@ export function SummaryPopover({
         { chatId, rangeStartIndex: rangeLow, rangeEndIndex: rangeHigh, promptTemplateId: activePromptTemplateId },
         {
           onSuccess: (data) => {
-            setDraft(data.summary ?? "");
-            setEditing(false);
+            if (data.entry?.id) {
+              setExpandedEntryIds((current) => new Set(current).add(data.entry!.id));
+            }
+            setEditingEntryId(null);
+            setDraftEntry(null);
             maybeHideSummarisedMessages(data.messageIds);
           },
+          onError: () => toast.error("Could not generate summary."),
         },
       );
       return;
@@ -304,10 +338,14 @@ export function SummaryPopover({
       { chatId, contextSize: normalizedLastSize, promptTemplateId: activePromptTemplateId },
       {
         onSuccess: (data) => {
-          setDraft(data.summary ?? "");
-          setEditing(false);
+          if (data.entry?.id) {
+            setExpandedEntryIds((current) => new Set(current).add(data.entry!.id));
+          }
+          setEditingEntryId(null);
+          setDraftEntry(null);
           maybeHideSummarisedMessages(data.messageIds);
         },
+        onError: () => toast.error("Could not generate summary."),
       },
     );
   }, [
@@ -324,15 +362,96 @@ export function SummaryPopover({
     summaryPopoverSettings.hideSummarisedMessages,
   ]);
 
-  const handleSave = useCallback(() => {
-    const content = draft.trim();
-    updateMeta.mutate({
-      id: chatId,
-      summary: content || null,
-      summaryEntries: createSingleEditableSummaryEntry({ content, summary, summaryEntries }),
+  const handleToggleExpanded = useCallback((entryId: string) => {
+    setExpandedEntryIds((current) => {
+      const next = new Set(current);
+      if (next.has(entryId)) {
+        next.delete(entryId);
+      } else {
+        next.add(entryId);
+      }
+      return next;
     });
-    setEditing(false);
-  }, [chatId, draft, summary, summaryEntries, updateMeta]);
+  }, []);
+
+  const handleStartEditEntry = useCallback((entry: ChatSummaryEntry) => {
+    setEditingEntryId(entry.id);
+    setDraftEntry({ ...entry });
+    setExpandedEntryIds((current) => new Set(current).add(entry.id));
+  }, []);
+
+  const handleCreateManualEntry = useCallback(() => {
+    const entry = createBlankManualSummaryEntry();
+    setEditingEntryId(entry.id);
+    setDraftEntry(entry);
+    setExpandedEntryIds((current) => new Set(current).add(entry.id));
+  }, []);
+
+  const handleCancelEditEntry = useCallback(() => {
+    setEditingEntryId(null);
+    setDraftEntry(null);
+  }, []);
+
+  const handleSaveEntry = useCallback(async () => {
+    if (!draftEntry) return;
+    const content = draftEntry.content.trim();
+    const title = draftEntry.title.trim() || "Manual summary";
+    if (!content) {
+      toast.error("Summary content is required.");
+      return;
+    }
+    try {
+      await updateSummaryEntry.mutateAsync({
+        chatId,
+        entry: {
+          ...draftEntry,
+          title,
+          content,
+          tokenEstimate: estimateChatSummaryTokens(content),
+        },
+      });
+      setEditingEntryId(null);
+      setDraftEntry(null);
+    } catch {
+      toast.error("Could not save summary entry.");
+    }
+  }, [chatId, draftEntry, updateSummaryEntry]);
+
+  const handleToggleEntry = useCallback(
+    async (entry: ChatSummaryEntry, enabled: boolean) => {
+      try {
+        await toggleSummaryEntry.mutateAsync({ chatId, entryId: entry.id, enabled });
+      } catch {
+        toast.error("Could not update summary entry.");
+      }
+    },
+    [chatId, toggleSummaryEntry],
+  );
+
+  const handleDeleteEntry = useCallback(
+    async (entry: ChatSummaryEntry) => {
+      const confirmed = await showConfirmDialog({
+        title: "Delete summary entry?",
+        message: `Delete "${entry.title}"? This will change the summary context sent to the model.`,
+        confirmLabel: "Delete",
+        cancelLabel: "Cancel",
+        tone: "destructive",
+      });
+      if (!confirmed) return;
+      try {
+        await deleteSummaryEntry.mutateAsync({ chatId, entryId: entry.id });
+        if (editingEntryId === entry.id) handleCancelEditEntry();
+        setExpandedEntryIds((current) => {
+          const next = new Set(current);
+          next.delete(entry.id);
+          return next;
+        });
+      } catch {
+        toast.error("Could not delete summary entry.");
+      }
+    },
+    [chatId, deleteSummaryEntry, editingEntryId, handleCancelEditEntry],
+  );
 
   const persistPromptTemplates = useCallback(
     (templates: ChatSummaryPromptTemplate[], activeId: string | null) => {
@@ -458,7 +577,7 @@ export function SummaryPopover({
       <div
         className={cn(
           "relative rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl shadow-black/40",
-          isMobile ? "relative w-full max-w-sm max-h-[calc(100dvh-4rem)] overflow-y-auto" : "w-[22rem]",
+          isMobile ? "relative w-full max-w-md max-h-[calc(100dvh-4rem)] overflow-y-auto" : "w-[28rem]",
         )}
       >
         {/* Header */}
@@ -468,7 +587,11 @@ export function SummaryPopover({
               <ScrollText size="0.8125rem" className="shrink-0 text-[var(--muted-foreground)]" />
               <span className="truncate">Chat Summary</span>
             </div>
-            <p className="truncate text-[0.625rem] text-[var(--muted-foreground)]">{sourceSummary}</p>
+            <p className="truncate text-[0.625rem] text-[var(--muted-foreground)]">
+              {hasEntries
+                ? `${enabledEntryCount} enabled · ~${formatTokenCount(enabledTokenEstimate)} tokens`
+                : "No summaries yet"}
+            </p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <button
@@ -797,67 +920,56 @@ export function SummaryPopover({
         )}
 
         {/* Body */}
-        <div className="max-h-80 overflow-y-auto p-3">
-          {editing ? (
-            <div className="space-y-2">
-              <textarea
-                ref={textareaRef}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                rows={6}
-                className="max-h-48 w-full resize-y rounded-lg bg-[var(--secondary)] p-2.5 text-xs ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-                placeholder="Write or paste a summary of this chat…"
-              />
-              <div className="flex justify-end gap-1.5">
-                <button
-                  onClick={() => {
-                    setDraft(summary ?? "");
-                    setEditing(false);
-                  }}
-                  className="rounded-lg px-2.5 py-1 text-[0.625rem] font-medium text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={updateMeta.isPending}
-                  className="flex items-center gap-1 rounded-lg bg-[var(--secondary)] px-2.5 py-1 text-[0.625rem] font-medium text-[var(--foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98] disabled:opacity-50"
-                >
-                  <Save size="0.625rem" />
-                  Save
-                </button>
+        <div className="max-h-[min(26rem,calc(100dvh-15rem))] overflow-y-auto p-3">
+          <div className="space-y-2">
+            {tokenWarning && (
+              <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-2.5 py-2 text-[0.6875rem] leading-relaxed text-amber-200">
+                Enabled summaries are around {formatTokenCount(enabledTokenEstimate)} tokens. Consider disabling older
+                entries if prompt context feels crowded.
               </div>
-            </div>
-          ) : (
-            <div>
-              {draft ? (
-                <div
-                  className="cursor-pointer rounded-lg border border-[var(--border)] bg-[var(--secondary)]/25 p-3 transition-colors hover:bg-[var(--accent)]/45"
-                  onClick={() => setEditing(true)}
-                  title="Click to edit"
-                >
-                  <div className="space-y-3">
-                    {summarySections.map((section, sectionIndex) => (
-                      <SummaryReadableSection
-                        key={`${section.title ?? "summary"}-${sectionIndex}`}
-                        section={section}
-                        sectionIndex={sectionIndex}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div
-                  className="cursor-pointer rounded-lg border border-dashed border-[var(--border)] bg-[var(--secondary)]/20 p-5 transition-colors hover:bg-[var(--accent)]/35"
-                  onClick={() => setEditing(true)}
-                >
-                  <p className="text-center text-xs italic text-[var(--muted-foreground)]">
-                    No summary yet. Click to write one, or press Generate.
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
+            )}
+
+            {allEntriesDisabled && (
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--secondary)]/20 px-2.5 py-2 text-[0.6875rem] leading-relaxed text-[var(--muted-foreground)]">
+                All summaries are disabled. The model will not receive summary context.
+              </div>
+            )}
+
+            {draftEntry && !displayEntries.some((entry) => entry.id === draftEntry.id) && (
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--secondary)]/20 px-2.5 py-2 text-[0.6875rem] leading-relaxed text-[var(--muted-foreground)]">
+                New manual summary. Save it to include it in prompt context.
+              </div>
+            )}
+
+            {hasEntries ? (
+              visibleEntries.map((entry) => (
+                <SummaryEntryRow
+                  key={entry.id}
+                  entry={entry}
+                  expanded={expandedEntryIds.has(entry.id)}
+                  editing={editingEntryId === entry.id}
+                  draftEntry={editingEntryId === entry.id ? draftEntry : null}
+                  textareaRef={entryTextareaRef}
+                  mutationPending={entryMutationPending}
+                  onToggleExpanded={() => handleToggleExpanded(entry.id)}
+                  onToggleEnabled={(enabled) => handleToggleEntry(entry, enabled)}
+                  onStartEdit={() => handleStartEditEntry(entry)}
+                  onDraftChange={setDraftEntry}
+                  onCancelEdit={handleCancelEditEntry}
+                  onSaveEdit={handleSaveEntry}
+                  onDelete={() => void handleDeleteEntry(entry)}
+                />
+              ))
+            ) : (
+              <button
+                type="button"
+                onClick={handleCreateManualEntry}
+                className="w-full rounded-lg border border-dashed border-[var(--border)] bg-[var(--secondary)]/20 p-5 text-center text-xs italic text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]/35"
+              >
+                No summaries yet. Generate one or write your own.
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Source controls */}
@@ -867,20 +979,32 @@ export function SummaryPopover({
             <span className="shrink-0 text-right">{sourceDetail}</span>
           </div>
 
-          <button
-            onClick={handleGenerate}
-            disabled={isGenerating || !canGenerate}
-            className={cn(
-              "mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all",
-              isGenerating || !canGenerate
-                ? "cursor-not-allowed bg-[var(--secondary)] text-[var(--muted-foreground)]"
-                : "bg-[var(--secondary)] text-[var(--foreground)] ring-1 ring-[var(--border)] hover:bg-[var(--accent)] active:scale-[0.98]",
-            )}
-            title="Generate summary with AI"
-          >
-            {isGenerating ? <Loader2 size="0.8125rem" className="animate-spin" /> : <Sparkles size="0.8125rem" />}
-            {isGenerating ? "Generating..." : "Generate"}
-          </button>
+          <div className="grid grid-cols-[auto_1fr] gap-1.5">
+            <button
+              type="button"
+              onClick={handleCreateManualEntry}
+              className="flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-[var(--foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98]"
+              title="Write summary entry"
+            >
+              <PenLine size="0.8125rem" />
+              Write
+            </button>
+            <button
+              type="button"
+              onClick={handleGenerate}
+              disabled={isGenerating || !canGenerate}
+              className={cn(
+                "flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all",
+                isGenerating || !canGenerate
+                  ? "cursor-not-allowed bg-[var(--secondary)] text-[var(--muted-foreground)]"
+                  : "bg-[var(--secondary)] text-[var(--foreground)] ring-1 ring-[var(--border)] hover:bg-[var(--accent)] active:scale-[0.98]",
+              )}
+              title="Generate summary with AI"
+            >
+              {isGenerating ? <Loader2 size="0.8125rem" className="animate-spin" /> : <Sparkles size="0.8125rem" />}
+              {isGenerating ? "Generating..." : "Generate"}
+            </button>
+          </div>
         </div>
 
         {/* Info tip */}
@@ -919,6 +1043,224 @@ function SummarySettingsToggle({ label, checked, onChange }: SummarySettingsTogg
       />
     </label>
   );
+}
+
+interface SummaryEntryRowProps {
+  entry: ChatSummaryEntry;
+  expanded: boolean;
+  editing: boolean;
+  draftEntry: ChatSummaryEntry | null;
+  textareaRef: RefObject<HTMLTextAreaElement | null>;
+  mutationPending: boolean;
+  onToggleExpanded: () => void;
+  onToggleEnabled: (enabled: boolean) => void;
+  onStartEdit: () => void;
+  onDraftChange: (entry: ChatSummaryEntry | null) => void;
+  onCancelEdit: () => void;
+  onSaveEdit: () => void;
+  onDelete: () => void;
+}
+
+function SummaryEntryRow({
+  entry,
+  expanded,
+  editing,
+  draftEntry,
+  textareaRef,
+  mutationPending,
+  onToggleExpanded,
+  onToggleEnabled,
+  onStartEdit,
+  onDraftChange,
+  onCancelEdit,
+  onSaveEdit,
+  onDelete,
+}: SummaryEntryRowProps) {
+  return (
+    <div
+      className={cn(
+        "rounded-lg border border-[var(--border)] bg-[var(--secondary)]/20 transition-colors",
+        entry.enabled ? "text-[var(--foreground)]" : "text-[var(--muted-foreground)] opacity-75",
+      )}
+    >
+      <div className="grid grid-cols-[auto_1fr_auto] items-start gap-2 p-2.5">
+        <input
+          type="checkbox"
+          checked={entry.enabled}
+          disabled={mutationPending}
+          onChange={(event) => onToggleEnabled(event.target.checked)}
+          className="mt-1 h-3.5 w-3.5 shrink-0 accent-[var(--muted-foreground)]"
+          title={entry.enabled ? "Disable summary" : "Enable summary"}
+          aria-label={entry.enabled ? "Disable summary" : "Enable summary"}
+        />
+
+        <button type="button" onClick={onToggleExpanded} className="min-w-0 text-left">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <SummaryEntryOriginIcon entry={entry} />
+            <span className="min-w-0 truncate text-xs font-semibold">{entry.title}</span>
+          </div>
+          <SummaryEntryMetaChips entry={entry} />
+        </button>
+
+        <div className="flex shrink-0 items-center gap-0.5 rounded-md bg-[var(--card)] px-0.5 py-0.5 ring-1 ring-[var(--border)] max-md:opacity-100 md:opacity-90">
+          <button
+            type="button"
+            onClick={onToggleExpanded}
+            className="rounded p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] active:scale-90"
+            title={expanded ? "Collapse" : "Expand"}
+            aria-label={expanded ? "Collapse summary entry" : "Expand summary entry"}
+          >
+            <ChevronRight size="0.75rem" className={cn("transition-transform", expanded && "rotate-90")} />
+          </button>
+          <button
+            type="button"
+            onClick={onStartEdit}
+            className="rounded p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] active:scale-90"
+            title="Edit"
+            aria-label="Edit summary entry"
+          >
+            <PenLine size="0.75rem" />
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={mutationPending}
+            className="rounded p-1 text-[var(--destructive)] transition-colors hover:bg-[var(--destructive)]/15 active:scale-90 disabled:cursor-not-allowed disabled:opacity-50"
+            title="Delete"
+            aria-label="Delete summary entry"
+          >
+            <Trash2 size="0.75rem" />
+          </button>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="border-t border-[var(--border)] px-2.5 pb-2.5 pt-2">
+          {editing && draftEntry ? (
+            <SummaryEntryEditor
+              entry={draftEntry}
+              textareaRef={textareaRef}
+              mutationPending={mutationPending}
+              onChange={onDraftChange}
+              onCancel={onCancelEdit}
+              onSave={onSaveEdit}
+            />
+          ) : (
+            <div className="space-y-3 rounded-md bg-[var(--card)]/45 p-2.5 ring-1 ring-[var(--border)]">
+              {parseSummarySections(entry.content).map((section, sectionIndex) => (
+                <SummaryReadableSection
+                  key={`${entry.id}-${section.title ?? "summary"}-${sectionIndex}`}
+                  section={section}
+                  sectionIndex={sectionIndex}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface SummaryEntryEditorProps {
+  entry: ChatSummaryEntry;
+  textareaRef: RefObject<HTMLTextAreaElement | null>;
+  mutationPending: boolean;
+  onChange: (entry: ChatSummaryEntry) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}
+
+function SummaryEntryEditor({ entry, textareaRef, mutationPending, onChange, onCancel, onSave }: SummaryEntryEditorProps) {
+  return (
+    <div className="space-y-2">
+      <input
+        value={entry.title}
+        onChange={(event) => onChange({ ...entry, title: event.target.value })}
+        maxLength={120}
+        placeholder="Summary title"
+        className="w-full rounded-md bg-[var(--card)] px-2.5 py-1.5 text-xs font-semibold text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+      />
+      <textarea
+        ref={textareaRef}
+        value={entry.content}
+        onChange={(event) => onChange({ ...entry, content: event.target.value })}
+        rows={7}
+        placeholder="Write or paste a summary of this chat..."
+        className="max-h-64 min-h-36 w-full resize-y rounded-md bg-[var(--card)] p-2.5 text-xs leading-relaxed text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+      />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <SummaryTokenBadge tokens={estimateChatSummaryTokens(entry.content)} />
+        <div className="flex justify-end gap-1.5">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-md px-2.5 py-1 text-[0.625rem] font-medium text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={mutationPending || !entry.content.trim()}
+            className="flex items-center gap-1 rounded-md bg-[var(--secondary)] px-2.5 py-1 text-[0.625rem] font-semibold text-[var(--foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Save size="0.625rem" />
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SummaryEntryMetaChips({ entry }: { entry: ChatSummaryEntry }) {
+  const sourceLabel = getSummaryEntrySourceLabel(entry);
+  return (
+    <div className="mt-1 flex flex-wrap gap-1">
+      {sourceLabel && <SummaryMetaChip>{sourceLabel}</SummaryMetaChip>}
+      {entry.messageCount && entry.sourceMode !== "last" && (
+        <SummaryMetaChip>
+          {entry.messageCount} {entry.messageCount === 1 ? "message" : "messages"}
+        </SummaryMetaChip>
+      )}
+      <SummaryTokenBadge tokens={entry.tokenEstimate} />
+    </div>
+  );
+}
+
+function SummaryMetaChip({ children }: { children: ReactNode }) {
+  return (
+    <span className="rounded-full bg-[var(--card)] px-1.5 py-0.5 text-[0.5625rem] font-medium text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
+      {children}
+    </span>
+  );
+}
+
+function SummaryTokenBadge({ tokens }: { tokens: number }) {
+  return <SummaryMetaChip>~{formatTokenCount(tokens)} tokens</SummaryMetaChip>;
+}
+
+function SummaryEntryOriginIcon({ entry }: { entry: ChatSummaryEntry }) {
+  if (entry.origin === "automated") {
+    return (
+      <Sparkles
+        size="0.75rem"
+        className="shrink-0 text-[var(--primary)]"
+        aria-label="Automated summary"
+      />
+    );
+  }
+  if (entry.origin === "legacy") {
+    return (
+      <ScrollText
+        size="0.75rem"
+        className="shrink-0 text-[var(--muted-foreground)]"
+        aria-label="Legacy summary"
+      />
+    );
+  }
+  return <PenLine size="0.75rem" className="shrink-0 text-[var(--muted-foreground)]" aria-label="Manual summary" />;
 }
 
 interface SummaryReadableSectionProps {
