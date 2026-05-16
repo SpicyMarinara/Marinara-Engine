@@ -17,6 +17,7 @@ import {
   resolveMacros,
   LIMITS,
   coerceGameStateTextValue,
+  appendChatSummaryEntryToMetadata,
 } from "@marinara-engine/shared";
 import type {
   AgentContext,
@@ -29,6 +30,7 @@ import type {
   HapticDeviceCommand,
   PlayerStats,
   LorebookEntryTimingState,
+  ChatSummaryEntry,
 } from "@marinara-engine/shared";
 import { createChatsStorage } from "../services/storage/chats.storage.js";
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
@@ -7987,12 +7989,24 @@ export async function generateRoutes(app: FastifyInstance) {
               const csData = result.data as Record<string, unknown>;
               const newText = ((csData.summary as string) ?? "").trim();
               if (newText) {
+                let createdEntry: ChatSummaryEntry | null = null;
+                let summaryEntries: ChatSummaryEntry[] = [];
                 const updatedMeta = await updateChatMetadataForTools((currentMeta) => {
-                  const existing = ((currentMeta.summary as string) ?? "").trim();
-                  return { summary: existing ? `${existing}\n\n${newText}` : newText };
+                  const result = appendChatSummaryEntryToMetadata(currentMeta, {
+                    kind: "rolling",
+                    origin: "automated",
+                    sourceMode: "agent",
+                    content: newText,
+                    enabled: true,
+                  });
+                  createdEntry = result.entry;
+                  summaryEntries = result.entries;
+                  return { summary: result.summary, summaryEntries: result.entries };
                 });
                 const combined = typeof updatedMeta.summary === "string" ? updatedMeta.summary : newText;
-                reply.raw.write(`data: ${JSON.stringify({ type: "chat_summary", data: { summary: combined } })}\n\n`);
+                reply.raw.write(
+                  `data: ${JSON.stringify({ type: "chat_summary", data: { summary: combined, entry: createdEntry, entries: summaryEntries } })}\n\n`,
+                );
               }
             } catch {
               // Non-critical

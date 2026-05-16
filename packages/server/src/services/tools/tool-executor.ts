@@ -8,6 +8,7 @@ import { isCustomToolScriptEnabled, isWebhookLocalUrlsEnabled } from "../../conf
 import { safeFetch } from "../../utils/security.js";
 import { logger } from "../../lib/logger.js";
 import { normalizeSpotifySearchQuery } from "../spotify/spotify.service.js";
+import { appendChatSummaryEntryToMetadata } from "@marinara-engine/shared";
 
 export interface ToolExecutionResult {
   toolCallId: string;
@@ -462,10 +463,20 @@ async function appendChatSummary(
   }
 
   const updated = await context.onUpdateMetadata((currentMeta) => {
-    const existing =
-      typeof currentMeta.summary === "string" ? sanitizePersistedSummaryText(currentMeta.summary.trim()) : "";
-    const summary = existing ? `${existing}\n\n${sanitizedText}` : sanitizedText;
-    return { summary: trimToUtf8Bytes(summary, MAX_TOTAL_SUMMARY_BYTES, true).trim() };
+    const existingSummary =
+      typeof currentMeta.summary === "string" ? sanitizePersistedSummaryText(currentMeta.summary.trim()) : null;
+    const result = appendChatSummaryEntryToMetadata(
+      { ...currentMeta, summary: existingSummary },
+      {
+        kind: "rolling",
+        origin: "automated",
+        sourceMode: "agent",
+        content: sanitizedText,
+        enabled: true,
+      },
+    );
+    const summary = trimToUtf8Bytes(result.summary ?? "", MAX_TOTAL_SUMMARY_BYTES, true).trim() || null;
+    return { summary, summaryEntries: result.entries };
   });
   return { summary: typeof updated.summary === "string" ? updated.summary : sanitizedText };
 }

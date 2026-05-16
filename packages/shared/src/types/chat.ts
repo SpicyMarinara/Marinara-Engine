@@ -84,6 +84,34 @@ export interface ChatSummaryPromptTemplate {
   prompt: string;
 }
 
+/** Rolling summary entry category. Extensible beyond rolling summaries later. */
+export type ChatSummaryEntryKind = "rolling";
+
+/** Whether a rolling summary entry was user-created, agent-created, or migrated from the legacy blob. */
+export type ChatSummaryEntryOrigin = "manual" | "automated" | "legacy";
+
+/** Source selector used to create a rolling summary entry. */
+export type ChatSummaryEntrySource = "last" | "range" | "agent";
+
+/** A single structured rolling chat summary entry. */
+export interface ChatSummaryEntry {
+  id: string;
+  kind: ChatSummaryEntryKind;
+  origin: ChatSummaryEntryOrigin;
+  title: string;
+  content: string;
+  enabled: boolean;
+  sourceMode: ChatSummaryEntrySource;
+  messageCount?: number;
+  rangeStartIndex?: number;
+  rangeEndIndex?: number;
+  messageIds?: string[];
+  promptTemplateId?: string | null;
+  tokenEstimate: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** A vectorized recall fragment created from one chat's messages. */
 export interface ChatMemoryChunk {
   id: string;
@@ -101,8 +129,10 @@ export interface ChatMemoryChunk {
 
 /** Extra metadata stored on a chat. */
 export interface ChatMetadata {
-  /** Summary text for context injection */
+  /** Compiled enabled rolling summary text for context injection. Derived from summaryEntries when present. */
   summary: string | null;
+  /** Structured rolling summary entries. Missing means legacy summary-only metadata. */
+  summaryEntries?: ChatSummaryEntry[];
   /** Recent message count used by manual rolling summary generation and the automated summary agent. */
   summaryContextSize?: number;
   /** Chat-scoped manual summary prompt templates. Missing or empty uses the built-in default. */
