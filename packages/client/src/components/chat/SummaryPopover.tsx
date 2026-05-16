@@ -288,8 +288,9 @@ export function SummaryPopover({
     (total, entry) => (entry.enabled ? total + entry.tokenEstimate : total),
     0,
   );
+  const hasPersistedEntries = displayEntries.length > 0;
   const hasEntries = visibleEntries.length > 0;
-  const allEntriesDisabled = hasEntries && enabledEntryCount === 0;
+  const allEntriesDisabled = hasPersistedEntries && enabledEntryCount === 0;
   const tokenWarning = enabledTokenEstimate > SUMMARY_TOKEN_WARNING_THRESHOLD;
   const entryMutationPending =
     updateSummaryEntry.isPending || deleteSummaryEntry.isPending || toggleSummaryEntry.isPending;
@@ -400,22 +401,31 @@ export function SummaryPopover({
       toast.error("Summary content is required.");
       return;
     }
-    try {
-      await updateSummaryEntry.mutateAsync({
-        chatId,
-        entry: {
+    const existingEntry = displayEntries.find((entry) => entry.id === draftEntry.id);
+    const entryPayload = existingEntry
+      ? {
+          id: draftEntry.id,
+          title,
+          content,
+          tokenEstimate: estimateChatSummaryTokens(content),
+        }
+      : {
           ...draftEntry,
           title,
           content,
           tokenEstimate: estimateChatSummaryTokens(content),
-        },
+        };
+    try {
+      await updateSummaryEntry.mutateAsync({
+        chatId,
+        entry: entryPayload,
       });
       setEditingEntryId(null);
       setDraftEntry(null);
     } catch {
       toast.error("Could not save summary entry.");
     }
-  }, [chatId, draftEntry, updateSummaryEntry]);
+  }, [chatId, displayEntries, draftEntry, updateSummaryEntry]);
 
   const handleToggleEntry = useCallback(
     async (entry: ChatSummaryEntry, enabled: boolean) => {
