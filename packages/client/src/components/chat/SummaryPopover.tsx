@@ -2,7 +2,7 @@
 // Summary Popover — View / edit / generate chat summary
 // Shown via the scroll icon in the chat header bar.
 // ──────────────────────────────────────────────
-import { useState, useEffect, useRef, useCallback, useMemo, type MouseEvent, type RefObject } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
   useBulkSetMessagesHiddenFromAI,
@@ -205,7 +205,7 @@ export function SummaryPopover({
   // mousedown from the tap that *opened* the popover doesn't
   // immediately close it on touch devices (Android / iPadOS).
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
+    const handler = (e: globalThis.MouseEvent) => {
       if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
         onClose();
       }
@@ -231,7 +231,7 @@ export function SummaryPopover({
   // Close the settings flyout when clicking elsewhere in the summary popover.
   useEffect(() => {
     if (!scopeSettingsOpen) return;
-    const handler = (e: MouseEvent) => {
+    const handler = (e: globalThis.MouseEvent) => {
       const target = e.target as Node;
       if (scopeSettingsRef.current?.contains(target) || scopeSettingsButtonRef.current?.contains(target)) return;
       setScopeSettingsOpen(false);
@@ -620,7 +620,7 @@ export function SummaryPopover({
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
   const handlePanelMouseDown = useCallback(
-    (event: MouseEvent<HTMLDivElement>) => {
+    (event: ReactMouseEvent<HTMLDivElement>) => {
       if (scopeSettingsOpen) {
         const target = event.target as Node;
         if (!scopeSettingsRef.current?.contains(target) && !scopeSettingsButtonRef.current?.contains(target)) {
