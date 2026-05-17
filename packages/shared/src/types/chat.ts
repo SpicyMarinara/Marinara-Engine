@@ -94,7 +94,7 @@ export type ChatSummaryEntryOrigin = "manual" | "automated" | "legacy";
 export type ChatSummaryEntrySource = "last" | "range" | "agent";
 
 /** How rolling summaries are injected for roleplay chats. */
-export type ChatSummaryInjectionMode = "full" | "semantic" | "full_and_semantic";
+export type ChatSummaryInjectionMode = "full" | "semantic";
 
 /** How selective semantic rolling-summary recall should be. */
 export type ChatSummaryRecallStrictness = "conservative" | "balanced" | "broad";

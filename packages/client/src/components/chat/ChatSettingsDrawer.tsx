@@ -1543,24 +1543,20 @@ export function ChatSettingsDrawer({
   };
 
   const renderSummaryContextControls = () => {
-    const mode =
-      metadata.summaryInjectionMode === "semantic" || metadata.summaryInjectionMode === "full_and_semantic"
-        ? metadata.summaryInjectionMode
-        : "full";
+    const mode = metadata.summaryInjectionMode === "semantic" ? metadata.summaryInjectionMode : "full";
     const strictness =
       metadata.summaryRecallStrictness === "conservative" || metadata.summaryRecallStrictness === "broad"
         ? metadata.summaryRecallStrictness
         : "balanced";
     const recallCount = summaryRecallCountDraft;
-    const semanticEnabled = mode === "semantic" || mode === "full_and_semantic";
+    const semanticEnabled = mode === "semantic";
     const showRecallCountWarning = recallCount > 7;
     return (
       <div className="space-y-3">
         <div className="grid grid-cols-1 gap-1.5">
           {[
             { value: "full", label: "Full summary" },
-            { value: "semantic", label: "Semantic recall" },
-            { value: "full_and_semantic", label: "Full summary + semantic recall" },
+            { value: "semantic", label: "Relevant summaries" },
           ].map((option) => (
             <button
               key={option.value}

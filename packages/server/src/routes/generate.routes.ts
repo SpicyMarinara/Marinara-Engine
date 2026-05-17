@@ -646,8 +646,8 @@ function packRecalledMemories(
   return { lines, estimatedTokens, budgetTokens, trimmed };
 }
 
-function normalizeSummaryInjectionMode(value: unknown): "full" | "semantic" | "full_and_semantic" {
-  return value === "semantic" || value === "full_and_semantic" ? value : "full";
+function normalizeSummaryInjectionMode(value: unknown): "full" | "semantic" {
+  return value === "semantic" ? value : "full";
 }
 
 function normalizeSummaryRecallCount(value: unknown): number {
@@ -1056,9 +1056,7 @@ export async function generateRoutes(app: FastifyInstance) {
     }
     let chatMeta = parseExtra(chat.metadata) as Record<string, unknown>;
     const summaryInjectionMode = normalizeSummaryInjectionMode(chatMeta.summaryInjectionMode);
-    const enableSummaryRecall =
-      requestChatMode === "roleplay" &&
-      (summaryInjectionMode === "semantic" || summaryInjectionMode === "full_and_semantic");
+    const enableSummaryRecall = requestChatMode === "roleplay" && summaryInjectionMode === "semantic";
     const summaryRecallCount = normalizeSummaryRecallCount(chatMeta.summaryRecallCount);
     const summaryRecallStrictness = normalizeSummaryRecallStrictness(chatMeta.summaryRecallStrictness);
     let memoryRecallEmbeddingSource: Awaited<ReturnType<typeof resolveMemoryRecallEmbeddingSource>> | null = null;
