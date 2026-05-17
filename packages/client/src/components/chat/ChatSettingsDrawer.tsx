@@ -5686,8 +5686,8 @@ function MemoryRecallMemoriesModal({ chatId, open, onClose }: { chatId: string; 
   const handleClear = async () => {
     if (memories.length === 0) return;
     const ok = await showConfirmDialog({
-      title: "Clear Memories",
-      message: "Remove all recall memories for this chat? This does not delete chat messages.",
+      title: "Clear Message Memories",
+      message: "Remove all message recall memories for this chat? This does not delete chat messages or summary memories.",
       confirmLabel: "Clear",
       tone: "destructive",
     });
@@ -5730,7 +5730,7 @@ function MemoryRecallMemoriesModal({ chatId, open, onClose }: { chatId: string; 
               onClick={handleClear}
               disabled={memories.length === 0 || clearMemories.isPending}
               className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)] disabled:opacity-40"
-              title="Clear all memories"
+              title="Clear message memories"
             >
               <Trash2 size="0.8125rem" />
             </button>

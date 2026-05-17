@@ -826,7 +826,8 @@ export async function chatsRoutes(app: FastifyInstance) {
     return { rebuilt };
   });
 
-  // Clear all memory-recall chunks for this chat.
+  // Clear message-derived memory-recall chunks for this chat.
+  // Rolling-summary chunks are a derived summary index; refresh them instead of deleting them here.
   app.delete<{ Params: { id: string } }>("/:id/memories", async (req, reply) => {
     const chat = await storage.getById(req.params.id);
     if (!chat) return reply.status(404).send({ error: "Chat not found" });
