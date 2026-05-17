@@ -1,5 +1,6 @@
 import { useLayoutEffect, useState, type CSSProperties, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { motion, useReducedMotion, type MotionProps, type Transition } from "framer-motion";
 import type { TrackerPanelSide } from "../../../../stores/ui.store";
 import { cn } from "../../../../lib/utils";
 import { visibleText } from "../../lib/tracker-display";
@@ -14,6 +15,69 @@ type ThoughtTextFit = {
   editMinHeightClassName: string;
   previewClassName?: string;
 };
+type ThoughtBubbleMotionProps = Pick<MotionProps, "initial" | "animate" | "transition">;
+
+const THOUGHT_BUBBLE_EASE: [number, number, number, number] = [0.16, 1, 0.3, 1];
+const INLINE_THOUGHT_BUBBLE_TRANSITION: Transition = { duration: 0.2, ease: THOUGHT_BUBBLE_EASE };
+const FLOATING_THOUGHT_BUBBLE_TRANSITION: Transition = { duration: 0.24, ease: THOUGHT_BUBBLE_EASE };
+
+function getInlineThoughtBubbleMotion({
+  tailOnLeft,
+  featured,
+  reducedMotion,
+}: {
+  tailOnLeft: boolean;
+  featured: boolean;
+  reducedMotion: boolean | null;
+}): ThoughtBubbleMotionProps {
+  if (reducedMotion) {
+    return {
+      initial: false,
+      animate: { opacity: 1 },
+      transition: { duration: 0 },
+    };
+  }
+
+  return {
+    initial: {
+      opacity: 0,
+      x: featured ? 0 : tailOnLeft ? -8 : 8,
+      y: featured ? -5 : 3,
+      scale: featured ? 0.985 : 0.97,
+      filter: "blur(2px)",
+    },
+    animate: { opacity: 1, x: 0, y: 0, scale: 1, filter: "blur(0px)" },
+    transition: INLINE_THOUGHT_BUBBLE_TRANSITION,
+  };
+}
+
+function getFloatingThoughtBubbleMotion({
+  outsideSide,
+  reducedMotion,
+}: {
+  outsideSide: "left" | "right";
+  reducedMotion: boolean | null;
+}): ThoughtBubbleMotionProps {
+  if (reducedMotion) {
+    return {
+      initial: false,
+      animate: { opacity: 1 },
+      transition: { duration: 0 },
+    };
+  }
+
+  return {
+    initial: {
+      opacity: 0,
+      x: outsideSide === "left" ? 10 : -10,
+      y: -4,
+      scale: 0.96,
+      filter: "blur(2px)",
+    },
+    animate: { opacity: 1, x: 0, y: 0, scale: 1, filter: "blur(0px)" },
+    transition: FLOATING_THOUGHT_BUBBLE_TRANSITION,
+  };
+}
 
 function getThoughtPreviewClampClass(previewLineCount: ThoughtTextFit["previewLineCount"]) {
   if (previewLineCount === 4) return "line-clamp-4";
@@ -202,6 +266,7 @@ export function InlineThoughtBubble({
   const thoughtText = visibleText(value, "Thoughts").replace(/\s+/g, " ");
   const thoughtTextFit = getThoughtTextFit(thoughtText, getThoughtBubbleSize(thoughtText));
   const isFeaturedVariant = variant === "featured";
+  const reducedMotion = useReducedMotion();
   const previewLineCount = isFeaturedVariant ? (thoughtText.length <= 70 ? 2 : 3) : thoughtTextFit.previewLineCount;
   const thoughtTextStyle: CSSProperties = {
     fontSize: isFeaturedVariant
@@ -216,11 +281,12 @@ export function InlineThoughtBubble({
     : thoughtTextFit.editMinHeightClassName;
 
   return (
-    <div
+    <motion.div
       ref={bubbleRef}
       data-component="InlineThoughtBubble"
+      {...getInlineThoughtBubbleMotion({ tailOnLeft, featured: isFeaturedVariant, reducedMotion })}
       className={cn(
-        "relative mx-1 mt-1 min-w-0 text-[var(--foreground)] [container-type:inline-size]",
+        "relative mx-1 mt-1 min-w-0 text-[var(--foreground)] will-change-transform [container-type:inline-size]",
         isFeaturedVariant
           ? "px-0"
           : tailOnLeft
@@ -250,7 +316,7 @@ export function InlineThoughtBubble({
         className={cn(
           "relative z-[1] min-w-0 overflow-hidden border",
           isFeaturedVariant
-            ? "max-h-[3.25rem] rounded-[1.05rem] border-[color-mix(in_srgb,var(--tracker-profile-dialogue-border)_24%,transparent)] bg-[linear-gradient(150deg,color-mix(in_srgb,var(--tracker-profile-panel)_78%,var(--tracker-profile-display-solid)_12%)_0%,color-mix(in_srgb,var(--tracker-profile-panel)_72%,var(--tracker-profile-accent-solid)_10%)_54%,color-mix(in_srgb,var(--background)_34%,var(--tracker-profile-panel)_66%)_100%)] px-2.5 py-1 text-[color:var(--tracker-profile-text)] shadow-[0_3px_8px_color-mix(in_srgb,var(--background)_22%,transparent),0_0_6px_color-mix(in_srgb,var(--tracker-profile-accent-solid)_7%,transparent),inset_0_1px_0_color-mix(in_srgb,var(--foreground)_4%,transparent)]"
+            ? "max-h-[3.25rem] rounded-[1.05rem] border-[color-mix(in_srgb,var(--tracker-profile-dialogue-border)_24%,transparent)] bg-[linear-gradient(150deg,color-mix(in_srgb,var(--tracker-profile-surface-solid)_78%,var(--tracker-profile-display-solid)_12%)_0%,color-mix(in_srgb,var(--tracker-profile-surface-solid)_72%,var(--tracker-profile-accent-solid)_10%)_54%,color-mix(in_srgb,var(--background)_34%,var(--tracker-profile-surface-solid)_66%)_100%)] px-2.5 py-1 text-[color:var(--tracker-profile-text)] shadow-[0_3px_8px_color-mix(in_srgb,var(--background)_22%,transparent),0_0_6px_color-mix(in_srgb,var(--tracker-profile-accent-solid)_7%,transparent),inset_0_1px_0_color-mix(in_srgb,var(--foreground)_4%,transparent)]"
             : "rounded-[1.2rem] border-[var(--primary)]/22 bg-[color-mix(in_srgb,var(--card)_84%,var(--background)_16%)] px-2.5 py-1.5 shadow-[0_6px_12px_rgba(0,0,0,0.18),inset_0_1px_0_color-mix(in_srgb,var(--foreground)_7%,transparent)] backdrop-blur-xl",
           surfaceClassName,
         )}
@@ -296,7 +362,7 @@ export function InlineThoughtBubble({
           )}
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -313,6 +379,7 @@ export function ExternalThoughtBubble({
   panelSide: TrackerPanelSide;
   bubbleRef?: RefObject<HTMLDivElement | null>;
 }) {
+  const reducedMotion = useReducedMotion();
   const [position, setPosition] = useState<{
     left: number;
     top: number;
@@ -389,14 +456,20 @@ export function ExternalThoughtBubble({
   if (!position || typeof document === "undefined") return null;
 
   return createPortal(
-    <div
+    <motion.div
       ref={bubbleRef}
       data-component="ExternalThoughtBubble"
-      className="pointer-events-auto fixed z-[60] drop-shadow-[0_8px_14px_rgba(0,0,0,0.24)]"
-      style={{ left: position.left, top: position.top, width: position.width }}
+      {...getFloatingThoughtBubbleMotion({ outsideSide: position.outsideSide, reducedMotion })}
+      className="pointer-events-auto fixed z-[60] drop-shadow-[0_8px_14px_rgba(0,0,0,0.24)] will-change-transform"
+      style={{
+        left: position.left,
+        top: position.top,
+        width: position.width,
+        transformOrigin: position.outsideSide === "left" ? "right 1.5rem" : "left 1.5rem",
+      }}
     >
       <ThoughtBubble value={value} onSave={onSave} tailSide={position.outsideSide === "left" ? "right" : "left"} />
-    </div>,
+    </motion.div>,
     document.body,
   );
 }

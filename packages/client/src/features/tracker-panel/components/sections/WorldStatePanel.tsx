@@ -6,7 +6,6 @@ import type { TrackerPanelSizeProfile, TrackerTemperatureUnit } from "../../../.
 import { cn } from "../../../../lib/utils";
 import {
   getWorldAmbienceStyle,
-  getWorldDashboardGridClass,
   getWorldDateDisplay,
   WORLD_FREEFORM_DATE_GRID_BASE_CLASS,
   WORLD_GRID_BASE_CLASS,
@@ -33,12 +32,8 @@ export function WorldStatePanel({
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
 }) {
-  const useExpandedDashboard = trackerPanelSizeProfile === "expanded";
   const dateDisplay = getWorldDateDisplay(state?.date);
   const hasFreeformDate = dateDisplay.kind === "freeform";
-  const dashboardGridClass = useExpandedDashboard
-    ? getWorldDashboardGridClass(state?.weather, state?.temperature, state?.location, { hasFreeformDate })
-    : "";
 
   return (
     <div
@@ -60,7 +55,6 @@ export function WorldStatePanel({
           className={cn(
             "relative grid gap-px p-1 @min-[380px]:gap-1 @min-[380px]:p-1.5",
             hasFreeformDate ? WORLD_FREEFORM_DATE_GRID_BASE_CLASS : WORLD_GRID_BASE_CLASS,
-            dashboardGridClass,
           )}
         >
           <WorldDateTile
@@ -80,11 +74,7 @@ export function WorldStatePanel({
           <WorldLocationPlate
             value={state?.location}
             onSave={(value) => onSaveField("location", value || null)}
-            className={cn(
-              "col-span-3",
-              useExpandedDashboard &&
-                "@min-[380px]:col-span-1 @min-[380px]:col-start-4 @min-[380px]:row-start-1 @min-[380px]:min-h-[3.125rem]",
-            )}
+            className="col-span-3"
           />
         </div>
       )}

@@ -556,7 +556,7 @@ function TrackerPanelAppearanceDrawer({
                     aria-pressed={selected}
                     title={`${opt.label}: ${getTrackerPanelWidthForProfile(opt.id)}px. ${opt.desc}`}
                     className={cn(
-                      "flex min-h-8 min-w-0 items-center justify-center gap-1 rounded-md px-1 text-[0.625rem] transition-all disabled:cursor-not-allowed",
+                      "flex min-h-8 min-w-0 items-center justify-center rounded-md px-1.5 text-[0.6875rem] transition-all disabled:cursor-not-allowed",
                       selected
                         ? "bg-[var(--primary)]/12 text-[var(--foreground)] ring-1 ring-[var(--primary)]/45"
                         : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
@@ -567,9 +567,6 @@ function TrackerPanelAppearanceDrawer({
                         <TrackerSizeTierIcon sizeProfile={opt.id} />
                       </span>
                       {opt.label}
-                    </span>
-                    <span className="shrink-0 font-mono text-[0.5625rem] tabular-nums opacity-65">
-                      {getTrackerPanelWidthForProfile(opt.id)}
                     </span>
                   </button>
                 );

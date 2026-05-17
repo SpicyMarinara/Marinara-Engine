@@ -457,13 +457,36 @@ const now = () => new Date().toISOString();
 
 const MARI_AVATAR = "/sprites/mari/Mari_profile.png";
 
-export async function seedProfessorMari(db: DB) {
-  const serialized = JSON.stringify(MARI_CHARACTER_DATA);
+function parseExistingMariData(raw: unknown): CharacterData | null {
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as CharacterData) : null;
+  } catch {
+    return null;
+  }
+}
 
+function getSeedDataForExistingMari(rawExistingData: unknown): CharacterData {
+  const existingData = parseExistingMariData(rawExistingData);
+  const existingTrackerCardColors = existingData?.extensions?.trackerCardColors;
+
+  return {
+    ...MARI_CHARACTER_DATA,
+    extensions: {
+      ...MARI_CHARACTER_DATA.extensions,
+      ...(existingTrackerCardColors !== undefined && { trackerCardColors: existingTrackerCardColors }),
+    },
+  };
+}
+
+export async function seedProfessorMari(db: DB) {
   // Check if Mari already exists
   const existing = await db.select().from(characters).where(eq(characters.id, PROFESSOR_MARI_ID));
 
   if (existing.length > 0) {
+    const seedData = getSeedDataForExistingMari(existing[0]!.data);
+    const serialized = JSON.stringify(seedData);
+
     // Update her card data and avatar if changed (e.g. after an app update)
     const needsUpdate = existing[0]!.data !== serialized || existing[0]!.avatarPath !== MARI_AVATAR;
     if (needsUpdate) {
@@ -475,6 +498,8 @@ export async function seedProfessorMari(db: DB) {
     }
     return;
   }
+
+  const serialized = JSON.stringify(MARI_CHARACTER_DATA);
 
   await db.insert(characters).values({
     id: PROFESSOR_MARI_ID,

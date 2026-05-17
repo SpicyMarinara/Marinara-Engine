@@ -15,6 +15,7 @@ import { CharacterTrackerCard } from "../character-card/CharacterTrackerCard";
 
 const COMPACT_CHARACTER_GHOST_SLOT_CLASS =
   "pointer-events-none relative hidden min-h-0 self-stretch overflow-hidden rounded-md border border-[color-mix(in_srgb,var(--border)_28%,transparent)] bg-[linear-gradient(135deg,color-mix(in_srgb,var(--card)_18%,transparent),color-mix(in_srgb,var(--background)_12%,transparent)_48%,transparent)] opacity-55 shadow-[inset_0_1px_0_color-mix(in_srgb,var(--foreground)_3%,transparent),inset_0_-1px_0_color-mix(in_srgb,var(--background)_18%,transparent)] @min-[260px]:block before:pointer-events-none before:absolute before:left-0 before:right-2 before:top-0.5 before:h-5 before:rounded-l-[4px] before:rounded-r-[2px] before:bg-[linear-gradient(180deg,color-mix(in_srgb,var(--background)_78%,var(--card)_22%),color-mix(in_srgb,var(--card)_42%,transparent))] before:opacity-65 after:pointer-events-none after:absolute after:inset-1 after:rounded-[4px] after:bg-[repeating-linear-gradient(135deg,color-mix(in_srgb,var(--border)_12%,transparent)_0_1px,transparent_1px_7px)] after:opacity-35";
+const COMPACT_CHARACTER_CARD_SLOT_CLASS = "min-h-0 h-full";
 
 export function CharacterTrackerPanel({
   activeChatId,
@@ -124,7 +125,10 @@ export function CharacterTrackerPanel({
     const useCompactCardColumns = trackerPanelSizeProfile !== "compact";
     const shouldRenderCompactGhostSlot = useCompactCardColumns && compactEntries.length % 2 === 1;
     const renderCompactCharacterCard = (entry: (typeof characterEntries)[number]) => (
-      <div key={`${activeChatId ?? "chat"}-${entry.character.characterId}-${entry.index}`}>
+      <div
+        key={`${activeChatId ?? "chat"}-${entry.character.characterId}-${entry.index}`}
+        className={COMPACT_CHARACTER_CARD_SLOT_CLASS}
+      >
         {renderCharacterCard(entry)}
       </div>
     );
@@ -135,7 +139,7 @@ export function CharacterTrackerPanel({
         {compactEntries.length > 0 && (
           <div
             className={cn(
-              "grid grid-cols-1 items-start gap-1 px-1",
+              "grid auto-rows-auto grid-cols-1 items-stretch gap-1 px-1 pb-1",
               useCompactCardColumns && "@min-[260px]:grid-cols-2",
               featuredEntries.length === 0 && "pt-1",
             )}

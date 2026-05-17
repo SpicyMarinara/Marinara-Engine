@@ -25,6 +25,28 @@ function characterDataChanged(current: CharacterData, next: CharacterData) {
   return JSON.stringify(current) !== JSON.stringify(next);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function mergeCharacterData(current: CharacterData, data: Partial<CharacterData>): CharacterData {
+  const merged = { ...current, ...data };
+  if (!isRecord(data.extensions)) return merged;
+
+  const extensions = {
+    ...(isRecord(current.extensions) ? current.extensions : {}),
+    ...data.extensions,
+  };
+  for (const [key, value] of Object.entries(data.extensions)) {
+    if (value === undefined) delete extensions[key];
+  }
+
+  return {
+    ...merged,
+    extensions: extensions as CharacterData["extensions"],
+  };
+}
+
 export function createCharactersStorage(db: DB) {
   return {
     // ── Characters ──
@@ -122,7 +144,7 @@ export function createCharactersStorage(db: DB) {
       const existing = await this.getById(id);
       if (!existing) return null;
       const currentData = parseCharacterData(existing.data);
-      const merged = { ...currentData, ...data };
+      const merged = mergeCharacterData(currentData, data);
       const nextComment = options?.comment !== undefined ? (options.comment ?? "") : (existing.comment ?? "");
       const nextAvatarPath = avatarPath !== undefined ? avatarPath : existing.avatarPath;
       const shouldSnapshot =

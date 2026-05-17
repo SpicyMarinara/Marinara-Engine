@@ -379,8 +379,11 @@ export async function chatsRoutes(app: FastifyInstance) {
       if (currentExtensions.conversationStatus === "online" && currentExtensions.conversationActivity == null) {
         continue;
       }
-      const extensions: Record<string, unknown> = { ...currentExtensions, conversationStatus: "online" };
-      delete extensions.conversationActivity;
+      const extensions: Record<string, unknown> = {
+        ...currentExtensions,
+        conversationStatus: "online",
+        conversationActivity: undefined,
+      };
       await characterStorage.update(characterId, { extensions } as Partial<CharacterData>, undefined, {
         skipVersionSnapshot: true,
       });

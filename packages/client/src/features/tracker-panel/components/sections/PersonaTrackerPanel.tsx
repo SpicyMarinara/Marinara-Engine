@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { HeartPulse, Package, Sparkles } from "lucide-react";
 import type { CharacterStat, InventoryItem, Persona } from "@marinara-engine/shared";
 import type { TrackerPanelSide, TrackerPanelSizeProfile } from "../../../../stores/ui.store";
-import { useCharacterSprites, useUpdatePersona, type SpriteInfo } from "../../../../hooks/use-characters";
+import {
+  characterKeys,
+  useCharacterSprites,
+  useUpdatePersona,
+  type SpriteInfo,
+} from "../../../../hooks/use-characters";
 import {
   getTrackerCardPortraitView,
   parseTrackerCardColorConfig,
@@ -27,7 +33,7 @@ import {
 import { resolveSpriteUrl } from "../../lib/sprite-expressions";
 import { getPersonaStatDensity } from "../../lib/tracker-stat-layout";
 import { getPersonaAmbienceStyle } from "../../lib/tracker-profile-style";
-import { InlineEdit } from "../controls/InlineControls";
+import { InlineAddRow, InlineEdit } from "../controls/InlineControls";
 import { TrackerProfileNameplate } from "../controls/TrackerProfileNameplate";
 import {
   TRACKER_PROFILE_BODY_BOTTOM_RULE_CLASS,
@@ -65,8 +71,31 @@ const PERSONA_STATUS_STRIP_CLASS =
   cn(TRACKER_PROFILE_STATUS_STRIP_CLASS, "mx-0.5 mb-1.5 px-1.5 py-0.5");
 const PERSONA_INVENTORY_HEADER_CLASS =
   "relative mx-0.5 flex h-4 items-center gap-1 overflow-hidden px-0.5 text-[0.625rem] leading-3";
-const PERSONA_EMPTY_INVENTORY_CLASS =
-  cn(TRACKER_PROFILE_EMPTY_SURFACE_CLASS, "px-1 py-2");
+const PERSONA_INVENTORY_SHELF_CLASS =
+  cn(TRACKER_PROFILE_EMPTY_SURFACE_CLASS, "min-h-0 flex-1");
+
+interface PersonaPortraitPendingSave {
+  id: string;
+  portraitFocusX: number;
+  portraitFocusY: number;
+  portraitZoom: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function isSamePersonaPortraitPendingSave(
+  current: PersonaPortraitPendingSave | null,
+  expected: PersonaPortraitPendingSave,
+) {
+  return (
+    current?.id === expected.id &&
+    current.portraitFocusX === expected.portraitFocusX &&
+    current.portraitFocusY === expected.portraitFocusY &&
+    current.portraitZoom === expected.portraitZoom
+  );
+}
 
 export function PersonaInventoryPanel({
   persona,
@@ -107,8 +136,12 @@ export function PersonaInventoryPanel({
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
 }) {
+  const queryClient = useQueryClient();
   const updatePersona = useUpdatePersona();
   const personaPortraitSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const personaPortraitPendingSaveRef = useRef<PersonaPortraitPendingSave | null>(null);
+  const updatePersonaMutateRef = useRef(updatePersona.mutate);
+  const flushPersonaPortraitPendingSaveRef = useRef<(pendingSave: PersonaPortraitPendingSave) => void>(() => {});
   const [personaPortraitFocusOverride, setPersonaPortraitFocusOverride] = useState<{
     personaId: string;
     x: number;
@@ -127,6 +160,8 @@ export function PersonaInventoryPanel({
   const defaultPersonaPortraitFocusY =
     personaPortraitMediaKind === "expression" ? TRACKER_PORTRAIT_EXPRESSION_DEFAULT_FOCUS_Y : undefined;
   const personaTrackerCardColors = parseTrackerCardColorConfig(persona?.trackerCardColors);
+  const personaTrackerCardColorsRef = useRef(personaTrackerCardColors);
+  personaTrackerCardColorsRef.current = personaTrackerCardColors;
   const personaSavedPortraitFocus = getTrackerCardPortraitView(personaTrackerCardColors, {
     y: defaultPersonaPortraitFocusY,
   });
@@ -134,25 +169,41 @@ export function PersonaInventoryPanel({
     personaPortraitFocusOverride && personaPortraitFocusOverride.personaId === persona?.id
       ? personaPortraitFocusOverride
       : personaSavedPortraitFocus;
+  const flushPersonaPortraitPendingSave = (pendingSave: PersonaPortraitPendingSave) => {
+    const cachedPersonas = queryClient.getQueryData<unknown[] | undefined>(characterKeys.personas);
+    const cachedPersona = Array.isArray(cachedPersonas)
+      ? cachedPersonas.find((candidate) => isRecord(candidate) && candidate.id === pendingSave.id)
+      : null;
+    const latestTrackerCardColors = parseTrackerCardColorConfig(
+      isRecord(cachedPersona) ? cachedPersona.trackerCardColors : personaTrackerCardColorsRef.current,
+    );
+    const trackerCardColors = serializeTrackerCardColorConfig({
+      ...latestTrackerCardColors,
+      portraitFocusX: pendingSave.portraitFocusX,
+      portraitFocusY: pendingSave.portraitFocusY,
+      portraitZoom: pendingSave.portraitZoom,
+    });
+
+    updatePersonaMutateRef.current({ id: pendingSave.id, trackerCardColors });
+  };
+  flushPersonaPortraitPendingSaveRef.current = flushPersonaPortraitPendingSave;
   const updatePersonaPortraitFocus =
     persona?.id && personaPortraitMediaKind
       ? (portraitFocusX: number, portraitFocusY: number, portraitZoom: number) => {
-          const trackerCardColors = serializeTrackerCardColorConfig({
-            ...personaTrackerCardColors,
-            portraitFocusX,
-            portraitFocusY,
-            portraitZoom,
-          });
-
           setPersonaPortraitFocusOverride({
             personaId: persona.id,
             x: portraitFocusX,
             y: portraitFocusY,
             zoom: portraitZoom,
           });
+          const pendingSave = { id: persona.id, portraitFocusX, portraitFocusY, portraitZoom };
+          personaPortraitPendingSaveRef.current = pendingSave;
           if (personaPortraitSaveTimeoutRef.current) clearTimeout(personaPortraitSaveTimeoutRef.current);
           personaPortraitSaveTimeoutRef.current = setTimeout(() => {
-            updatePersona.mutate({ id: persona.id, trackerCardColors });
+            if (isSamePersonaPortraitPendingSave(personaPortraitPendingSaveRef.current, pendingSave)) {
+              flushPersonaPortraitPendingSaveRef.current(pendingSave);
+              personaPortraitPendingSaveRef.current = null;
+            }
             personaPortraitSaveTimeoutRef.current = null;
           }, 180);
         }
@@ -161,20 +212,88 @@ export function PersonaInventoryPanel({
     trackerPanelSizeProfile === "expanded"
       ? TRACKER_PROFILE_PORTRAIT_ROOMY_MEDIA_STAGE_REM
       : TRACKER_PROFILE_PORTRAIT_MEDIA_STAGE_REM;
-  const hasPersonaStatBlock = personaStats.length > 0 || addMode;
+  const hasPersonaStats = personaStats.length > 0;
+  const showInventoryInStatColumn = !hasPersonaStats;
+  const hasPersonaStatBlock = hasPersonaStats || addMode || showInventoryInStatColumn;
   const personaStatDensity = getPersonaStatDensity(personaStats.length, addMode, personaPortraitStageRem);
   const fillPersonaStats = personaStatDensity === "normal" && personaStats.length >= 3;
   const useExpandedPersonaStatColumns = trackerPanelSizeProfile === "expanded" && personaStats.length >= 6;
   const personaPortraitSide = getTrackerProfilePortraitSide(trackerPanelSide);
   const personaDetailsSide = getOppositeTrackerProfileSide(personaPortraitSide);
+  const renderInventoryShelf = (placement: "stat-column" | "lower-deck") => (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className={PERSONA_INVENTORY_HEADER_CLASS}>
+        <Package
+          size="0.6875rem"
+          className="relative z-[1] shrink-0 text-[color-mix(in_srgb,var(--tracker-profile-label-muted-text)_42%,var(--tracker-profile-label-icon)_58%)]"
+        />
+        <span className="relative z-[1] min-w-0 flex-1 truncate font-semibold uppercase tracking-[0.06em] text-[color-mix(in_srgb,var(--tracker-profile-label-muted-text)_62%,var(--tracker-profile-label-text)_38%)]">
+          Inventory
+        </span>
+        {addMode && (
+          <span className="relative z-[1]">
+            <AddRowButton title="Add item" onClick={onAddInventoryItem} />
+          </span>
+        )}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--tracker-profile-dialogue-border)_42%,transparent),transparent)] opacity-80" />
+      </div>
+      <div
+        className={cn(
+          PERSONA_INVENTORY_SHELF_CLASS,
+          inventory.length === 0
+            ? "flex items-center justify-center px-1 py-2"
+            : [
+                "grid auto-rows-max content-start items-start gap-px overflow-y-auto p-0.5 text-left",
+                placement === "stat-column"
+                  ? [
+                      "grid-cols-1",
+                      trackerPanelSizeProfile === "expanded" && inventory.length >= 6 && "@min-[420px]:grid-cols-2",
+                    ]
+                  : trackerPanelSizeProfile === "expanded"
+                    ? [
+                        inventory.length >= 2 && "@min-[380px]:grid-cols-2",
+                        inventory.length >= 9 && "@min-[380px]:grid-cols-3",
+                      ]
+                    : [
+                        inventory.length <= 4 && "@min-[380px]:grid-cols-1",
+                        inventory.length >= 9 && "@min-[380px]:grid-cols-3",
+                      ],
+              ],
+          placement === "stat-column" && "min-h-10",
+        )}
+      >
+        {inventory.length === 0 ? (
+          <span className="relative z-[1]">Inventory empty.</span>
+        ) : (
+          inventory.map((item, index) => (
+            <PersonaInventoryRow
+              key={`${item.name}-${index}`}
+              item={item}
+              onUpdate={(updated) => onUpdateInventoryItem(index, updated)}
+              onRemove={() => onRemoveInventoryItem(index)}
+              deleteMode={deleteMode}
+              fullWidth={inventory.length === 1}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
 
   useEffect(() => {
     setPersonaPortraitFocusOverride(null);
   }, [persona?.id, persona?.trackerCardColors]);
 
+  useEffect(() => {
+    updatePersonaMutateRef.current = updatePersona.mutate;
+  }, [updatePersona.mutate]);
+
   useEffect(
     () => () => {
       if (personaPortraitSaveTimeoutRef.current) clearTimeout(personaPortraitSaveTimeoutRef.current);
+      const pendingSave = personaPortraitPendingSaveRef.current;
+      personaPortraitPendingSaveRef.current = null;
+      if (pendingSave) flushPersonaPortraitPendingSaveRef.current(pendingSave);
     },
     [],
   );
@@ -226,23 +345,36 @@ export function PersonaInventoryPanel({
                   <div
                     className={cn(
                       PERSONA_STAT_SHELF_CLASS,
-                      fillPersonaStats && "flex flex-col",
+                      (fillPersonaStats || showInventoryInStatColumn) && "flex flex-col",
                       TRACKER_PROFILE_DETAILS_SEAM_BORDER_CLASS_BY_SIDE[personaDetailsSide],
                     )}
                   >
-                    <StatList
-                      stats={personaStats}
-                      onUpdate={onUpdatePersonaStats}
-                      onAdd={onAddPersonaStat}
-                      nameMode="truncate"
-                      deleteMode={deleteMode}
-                      addMode={addMode}
-                      density={personaStatDensity}
-                      fillAvailable={fillPersonaStats}
-                      wideColumns={useExpandedPersonaStatColumns}
-                      fillWideColumns={useExpandedPersonaStatColumns}
-                      visualTone="instrument"
-                    />
+                    {showInventoryInStatColumn ? (
+                      <div className="flex min-h-0 flex-1 flex-col gap-1">
+                        {addMode && (
+                          <InlineAddRow
+                            onClick={onAddPersonaStat}
+                            title="Add stat"
+                            className="shrink-0 rounded-[5px] border border-[color-mix(in_srgb,var(--tracker-profile-dialogue-border)_32%,transparent)] bg-[image:var(--tracker-profile-field-material)] [background-blend-mode:var(--tracker-profile-field-material-blend)]"
+                          />
+                        )}
+                        {renderInventoryShelf("stat-column")}
+                      </div>
+                    ) : (
+                      <StatList
+                        stats={personaStats}
+                        onUpdate={onUpdatePersonaStats}
+                        onAdd={onAddPersonaStat}
+                        nameMode="truncate"
+                        deleteMode={deleteMode}
+                        addMode={addMode}
+                        density={personaStatDensity}
+                        fillAvailable={fillPersonaStats}
+                        wideColumns={useExpandedPersonaStatColumns}
+                        fillWideColumns={useExpandedPersonaStatColumns}
+                        visualTone="instrument"
+                      />
+                    )}
                   </div>
                 </div>
               )}
@@ -278,53 +410,7 @@ export function PersonaInventoryPanel({
                     showEditHint={false}
                   />
                 </div>
-                <div className="flex min-h-0 min-w-0 flex-col">
-                  <div className={PERSONA_INVENTORY_HEADER_CLASS}>
-                    <Package
-                      size="0.6875rem"
-                      className="relative z-[1] shrink-0 text-[color-mix(in_srgb,var(--tracker-profile-label-muted-text)_42%,var(--tracker-profile-label-icon)_58%)]"
-                    />
-                    <span className="relative z-[1] min-w-0 flex-1 truncate font-semibold uppercase tracking-[0.06em] text-[color-mix(in_srgb,var(--tracker-profile-label-muted-text)_62%,var(--tracker-profile-label-text)_38%)]">
-                      Inventory
-                    </span>
-                    {addMode && (
-                      <span className="relative z-[1]">
-                        <AddRowButton title="Add item" onClick={onAddInventoryItem} />
-                      </span>
-                    )}
-                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--tracker-profile-dialogue-border)_42%,transparent),transparent)] opacity-80" />
-                  </div>
-                  {inventory.length === 0 ? (
-                    <div className={PERSONA_EMPTY_INVENTORY_CLASS}>Inventory empty.</div>
-                  ) : (
-                    <div
-                      className={cn(
-                        "grid min-h-0 flex-1 auto-rows-max content-start items-start grid-cols-2 gap-px overflow-y-auto rounded-[5px] border border-[color-mix(in_srgb,var(--tracker-profile-dialogue-border)_36%,transparent)] bg-[color-mix(in_srgb,var(--background)_72%,transparent)] p-0.5",
-                        "bg-[image:var(--tracker-profile-field-material)] [background-blend-mode:var(--tracker-profile-field-material-blend)]",
-                        trackerPanelSizeProfile === "expanded"
-                          ? [
-                              inventory.length >= 2 && "@min-[380px]:grid-cols-2",
-                              inventory.length >= 9 && "@min-[380px]:grid-cols-3",
-                            ]
-                          : [
-                              inventory.length <= 4 && "@min-[380px]:grid-cols-1",
-                              inventory.length >= 9 && "@min-[380px]:grid-cols-3",
-                            ],
-                      )}
-                    >
-                      {inventory.map((item, index) => (
-                        <PersonaInventoryRow
-                          key={`${item.name}-${index}`}
-                          item={item}
-                          onUpdate={(updated) => onUpdateInventoryItem(index, updated)}
-                          onRemove={() => onRemoveInventoryItem(index)}
-                          deleteMode={deleteMode}
-                          fullWidth={inventory.length === 1}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
+                {!showInventoryInStatColumn && renderInventoryShelf("lower-deck")}
               </div>
             </div>
             <TrackerProfileEdgeHighlight

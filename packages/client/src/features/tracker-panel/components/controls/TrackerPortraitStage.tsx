@@ -1,10 +1,11 @@
 import { ImagePlus, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
-import { useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useRef, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { cn } from "../../../../lib/utils";
 import {
   TRACKER_PORTRAIT_DEFAULT_FOCUS_X,
   TRACKER_PORTRAIT_DEFAULT_FOCUS_Y,
   TRACKER_PORTRAIT_DEFAULT_ZOOM,
+  TRACKER_PORTRAIT_EXPRESSION_FOCUS_Y_MAX,
   TRACKER_PORTRAIT_MAX_ZOOM,
   TRACKER_PORTRAIT_MIN_ZOOM,
   TRACKER_PORTRAIT_ZOOM_STEP,
@@ -63,8 +64,9 @@ const PORTRAIT_TONE_OVERLAY_CLASS =
   "pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_42%_16%,color-mix(in_srgb,var(--tracker-profile-display-solid)_15%,transparent)_0%,transparent_42%),linear-gradient(180deg,color-mix(in_srgb,var(--tracker-portrait-frame-accent)_8%,transparent)_0%,transparent_42%,color-mix(in_srgb,var(--background)_55%,transparent)_100%)]";
 const PORTRAIT_MEDIA_DRAG_SURFACE_CLASS =
   "absolute inset-0 z-[1] flex h-full w-full touch-none items-center justify-center overflow-hidden";
+const PORTRAIT_MEDIA_OFFSET_CLASS = "relative flex h-full w-full min-w-0 items-center justify-center will-change-transform";
 const SPRITE_IMAGE_CLASS =
-  "relative h-full w-full object-contain object-bottom drop-shadow-[0_8px_14px_rgba(0,0,0,0.38)] will-change-transform";
+  "relative h-full w-full object-contain drop-shadow-[0_8px_14px_rgba(0,0,0,0.38)] will-change-transform";
 const ART_IMAGE_CLASS = "absolute inset-0 h-full w-full max-h-none object-cover will-change-transform";
 const EMPTY_PORTRAIT_CLASS = "relative z-[1] flex h-full w-full items-center justify-center px-2 py-3";
 const EMPTY_PORTRAIT_FLOOR_CLASS =
@@ -75,7 +77,7 @@ const EMPTY_PORTRAIT_INITIAL_CLASS = "relative text-2xl font-semibold leading-no
 const EMPTY_PORTRAIT_UPLOAD_BADGE_CLASS =
   "absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--tracker-profile-dialogue-border)] bg-[color-mix(in_srgb,var(--background)_82%,var(--primary)_18%)] text-[var(--tracker-profile-icon)] shadow-[0_4px_10px_rgba(0,0,0,0.28)]";
 const PORTRAIT_VIEW_CONTROLS_CLASS =
-  "absolute bottom-1 left-1 z-[4] flex flex-col items-center gap-0.5 rounded-sm border border-[color-mix(in_srgb,var(--tracker-profile-rule)_88%,transparent)] bg-[color-mix(in_srgb,var(--background)_66%,transparent)] p-0.5 text-[var(--tracker-profile-icon)] opacity-0 shadow-[0_6px_14px_rgba(0,0,0,0.24)] backdrop-blur-sm transition-opacity group-hover/portrait:opacity-100 group-focus-within/portrait:opacity-100";
+  "pointer-events-none absolute bottom-1 left-1 z-[4] flex flex-col items-center gap-0.5 rounded-sm border border-[color-mix(in_srgb,var(--tracker-profile-rule)_88%,transparent)] bg-[color-mix(in_srgb,var(--background)_66%,transparent)] p-0.5 text-[var(--tracker-profile-icon)] opacity-0 shadow-[0_6px_14px_rgba(0,0,0,0.24)] backdrop-blur-sm transition-opacity group-hover/portrait:pointer-events-auto group-hover/portrait:opacity-100 group-focus-within/portrait:pointer-events-auto group-focus-within/portrait:opacity-100 [@media(pointer:coarse)]:pointer-events-auto [@media(pointer:coarse)]:opacity-100";
 const PORTRAIT_VIEW_BUTTON_CLASS =
   "flex h-5 w-5 items-center justify-center rounded-[2px] transition-colors hover:bg-[var(--primary)]/16 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] active:scale-90";
 const PORTRAIT_EDGE_OVERLAY_CLASS =
@@ -96,7 +98,31 @@ const PORTRAIT_SIDE_FADE_BASE_CLASS = "pointer-events-none absolute inset-y-0 z-
 const PORTRAIT_UPLOAD_HIT_TARGET_CLASS =
   "absolute inset-0 z-[3] cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--primary)] active:scale-[0.99]";
 const PORTRAIT_UPLOAD_BUTTON_CLASS =
-  "absolute bottom-1 right-1 z-[4] flex h-6 w-6 items-center justify-center rounded-sm border border-[color-mix(in_srgb,var(--tracker-profile-rule)_86%,transparent)] bg-[color-mix(in_srgb,var(--background)_66%,transparent)] text-[var(--muted-foreground)]/80 opacity-0 shadow-[0_5px_12px_rgba(0,0,0,0.24)] backdrop-blur-sm transition-all hover:bg-[var(--primary)]/16 hover:text-[var(--tracker-profile-icon)] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] group-hover/portrait:opacity-100 group-focus-within/portrait:opacity-100";
+  "pointer-events-none absolute bottom-1 right-1 z-[4] flex h-6 w-6 items-center justify-center rounded-sm border border-[color-mix(in_srgb,var(--tracker-profile-rule)_86%,transparent)] bg-[color-mix(in_srgb,var(--background)_66%,transparent)] text-[var(--muted-foreground)]/80 opacity-0 shadow-[0_5px_12px_rgba(0,0,0,0.24)] backdrop-blur-sm transition-all hover:bg-[var(--primary)]/16 hover:text-[var(--tracker-profile-icon)] focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] group-hover/portrait:pointer-events-auto group-hover/portrait:opacity-100 group-focus-within/portrait:pointer-events-auto group-focus-within/portrait:opacity-100 [@media(pointer:coarse)]:pointer-events-auto [@media(pointer:coarse)]:opacity-100";
+const EMPTY_AVATAR_STAGE_STYLE = {
+  "--tracker-profile-surface":
+    "radial-gradient(ellipse at 50% 42%, color-mix(in srgb, var(--muted-foreground) 10%, transparent) 0%, transparent 42%), linear-gradient(180deg, color-mix(in srgb, var(--card) 82%, var(--background) 18%) 0%, color-mix(in srgb, var(--background) 92%, var(--card) 8%) 100%)",
+  "--tracker-profile-surface-blend": "normal",
+  "--tracker-profile-surface-layer":
+    "radial-gradient(ellipse at 50% 42%, color-mix(in srgb, var(--foreground) 7%, transparent) 0%, transparent 46%)",
+  "--tracker-profile-tint-opacity": "0.16",
+  "--tracker-profile-display-solid": "color-mix(in srgb, var(--muted-foreground) 48%, var(--background) 52%)",
+  "--tracker-profile-accent-solid": "color-mix(in srgb, var(--muted-foreground) 38%, var(--background) 62%)",
+  "--tracker-profile-portrait-base":
+    "radial-gradient(ellipse at 50% 42%, color-mix(in srgb, var(--muted-foreground) 14%, transparent) 0%, transparent 34%), linear-gradient(180deg, color-mix(in srgb, var(--card) 88%, var(--background) 12%) 0%, color-mix(in srgb, var(--background) 94%, var(--card) 6%) 100%)",
+  "--tracker-profile-portrait-veil":
+    "radial-gradient(ellipse at 50% 43%, transparent 0%, transparent 30%, color-mix(in srgb, var(--background) 48%, transparent) 72%, color-mix(in srgb, var(--background) 82%, transparent) 100%), linear-gradient(90deg, color-mix(in srgb, var(--background) 58%, transparent) 0%, transparent 25%, transparent 75%, color-mix(in srgb, var(--background) 58%, transparent) 100%)",
+  "--tracker-profile-portrait-light":
+    "radial-gradient(ellipse at 50% 42%, color-mix(in srgb, var(--muted-foreground) 12%, transparent) 0%, transparent 36%)",
+  "--tracker-profile-portrait-light-opacity": "0.36",
+  "--tracker-profile-portrait-rim":
+    "linear-gradient(180deg, color-mix(in srgb, var(--foreground) 6%, transparent) 0%, transparent 22%), linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--muted-foreground) 18%, transparent) 50%, transparent 100%)",
+  "--tracker-profile-portrait-rim-opacity": "0.32",
+  "--tracker-profile-portrait-bottom-glow-opacity": "0.18",
+  "--tracker-profile-portrait-bottom-rule-opacity": "0.28",
+  "--tracker-profile-portrait-side-mask-opacity": "0.22",
+  "--tracker-portrait-frame-accent": "color-mix(in srgb, var(--tracker-profile-rule) 72%, var(--muted-foreground) 28%)",
+} satisfies CSSProperties;
 
 function normalizeZoom(value: number) {
   return Math.round(clampNumber(value, TRACKER_PORTRAIT_MIN_ZOOM, TRACKER_PORTRAIT_MAX_ZOOM) * 100) / 100;
@@ -130,23 +156,29 @@ export function TrackerPortraitStage({
   const dragStateRef = useRef<PortraitDragState | null>(null);
   const isArt = mediaKind === "art";
   const isExpression = mediaKind === "expression";
+  const isEmptyAvatarPlaceholder = !media && placeholderVariant === "avatar";
   const canAdjustView = !!media && !!view?.onChange;
   const defaultX = view?.defaultX ?? TRACKER_PORTRAIT_DEFAULT_FOCUS_X;
   const defaultY = view?.defaultY ?? TRACKER_PORTRAIT_DEFAULT_FOCUS_Y;
   const defaultZoom = normalizeZoom(view?.defaultZoom ?? TRACKER_PORTRAIT_DEFAULT_ZOOM);
+  const focusYMax = isExpression ? TRACKER_PORTRAIT_EXPRESSION_FOCUS_Y_MAX : 100;
   const focusX = clampNumber(typeof view?.x === "number" ? view.x : defaultX, 0, 100);
-  const focusY = clampNumber(typeof view?.y === "number" ? view.y : defaultY, 0, 100);
+  const focusY = clampNumber(typeof view?.y === "number" ? view.y : defaultY, 0, focusYMax);
+  const visualFocusY = clampNumber(focusY, 0, 100);
   const zoom = normalizeZoom(typeof view?.zoom === "number" ? view.zoom : defaultZoom);
   const zoomPercent = Math.round(zoom * 100);
+  const expressionOverdragY = isExpression ? Math.max(0, focusY - 100) : 0;
+  const mediaOffsetStyle =
+    expressionOverdragY > 0 ? { transform: `translate3d(0, ${expressionOverdragY}%, 0)` } : undefined;
   const imageStyle = {
-    objectPosition: `${focusX}% ${focusY}%`,
+    objectPosition: `${focusX}% ${visualFocusY}%`,
     transform: `scale(${zoom})`,
-    transformOrigin: `${focusX}% ${focusY}%`,
+    transformOrigin: `${focusX}% ${visualFocusY}%`,
   };
   const setPortraitView = (nextFocusX: number, nextFocusY: number, nextZoom = zoom) => {
     if (!view?.onChange) return;
     const normalizedX = Math.round(clampNumber(nextFocusX, 0, 100));
-    const normalizedY = Math.round(clampNumber(nextFocusY, 0, 100));
+    const normalizedY = Math.round(clampNumber(nextFocusY, 0, focusYMax));
     const normalizedZoom = normalizeZoom(nextZoom);
     if (normalizedX === Math.round(focusX) && normalizedY === Math.round(focusY) && normalizedZoom === zoom) return;
     view.onChange(normalizedX, normalizedY, normalizedZoom);
@@ -174,9 +206,9 @@ export function TrackerPortraitStage({
     if (!dragState || dragState.pointerId !== event.pointerId) return;
     const zoomWeight = Math.max(0.75, dragState.zoom);
     const nextFocusX =
-      dragState.startFocusX - ((event.clientX - dragState.startClientX) / dragState.stageWidth) * (100 / zoomWeight);
+      dragState.startFocusX + ((event.clientX - dragState.startClientX) / dragState.stageWidth) * (100 / zoomWeight);
     const nextFocusY =
-      dragState.startFocusY - ((event.clientY - dragState.startClientY) / dragState.stageHeight) * (100 / zoomWeight);
+      dragState.startFocusY + ((event.clientY - dragState.startClientY) / dragState.stageHeight) * (100 / zoomWeight);
     setPortraitView(nextFocusX, nextFocusY, dragState.zoom);
   };
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -198,6 +230,7 @@ export function TrackerPortraitStage({
         canAdjustView ? "cursor-grab active:cursor-grabbing" : "cursor-default",
         className,
       )}
+      style={isEmptyAvatarPlaceholder ? EMPTY_AVATAR_STAGE_STYLE : undefined}
     >
       <div className={PORTRAIT_STAGE_INNER_GLOW_CLASS} />
       <TrackerPortraitStageBackdrop media={media} />
@@ -211,13 +244,15 @@ export function TrackerPortraitStage({
           onPointerUp={endDrag}
           title={canAdjustView ? "Drag to reposition portrait" : undefined}
         >
-          <img
-            src={media}
-            alt=""
-            className={cn("z-[1]", isExpression && SPRITE_IMAGE_CLASS, isArt && ART_IMAGE_CLASS)}
-            style={imageStyle}
-            draggable={false}
-          />
+          <div className={PORTRAIT_MEDIA_OFFSET_CLASS} style={mediaOffsetStyle}>
+            <img
+              src={media}
+              alt=""
+              className={cn("z-[1]", isExpression && SPRITE_IMAGE_CLASS, isArt && ART_IMAGE_CLASS)}
+              style={imageStyle}
+              draggable={false}
+            />
+          </div>
         </div>
       ) : (
         <div className={EMPTY_PORTRAIT_CLASS}>

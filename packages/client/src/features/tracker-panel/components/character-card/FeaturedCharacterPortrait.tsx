@@ -5,6 +5,7 @@ import {
   FEATURED_PORTRAIT_DEFAULT_FOCUS_Y,
   TRACKER_PORTRAIT_DEFAULT_ZOOM,
   TRACKER_PORTRAIT_EXPRESSION_DEFAULT_FOCUS_Y,
+  TRACKER_PORTRAIT_EXPRESSION_FOCUS_Y_MAX,
   TRACKER_PORTRAIT_MAX_ZOOM,
   TRACKER_PORTRAIT_MIN_ZOOM,
 } from "../../lib/tracker-panel.constants";
@@ -43,6 +44,7 @@ export function FeaturedCharacterPortrait({
   const canUploadTrackerArt = !!onUploadAvatar && !spriteUrl && !characterPicture;
   const defaultPortraitFocusY =
     mediaKind === "expression" ? TRACKER_PORTRAIT_EXPRESSION_DEFAULT_FOCUS_Y : FEATURED_PORTRAIT_DEFAULT_FOCUS_Y;
+  const portraitFocusYMax = mediaKind === "expression" ? TRACKER_PORTRAIT_EXPRESSION_FOCUS_Y_MAX : 100;
   const portraitFocusX = clampNumber(
     typeof character.portraitFocusX === "number" ? character.portraitFocusX : FEATURED_PORTRAIT_DEFAULT_FOCUS_X,
     0,
@@ -51,7 +53,7 @@ export function FeaturedCharacterPortrait({
   const portraitFocusY = clampNumber(
     typeof character.portraitFocusY === "number" ? character.portraitFocusY : defaultPortraitFocusY,
     0,
-    100,
+    portraitFocusYMax,
   );
   const portraitZoom = clampNumber(
     typeof character.portraitZoom === "number" ? character.portraitZoom : TRACKER_PORTRAIT_DEFAULT_ZOOM,
@@ -62,7 +64,7 @@ export function FeaturedCharacterPortrait({
     ? (nextFocusX: number, nextFocusY: number, nextZoom: number) =>
         onPortraitFocusChange(
           clampNumber(Math.round(nextFocusX), 0, 100),
-          clampNumber(Math.round(nextFocusY), 0, 100),
+          clampNumber(Math.round(nextFocusY), 0, portraitFocusYMax),
           Math.round(clampNumber(nextZoom, TRACKER_PORTRAIT_MIN_ZOOM, TRACKER_PORTRAIT_MAX_ZOOM) * 100) / 100,
         )
     : undefined;

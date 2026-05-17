@@ -57,15 +57,22 @@ const FINISH_OPTIONS: Array<{
 
 const FINISH_PRESETS: Array<{
   label: string;
+  title: string;
   finish: TrackerCardFinish;
 }> = [
-  { label: "Clean", finish: { tintIntensity: 100, materialBrightness: 54, glowIntensity: 24, contrastIntensity: 58 } },
   {
-    label: "Balanced",
+    label: "Soft",
+    title: "Brighter material with gentle glow and mild separation",
+    finish: { tintIntensity: 100, materialBrightness: 54, glowIntensity: 24, contrastIntensity: 58 },
+  },
+  {
+    label: "Crisp",
+    title: "Neutral material with clearer edges and medium glow",
     finish: { tintIntensity: 100, materialBrightness: 50, glowIntensity: 46, contrastIntensity: 64 },
   },
   {
-    label: "Dramatic",
+    label: "Vivid",
+    title: "Darker material with strong glow and high contrast",
     finish: { tintIntensity: 100, materialBrightness: 44, glowIntensity: 82, contrastIntensity: 86 },
   },
 ];
@@ -291,8 +298,10 @@ export function TrackerCardColorControls({
       {!collapsed && (
         <div className="mt-2 space-y-2">
           <div className="grid gap-1.5 rounded-lg bg-[var(--secondary)]/65 p-1.5 ring-1 ring-[var(--border)]/40">
-            <div className="grid min-w-0 grid-cols-[3.15rem_minmax(0,1fr)] items-center gap-1.5">
-              <span className="text-[0.5625rem] font-semibold uppercase text-[var(--muted-foreground)]">Source</span>
+            <div className="grid min-w-0 gap-1">
+              <span className="px-0.5 text-[0.5625rem] font-semibold uppercase text-[var(--muted-foreground)]">
+                Source
+              </span>
               <div className="grid grid-cols-3 gap-0.5 rounded-md bg-[var(--background)]/35 p-0.5">
                 {MODE_OPTIONS.map((option) => {
                   const Icon = option.icon;
@@ -304,7 +313,7 @@ export function TrackerCardColorControls({
                       onClick={() => updateMode(option.mode)}
                       disabled={disabled}
                       className={cn(
-                        "flex min-h-6 min-w-0 items-center justify-center gap-0.5 rounded-sm px-0.5 text-[0.5625rem] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-55",
+                        "flex min-h-6 min-w-0 items-center justify-center gap-1 rounded-sm px-1 text-[0.5625rem] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-55",
                         selected
                           ? "bg-[var(--primary)]/12 text-[var(--primary)] ring-1 ring-[var(--primary)]/24"
                           : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]/45 hover:text-[var(--foreground)]",
@@ -318,8 +327,10 @@ export function TrackerCardColorControls({
               </div>
             </div>
 
-            <div className="grid min-w-0 grid-cols-[3.15rem_minmax(0,1fr)] items-center gap-1.5">
-              <span className="text-[0.5625rem] font-semibold uppercase text-[var(--muted-foreground)]">Stage</span>
+            <div className="grid min-w-0 gap-1">
+              <span className="px-0.5 text-[0.5625rem] font-semibold uppercase text-[var(--muted-foreground)]">
+                Stage
+              </span>
               <div className="grid grid-cols-4 gap-0.5 rounded-md bg-[var(--background)]/35 p-0.5">
                 {PORTRAIT_STAGE_BACKGROUND_OPTIONS.map((option) => {
                   const Icon = option.icon;
@@ -333,7 +344,7 @@ export function TrackerCardColorControls({
                       onClick={() => updatePortraitStageBackground(option.value)}
                       disabled={disabled}
                       className={cn(
-                        "flex min-h-6 min-w-0 items-center justify-center gap-0.5 rounded-sm px-0.5 text-[0.5625rem] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-55",
+                        "flex min-h-6 min-w-0 items-center justify-center gap-1 rounded-sm px-1 text-[0.5625rem] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-55",
                         selected
                           ? "bg-[var(--primary)]/12 text-[var(--primary)] ring-1 ring-[var(--primary)]/24"
                           : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]/45 hover:text-[var(--foreground)]",
@@ -349,8 +360,10 @@ export function TrackerCardColorControls({
           </div>
 
           <div className="grid gap-1.5 rounded-lg bg-[var(--secondary)]/65 p-1.5 ring-1 ring-[var(--border)]/40">
-            <div className="grid min-w-0 grid-cols-[3.15rem_minmax(0,1fr)] items-center gap-1.5">
-              <span className="text-[0.5625rem] font-semibold uppercase text-[var(--muted-foreground)]">Finish</span>
+            <div className="grid min-w-0 gap-1">
+              <span className="px-0.5 text-[0.5625rem] font-semibold uppercase text-[var(--muted-foreground)]">
+                Finish
+              </span>
               <div className="grid grid-cols-3 gap-0.5 rounded-md bg-[var(--background)]/35 p-0.5">
                 {FINISH_PRESETS.map((preset) => {
                   const selected =
@@ -362,10 +375,11 @@ export function TrackerCardColorControls({
                     <button
                       key={preset.label}
                       type="button"
+                      title={preset.title}
                       onClick={() => updateFinishPreset(preset.finish)}
                       disabled={disabled}
                       className={cn(
-                        "min-h-6 rounded-sm px-0.5 text-[0.5625rem] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-55",
+                        "min-h-6 rounded-sm px-1 text-[0.5625rem] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-55",
                         selected
                           ? "bg-[var(--primary)]/12 text-[var(--primary)] ring-1 ring-[var(--primary)]/24"
                           : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]/45 hover:text-[var(--foreground)]",

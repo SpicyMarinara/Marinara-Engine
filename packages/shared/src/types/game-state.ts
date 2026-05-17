@@ -55,7 +55,7 @@ export interface PresentCharacter {
   avatarPath?: string | null;
   /** Featured tracker portrait focus, 0 = left, 100 = right. */
   portraitFocusX?: number;
-  /** Featured tracker portrait focus, 0 = top, 100 = bottom. */
+  /** Featured tracker portrait focus, 0 = top, 100 = bottom; expression sprites may exceed 100 to dip below the frame. */
   portraitFocusY?: number;
   /** Featured tracker portrait zoom multiplier. */
   portraitZoom?: number;

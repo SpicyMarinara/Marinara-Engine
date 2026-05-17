@@ -501,8 +501,8 @@ export async function conversationRoutes(app: FastifyInstance) {
             const extensions: Record<string, unknown> = {
               ...currentExtensions,
               conversationStatus: "online",
+              conversationActivity: undefined,
             };
-            delete extensions.conversationActivity;
             await chars.update(charId, { extensions } as Partial<CharacterData>, undefined, {
               skipVersionSnapshot: true,
             });

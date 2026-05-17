@@ -8,6 +8,7 @@ export const DEFAULT_TRACKER_CARD_COLOR_MODE: TrackerCardColorMode = "chat";
 export const DEFAULT_TRACKER_CARD_PORTRAIT_STAGE_BACKGROUND: TrackerCardPortraitStageBackground = "ambient";
 export const DEFAULT_TRACKER_CARD_PORTRAIT_FOCUS_X = 50;
 export const DEFAULT_TRACKER_CARD_PORTRAIT_FOCUS_Y = 36;
+export const MAX_TRACKER_CARD_PORTRAIT_FOCUS_Y = 140;
 export const DEFAULT_TRACKER_CARD_PORTRAIT_ZOOM = 1;
 export const MIN_TRACKER_CARD_PORTRAIT_ZOOM = 0.75;
 export const MAX_TRACKER_CARD_PORTRAIT_ZOOM = 2.35;
@@ -290,6 +291,12 @@ function getClampedFinishValue(value: unknown): number | undefined {
   return Math.max(0, Math.min(100, Math.round(numberValue)));
 }
 
+function getClampedPortraitFocusYValue(value: unknown): number | undefined {
+  const numberValue = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+  if (!Number.isFinite(numberValue)) return undefined;
+  return Math.max(0, Math.min(MAX_TRACKER_CARD_PORTRAIT_FOCUS_Y, Math.round(numberValue)));
+}
+
 function getClampedPortraitZoomValue(value: unknown): number | undefined {
   const numberValue = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
   if (!Number.isFinite(numberValue)) return undefined;
@@ -323,13 +330,16 @@ export function cleanTrackerCardColorConfig(config: TrackerCardColorConfig | nul
   const surfaceEnabled = getBoolean(config?.surfaceEnabled);
   const nameColorOpacity = getClampedFinishValue(config?.nameColorOpacity);
   const dialogueColorOpacity = getClampedFinishValue(config?.dialogueColorOpacity);
-  const boxColorOpacity = getClampedFinishValue(config?.boxColorOpacity);
+  const rawBoxColorOpacity = getClampedFinishValue(config?.boxColorOpacity);
+  const legacyTintIntensity = getClampedFinishValue(config?.tintIntensity);
   const materialBrightness = getClampedFinishValue(config?.materialBrightness);
+  // Legacy Tint controlled how much Surface paint entered material; preserve that as Surface strength.
+  const boxColorOpacity = rawBoxColorOpacity ?? (materialBrightness === undefined ? legacyTintIntensity : undefined);
   const glowIntensity = getClampedFinishValue(config?.glowIntensity);
   const contrastIntensity = getClampedFinishValue(config?.contrastIntensity);
   const portraitStageBackground = normalizeTrackerCardPortraitStageBackground(config?.portraitStageBackground);
   const portraitFocusX = getClampedFinishValue(config?.portraitFocusX);
-  const portraitFocusY = getClampedFinishValue(config?.portraitFocusY);
+  const portraitFocusY = getClampedPortraitFocusYValue(config?.portraitFocusY);
   const portraitZoom = getClampedPortraitZoomValue(config?.portraitZoom);
 
   return {
@@ -374,7 +384,7 @@ export function parseTrackerCardColorConfig(raw: unknown): TrackerCardColorConfi
     contrastIntensity: getClampedFinishValue(record.contrastIntensity),
     portraitStageBackground: normalizeTrackerCardPortraitStageBackground(record.portraitStageBackground),
     portraitFocusX: getClampedFinishValue(record.portraitFocusX),
-    portraitFocusY: getClampedFinishValue(record.portraitFocusY),
+    portraitFocusY: getClampedPortraitFocusYValue(record.portraitFocusY),
     portraitZoom: getClampedPortraitZoomValue(record.portraitZoom),
   });
 }
@@ -432,7 +442,7 @@ export function getTrackerCardPortraitView(
 ): TrackerCardPortraitView {
   return {
     x: getClampedFinishValue(config?.portraitFocusX) ?? defaults.x ?? DEFAULT_TRACKER_CARD_PORTRAIT_FOCUS_X,
-    y: getClampedFinishValue(config?.portraitFocusY) ?? defaults.y ?? DEFAULT_TRACKER_CARD_PORTRAIT_FOCUS_Y,
+    y: getClampedPortraitFocusYValue(config?.portraitFocusY) ?? defaults.y ?? DEFAULT_TRACKER_CARD_PORTRAIT_FOCUS_Y,
     zoom: getClampedPortraitZoomValue(config?.portraitZoom) ?? defaults.zoom ?? DEFAULT_TRACKER_CARD_PORTRAIT_ZOOM,
   };
 }
