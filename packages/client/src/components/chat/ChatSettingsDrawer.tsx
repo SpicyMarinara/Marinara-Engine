@@ -1082,6 +1082,14 @@ export function ChatSettingsDrawer({
   const [showConnectionPicker, setShowConnectionPicker] = useState(false);
   const [showSummariesModal, setShowSummariesModal] = useState(false);
   const [showMemoriesModal, setShowMemoriesModal] = useState(false);
+  const summaryRecallCountFromMetadata =
+    typeof metadata.summaryRecallCount === "number" && Number.isFinite(metadata.summaryRecallCount)
+      ? Math.max(1, Math.min(10, Math.trunc(metadata.summaryRecallCount)))
+      : 3;
+  const [summaryRecallCountDraft, setSummaryRecallCountDraft] = useState(summaryRecallCountFromMetadata);
+  useEffect(() => {
+    setSummaryRecallCountDraft(summaryRecallCountFromMetadata);
+  }, [chat.id, summaryRecallCountFromMetadata]);
   // Session-ephemeral: did the user change Day Rollover Hour in this drawer mount?
   // Used to gate the "transitional duplication" warning so it only appears
   // immediately after a change (when the warning is operationally useful) and
@@ -1479,6 +1487,14 @@ export function ChatSettingsDrawer({
     setEditingName(false);
   };
 
+  const commitSummaryRecallCount = (value: number) => {
+    const next = Math.max(1, Math.min(10, Math.trunc(value)));
+    setSummaryRecallCountDraft(next);
+    if (next !== summaryRecallCountFromMetadata) {
+      updateMeta.mutate({ id: chat.id, summaryRecallCount: next });
+    }
+  };
+
   const renderMemoryRecallControls = (defaultOn: boolean) => {
     const effectiveValue = metadata.enableMemoryRecall !== undefined ? metadata.enableMemoryRecall === true : defaultOn;
     return (
@@ -1535,12 +1551,9 @@ export function ChatSettingsDrawer({
       metadata.summaryRecallStrictness === "conservative" || metadata.summaryRecallStrictness === "broad"
         ? metadata.summaryRecallStrictness
         : "balanced";
-    const recallCount =
-      typeof metadata.summaryRecallCount === "number" && Number.isFinite(metadata.summaryRecallCount)
-        ? Math.max(1, Math.min(10, Math.trunc(metadata.summaryRecallCount)))
-        : 3;
+    const recallCount = summaryRecallCountDraft;
     const semanticEnabled = mode === "semantic" || mode === "full_and_semantic";
-    const showRecallCountWarning = recallCount > 5;
+    const showRecallCountWarning = recallCount > 7;
     return (
       <div className="space-y-3">
         <div className="grid grid-cols-1 gap-1.5">
@@ -1597,9 +1610,13 @@ export function ChatSettingsDrawer({
               type="range"
               min={1}
               max={10}
+              step={1}
               value={recallCount}
-              onChange={(e) => updateMeta.mutate({ id: chat.id, summaryRecallCount: Number(e.target.value) })}
-              className="w-full accent-[var(--primary)]"
+              onChange={(e) => setSummaryRecallCountDraft(Number(e.target.value))}
+              onPointerUp={(e) => commitSummaryRecallCount(Number(e.currentTarget.value))}
+              onKeyUp={(e) => commitSummaryRecallCount(Number(e.currentTarget.value))}
+              onBlur={(e) => commitSummaryRecallCount(Number(e.currentTarget.value))}
+              className="h-1.5 w-full cursor-pointer accent-[var(--primary)]"
             />
             <div className="text-right text-[0.625rem] text-[var(--muted-foreground)]">{recallCount}</div>
             {showRecallCountWarning && (
