@@ -22,8 +22,10 @@ const GITHUB_RELEASE_BY_TAG_API = (tag: string) => `${GITHUB_API_BASE}/releases/
 const UPDATE_REMOTE = "origin";
 const UPDATE_BRANCH = "main";
 const UPDATE_REF = `${UPDATE_REMOTE}/${UPDATE_BRANCH}`;
+const UPDATE_FETCH_REF = `+refs/heads/${UPDATE_BRANCH}:refs/remotes/${UPDATE_REMOTE}/${UPDATE_BRANCH}`;
 const DEFAULT_PNPM_VERSION = "10.33.2";
-const MANUAL_GIT_UPDATE_COMMAND = "git pull && pnpm install && pnpm build && pnpm start";
+const MANUAL_GIT_UPDATE_COMMAND =
+  "git fetch origin +refs/heads/main:refs/remotes/origin/main && (git merge --ff-only origin/main || git checkout --detach origin/main) && pnpm install && pnpm build && pnpm start";
 const DOCKER_UPDATE_COMMAND = "docker compose pull && docker compose up -d";
 const ANDROID_APK_NOTICE =
   "> [!IMPORTANT]\n" +
@@ -51,7 +53,7 @@ function isGitInstall(): boolean {
 }
 
 async function fetchUpdateRef(root: string) {
-  await execFileAsync("git", ["fetch", UPDATE_REMOTE, UPDATE_BRANCH, "--quiet"], {
+  await execFileAsync("git", ["fetch", UPDATE_REMOTE, UPDATE_FETCH_REF, "--quiet"], {
     cwd: root,
     timeout: 15_000,
   });
@@ -492,7 +494,7 @@ export async function updatesRoutes(app: FastifyInstance) {
         });
       }
 
-      // Step 0: stash local tracked changes so the fast-forward does not fail.
+      // Step 0: stash local tracked changes so the update does not fail.
       let stashed = false;
       try {
         if (await hasTrackedChanges(root)) {
@@ -506,19 +508,29 @@ export async function updatesRoutes(app: FastifyInstance) {
         /* clean tree — nothing to stash */
       }
 
-      // Step 1: fast-forward to the latest origin/main commit.
+      // Step 1: move to the latest origin/main commit.
+      // Installer-created release checkouts are shallow detached HEADs, so
+      // they cannot reliably merge a remote-tracking branch. A detached
+      // checkout is expected there; normal main-branch clones still fast-forward.
       if (oldHead !== targetHead) {
         try {
-          await execFileAsync("git", ["merge", "--ff-only", UPDATE_REF], {
-            cwd: root,
-            timeout: 60_000,
-          });
+          if (currentBranch) {
+            await execFileAsync("git", ["merge", "--ff-only", UPDATE_REF], {
+              cwd: root,
+              timeout: 60_000,
+            });
+          } else {
+            await execFileAsync("git", ["checkout", "--detach", targetHead], {
+              cwd: root,
+              timeout: 60_000,
+            });
+          }
         } catch (mergeErr) {
           if (stashed)
             await execFileAsync("git", ["stash", "pop", "-q"], { cwd: root, timeout: 10_000 }).catch(() => {});
           const branchLabel = currentBranch ? ` branch "${currentBranch}"` : " current checkout";
           const message = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
-          throw new Error(`Could not fast-forward the${branchLabel} to ${UPDATE_REF}: ${message}`);
+          throw new Error(`Could not update the${branchLabel} to ${UPDATE_REF}: ${message}`);
         }
       }
 
@@ -583,7 +595,7 @@ export async function updatesRoutes(app: FastifyInstance) {
       const pnpmVersion = getPinnedPnpmVersion(root);
       return reply.status(500).send({
         error: `Update failed: ${message}`,
-        hint: `You can try running the update manually: git fetch ${UPDATE_REMOTE} ${UPDATE_BRANCH} && git merge --ff-only ${UPDATE_REF} && pnpm install --frozen-lockfile && pnpm --filter @marinara-engine/shared build && pnpm --filter @marinara-engine/server --filter @marinara-engine/client --parallel run build. If pnpm is unavailable, run npm install -g pnpm@${pnpmVersion} first.`,
+        hint: `You can try running the update manually: git fetch ${UPDATE_REMOTE} +refs/heads/${UPDATE_BRANCH}:refs/remotes/${UPDATE_REMOTE}/${UPDATE_BRANCH} && (git merge --ff-only ${UPDATE_REF} || git checkout --detach ${UPDATE_REF}) && pnpm install --frozen-lockfile && pnpm --filter @marinara-engine/shared build && pnpm --filter @marinara-engine/server --filter @marinara-engine/client --parallel run build. If pnpm is unavailable, run npm install -g pnpm@${pnpmVersion} first.`,
       });
     }
   });

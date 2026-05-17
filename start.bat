@@ -101,7 +101,7 @@ goto :eof
 if not exist ".git" goto :skip_update
 echo  [..] Checking for updates...
 for /f "tokens=*" %%i in ('git rev-parse HEAD 2^>nul') do set "OLD_HEAD=%%i"
-git fetch origin main --quiet >nul 2>&1
+git fetch origin "+refs/heads/main:refs/remotes/origin/main" --quiet >nul 2>&1
 if errorlevel 1 (
     echo  [WARN] Could not check for updates. Continuing with current version.
     goto :skip_update
@@ -121,7 +121,7 @@ if exist "app-icon.ico" (
     if errorlevel 1 del /q "app-icon.ico" >nul 2>&1
 )
 
-:: Stash any tracked local changes so the fast-forward update doesn't fail
+:: Stash any tracked local changes so the update doesn't fail
 set "STASHED=0"
 set "STASH_REF="
 set "DIRTY=0"
@@ -133,10 +133,17 @@ if "!DIRTY!"=="1" (
     git stash push -q -m "auto-stash before update" >nul 2>&1 && set "STASHED=1"
     if "!STASHED!"=="1" for /f "tokens=*" %%i in ('git stash list -1 --format^=%%gd 2^>nul') do set "STASH_REF=%%i"
 )
-git merge --ff-only origin/main >nul 2>&1
-if errorlevel 1 (
+set "CURRENT_BRANCH="
+for /f "tokens=*" %%i in ('git branch --show-current 2^>nul') do set "CURRENT_BRANCH=%%i"
+set "UPDATED_TO_TARGET=0"
+if "!CURRENT_BRANCH!"=="" (
+    git checkout --detach "!TARGET_HEAD!" >nul 2>&1 && set "UPDATED_TO_TARGET=1"
+) else (
+    git merge --ff-only origin/main >nul 2>&1 && set "UPDATED_TO_TARGET=1"
+)
+if not "!UPDATED_TO_TARGET!"=="1" (
     if "!STASHED!"=="1" call :restore_stashed_changes
-    echo  [WARN] Could not fast-forward to origin/main. Continuing with current version.
+    echo  [WARN] Could not update to origin/main. Continuing with current version.
     goto :skip_update
 )
 for /f "tokens=*" %%i in ('git rev-parse HEAD 2^>nul') do set "NEW_HEAD=%%i"

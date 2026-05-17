@@ -174,13 +174,14 @@ if [ "$SKIP_UPDATE" = "1" ]; then
 elif [ -d ".git" ]; then
     echo "  [..] Checking for updates..."
     OLD_HEAD=$(git rev-parse HEAD 2>/dev/null)
-    if ! git fetch origin main --quiet 2>/dev/null; then
+    if ! git fetch origin +refs/heads/main:refs/remotes/origin/main --quiet 2>/dev/null; then
         echo "  [WARN] Could not check for updates (no internet?). Continuing with current version."
     elif [ "$OLD_HEAD" = "$(git rev-parse origin/main 2>/dev/null || true)" ]; then
         echo "  [OK] Already up to date"
     else
         TARGET_HEAD=$(git rev-parse origin/main 2>/dev/null || true)
-        # Stash any tracked local changes (e.g. pnpm install modifying package.json) so the fast-forward update doesn't fail
+        CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || true)
+        # Stash any tracked local changes (e.g. pnpm install modifying package.json) so the update doesn't fail
         STASHED=0
         STASH_REF=""
         if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
@@ -189,7 +190,12 @@ elif [ -d ".git" ]; then
                 STASH_REF=$(git stash list -1 --format=%gd 2>/dev/null || true)
             fi
         fi
-        if git merge --ff-only origin/main 2>/dev/null; then
+        if [ -z "$CURRENT_BRANCH" ]; then
+            UPDATE_COMMAND=(git checkout --detach "$TARGET_HEAD")
+        else
+            UPDATE_COMMAND=(git merge --ff-only origin/main)
+        fi
+        if "${UPDATE_COMMAND[@]}" 2>/dev/null; then
             NEW_HEAD=$(git rev-parse HEAD 2>/dev/null)
             if [ "$STASHED" = "1" ]; then
                 restore_stashed_changes || true
@@ -204,7 +210,7 @@ elif [ -d ".git" ]; then
                 rm -f packages/shared/tsconfig.tsbuildinfo packages/server/tsconfig.tsbuildinfo packages/client/tsconfig.tsbuildinfo
             fi
         else
-            echo "  [WARN] Could not fast-forward to origin/main. Continuing with current version."
+            echo "  [WARN] Could not update to origin/main. Continuing with current version."
             if [ "$STASHED" = "1" ]; then
                 restore_stashed_changes || true
             fi
