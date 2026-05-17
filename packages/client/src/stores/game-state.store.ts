@@ -2,11 +2,13 @@
 // Zustand Store: Game State Slice (RPG Companion)
 // ──────────────────────────────────────────────
 import { create } from "zustand";
-import type { GameState } from "@marinara-engine/shared";
+import { coerceGameStateTextFields, type GameState } from "@marinara-engine/shared";
 
 interface GameStateStore {
   current: GameState | null;
   isVisible: boolean;
+  isRefreshing: boolean;
+  refreshingChatId: string | null;
   expandedSections: Set<string>;
   /** Flushes any pending debounced game-state patch immediately. */
   flushPatch: (() => Promise<void>) | null;
@@ -14,12 +16,19 @@ interface GameStateStore {
   // Actions
   setGameState: (state: GameState | null) => void;
   setVisible: (visible: boolean) => void;
+  setRefreshingChat: (chatId: string | null) => void;
+  clearRefreshingChat: (chatId: string | null) => void;
   toggleSection: (section: string) => void;
   registerFlushPatch: (id: string, fn: () => Promise<void>) => () => void;
   reset: () => void;
 }
 
 const flushPatchCallbacks = new Map<string, () => Promise<void>>();
+
+function normalizeGameState(state: GameState | null): GameState | null {
+  if (!state) return null;
+  return { ...state, ...coerceGameStateTextFields(state as unknown as Record<string, unknown>) };
+}
 
 function buildFlushPatch() {
   if (flushPatchCallbacks.size === 0) return null;
@@ -38,11 +47,27 @@ function buildFlushPatch() {
 export const useGameStateStore = create<GameStateStore>((set) => ({
   current: null,
   isVisible: true,
+  isRefreshing: false,
+  refreshingChatId: null,
   expandedSections: new Set(["location", "characters", "stats"]),
   flushPatch: null,
 
-  setGameState: (state) => set({ current: state }),
+  setGameState: (state) =>
+    set((currentStore) => ({
+      current: normalizeGameState(state),
+      isRefreshing: currentStore.refreshingChatId !== null && currentStore.refreshingChatId === state?.chatId,
+    })),
   setVisible: (visible) => set({ isVisible: visible }),
+  setRefreshingChat: (chatId) =>
+    set((currentStore) => ({
+      refreshingChatId: chatId,
+      isRefreshing: chatId !== null && chatId === currentStore.current?.chatId,
+    })),
+  clearRefreshingChat: (chatId) =>
+    set((currentStore) => {
+      if (!currentStore.refreshingChatId || currentStore.refreshingChatId !== chatId) return {};
+      return { refreshingChatId: null, isRefreshing: false };
+    }),
   registerFlushPatch: (id, fn) => {
     flushPatchCallbacks.set(id, fn);
     set({ flushPatch: buildFlushPatch() });
@@ -65,6 +90,8 @@ export const useGameStateStore = create<GameStateStore>((set) => ({
     set({
       current: null,
       isVisible: true,
+      isRefreshing: false,
+      refreshingChatId: null,
       expandedSections: new Set(["location", "characters", "stats"]),
       flushPatch: null,
     });

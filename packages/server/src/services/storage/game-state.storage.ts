@@ -5,7 +5,21 @@ import { eq, and, ne, desc, inArray } from "drizzle-orm";
 import type { DB } from "../../db/connection.js";
 import { gameStateSnapshots } from "../../db/schema/index.js";
 import { newId, now } from "../../utils/id-generator.js";
-import type { GameState } from "@marinara-engine/shared";
+import { coerceGameStateTextValue, type GameState } from "@marinara-engine/shared";
+
+export type GameStateVisibleAnchor = { messageId: string; swipeIndex: number };
+
+const MANUAL_OVERRIDE_FIELDS = ["date", "time", "location", "weather", "temperature"] as const;
+
+function coerceSnapshotTextFields(fields: Partial<Pick<GameState, (typeof MANUAL_OVERRIDE_FIELDS)[number]>>) {
+  return {
+    date: coerceGameStateTextValue(fields.date),
+    time: coerceGameStateTextValue(fields.time),
+    location: coerceGameStateTextValue(fields.location),
+    weather: coerceGameStateTextValue(fields.weather),
+    temperature: coerceGameStateTextValue(fields.temperature),
+  };
+}
 
 export function createGameStateStorage(db: DB) {
   return {
@@ -30,12 +44,97 @@ export function createGameStateStorage(db: DB) {
       return rows[0] ?? null;
     },
 
+    async getForGeneration(
+      chatId: string,
+      options?: {
+        preferLatestVisible?: boolean;
+        visibleAnchor?: GameStateVisibleAnchor | null;
+        excludeMessageId?: string | null;
+        fallbackMessageIds?: string[] | null;
+      },
+    ) {
+      const excludeMessageId = options?.excludeMessageId || null;
+      const fallbackMessageIds = Array.from(
+        new Set((options?.fallbackMessageIds ?? []).filter((id): id is string => typeof id === "string")),
+      );
+      const latestCommitted = () =>
+        fallbackMessageIds.length > 0
+          ? this.getLatestCommittedForMessages(chatId, fallbackMessageIds)
+          : excludeMessageId
+            ? this.getLatestCommittedExcludingMessage(chatId, excludeMessageId)
+            : this.getLatestCommitted(chatId);
+      const latestAny = () =>
+        fallbackMessageIds.length > 0
+          ? this.getLatestForMessages(chatId, fallbackMessageIds)
+          : excludeMessageId
+            ? this.getLatestExcludingMessage(chatId, excludeMessageId)
+            : this.getLatest(chatId);
+
+      if (options?.preferLatestVisible) {
+        if (options.visibleAnchor?.messageId) {
+          const visible = await this.getByChatAndMessage(
+            chatId,
+            options.visibleAnchor.messageId,
+            options.visibleAnchor.swipeIndex,
+          );
+          if (visible) return visible;
+        }
+        return (await latestCommitted()) ?? (await latestAny());
+      }
+      return (await latestCommitted()) ?? (await latestAny());
+    },
+
     /** Get latest game state excluding snapshots tied to a specific message (for regen/swipes). */
     async getLatestExcludingMessage(chatId: string, excludeMessageId: string) {
       const rows = await db
         .select()
         .from(gameStateSnapshots)
         .where(and(eq(gameStateSnapshots.chatId, chatId), ne(gameStateSnapshots.messageId, excludeMessageId)))
+        .orderBy(desc(gameStateSnapshots.createdAt))
+        .limit(1);
+      return rows[0] ?? null;
+    },
+
+    /** Get latest committed state excluding snapshots tied to a specific message (for regen/swipes). */
+    async getLatestCommittedExcludingMessage(chatId: string, excludeMessageId: string) {
+      const rows = await db
+        .select()
+        .from(gameStateSnapshots)
+        .where(
+          and(
+            eq(gameStateSnapshots.chatId, chatId),
+            eq(gameStateSnapshots.committed, 1),
+            ne(gameStateSnapshots.messageId, excludeMessageId),
+          ),
+        )
+        .orderBy(desc(gameStateSnapshots.createdAt))
+        .limit(1);
+      return rows[0] ?? null;
+    },
+
+    async getLatestForMessages(chatId: string, messageIds: string[]) {
+      if (messageIds.length === 0) return null;
+      const rows = await db
+        .select()
+        .from(gameStateSnapshots)
+        .where(and(eq(gameStateSnapshots.chatId, chatId), inArray(gameStateSnapshots.messageId, messageIds)))
+        .orderBy(desc(gameStateSnapshots.createdAt))
+        .limit(1);
+      return rows[0] ?? null;
+    },
+
+    async getLatestCommittedForMessages(chatId: string, messageIds: string[]) {
+      if (messageIds.length === 0) return null;
+      const rows = await db
+        .select()
+        .from(gameStateSnapshots)
+        .where(
+          and(
+            eq(gameStateSnapshots.chatId, chatId),
+            eq(gameStateSnapshots.committed, 1),
+            inArray(gameStateSnapshots.messageId, messageIds),
+          ),
+        )
         .orderBy(desc(gameStateSnapshots.createdAt))
         .limit(1);
       return rows[0] ?? null;
@@ -102,11 +201,7 @@ export function createGameStateStorage(db: DB) {
         chatId: state.chatId,
         messageId: state.messageId,
         swipeIndex: state.swipeIndex,
-        date: state.date,
-        time: state.time,
-        location: state.location,
-        weather: state.weather,
-        temperature: state.temperature,
+        ...coerceSnapshotTextFields(state),
         presentCharacters: JSON.stringify(state.presentCharacters),
         recentEvents: JSON.stringify(state.recentEvents),
         playerStats: state.playerStats ? JSON.stringify(state.playerStats) : null,
@@ -146,9 +241,14 @@ export function createGameStateStorage(db: DB) {
      * to the exact same snapshot the world-state agent created for a given swipe.
      *
      * When no snapshot exists for the target (messageId, swipeIndex) — e.g. because
-     * the world-state agent is disabled or failed — we clone the latest snapshot
-     * into a NEW row for this message+swipe and apply the update there. This avoids
-     * corrupting a previous turn's snapshot with new tracker data.
+     * the world-state agent is disabled or failed — we clone the provided base
+     * snapshot, or the latest snapshot when no base is supplied, into a NEW row for
+     * this message+swipe and apply the update there. This avoids corrupting a
+     * previous turn's snapshot with new tracker data.
+     *
+     * options.baseSnapshot is intentionally presence-sensitive: omitted falls back
+     * to getLatest(chatId), while an explicit null means no base and creates an
+     * empty snapshot for the target.
      */
     async updateByMessage(
       messageId: string,
@@ -168,25 +268,29 @@ export function createGameStateStorage(db: DB) {
         >
       >,
       manual?: boolean,
+      options?: { baseSnapshot?: typeof gameStateSnapshots.$inferSelect | null },
     ) {
       const snap = await this.getByMessage(messageId, swipeIndex);
       if (snap) return this._applyUpdate(snap, fields, manual);
 
-      // No snapshot for this swipe yet — clone the latest one into a new row
+      // No snapshot for this swipe yet — clone the chosen base into a new row
       // so each (messageId, swipeIndex) gets its own snapshot and we don't
       // corrupt a previous turn's data.
-      const latest = await this.getLatest(chatId);
+      const latest =
+        options && Object.prototype.hasOwnProperty.call(options, "baseSnapshot")
+          ? options.baseSnapshot
+          : await this.getLatest(chatId);
       if (!latest && !messageId) return null;
 
       const baseState = {
         chatId,
         messageId,
         swipeIndex,
-        date: (latest?.date as string) ?? null,
-        time: (latest?.time as string) ?? null,
-        location: (latest?.location as string) ?? null,
-        weather: (latest?.weather as string) ?? null,
-        temperature: (latest?.temperature as string) ?? null,
+        date: coerceGameStateTextValue(latest?.date),
+        time: coerceGameStateTextValue(latest?.time),
+        location: coerceGameStateTextValue(latest?.location),
+        weather: coerceGameStateTextValue(latest?.weather),
+        temperature: coerceGameStateTextValue(latest?.temperature),
         presentCharacters: latest?.presentCharacters
           ? typeof latest.presentCharacters === "string"
             ? JSON.parse(latest.presentCharacters)
@@ -210,17 +314,28 @@ export function createGameStateStorage(db: DB) {
       };
 
       // Apply the incoming fields on top of the cloned base
-      if (fields.date !== undefined) baseState.date = fields.date as any;
-      if (fields.time !== undefined) baseState.time = fields.time as any;
-      if (fields.location !== undefined) baseState.location = fields.location as any;
-      if (fields.weather !== undefined) baseState.weather = fields.weather as any;
-      if (fields.temperature !== undefined) baseState.temperature = fields.temperature as any;
+      if (fields.date !== undefined) baseState.date = coerceGameStateTextValue(fields.date);
+      if (fields.time !== undefined) baseState.time = coerceGameStateTextValue(fields.time);
+      if (fields.location !== undefined) baseState.location = coerceGameStateTextValue(fields.location);
+      if (fields.weather !== undefined) baseState.weather = coerceGameStateTextValue(fields.weather);
+      if (fields.temperature !== undefined) baseState.temperature = coerceGameStateTextValue(fields.temperature);
       if (fields.presentCharacters !== undefined) baseState.presentCharacters = fields.presentCharacters as any;
       if (fields.playerStats !== undefined) baseState.playerStats = fields.playerStats as any;
       if (fields.personaStats !== undefined) baseState.personaStats = fields.personaStats as any;
 
-      // Manual overrides are one-shot — do not carry forward to the new snapshot.
-      const newId = await this.create(baseState as any, null);
+      const manualOverrides = manual
+        ? MANUAL_OVERRIDE_FIELDS.reduce<Record<string, string>>(
+            (acc, key) => {
+              const value = fields[key];
+              const text = coerceGameStateTextValue(value);
+              if (text) acc[key] = text;
+              return acc;
+            },
+            {},
+          )
+        : {};
+      // Manual overrides are one-shot — carry only overrides from this edit.
+      await this.create(baseState as any, Object.keys(manualOverrides).length > 0 ? manualOverrides : null);
       return this.getByMessage(messageId, swipeIndex);
     },
 
@@ -243,11 +358,11 @@ export function createGameStateStorage(db: DB) {
       manual?: boolean,
     ) {
       const updates: Record<string, unknown> = {};
-      if (fields.date !== undefined) updates.date = fields.date;
-      if (fields.time !== undefined) updates.time = fields.time;
-      if (fields.location !== undefined) updates.location = fields.location;
-      if (fields.weather !== undefined) updates.weather = fields.weather;
-      if (fields.temperature !== undefined) updates.temperature = fields.temperature;
+      if (fields.date !== undefined) updates.date = coerceGameStateTextValue(fields.date);
+      if (fields.time !== undefined) updates.time = coerceGameStateTextValue(fields.time);
+      if (fields.location !== undefined) updates.location = coerceGameStateTextValue(fields.location);
+      if (fields.weather !== undefined) updates.weather = coerceGameStateTextValue(fields.weather);
+      if (fields.temperature !== undefined) updates.temperature = coerceGameStateTextValue(fields.temperature);
       if (fields.presentCharacters !== undefined) updates.presentCharacters = JSON.stringify(fields.presentCharacters);
       if (fields.playerStats !== undefined)
         updates.playerStats = fields.playerStats ? JSON.stringify(fields.playerStats) : null;
@@ -257,15 +372,15 @@ export function createGameStateStorage(db: DB) {
 
       // Merge manual override tracking
       if (manual) {
-        const TRACKABLE = ["date", "time", "location", "weather", "temperature"] as const;
         const existing: Record<string, string> = row.manualOverrides ? JSON.parse(row.manualOverrides as string) : {};
-        for (const key of TRACKABLE) {
+        for (const key of MANUAL_OVERRIDE_FIELDS) {
           if (fields[key] !== undefined) {
+            const text = coerceGameStateTextValue(fields[key]);
             // Setting a field to null/empty removes the override so the agent can update it again
-            if (fields[key] == null || fields[key] === "") {
+            if (!text) {
               delete existing[key];
             } else {
-              existing[key] = fields[key] as string;
+              existing[key] = text;
             }
           }
         }

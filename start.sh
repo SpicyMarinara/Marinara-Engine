@@ -217,6 +217,10 @@ case "$AUTO_OPEN_BROWSER_NORMALIZED" in
   *) AUTO_OPEN_BROWSER_ENABLED=1 ;;
 esac
 
+if ! node scripts/check-port-available.mjs; then
+  exit 1
+fi
+
 echo ""
 echo "  ══════════════════════════════════════════"
 echo "    Starting Marinara Engine on ${PROTOCOL}://127.0.0.1:$PORT"

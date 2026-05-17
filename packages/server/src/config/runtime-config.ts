@@ -439,6 +439,10 @@ export function isHapticsRemoteAllowed() {
   return isEnabledFlag(process.env.HAPTICS_ALLOW_REMOTE);
 }
 
+export function getIntifaceUrl() {
+  return normalizeEnvValue(process.env.INTIFACE_URL) ?? "ws://127.0.0.1:12345";
+}
+
 export function getImportAllowedRoots() {
   return parseCsv(process.env.IMPORT_ALLOWED_ROOTS).map(resolveFromRepoRoot);
 }

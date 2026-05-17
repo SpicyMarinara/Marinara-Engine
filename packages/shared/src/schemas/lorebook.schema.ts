@@ -164,6 +164,7 @@ export const createLorebookEntrySchema = z.object({
   dynamicState: z.record(z.unknown()).default({}),
   activationConditions: z.array(activationConditionSchema).default([]),
   schedule: lorebookScheduleSchema.nullable().default(null),
+  excludeFromVectorization: z.boolean().default(false),
 });
 
 export const updateLorebookEntrySchema = z.object({
@@ -206,6 +207,7 @@ export const updateLorebookEntrySchema = z.object({
   dynamicState: z.record(z.unknown()).optional(),
   activationConditions: z.array(activationConditionSchema).optional(),
   schedule: lorebookScheduleSchema.nullable().optional(),
+  excludeFromVectorization: z.boolean().optional(),
 });
 
 export type CreateLorebookInput = z.input<typeof createLorebookSchema>;

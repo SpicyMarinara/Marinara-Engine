@@ -64,6 +64,7 @@ import {
 import { generateWeather, inferBiome, shouldWeatherChange } from "../services/game/weather.service.js";
 import { rollEncounter, rollEnemyCount } from "../services/game/encounter.service.js";
 import { processReputationActions } from "../services/game/reputation.service.js";
+import { sanitizeGameNpcAvatarUrls } from "../services/game/npc-avatar-utils.js";
 import { createCheckpointService, type CheckpointTrigger } from "../services/game/checkpoint.service.js";
 import {
   resolveSkillCheck,
@@ -144,7 +145,21 @@ import {
 // Helpers
 // ──────────────────────────────────────────────
 
-const AVATAR_NAME_TITLE_WORDS = new Set(["a", "an", "the", "il", "lo", "la", "le", "l", "el", "sir", "lady", "lord"]);
+const AVATAR_NAME_TITLE_WORDS = new Set([
+  "a",
+  "an",
+  "the",
+  "il",
+  "lo",
+  "la",
+  "le",
+  "l",
+  "el",
+  "sir",
+  "lady",
+  "lord",
+  "professor",
+]);
 
 function normalizeAvatarLookupName(value: string): string {
   return value
@@ -172,7 +187,7 @@ function avatarLookupAliases(value: string): string[] {
   ).filter(Boolean);
 }
 
-function addNameLookupEntry(map: Map<string, string>, name: unknown, value: unknown): void {
+export function addNameLookupEntry(map: Map<string, string>, name: unknown, value: unknown): void {
   if (typeof name !== "string" || typeof value !== "string") return;
   const trimmedValue = value.trim();
   if (!trimmedValue) return;
@@ -207,7 +222,7 @@ const generatedOptionalStringSchema = z.preprocess((value) => generatedStringVal
  * Title aliases make "Il Dottore" resolve to a saved "Dottore" card and
  * "Il Capitano" resolve to "Capitano" before any image generation is attempted.
  */
-function findCharAvatarFuzzy(npcName: string, charAvatarByName: Map<string, string>): string | undefined {
+export function findCharAvatarFuzzy(npcName: string, charAvatarByName: Map<string, string>): string | undefined {
   const npcAliases = avatarLookupAliases(npcName);
 
   // 1. Exact
@@ -2395,8 +2410,9 @@ function buildSceneAssetNpcCandidates(
 function upsertGameNpcAvatarEntries(currentNpcs: GameNpc[], avatarEntries: SceneAssetNpcAvatarEntry[]): GameNpc[] {
   if (avatarEntries.length === 0) return currentNpcs;
 
-  const nextNpcs = [...currentNpcs];
-  let changed = false;
+  const sanitizedCurrentNpcs = sanitizeGameNpcAvatarUrls(currentNpcs);
+  const nextNpcs = [...sanitizedCurrentNpcs];
+  let changed = sanitizedCurrentNpcs !== currentNpcs;
 
   for (const entry of avatarEntries) {
     const normalizedName = normalizeJournalMatch(entry.name);
@@ -2407,7 +2423,7 @@ function upsertGameNpcAvatarEntries(currentNpcs: GameNpc[], avatarEntries: Scene
       const existing = nextNpcs[existingIndex]!;
       let nextNpc = existing;
 
-      if (!existing.avatarUrl) {
+      if (existing.avatarUrl !== entry.avatarUrl) {
         nextNpc = { ...nextNpc, avatarUrl: entry.avatarUrl };
       }
       if (!nextNpc.description && entry.description) {
@@ -2650,6 +2666,11 @@ export async function gameRoutes(app: FastifyInstance) {
     const latestState = await gameStateStore.getLatest(chatId);
 
     let hydratedMeta = baseMeta;
+    const gameNpcs = Array.isArray(hydratedMeta.gameNpcs) ? (hydratedMeta.gameNpcs as GameNpc[]) : null;
+    if (gameNpcs) {
+      const sanitizedNpcs = sanitizeGameNpcAvatarUrls(gameNpcs);
+      if (sanitizedNpcs !== gameNpcs) hydratedMeta = { ...hydratedMeta, gameNpcs: sanitizedNpcs };
+    }
     const presentCharacterNames = extractPresentCharacterNames(latestState?.presentCharacters);
     if (presentCharacterNames.length > 0) {
       hydratedMeta = markNpcsMetByNames(hydratedMeta, presentCharacterNames);
@@ -3461,13 +3482,60 @@ export async function gameRoutes(app: FastifyInstance) {
     if (!chat) throw new Error("Chat not found");
 
     const meta = parseMeta(chat.metadata);
+    // Idempotent guard: a late second click that arrives after the first /start
+    // has already flipped the status to "active" should not error out — let the
+    // client skip its duplicate generation by returning alreadyStarted: true.
+    if (meta.gameSessionStatus === "active") {
+      return { status: "active", alreadyStarted: true };
+    }
     if (meta.gameSessionStatus !== "ready") {
       throw new Error(`Cannot start game: status is "${meta.gameSessionStatus}", expected "ready"`);
     }
 
-    await chats.updateMetadata(chatId, { ...meta, gameSessionStatus: "active" });
+    // Stale-meta recovery (#321 / #821): an existing GM turn means the game has
+    // already started, even though gameSessionStatus is back at "ready". This
+    // happens when a concurrent metadata-write race transiently reverts the
+    // status from "active" to "ready" mid-stream (see PR #320 for the original
+    // audit and remaining call sites the team hasn't migrated to
+    // chats.patchMetadata yet). Without this branch, a second Start Game click
+    // during that race window would fire a duplicate /api/generate. Instead:
+    // re-flip status back to "active" silently and tell the client we already
+    // started so it skips generateInitialGameTurn.
+    const existingMessages = await chats.listMessages(chatId);
+    const hasGmTurn = existingMessages.some(
+      (m) => m.role === "assistant" && typeof m.content === "string" && m.content.trim().length > 0,
+    );
+    if (hasGmTurn) {
+      logger.warn(
+        "[game/start] Stale-meta recovery for chatId=%s — GM turn already exists; restoring status to active without re-firing intro",
+        chatId,
+      );
+      await chats.patchMetadata(chatId, { gameSessionStatus: "active" });
+      return { status: "active", alreadyStarted: true };
+    }
 
-    return { status: "active" };
+    // Atomic ready→active claim: route the transition through patchMetadata's
+    // per-chat queue so two concurrent /start requests can't both observe
+    // "ready" + no GM turn and both fire a generate. Only the first call wins
+    // the claim; the rest fall through to the alreadyStarted: true branch
+    // below.
+    let claimedStart = false;
+    await chats.patchMetadata(chatId, (current) => {
+      if (current.gameSessionStatus !== "ready") return {};
+      claimedStart = true;
+      return { gameSessionStatus: "active" };
+    });
+
+    if (!claimedStart) {
+      const latestChat = await chats.getById(chatId);
+      const latestStatus = latestChat ? (parseMeta(latestChat.metadata).gameSessionStatus as string) : null;
+      if (latestStatus === "active") {
+        return { status: "active", alreadyStarted: true };
+      }
+      throw new Error(`Cannot start game: status is "${latestStatus}", expected "ready"`);
+    }
+
+    return { status: "active", alreadyStarted: false };
   });
 
   const pendingSessionStarts = new Map<
@@ -6004,6 +6072,8 @@ export async function gameRoutes(app: FastifyInstance) {
   const spotifyPlaySchema = z.object({
     chatId: z.string().min(1),
     track: spotifySceneTrackSelectionSchema,
+    deviceId: z.string().min(1).nullable().optional(),
+    mobileDeviceOnly: z.boolean().optional(),
   });
 
   app.post("/spotify/play", async (req, reply) => {
@@ -6018,6 +6088,8 @@ export async function gameRoutes(app: FastifyInstance) {
         storage: agents,
         chatMeta: parseMeta(chat.metadata),
         track: input.track,
+        deviceId: input.deviceId ?? null,
+        mobileDeviceOnly: input.mobileDeviceOnly === true,
       });
     } catch (err) {
       logger.warn(err, "[spotify/game] Failed to play scene music");
@@ -7131,7 +7203,7 @@ export async function gameRoutes(app: FastifyInstance) {
         if (avatarUrl) {
           generatedNpcAvatars.push({
             name: npc.name,
-            avatarUrl: forceNpcAvatar ? `${avatarUrl.split("?")[0]}?v=${Date.now()}` : avatarUrl,
+            avatarUrl: `${avatarUrl.split("?")[0]}?v=${Date.now()}`,
           });
         }
       }

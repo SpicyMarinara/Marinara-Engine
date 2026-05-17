@@ -2,17 +2,7 @@
 // View: File Browser (full-page overlay)
 // ──────────────────────────────────────────────
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
-import {
-  Folder,
-  Upload,
-  Pencil,
-  Info,
-  FileText,
-  Move,
-  Copy,
-  Trash2,
-  X,
-} from "lucide-react";
+import { Check, Folder, Upload, Pencil, Info, FileText, Move, Copy, Minus, RotateCcw, Trash2, X } from "lucide-react";
 import {
   useGameAssetTree,
   useCreateGameAssetFolder,
@@ -47,8 +37,29 @@ import { DEFAULT_DESCRIPTIONS } from "./constants";
 import { isImage, isAudio, isEditableText, countItems } from "./utils";
 import { encodeAssetPath } from "./encode-asset-path";
 import { useUIStore } from "../../stores/ui.store";
+import { useChatStore } from "../../stores/chat.store";
+import { useChat, useUpdateChatMetadata } from "../../hooks/use-chats";
+import { parseChatMetadata } from "../../lib/chat-display";
+import {
+  excludeGameAssetFolder,
+  getGameAssetFolderSelectionStatus,
+  includeGameAssetFolder,
+  parseGameAssetExcludedFolders,
+  serializeGameAssetSelection,
+  type GameAssetSelectionStatus,
+} from "../../lib/game-asset-selection";
 
 const PROTECTED_PATHS = new Set(["", "music", "sfx", "ambient", "sprites", "backgrounds"]);
+
+function AssetSelectionIcon({ status }: { status: GameAssetSelectionStatus }) {
+  if (status === "included") return <Check size="0.75rem" />;
+  if (status === "partial") return <Minus size="0.75rem" />;
+  return null;
+}
+
+function sameFolderSelection(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((folder, index) => folder === b[index]);
+}
 
 /**
  * Full-screen overlay for browsing, previewing, and managing game assets.
@@ -77,6 +88,7 @@ export function GameAssetsBrowserView() {
   const moveBulk = useMoveGameAssetsBulk();
   const copyBulk = useCopyGameAssetsBulk();
   const deleteBulk = useDeleteGameAssetsBulk();
+  const updateChatMetadata = useUpdateChatMetadata();
 
   const [selectedPath, setSelectedPath] = useState("");
   const [search, setSearch] = useState("");
@@ -90,6 +102,13 @@ export function GameAssetsBrowserView() {
   const [imageInfoNode, setImageInfoNode] = useState<TreeNode | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [listColumns, setListColumns] = useState({ size: true, modified: false });
+  const [assetSelectionMode, setAssetSelectionMode] = useState(false);
+  const [optimisticAssetExcludedFolders, setOptimisticAssetExcludedFolders] = useState<string[] | null>(null);
+  const [folderSelectionMenu, setFolderSelectionMenu] = useState<{
+    node: TreeNode;
+    x: number;
+    y: number;
+  } | null>(null);
 
   // Multi-select state (files only)
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
@@ -110,6 +129,104 @@ export function GameAssetsBrowserView() {
   const [deleteRecursive, setDeleteRecursive] = useState(false);
   const uploadRef = useRef<HTMLInputElement>(null);
   const saveFile = useSaveGameAssetFile();
+  const closeGameAssetsBrowser = useUIStore((s) => s.closeGameAssetsBrowser);
+  const activeChatId = useChatStore((s) => s.activeChatId);
+  const { data: activeChat } = useChat(activeChatId);
+  const showGameCloseButton = activeChat?.mode === "game";
+  const canSelectGameAssets = activeChat?.mode === "game" && !!activeChatId;
+  const activeChatMeta = useMemo(() => parseChatMetadata(activeChat?.metadata), [activeChat?.metadata]);
+  const persistedGameAssetExcludedFolders = useMemo(
+    () => parseGameAssetExcludedFolders(activeChatMeta.gameAssetSelection),
+    [activeChatMeta.gameAssetSelection],
+  );
+  const gameAssetExcludedFolders = optimisticAssetExcludedFolders ?? persistedGameAssetExcludedFolders;
+  const folderSelectionMenuRef = useRef<HTMLDivElement>(null);
+
+  const persistGameAssetSelection = useCallback(
+    (excludedFolders: string[]) => {
+      if (!activeChatId) return;
+      const metadata = serializeGameAssetSelection(excludedFolders);
+      const normalizedExcludedFolders = metadata?.excludedFolders ?? [];
+      setOptimisticAssetExcludedFolders(normalizedExcludedFolders);
+      updateChatMetadata.mutate(
+        {
+          id: activeChatId,
+          gameAssetSelection: metadata,
+        },
+        {
+          onError: () => setOptimisticAssetExcludedFolders(null),
+        },
+      );
+    },
+    [activeChatId, updateChatMetadata],
+  );
+
+  const getFolderSelectionStatus = useCallback(
+    (node: TreeNode) => getGameAssetFolderSelectionStatus(node.path, gameAssetExcludedFolders),
+    [gameAssetExcludedFolders],
+  );
+
+  const handleOpenFolderSelection = useCallback((node: TreeNode, anchorEl: HTMLElement) => {
+    const rect = anchorEl.getBoundingClientRect();
+    setFolderSelectionMenu({
+      node,
+      x: Math.max(8, Math.min(rect.left, window.innerWidth - 288)),
+      y: rect.bottom + 6,
+    });
+  }, []);
+
+  const handleIncludeFolder = useCallback(
+    (node: TreeNode) => {
+      persistGameAssetSelection(includeGameAssetFolder(node.path, gameAssetExcludedFolders));
+    },
+    [gameAssetExcludedFolders, persistGameAssetSelection],
+  );
+
+  const handleExcludeFolder = useCallback(
+    (node: TreeNode) => {
+      persistGameAssetSelection(excludeGameAssetFolder(node.path, gameAssetExcludedFolders));
+    },
+    [gameAssetExcludedFolders, persistGameAssetSelection],
+  );
+
+  const handleExcludeSubfolders = useCallback(
+    (nodes: TreeNode[]) => {
+      const nextExcludedFolders = nodes.reduce(
+        (folders, node) => excludeGameAssetFolder(node.path, folders),
+        gameAssetExcludedFolders,
+      );
+      persistGameAssetSelection(nextExcludedFolders);
+    },
+    [gameAssetExcludedFolders, persistGameAssetSelection],
+  );
+
+  const handleIncludeSubfolders = useCallback(
+    (nodes: TreeNode[]) => {
+      const nextExcludedFolders = nodes.reduce(
+        (folders, node) => includeGameAssetFolder(node.path, folders),
+        gameAssetExcludedFolders,
+      );
+      persistGameAssetSelection(nextExcludedFolders);
+    },
+    [gameAssetExcludedFolders, persistGameAssetSelection],
+  );
+
+  useEffect(() => {
+    if (canSelectGameAssets) return;
+    setAssetSelectionMode(false);
+    setFolderSelectionMenu(null);
+  }, [canSelectGameAssets]);
+
+  useEffect(() => {
+    setOptimisticAssetExcludedFolders(null);
+  }, [activeChatId]);
+
+  useEffect(() => {
+    if (!optimisticAssetExcludedFolders) return;
+    if (sameFolderSelection(optimisticAssetExcludedFolders, persistedGameAssetExcludedFolders)) {
+      setOptimisticAssetExcludedFolders(null);
+    }
+  }, [optimisticAssetExcludedFolders, persistedGameAssetExcludedFolders]);
 
   const selectedNode = useMemo(() => {
     if (!tree) return null;
@@ -136,10 +253,7 @@ export function GameAssetsBrowserView() {
   }, [selectedNode, search]);
 
   // Visible file nodes (for select-all)
-  const visibleFileNodes = useMemo(
-    () => currentChildren.filter((n) => n.type === "file"),
-    [currentChildren],
-  );
+  const visibleFileNodes = useMemo(() => currentChildren.filter((n) => n.type === "file"), [currentChildren]);
 
   const breadcrumb = useMemo(() => {
     if (!selectedPath) return ["Game Assets"];
@@ -196,11 +310,7 @@ export function GameAssetsBrowserView() {
     if (!isBrowserVisible) return;
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target.isContentEditable
-      ) {
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable) {
         return;
       }
       if (e.key === "a" && (e.metaKey || e.ctrlKey)) {
@@ -216,6 +326,26 @@ export function GameAssetsBrowserView() {
     return () => window.removeEventListener("keydown", handler);
   }, [isBrowserVisible, handleSelectAll, handleClearSelection, selectedPaths.size]);
 
+  useEffect(() => {
+    if (!folderSelectionMenu) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (!folderSelectionMenuRef.current?.contains(target)) {
+        setFolderSelectionMenu(null);
+      }
+    };
+    const onScroll = () => setFolderSelectionMenu(null);
+    const raf = requestAnimationFrame(() => {
+      document.addEventListener("mousedown", handler);
+      window.addEventListener("scroll", onScroll, true);
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener("mousedown", handler);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [folderSelectionMenu]);
+
   // Clear selection when changing folders
   useEffect(() => {
     handleClearSelection();
@@ -229,8 +359,10 @@ export function GameAssetsBrowserView() {
   const getUploadErrorMessage = useCallback((err: unknown, file: File, _category: string): string => {
     const msg = err instanceof Error ? err.message : "";
     if (msg.includes("File too large")) return msg;
-    if (msg.includes("Can't upload")) return `${msg} You can still create text files (.txt, .md, .json, etc.) here via the New menu.`;
-    if (msg.includes("Invalid category")) return `Please navigate to a category folder (music, sfx, ambient, sprites, backgrounds) before uploading.`;
+    if (msg.includes("Can't upload"))
+      return `${msg} You can still create text files (.txt, .md, .json, etc.) here via the New menu.`;
+    if (msg.includes("Invalid category"))
+      return `Please navigate to a category folder (music, sfx, ambient, sprites, backgrounds) before uploading.`;
     if (msg.includes("Invalid upload")) return `Upload failed for ${file.name}. Please check the file and try again.`;
     return `Failed to upload ${file.name}: ${msg || "Unknown error"}`;
   }, []);
@@ -345,7 +477,13 @@ export function GameAssetsBrowserView() {
         }
         items.push(
           { label: "Download", onSelect: () => handleDownload(node) },
-          { label: "Rename", onSelect: () => { setModal({ type: "rename", node }); setModalValue(node.name); } },
+          {
+            label: "Rename",
+            onSelect: () => {
+              setModal({ type: "rename", node });
+              setModalValue(node.name);
+            },
+          },
           { label: "Move", onSelect: () => setModal({ type: "move", node }) },
           { label: "Copy", onSelect: () => handleCopy(node) },
           { label: "Delete", onSelect: () => setModal({ type: "delete", node }), destructive: true },
@@ -433,7 +571,23 @@ export function GameAssetsBrowserView() {
     setModal(null);
     setModalValue("");
     setDeleteRecursive(false);
-  }, [modal, modalValue, selectedPath, deleteRecursive, selectedPaths, createFolder, saveFile, renameAsset, moveAsset, deleteFolder, deleteAsset, moveBulk, copyBulk, deleteBulk, handleClearSelection]);
+  }, [
+    modal,
+    modalValue,
+    selectedPath,
+    deleteRecursive,
+    selectedPaths,
+    createFolder,
+    saveFile,
+    renameAsset,
+    moveAsset,
+    deleteFolder,
+    deleteAsset,
+    moveBulk,
+    copyBulk,
+    deleteBulk,
+    handleClearSelection,
+  ]);
 
   const moveTargetFolders = useMemo(() => {
     if (!tree) return [];
@@ -492,15 +646,55 @@ export function GameAssetsBrowserView() {
         viewMode={viewMode}
         onViewMode={setViewMode}
         onUploadClick={() => uploadRef.current?.click()}
-        onNewFolder={() => { setModal({ type: "create-folder" }); setModalValue(""); }}
-        onNewTextFile={() => { setModal({ type: "new-text-file" }); setModalValue(""); }}
-        onNewMarkdownFile={() => { setModal({ type: "new-markdown-file" }); setModalValue(""); }}
+        onNewFolder={() => {
+          setModal({ type: "create-folder" });
+          setModalValue("");
+        }}
+        onNewTextFile={() => {
+          setModal({ type: "new-text-file" });
+          setModalValue("");
+        }}
+        onNewMarkdownFile={() => {
+          setModal({ type: "new-markdown-file" });
+          setModalValue("");
+        }}
         onRescan={() => rescan.mutate()}
         onOpenFolder={() => openFolder.mutate(selectedPath || undefined)}
         onBreadcrumbClick={(path) => setSelectedPath(path)}
         listColumns={listColumns}
         onToggleColumn={(col) => setListColumns((prev) => ({ ...prev, [col]: !prev[col] }))}
+        onClose={showGameCloseButton ? closeGameAssetsBrowser : undefined}
+        assetSelection={
+          canSelectGameAssets
+            ? {
+                active: assetSelectionMode,
+                excludedCount: gameAssetExcludedFolders.length,
+                onToggle: () => setAssetSelectionMode((active) => !active),
+              }
+            : undefined
+        }
       />
+
+      {canSelectGameAssets && assetSelectionMode && (
+        <div className="flex min-h-[36px] items-center gap-3 border-b border-[var(--border)]/40 bg-[var(--primary)]/5 px-4 py-1.5">
+          <span className="text-xs font-medium text-[var(--primary)]">Game asset selection</span>
+          <span className="text-xs text-[var(--muted-foreground)]">
+            {gameAssetExcludedFolders.length === 0
+              ? "All folders included"
+              : `${gameAssetExcludedFolders.length} folder${gameAssetExcludedFolders.length !== 1 ? "s" : ""} excluded`}
+          </span>
+          {gameAssetExcludedFolders.length > 0 && (
+            <button
+              type="button"
+              onClick={() => persistGameAssetSelection([])}
+              className="ml-auto flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--accent)]"
+            >
+              <RotateCcw size="0.75rem" />
+              Reset to all
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Folder Description (hidden when selections exist) */}
       {selectedPaths.size === 0 && selectedNode?.type === "folder" && (
@@ -536,9 +730,7 @@ export function GameAssetsBrowserView() {
           ) : PROTECTED_PATHS.has(selectedPath) ? (
             <div className="flex w-full items-center gap-1.5 text-left text-xs">
               <FileText size="0.75rem" className="shrink-0 text-[var(--muted-foreground)]" />
-              <span className="text-[var(--foreground)]">
-                {currentDescription}
-              </span>
+              <span className="text-[var(--foreground)]">{currentDescription}</span>
             </div>
           ) : (
             <button
@@ -572,14 +764,20 @@ export function GameAssetsBrowserView() {
             </button>
             <div className="mx-1 h-3 w-px bg-[var(--border)]" />
             <button
-              onClick={() => { setModal({ type: "bulk-move" }); setModalValue(""); }}
+              onClick={() => {
+                setModal({ type: "bulk-move" });
+                setModalValue("");
+              }}
               className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--accent)]"
             >
               <Move size="0.75rem" />
               Move
             </button>
             <button
-              onClick={() => { setModal({ type: "bulk-copy" }); setModalValue(""); }}
+              onClick={() => {
+                setModal({ type: "bulk-copy" });
+                setModalValue("");
+              }}
               className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--accent)]"
             >
               <Copy size="0.75rem" />
@@ -618,6 +816,9 @@ export function GameAssetsBrowserView() {
               expanded={expanded}
               onToggle={toggleExpanded}
               onSelect={setSelectedPath}
+              assetSelectionMode={canSelectGameAssets && assetSelectionMode}
+              getFolderSelectionStatus={getFolderSelectionStatus}
+              onOpenFolderSelection={handleOpenFolderSelection}
             />
           ) : null}
         </div>
@@ -633,7 +834,9 @@ export function GameAssetsBrowserView() {
           onDragLeave={handleDragLeave}
         >
           {isLoading ? (
-            <div className="flex flex-1 items-center justify-center text-sm text-[var(--muted-foreground)]">Loading assets...</div>
+            <div className="flex flex-1 items-center justify-center text-sm text-[var(--muted-foreground)]">
+              Loading assets...
+            </div>
           ) : (
             <div className="flex-1 overflow-y-auto">
               <AssetGrid
@@ -649,6 +852,9 @@ export function GameAssetsBrowserView() {
                   setActionMenu({ node, x: rect.right - 160, y: rect.bottom + 4 });
                 }}
                 listColumns={listColumns}
+                assetSelectionMode={canSelectGameAssets && assetSelectionMode}
+                getFolderSelectionStatus={getFolderSelectionStatus}
+                onOpenFolderSelection={handleOpenFolderSelection}
               />
             </div>
           )}
@@ -663,14 +869,105 @@ export function GameAssetsBrowserView() {
         </div>
       </div>
 
+      {canSelectGameAssets && assetSelectionMode && folderSelectionMenu && (
+        <div
+          ref={folderSelectionMenuRef}
+          className="fixed z-[60] w-72 rounded-lg border border-[var(--border)] bg-[var(--card)] py-1 shadow-xl"
+          style={{ left: folderSelectionMenu.x, top: folderSelectionMenu.y }}
+        >
+          {(() => {
+            const status = getFolderSelectionStatus(folderSelectionMenu.node);
+            const subfolders = folderSelectionMenu.node.children?.filter((child) => child.type === "folder") ?? [];
+            return (
+              <>
+                <div className="border-b border-[var(--border)]/50 px-3 py-2">
+                  <div className="truncate text-xs font-semibold text-[var(--foreground)]">
+                    {folderSelectionMenu.node.name}
+                  </div>
+                  <div className="mt-0.5 text-[0.625rem] text-[var(--muted-foreground)]">
+                    {status === "included" && "Included in this game"}
+                    {status === "partial" && "Some subfolders excluded"}
+                    {status === "excluded" && "Excluded from this game"}
+                  </div>
+                </div>
+                {subfolders.length > 0 && (
+                  <div className="max-h-56 overflow-y-auto py-1">
+                    <div className="px-3 py-1 text-[0.625rem] font-medium uppercase text-[var(--muted-foreground)]">
+                      Subfolders
+                    </div>
+                    {subfolders.map((child) => {
+                      const childStatus = getFolderSelectionStatus(child);
+                      const childIncluded = childStatus !== "excluded";
+                      return (
+                        <button
+                          key={child.path}
+                          type="button"
+                          onClick={() => {
+                            if (childIncluded) handleExcludeFolder(child);
+                            else handleIncludeFolder(child);
+                          }}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--foreground)] transition-colors hover:bg-[var(--accent)]"
+                        >
+                          <span
+                            className={
+                              "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border " +
+                              (childIncluded
+                                ? "border-[var(--primary)]/40 bg-[var(--primary)] text-white"
+                                : "border-[var(--border)] text-[var(--muted-foreground)]")
+                            }
+                          >
+                            <AssetSelectionIcon status={childStatus} />
+                          </span>
+                          <span className="min-w-0 flex-1 truncate">{child.name}</span>
+                          <span className="text-[0.625rem] text-[var(--muted-foreground)]">
+                            {childIncluded ? "Included" : "Excluded"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                <div className="border-t border-[var(--border)]/50 py-1">
+                  {subfolders.length > 0 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleExcludeSubfolders(subfolders)}
+                        className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs font-medium text-[var(--destructive)] transition-colors hover:bg-[var(--accent)]"
+                      >
+                        Remove all subfolders from game
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleIncludeSubfolders(subfolders)}
+                        className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs font-medium text-[var(--primary)] transition-colors hover:bg-[var(--accent)]"
+                      >
+                        Include all subfolders
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (status === "excluded") handleIncludeFolder(folderSelectionMenu.node);
+                      else handleExcludeFolder(folderSelectionMenu.node);
+                    }}
+                    className={cn(
+                      "flex w-full items-center justify-between px-3 py-1.5 text-left text-xs font-medium transition-colors hover:bg-[var(--accent)]",
+                      status === "excluded" ? "text-[var(--primary)]" : "text-[var(--destructive)]",
+                    )}
+                  >
+                    {status === "excluded" ? "Include this folder" : "Remove this folder from game"}
+                  </button>
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      )}
+
       {/* Hidden upload input */}
-      <input
-        ref={uploadRef}
-        type="file"
-        multiple
-        className="hidden"
-        onChange={(e) => handleUpload(e.target.files)}
-      />
+      <input ref={uploadRef} type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
 
       {/* Context menu (desktop right-click) */}
       {contextMenu && (
@@ -693,38 +990,20 @@ export function GameAssetsBrowserView() {
       )}
 
       {/* Image preview */}
-      {previewImage && (
-        <ImagePreviewModal
-          node={previewImage}
-          onClose={() => setPreviewImage(null)}
-        />
-      )}
+      {previewImage && <ImagePreviewModal node={previewImage} onClose={() => setPreviewImage(null)} />}
 
       {/* Audio preview */}
       {previewAudio && (
-        <AudioPlayerModal
-          path={previewAudio.path}
-          name={previewAudio.name}
-          onClose={() => setPreviewAudio(null)}
-        />
+        <AudioPlayerModal path={previewAudio.path} name={previewAudio.name} onClose={() => setPreviewAudio(null)} />
       )}
 
       {/* File editor */}
       {editingFile && (
-        <FileEditorModal
-          node={editingFile.node}
-          initialMode={editingFile.mode}
-          onClose={() => setEditingFile(null)}
-        />
+        <FileEditorModal node={editingFile.node} initialMode={editingFile.mode} onClose={() => setEditingFile(null)} />
       )}
 
       {/* Image info popover */}
-      {imageInfoNode && (
-        <ImageInfoPopover
-          node={imageInfoNode}
-          onClose={() => setImageInfoNode(null)}
-        />
-      )}
+      {imageInfoNode && <ImageInfoPopover node={imageInfoNode} onClose={() => setImageInfoNode(null)} />}
 
       {/* Modals */}
       {modal && (
@@ -743,13 +1022,15 @@ export function GameAssetsBrowserView() {
               {modal.type === "delete" && `Delete ${modal.node.type === "folder" ? "Folder" : "File"}?`}
               {modal.type === "bulk-move" && `Move ${selectedPaths.size} file${selectedPaths.size !== 1 ? "s" : ""}`}
               {modal.type === "bulk-copy" && `Copy ${selectedPaths.size} file${selectedPaths.size !== 1 ? "s" : ""}`}
-              {modal.type === "bulk-delete" && `Delete ${selectedPaths.size} file${selectedPaths.size !== 1 ? "s" : ""}?`}
+              {modal.type === "bulk-delete" &&
+                `Delete ${selectedPaths.size} file${selectedPaths.size !== 1 ? "s" : ""}?`}
             </h3>
 
             {modal.type === "delete" ? (
               <div className="mb-4 text-sm text-[var(--muted-foreground)]">
                 <p>
-                  Are you sure you want to delete <strong className="text-[var(--foreground)]">{modal.node.name}</strong>?
+                  Are you sure you want to delete{" "}
+                  <strong className="text-[var(--foreground)]">{modal.node.name}</strong>?
                 </p>
                 {modal.node.type === "folder" && (
                   <div className="mt-2">
@@ -791,7 +1072,9 @@ export function GameAssetsBrowserView() {
                     onClick={() => setModalValue(f.path)}
                     className={cn(
                       "flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors",
-                      modalValue === f.path ? "bg-[var(--primary)]/10 text-[var(--primary)]" : "text-[var(--foreground)] hover:bg-[var(--accent)]",
+                      modalValue === f.path
+                        ? "bg-[var(--primary)]/10 text-[var(--primary)]"
+                        : "text-[var(--foreground)] hover:bg-[var(--accent)]",
                     )}
                   >
                     <Folder size="0.875rem" />
@@ -802,7 +1085,11 @@ export function GameAssetsBrowserView() {
             ) : modal.type === "bulk-delete" ? (
               <div className="mb-4 text-sm text-[var(--muted-foreground)]">
                 <p>
-                  Are you sure you want to delete <strong className="text-[var(--foreground)]">{selectedPaths.size} file{selectedPaths.size !== 1 ? "s" : ""}</strong>?
+                  Are you sure you want to delete{" "}
+                  <strong className="text-[var(--foreground)]">
+                    {selectedPaths.size} file{selectedPaths.size !== 1 ? "s" : ""}
+                  </strong>
+                  ?
                 </p>
                 <p className="mt-1 text-xs text-[var(--destructive)]">This action cannot be undone.</p>
               </div>
@@ -820,7 +1107,11 @@ export function GameAssetsBrowserView() {
 
             <div className="flex justify-end gap-2">
               <button
-                onClick={() => { setModal(null); setModalValue(""); setDeleteRecursive(false); }}
+                onClick={() => {
+                  setModal(null);
+                  setModalValue("");
+                  setDeleteRecursive(false);
+                }}
                 className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-4 py-2 text-xs font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--accent)]"
               >
                 Cancel
@@ -828,13 +1119,22 @@ export function GameAssetsBrowserView() {
               <button
                 onClick={handleModalConfirm}
                 disabled={
-                  (modal.type === "delete" && modal.node.type === "folder" && countItems(modal.node) > 0 && !deleteRecursive) ||
+                  (modal.type === "delete" &&
+                    modal.node.type === "folder" &&
+                    countItems(modal.node) > 0 &&
+                    !deleteRecursive) ||
                   ((modal.type === "move" || modal.type === "bulk-move" || modal.type === "bulk-copy") && !modalValue)
                 }
                 className={cn(
                   "rounded-lg px-4 py-2 text-xs font-medium transition-opacity hover:opacity-90",
-                  modal.type === "delete" || modal.type === "bulk-delete" ? "bg-[var(--destructive)] text-white" : "bg-[var(--primary)] text-white",
-                  (modal.type === "delete" && modal.node.type === "folder" && countItems(modal.node) > 0 && !deleteRecursive) && "cursor-not-allowed opacity-50",
+                  modal.type === "delete" || modal.type === "bulk-delete"
+                    ? "bg-[var(--destructive)] text-white"
+                    : "bg-[var(--primary)] text-white",
+                  modal.type === "delete" &&
+                    modal.node.type === "folder" &&
+                    countItems(modal.node) > 0 &&
+                    !deleteRecursive &&
+                    "cursor-not-allowed opacity-50",
                 )}
               >
                 {modal.type === "delete" || modal.type === "bulk-delete" ? "Delete" : "Confirm"}

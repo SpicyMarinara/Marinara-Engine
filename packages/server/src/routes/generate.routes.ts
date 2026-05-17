@@ -16,6 +16,7 @@ import {
   LOCAL_SIDECAR_CONNECTION_ID,
   resolveMacros,
   LIMITS,
+  coerceGameStateTextValue,
 } from "@marinara-engine/shared";
 import type {
   AgentContext,
@@ -41,6 +42,7 @@ import { createRegexScriptsStorage } from "../services/storage/regex-scripts.sto
 import { applyRegexScriptsToPromptMessages } from "../services/regex/regex-application.js";
 import { createPromptOverridesStorage } from "../services/storage/prompt-overrides.storage.js";
 import { loadPrompt, CONVERSATION_SELFIE } from "../services/prompt-overrides/index.js";
+import { renderTemplate } from "../services/prompt-overrides/template.js";
 import { processLorebooks } from "../services/lorebook/index.js";
 import {
   filterGameInternalAgentIds,
@@ -73,15 +75,10 @@ import {
 import { executeToolCalls, type MetadataPatchInput } from "../services/tools/tool-executor.js";
 import { createAgentPipeline, type ResolvedAgent, type AgentInjection } from "../services/agents/agent-pipeline.js";
 import { DATA_DIR } from "../utils/data-dir.js";
-import {
-  executeAgent,
-  formatToolPayloadForLog,
-  normalizeAgentContextSize,
-  resolveAgentResultType,
-} from "../services/agents/agent-executor.js";
-import { buildSpriteExpressionChoices, listCharacterSprites } from "../services/game/sprite.service.js";
+import { executeAgent, normalizeAgentContextSize, resolveAgentResultType } from "../services/agents/agent-executor.js";
+import { listCharacterSprites } from "../services/game/sprite.service.js";
 import { generateChatBackground } from "../services/game/game-asset-generation.js";
-import { getAssetManifest } from "../services/game/asset-manifest.service.js";
+import { sanitizeGameNpcAvatarUrls } from "../services/game/npc-avatar-utils.js";
 import { getLocalSidecarProvider, LOCAL_SIDECAR_MODEL } from "../services/llm/local-sidecar.js";
 import {
   parseCharacterCommands,
@@ -132,7 +129,7 @@ import { executeKnowledgeRouter } from "../services/agents/knowledge-router.js";
 import { extractFileText, getSourceFilePath } from "./knowledge-sources.routes.js";
 import { gameStateSnapshots as gameStateSnapshotsTable } from "../db/schema/index.js";
 import { chats as chatsTable } from "../db/schema/index.js";
-import { eq, and, desc } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { PROFESSOR_MARI_ID } from "@marinara-engine/shared";
 import { chunkAndEmbedMessages, recallMemories } from "../services/memory-recall.js";
 import { resolveMemoryRecallEmbeddingSource } from "../services/memory-recall-embedding.js";
@@ -149,12 +146,22 @@ import {
   parseGameStateRow,
   preserveTrackerCharacterUiFields,
   resolveBaseUrl,
+  resolveRegenerationGameStateFallbackMessageIds,
+  resolveRegenerationGameStateAnchor,
+  resolveVisibleGameStateAnchor,
+  shouldPreferLatestVisibleGameState,
+  shouldAbortOnPassiveGenerationDisconnect,
   shouldEnableAgentsForGeneration,
+  shouldInjectIdentityFallback,
   wrapFields,
   type PromptAttachment,
   type SimpleMessage,
 } from "./generate/generate-route-utils.js";
-import { validateSpriteExpressionEntries } from "./generate/expression-agent-utils.js";
+import {
+  buildAvailableSpriteCharacter,
+  normalizeSpriteDisplayModes,
+  validateSpriteExpressionEntries,
+} from "./generate/expression-agent-utils.js";
 import { logger, logDebugOverride } from "../lib/logger.js";
 import {
   buildHistoricalLorebookKeeperContext,
@@ -184,6 +191,11 @@ import {
   buildGenerationPromptPresetCandidates,
   type PromptPresetCandidateSource,
 } from "./generate/prompt-preset-selection.js";
+import {
+  applyGenerationReplayToRegenerateInput,
+  buildGenerationReplay,
+  normalizeGenerationReplay,
+} from "./generate/generation-replay.js";
 import {
   createJournal,
   addLocationEntry,
@@ -247,6 +259,12 @@ function getEnabledConversationSchedules(meta: Record<string, any>): Record<stri
   return areConversationSchedulesEnabled(meta) && hasConversationSchedules(meta.characterSchedules)
     ? meta.characterSchedules
     : {};
+}
+
+function getChatHapticIntifaceUrl(meta: Record<string, unknown>): string | undefined {
+  const url = meta.hapticIntifaceUrl;
+  if (typeof url !== "string") return undefined;
+  return url.trim() || undefined;
 }
 
 function normalizeHapticAgentAction(action: unknown): HapticDeviceCommand["action"] | null {
@@ -365,7 +383,13 @@ function formatConversationPromptTurn(content: string, role: string, personaName
 }
 
 function resolveLorebookGenerationTriggers(
-  input: { impersonate?: boolean; regenerateMessageId?: string | null; userMessage?: string | null },
+  input: {
+    impersonate?: boolean;
+    regenerateMessageId?: string | null;
+    userMessage?: string | null;
+    generationGuide?: string | null;
+    generationGuideSource?: "narrator" | "guide" | "game_start" | null;
+  },
   chatMode: string,
 ): string[] {
   const triggers = new Set<string>();
@@ -376,6 +400,11 @@ function resolveLorebookGenerationTriggers(
   } else if (input.regenerateMessageId) {
     triggers.add("swipe");
     triggers.add("regenerate");
+  } else if (
+    input.generationGuide?.trim() &&
+    (input.generationGuideSource === "narrator" || input.generationGuideSource === "guide")
+  ) {
+    triggers.add("chat");
   } else if (!input.userMessage?.trim()) {
     triggers.add("continue");
     triggers.add("autonomous");
@@ -384,6 +413,22 @@ function resolveLorebookGenerationTriggers(
   }
 
   return Array.from(triggers);
+}
+
+type LorebookScanMessage = { role: "user" | "assistant" | "system"; content: string };
+
+function buildLorebookScanMessagesWithGenerationGuide(
+  messages: LorebookScanMessage[],
+  input: {
+    generationGuide?: string | null;
+    generationGuideSource?: "narrator" | "guide" | "game_start" | null;
+  },
+): LorebookScanMessage[] {
+  const guide = input.generationGuide?.trim();
+  if (!guide || (input.generationGuideSource !== "narrator" && input.generationGuideSource !== "guide")) {
+    return messages;
+  }
+  return [...messages, { role: "user", content: guide }];
 }
 
 function normalizePartyLookupName(value: string): string {
@@ -453,27 +498,6 @@ async function persistLorebookRuntimeState(args: {
     ...(args.entryStateOverrides !== undefined ? { entryStateOverrides: args.entryStateOverrides } : {}),
     ...(args.entryTimingStates !== undefined ? { entryTimingStates: args.entryTimingStates } : {}),
   });
-}
-
-async function resolveLatestGameStateForLorebooks(db: any, chatId: string): Promise<Record<string, unknown> | null> {
-  const latestRows = await db
-    .select()
-    .from(gameStateSnapshotsTable)
-    .where(eq(gameStateSnapshotsTable.chatId, chatId))
-    .orderBy(desc(gameStateSnapshotsTable.createdAt))
-    .limit(1);
-  const latest = latestRows[0];
-  if (latest) return parseGameStateRow(latest as Record<string, unknown>) as unknown as Record<string, unknown>;
-
-  const committedRows = await db
-    .select()
-    .from(gameStateSnapshotsTable)
-    .where(and(eq(gameStateSnapshotsTable.chatId, chatId), eq(gameStateSnapshotsTable.committed, 1)))
-    .orderBy(desc(gameStateSnapshotsTable.createdAt))
-    .limit(1);
-  const committed = committedRows[0];
-  if (committed) return parseGameStateRow(committed as Record<string, unknown>) as unknown as Record<string, unknown>;
-  return null;
 }
 
 /** Read a character's avatar from disk as base64, or return undefined if unavailable. */
@@ -637,6 +661,131 @@ const REVIEWABLE_WRITER_AGENT_TYPES = new Set(
   ).map((agent) => agent.id),
 );
 
+type RuntimeAgentSectionType = string;
+
+const RUNTIME_AGENT_SECTION_TOKEN_PREFIX = "__MARINARA_RUNTIME_AGENT_SECTION__";
+
+interface RuntimeAgentSectionTokens {
+  placeholder: string;
+  start: string;
+  end: string;
+}
+
+function toRuntimeAgentSectionType(
+  agentType: string,
+  eligibleAgentTypes: ReadonlySet<string>,
+): RuntimeAgentSectionType | null {
+  return eligibleAgentTypes.has(agentType) ? agentType : null;
+}
+
+function makeRuntimeAgentSectionTokens(
+  agentType: RuntimeAgentSectionType,
+  nonce: string,
+): RuntimeAgentSectionTokens {
+  return {
+    placeholder: `${RUNTIME_AGENT_SECTION_TOKEN_PREFIX}${nonce}__${agentType}__VALUE__`,
+    start: `${RUNTIME_AGENT_SECTION_TOKEN_PREFIX}${nonce}__${agentType}__START__`,
+    end: `${RUNTIME_AGENT_SECTION_TOKEN_PREFIX}${nonce}__${agentType}__END__`,
+  };
+}
+
+function replaceRuntimeAgentSection(
+  messages: Array<{ content: string }>,
+  tokens: RuntimeAgentSectionTokens,
+  text: string,
+): boolean {
+  let replaced = false;
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i]!;
+    if (!message.content.includes(tokens.placeholder)) continue;
+    messages[i] = {
+      ...message,
+      content: message.content
+        .split(tokens.start)
+        .join("")
+        .split(tokens.end)
+        .join("")
+        .split(tokens.placeholder)
+        .join(text),
+    };
+    replaced = true;
+  }
+  return replaced;
+}
+
+export function splitRuntimeHandledAgentInjectionsForTest(
+  messages: Array<{ content: string }>,
+  tokenMap: ReadonlyMap<RuntimeAgentSectionType, RuntimeAgentSectionTokens>,
+  injections: AgentInjection[],
+): { fallbackInjections: AgentInjection[]; handledTypes: Set<string> } {
+  const fallbackInjections: AgentInjection[] = [];
+  const handledTypes = new Set<string>();
+  for (const injection of injections) {
+    const tokens = tokenMap.get(injection.agentType);
+    const handledByPresetSection =
+      tokens !== undefined && replaceRuntimeAgentSection(messages, tokens, injection.text);
+    if (handledByPresetSection) {
+      handledTypes.add(injection.agentType);
+    } else {
+      fallbackInjections.push(injection);
+    }
+  }
+  return { fallbackInjections, handledTypes };
+}
+
+const splitRuntimeHandledAgentInjections = splitRuntimeHandledAgentInjectionsForTest;
+
+export function clearUnusedRuntimeAgentSectionsForTest(
+  messages: Array<{ content: string }>,
+  tokenEntries: Iterable<[RuntimeAgentSectionType, RuntimeAgentSectionTokens]>,
+): void {
+  let changed = false;
+  for (const [, tokens] of tokenEntries) {
+    const sectionPattern = new RegExp(
+      escapeRegExp(tokens.start) + "[\\s\\S]*?" + escapeRegExp(tokens.end),
+      "g",
+    );
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i]!;
+      if (!message.content.includes(tokens.start)) continue;
+      const content = message.content.replace(sectionPattern, "").trim();
+      if (content) {
+        messages[i] = { ...message, content };
+      } else {
+        messages.splice(i, 1);
+      }
+      changed = true;
+    }
+  }
+  if (changed) {
+    pruneEmptyPromptWrappers(messages);
+  }
+}
+
+const clearUnusedRuntimeAgentSections = clearUnusedRuntimeAgentSectionsForTest;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function pruneEmptyPromptWrappers(messages: Array<{ content: string }>): void {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const content = messages[i]!.content.trim();
+    if (isEmptyPromptWrapper(content)) {
+      messages.splice(i, 1);
+    } else if (content !== messages[i]!.content) {
+      messages[i] = { ...messages[i]!, content };
+    }
+  }
+}
+
+function isEmptyPromptWrapper(content: string): boolean {
+  if (!content) return true;
+  const xmlMatch = content.match(/^<([A-Za-z][\w.-]*)>\s*<\/\1>$/);
+  if (xmlMatch) return true;
+  return /^#{1,6}\s+\S.*$/m.test(content) && content.split(/\r?\n/).slice(1).every((line) => !line.trim());
+}
+
 function normalizeChatTopP(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   if (value <= 0) return 1;
@@ -732,6 +881,14 @@ export async function generateRoutes(app: FastifyInstance) {
       }
     };
 
+    if (input.regenerateMessageId) {
+      const regenCandidate = await chats.getMessage(input.regenerateMessageId);
+      if (regenCandidate?.chatId === input.chatId) {
+        const replay = normalizeGenerationReplay(parseExtra(regenCandidate.extra).generationReplay);
+        applyGenerationReplayToRegenerateInput(input, replay);
+      }
+    }
+
     // ── Discord webhook URL (parsed once, used for mirroring below) ──
     const earlyMeta = parseExtra(chat.metadata) as Record<string, unknown>;
     const discordWebhookUrl = typeof earlyMeta.discordWebhookUrl === "string" ? earlyMeta.discordWebhookUrl : "";
@@ -784,7 +941,6 @@ export async function generateRoutes(app: FastifyInstance) {
               backstory: snapshotPersona.backstory ?? "",
               appearance: snapshotPersona.appearance ?? "",
               avatarUrl: snapshotPersona.avatarPath || null,
-              avatarCrop: snapshotPersona.avatarCrop || null,
               nameColor: snapshotPersona.nameColor || null,
               dialogueColor: snapshotPersona.dialogueColor || null,
               boxColor: snapshotPersona.boxColor || null,
@@ -847,7 +1003,7 @@ export async function generateRoutes(app: FastifyInstance) {
       releaseActiveGeneration();
       return reply.status(400).send({ error: "No base URL configured for this connection" });
     }
-    const chatMeta = parseExtra(chat.metadata) as Record<string, unknown>;
+    let chatMeta = parseExtra(chat.metadata) as Record<string, unknown>;
     let memoryRecallEmbeddingSource: Awaited<ReturnType<typeof resolveMemoryRecallEmbeddingSource>> | null = null;
     try {
       memoryRecallEmbeddingSource = await resolveMemoryRecallEmbeddingSource(app.db, {
@@ -867,8 +1023,24 @@ export async function generateRoutes(app: FastifyInstance) {
     startSseReply(reply, { "X-Accel-Buffering": "no" });
 
     let generationComplete = false;
+    let clientDisconnected = false;
+    const originalSseWrite = reply.raw.write.bind(reply.raw);
+    reply.raw.write = ((chunk: any, encodingOrCallback?: any, callback?: any) => {
+      if (clientDisconnected || reply.raw.destroyed) return false;
+      try {
+        return originalSseWrite(chunk, encodingOrCallback, callback);
+      } catch {
+        return false;
+      }
+    }) as typeof reply.raw.write;
+
     const onClose = () => {
       if (generationComplete) return;
+      clientDisconnected = true;
+      if (!shouldAbortOnPassiveGenerationDisconnect({ chatMode: requestChatMode, impersonate: input.impersonate })) {
+        logger.info("[generate] Conversation client disconnected; generation will continue for chat: %s", input.chatId);
+        return;
+      }
       logger.info("[abort] Client disconnected — aborting generation");
       abortController.abort();
       if (activeGenerations) activeGenerations.delete(input.chatId);
@@ -896,6 +1068,7 @@ export async function generateRoutes(app: FastifyInstance) {
       const chatMode = requestChatMode;
       const lorebookGenerationTriggers = resolveLorebookGenerationTriggers(input, chatMode);
       const supportsHiddenFromAI = chatMode === "roleplay" || chatMode === "visual_novel";
+      const preferLatestVisibleGameState = shouldPreferLatestVisibleGameState(input);
 
       // ── Conversation-start filter: find the latest "isConversationStart" marker ──
       let startIdx = 0;
@@ -923,6 +1096,20 @@ export async function generateRoutes(app: FastifyInstance) {
         chatMessages = chatMessages.filter((m: any) => m.id !== input.regenerateMessageId);
         lorebookKeeperMessages = lorebookKeeperMessages.filter((m: any) => m.id !== input.regenerateMessageId);
       }
+      const visibleGameStateAnchor = input.regenerateMessageId
+        ? resolveRegenerationGameStateAnchor(scopedMessages, input.regenerateMessageId)
+        : resolveVisibleGameStateAnchor(allChatMessages);
+      const gameStateGenerationOptions = {
+        preferLatestVisible: preferLatestVisibleGameState,
+        visibleAnchor: visibleGameStateAnchor,
+        excludeMessageId: input.regenerateMessageId ?? null,
+        fallbackMessageIds: resolveRegenerationGameStateFallbackMessageIds(scopedMessages, input.regenerateMessageId),
+      };
+      const selectedGameStateSnapshotPromise = gameStateStore.getForGeneration(input.chatId, gameStateGenerationOptions);
+      const selectedGameStateForPrompt = async (): Promise<Record<string, unknown> | null> => {
+        const row = await selectedGameStateSnapshotPromise;
+        return row ? (parseGameStateRow(row as Record<string, unknown>) as unknown as Record<string, unknown>) : null;
+      };
 
       // ── Context message limit (from chat metadata, off by default) ──
       const lorebookKeeperSettings = getLorebookKeeperSettings(chatMeta);
@@ -982,14 +1169,14 @@ export async function generateRoutes(app: FastifyInstance) {
         }
       }
 
-      const characterIds: string[] = JSON.parse(chat.characterIds as string);
-
-      // ── Game mode: apply segment edit/delete overlays before regex scripts ──
-      // Users can edit individual narration/dialogue beats in the VN UI.
-      // Apply overlays first so regex scripts also affect corrected beat text.
-      if (chatMode === "game") {
-        applyAllSegmentEdits(mappedMessages, chatMeta as Record<string, unknown>, chatMessages);
+      // Always collapse 3+ consecutive blank lines into a double newline —
+      // these waste tokens and produce messy logs regardless of user regex settings.
+      // Matches pure newlines AND lines that contain only whitespace.
+      for (const msg of mappedMessages) {
+        msg.content = msg.content.replace(/\n([ \t]*\n){2,}/g, "\n\n");
       }
+
+      const characterIds: string[] = JSON.parse(chat.characterIds as string);
 
       // Resolve persona — prefer per-chat personaId, fall back to globally active persona
       // (Game mode skips the fallback — persona must be explicitly selected in the setup wizard)
@@ -998,6 +1185,14 @@ export async function generateRoutes(app: FastifyInstance) {
       let personaDescription = "";
       let personaFields: { personality?: string; scenario?: string; backstory?: string; appearance?: string } = {};
       const allPersonas = await chars.listPersonas();
+      // ── Game mode: apply segment edit overlays to message content ──
+      // Users can edit individual narration/dialogue segments in the VN UI.
+      // Edits are stored as chat-metadata overlays; apply them so the model
+      // sees the corrected text in its conversation history.
+      if (chatMode === "game") {
+        applyAllSegmentEdits(mappedMessages, chatMeta as Record<string, unknown>, chatMessages);
+      }
+
       const persona =
         (chat.personaId ? allPersonas.find((p: any) => p.id === chat.personaId) : null) ??
         (chatMode !== "game" ? allPersonas.find((p: any) => p.isActive === "true") : null);
@@ -1072,12 +1267,43 @@ export async function generateRoutes(app: FastifyInstance) {
       const chatChoices: Record<string, string | string[]> =
         overrideDefaultChoices ?? ((chatMeta.presetChoices ?? {}) as Record<string, string | string[]>);
 
+      // ── Professor Mari fetch follow-up loop ──
+      // After Mari executes a [fetch:], the fetched data is persisted to
+      // chatMeta.mariContext but only injected into the prompt at the START
+      // of a generation pass. Without a follow-up turn she goes silent
+      // ("snackbar without follow-up", #898). The loop re-runs the generation
+      // up to MAX_FOLLOW_UP_ITERATIONS additional times if a fetch fired in
+      // the previous pass, so Mari can speak to the data she just pulled.
+      let runningMessagesForFollowUp = [...mappedMessages];
+      let followUpIteration = 0;
+      const MAX_FOLLOW_UP_ITERATIONS = 2;
+
+      // Hoisted out of the loop so the SSE flush, OOC posting, and
+      // illustration await at the end see state from the latest iteration.
+      let firstSavedMsg: any = null;
+      let lastSavedMsg: any = null;
+      let pendingIllustration: Promise<void> | null = null;
+      const collectedCommands: Array<{
+        command: CharacterCommand;
+        characterId: string | null;
+        messageId: string;
+        swipeIndex: number;
+      }> = [];
+      const collectedOocMessages: string[] = [];
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+      // Per-iteration flag: set when a Mari [fetch:] command actually returned
+      // data AND persisted mariContext. The follow-up branch at the bottom of
+      // the loop body gates on this so a fetch that found nothing or threw
+      // doesn't burn an extra generation pass with no new context to read.
+      let mariFetchSucceededThisIteration = false;
       let finalMessages: Array<{
         role: "system" | "user" | "assistant";
         content: string;
         images?: string[];
         providerMetadata?: Record<string, unknown>;
-      }> = mappedMessages;
+      }> = [...runningMessagesForFollowUp];
       let conversationCommandsReminder: string | null = null;
       const conversationCommandsEnabled = chatMode === "conversation" && chatMeta.characterCommands !== false;
       let temperature = 1;
@@ -1092,6 +1318,8 @@ export async function generateRoutes(app: FastifyInstance) {
       let assistantPrefill = "";
       let customParameters: Record<string, unknown> = {};
       let wrapFormat: "xml" | "markdown" | "none" = "xml";
+      const runtimeAgentSectionTypes = new Set<RuntimeAgentSectionType>();
+      const runtimeAgentSectionTokens = new Map<RuntimeAgentSectionType, RuntimeAgentSectionTokens>();
       const connectionMaxContext = normalizeMaxContext(conn.maxContext);
       const knownModelContext = normalizeMaxContext(findKnownModel(conn.provider as APIProvider, conn.model)?.context);
       let effectiveMaxContext = minContextLimit(connectionMaxContext, knownModelContext);
@@ -1111,6 +1339,16 @@ export async function generateRoutes(app: FastifyInstance) {
         : [];
       const chatActiveAgentIds: string[] = filterGameInternalAgentIds(chatMode, persistedChatActiveAgentIds).filter(
         (agentId) => !(gameSpotifyMusicEnabled && agentId === "spotify"),
+      );
+      const runtimeSectionEligibleAgentTypes = new Set(
+        BUILT_IN_AGENTS.filter(
+          (agent) =>
+            chatActiveAgentIds.includes(agent.id) &&
+            agent.phase === "pre_generation" &&
+            agent.id !== "html" &&
+            resolveAgentResultType({ type: agent.id, settings: getDefaultBuiltInAgentSettings(agent.id) }) ===
+              "context_injection",
+        ).map((agent) => agent.id),
       );
       const chatActiveLorebookIds: string[] = Array.isArray(chatMeta.activeLorebookIds)
         ? (chatMeta.activeLorebookIds as string[])
@@ -1155,17 +1393,33 @@ export async function generateRoutes(app: FastifyInstance) {
 
       // ── Apply regex scripts to prompt message content ──
       // Macro context is available now, so regex find/replace/trim fields can use prompt macros.
-      applyRegexScriptsToPromptMessages(mappedMessages, await regexScriptsStore.list(), {
-        resolveMacros: (value) => resolveMacros(value, promptMacroContext, { trimResult: false }),
-      });
+      // Gated to iteration 0 because applyRegexScriptsToPromptMessages mutates
+      // message.content in place — running it again on a Mari follow-up pass
+      // would stack non-idempotent user regex scripts on already-rewritten text.
+      // The newly appended Mari turn is run through the same transforms below
+      // before it lands in runningMessagesForFollowUp, so each message still
+      // gets exactly one pass.
+      if (followUpIteration === 0) {
+        applyRegexScriptsToPromptMessages(mappedMessages, await regexScriptsStore.list(), {
+          resolveMacros: (value) => resolveMacros(value, promptMacroContext, { trimResult: false }),
+        });
 
-      // Always collapse 3+ consecutive blank lines into a double newline —
-      // these waste tokens and produce messy logs regardless of user regex settings.
-      // Matches pure newlines AND lines that contain only whitespace.
-      for (const msg of mappedMessages) {
-        msg.content = msg.content.replace(/\n([ \t]*\n){2,}/g, "\n\n");
+        // Always collapse 3+ consecutive blank lines into a double newline —
+        // these waste tokens and produce messy logs regardless of user regex settings.
+        // Matches pure newlines AND lines that contain only whitespace.
+        for (const msg of mappedMessages) {
+          msg.content = msg.content.replace(/\n([ \t]*\n){2,}/g, "\n\n");
+        }
       }
       promptMacroContext.lastInput = [...mappedMessages].reverse().find((message) => message.role === "user")?.content;
+      const toLorebookScanMessages = () =>
+        buildLorebookScanMessagesWithGenerationGuide(
+          mappedMessages.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+          input,
+        );
 
       // ── Compute chat embedding for semantic lorebook matching (if any entries are vectorized) ──
       sendProgress("embedding");
@@ -1180,7 +1434,9 @@ export async function generateRoutes(app: FastifyInstance) {
           excludedLorebookIds: gameLorebookScopeExclusions.excludedLorebookIds,
           excludedSourceAgentIds: gameLorebookScopeExclusions.excludedSourceAgentIds,
         });
-        const hasVectorizedEntries = (activeEntries as Array<Record<string, unknown>>).some((e) => e.embedding != null);
+        const hasVectorizedEntries = (activeEntries as Array<Record<string, unknown>>).some(
+          (e) => !e.excludeFromVectorization && e.embedding != null,
+        );
         if (hasVectorizedEntries) {
           // Embed the last ~10 messages as context
           const recentMsgs = mappedMessages
@@ -1237,6 +1493,34 @@ export async function generateRoutes(app: FastifyInstance) {
           presets.listGroups(presetId),
           presets.listChoiceBlocksForPreset(presetId),
         ]);
+        for (const section of sections) {
+          if (section.enabled !== "true" || section.isMarker !== "true" || !section.markerConfig) continue;
+          try {
+            const markerConfig = JSON.parse(section.markerConfig) as { type?: unknown; agentType?: unknown };
+            const runtimeType =
+              markerConfig.type === "agent_data" && typeof markerConfig.agentType === "string"
+                ? toRuntimeAgentSectionType(markerConfig.agentType, runtimeSectionEligibleAgentTypes)
+                : null;
+            if (runtimeType) runtimeAgentSectionTypes.add(runtimeType);
+          } catch {
+            /* ignore malformed marker config */
+          }
+        }
+        const runtimeAgentNonce = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+        const runtimeAgentData = Object.fromEntries(
+          Array.from(runtimeAgentSectionTypes).map((agentType) => {
+            const tokens = makeRuntimeAgentSectionTokens(agentType, runtimeAgentNonce);
+            runtimeAgentSectionTokens.set(agentType, tokens);
+            return [
+              agentType,
+              {
+                text: tokens.placeholder,
+                startToken: tokens.start,
+                endToken: tokens.end,
+              },
+            ];
+          }),
+        );
 
         const assemblerInput: AssemblerInput = {
           db: app.db,
@@ -1261,6 +1545,7 @@ export async function generateRoutes(app: FastifyInstance) {
             }
           })(),
           chatMessages: mappedMessages,
+          lorebookScanMessages: toLorebookScanMessages(),
           chatSummary: ((chatMeta.summary as string) ?? "").trim() || null,
           enableAgents: chatEnableAgents,
           activeAgentIds: chatActiveAgentIds,
@@ -1273,12 +1558,13 @@ export async function generateRoutes(app: FastifyInstance) {
             (chatMeta.entryStateOverrides as Record<string, { ephemeral?: number | null; enabled?: boolean }>) ??
             undefined,
           entryTimingStates: (chatMeta.entryTimingStates as Record<string, LorebookEntryTimingState>) ?? undefined,
-          gameState: chatMode === "game" ? await resolveLatestGameStateForLorebooks(app.db, input.chatId) : null,
+          gameState: chatMode === "game" ? await selectedGameStateForPrompt() : null,
           generationTriggers: lorebookGenerationTriggers,
           groupScenarioOverrideText:
             typeof chatMeta.groupScenarioText === "string" && (chatMeta.groupScenarioText as string).trim()
               ? (chatMeta.groupScenarioText as string).trim()
               : null,
+          runtimeAgentData,
         };
 
         const assembled = await assemblePrompt(assemblerInput);
@@ -1905,7 +2191,7 @@ export async function generateRoutes(app: FastifyInstance) {
 
           const commandLines: string[] = [
             `<commands>`,
-            `These are optional hidden commands you may use if you wish to. Only use them when they genuinely fit the conversation:`,
+            `Here are your optional, hidden commands you may use if you wish to, but only when they genuinely fit the conversation:`,
             ``,
             `- [schedule_update: status="online|idle|dnd|offline", activity="activity name", duration="number of hours (e.g., 1h)"] - only if you change your own status/activity, for example, if the user asks you to stop what you're doing or if you decide to change them yourself.`,
             ``,
@@ -1970,7 +2256,7 @@ export async function generateRoutes(app: FastifyInstance) {
             // Auto-connect to Intiface Central if not already connected
             if (!hapticService.connected) {
               try {
-                await hapticService.connect();
+                await hapticService.connect(getChatHapticIntifaceUrl(chatMeta));
               } catch {
                 logger.warn("[haptic] Auto-connect to Intiface Central failed — is the server running?");
               }
@@ -2352,11 +2638,7 @@ export async function generateRoutes(app: FastifyInstance) {
         // ── Lorebook injection for conversation mode ──
         {
           sendProgress("lorebooks");
-          const scanMessages = mappedMessages.map((m) => ({
-            role: m.role as "user" | "assistant" | "system",
-            content: m.content,
-          }));
-          const lorebookResult = await processLorebooks(app.db, scanMessages, null, {
+          const lorebookResult = await processLorebooks(app.db, toLorebookScanMessages(), null, {
             chatId: input.chatId,
             characterIds,
             personaId,
@@ -2406,11 +2688,7 @@ export async function generateRoutes(app: FastifyInstance) {
       // preset-driven chats get lorebook content via the preset assembler.
       if (!presetId && (chatMode === "roleplay" || chatMode === "visual_novel")) {
         sendProgress("lorebooks");
-        const scanMessages = mappedMessages.map((m) => ({
-          role: m.role as "user" | "assistant" | "system",
-          content: m.content,
-        }));
-        const lorebookResult = await processLorebooks(app.db, scanMessages, null, {
+        const lorebookResult = await processLorebooks(app.db, toLorebookScanMessages(), null, {
           chatId: input.chatId,
           characterIds,
           personaId,
@@ -2864,16 +3142,16 @@ export async function generateRoutes(app: FastifyInstance) {
         selectorGroupChatMode === "individual" &&
         selectorGroupResponseOrder === "smart";
       if (shouldResolveResponseOrchestratorSelector) {
-        const resolvedResponseOrchestratorAgent = resolvedAgents.find((agent) => agent.type === "response-orchestrator");
+        const resolvedResponseOrchestratorAgent = resolvedAgents.find(
+          (agent) => agent.type === "response-orchestrator",
+        );
         if (resolvedResponseOrchestratorAgent) {
           responseOrchestratorSelectorAgent = resolvedResponseOrchestratorAgent;
         } else {
           const storedResponseOrchestratorConfig = await agentsStore.getByType("response-orchestrator");
           const cfg =
             storedResponseOrchestratorConfig ??
-            (defaultAgentConn
-              ? (BUILT_IN_AGENTS.find((agent) => agent.id === "response-orchestrator") ?? null)
-              : null);
+            (defaultAgentConn ? (BUILT_IN_AGENTS.find((agent) => agent.id === "response-orchestrator") ?? null) : null);
           if (cfg) {
             const settings =
               "settings" in cfg && cfg.settings
@@ -2891,7 +3169,9 @@ export async function generateRoutes(app: FastifyInstance) {
 
             if (effectiveConnectionId === "skip-local-sidecar") {
               responseOrchestratorSelectorUnavailable = true;
-              const alreadyWarned = skippedLocalSidecarAgents.some((agentName) => agentName === "Response Orchestrator");
+              const alreadyWarned = skippedLocalSidecarAgents.some(
+                (agentName) => agentName === "Response Orchestrator",
+              );
               if (!alreadyWarned) {
                 agentConnectionWarnings.push(buildLocalSidecarUnavailableWarning(["Response Orchestrator"]));
               }
@@ -3090,10 +3370,10 @@ export async function generateRoutes(app: FastifyInstance) {
         return "Narrator";
       };
 
-      // ── Fallback: inject character & persona info if the preset didn't include them ──
+      // ── Fallback: inject character & persona info only when no prompt preset is active ──
       // In game mode the GM prompt already includes party members and player persona
       // in the <party> section, so skip fallback injection to avoid duplication.
-      if (chatMode !== "game") {
+      if (shouldInjectIdentityFallback({ chatMode, presetId })) {
         const allContent = finalMessages.map((m) => m.content).join("\n");
         const fallbackCharInfo = manualPromptTargetCharId
           ? charInfo.filter((c) => c.id === manualPromptTargetCharId)
@@ -3441,13 +3721,7 @@ export async function generateRoutes(app: FastifyInstance) {
         let weatherContext: string | undefined;
         let gameTime: string | undefined;
         try {
-          const snapRows = await app.db
-            .select()
-            .from(gameStateSnapshotsTable)
-            .where(eq(gameStateSnapshotsTable.chatId, input.chatId))
-            .orderBy(desc(gameStateSnapshotsTable.createdAt))
-            .limit(1);
-          const snap = snapRows[0];
+          const snap = await selectedGameStateSnapshotPromise;
           if (snap) {
             if (snap.weather)
               weatherContext = `Current weather: ${snap.weather}${snap.temperature ? `, ${snap.temperature}` : ""}`;
@@ -3482,13 +3756,7 @@ export async function generateRoutes(app: FastifyInstance) {
         // ── Passive perception hints ──
         let perceptionHintsBlock: string | undefined;
         try {
-          const snapRows2 = await app.db
-            .select()
-            .from(gameStateSnapshotsTable)
-            .where(eq(gameStateSnapshotsTable.chatId, input.chatId))
-            .orderBy(desc(gameStateSnapshotsTable.createdAt))
-            .limit(1);
-          const latSnap = snapRows2[0];
+          const latSnap = await selectedGameStateSnapshotPromise;
           const pStats = latSnap?.playerStats ? JSON.parse(latSnap.playerStats as string) : null;
           if (pStats) {
             const presentNpcs = latSnap?.presentCharacters
@@ -3580,14 +3848,10 @@ export async function generateRoutes(app: FastifyInstance) {
         // ── Lorebook injection for game mode ──
         if (!presetHandledLorebooks) {
           sendProgress("lorebooks");
-          const scanMessages = mappedMessages.map((m) => ({
-            role: m.role as "user" | "assistant" | "system",
-            content: m.content,
-          }));
           const lorebookResult = await processLorebooks(
             app.db,
-            scanMessages,
-            await resolveLatestGameStateForLorebooks(app.db, input.chatId),
+            toLorebookScanMessages(),
+            await selectedGameStateForPrompt(),
             {
               chatId: input.chatId,
               characterIds,
@@ -3898,11 +4162,12 @@ export async function generateRoutes(app: FastifyInstance) {
       }
 
       // Get current game state (if any)
-      // Prefer committed game state (locked in when the user sent their last
-      // message), but fall back to the latest snapshot so agents still receive
-      // prior state before anything has been committed (e.g. first turn).
-      const latestGameState =
-        (await gameStateStore.getLatestCommitted(input.chatId)) ?? (await gameStateStore.getLatest(input.chatId));
+      // Prefer committed game state after a real user turn, but keep visible
+      // uncommitted tracker edits authoritative for continue/impersonate flows.
+      // Regenerate uses the previous assistant's tracker snapshot as the prompt baseline.
+      const latestGameState = await selectedGameStateSnapshotPromise;
+      const baseGameStateSnapshot = latestGameState;
+      const allowLatestGameStateFallback = !input.regenerateMessageId;
       const gameState = latestGameState ? parseGameStateRow(latestGameState as Record<string, unknown>) : null;
 
       // Build base agent context (without mainResponse — that comes after generation)
@@ -4068,21 +4333,31 @@ export async function generateRoutes(app: FastifyInstance) {
       // If the expression agent is enabled, load available sprite expressions per character
       if (resolvedAgents.some((a) => a.type === "expression")) {
         try {
+          const spriteDisplayModes = normalizeSpriteDisplayModes(chatMeta.spriteDisplayModes);
+          const selectedSpriteIds = new Set(
+            Array.isArray(chatMeta.spriteCharacterIds)
+              ? chatMeta.spriteCharacterIds.filter((id): id is string => typeof id === "string")
+              : [],
+          );
+          const restrictToSelectedSprites = selectedSpriteIds.size > 0;
           const perChar: Array<{
             characterId: string;
             characterName: string;
             expressions: string[];
-            expressionChoices: string[];
+            expressionChoices?: string[];
           }> = [];
           for (const char of agentContext.characters) {
+            if (restrictToSelectedSprites && !selectedSpriteIds.has(char.id)) continue;
             const sprites = listCharacterSprites(char.id);
-            if (sprites && sprites.expressions.length > 0) {
-              perChar.push({
-                characterId: char.id,
-                characterName: char.name,
-                expressions: sprites.expressions,
-                expressionChoices: buildSpriteExpressionChoices(sprites.expressions),
-              });
+            if (!sprites) continue;
+            const spriteCharacter = buildAvailableSpriteCharacter(char.id, char.name, sprites, spriteDisplayModes);
+            if (spriteCharacter) perChar.push(spriteCharacter);
+          }
+          if (personaId && (!restrictToSelectedSprites || selectedSpriteIds.has(personaId))) {
+            const sprites = listCharacterSprites(personaId);
+            if (sprites) {
+              const spritePersona = buildAvailableSpriteCharacter(personaId, personaName, sprites, spriteDisplayModes);
+              if (spritePersona) perChar.push(spritePersona);
             }
           }
           if (perChar.length > 0) {
@@ -4104,12 +4379,6 @@ export async function generateRoutes(app: FastifyInstance) {
         try {
           const { readdirSync, readFileSync, existsSync } = await import("fs");
           const { join, extname } = await import("path");
-          const availableBackgrounds: Array<{
-            filename: string;
-            originalName?: string | null;
-            tags: string[];
-            source?: "user" | "game_asset";
-          }> = [];
           const bgDir = join(DATA_DIR, "backgrounds");
           if (existsSync(bgDir)) {
             const exts = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif"]);
@@ -4126,26 +4395,12 @@ export async function generateRoutes(app: FastifyInstance) {
               }
             }
 
-            availableBackgrounds.push(
-              ...files.map((f: string) => ({
-                filename: f,
-                originalName: meta[f]?.originalName ?? null,
-                tags: meta[f]?.tags ?? [],
-                source: "user" as const,
-              })),
-            );
+            agentContext.memory._availableBackgrounds = files.map((f: string) => ({
+              filename: f,
+              originalName: meta[f]?.originalName ?? null,
+              tags: meta[f]?.tags ?? [],
+            }));
           }
-          availableBackgrounds.push(
-            ...(getAssetManifest().byCategory.backgrounds ?? [])
-              .filter((entry) => !entry.path.startsWith("__user_bg__/"))
-              .map((entry) => ({
-                filename: `gameAsset:${entry.path}`,
-                originalName: entry.tag,
-                tags: entry.subcategory ? [entry.subcategory] : [],
-                source: "game_asset" as const,
-              })),
-          );
-          agentContext.memory._availableBackgrounds = availableBackgrounds;
         } catch {
           /* non-critical */
         }
@@ -4158,7 +4413,7 @@ export async function generateRoutes(app: FastifyInstance) {
           // Auto-connect to Intiface Central if not already connected
           if (!hapticService.connected) {
             try {
-              await hapticService.connect();
+              await hapticService.connect(getChatHapticIntifaceUrl(chatMeta));
             } catch {
               logger.warn("[haptic] Auto-connect to Intiface Central failed — is the server running?");
             }
@@ -4388,24 +4643,7 @@ export async function generateRoutes(app: FastifyInstance) {
         const hasCustomTracker = active.has("custom-tracker");
 
         if (hasWorldState || hasCharTracker || hasPersonaStats || hasQuest || hasCustomTracker) {
-          // Prefer committed snapshot; fall back to latest if none committed yet
-          let snap: typeof gameStateSnapshotsTable.$inferSelect | undefined;
-          const committedRows = await app.db
-            .select()
-            .from(gameStateSnapshotsTable)
-            .where(and(eq(gameStateSnapshotsTable.chatId, input.chatId), eq(gameStateSnapshotsTable.committed, 1)))
-            .orderBy(desc(gameStateSnapshotsTable.createdAt))
-            .limit(1);
-          snap = committedRows[0];
-          if (!snap) {
-            const anyRows = await app.db
-              .select()
-              .from(gameStateSnapshotsTable)
-              .where(eq(gameStateSnapshotsTable.chatId, input.chatId))
-              .orderBy(desc(gameStateSnapshotsTable.createdAt))
-              .limit(1);
-            snap = anyRows[0];
-          }
+          const snap = latestGameState ?? undefined;
 
           if (snap) {
             const trackerParts: string[] = [];
@@ -4989,6 +5227,7 @@ export async function generateRoutes(app: FastifyInstance) {
                   type: "agent_error",
                   data: {
                     agentType: "knowledge-retrieval",
+                    agentName: knowledgeRetrievalAgent!.name,
                     error: err instanceof Error ? err.message : "Knowledge retrieval failed",
                   },
                 });
@@ -5157,9 +5396,15 @@ export async function generateRoutes(app: FastifyInstance) {
           }
         }
 
+        const runtimeHandledPreGen = splitRuntimeHandledAgentInjections(
+          finalMessages,
+          runtimeAgentSectionTokens,
+          contextInjections,
+        );
+
         // Inject pre-gen agent context at depth 0 (very bottom of prompt)
-        if (contextInjections.length > 0) {
-          const wrapped = formatAgentInjections(contextInjections, wrapFormat);
+        if (runtimeHandledPreGen.fallbackInjections.length > 0) {
+          const wrapped = formatAgentInjections(runtimeHandledPreGen.fallbackInjections, wrapFormat);
           finalMessages = injectAtDepth(finalMessages, [{ content: wrapped, role: "system", depth: 0 }]);
         }
 
@@ -5168,7 +5413,14 @@ export async function generateRoutes(app: FastifyInstance) {
           const krText =
             typeof krResult.data === "string" ? krResult.data : ((krResult.data as { text?: string })?.text ?? "");
           if (krText) {
-            appendSeparateAgentInjection("knowledge-retrieval", krText);
+            const tokens = runtimeAgentSectionTokens.get("knowledge-retrieval");
+            const handledByPresetSection =
+              !runtimeHandledPreGen.handledTypes.has("knowledge-retrieval") &&
+              tokens !== undefined &&
+              replaceRuntimeAgentSection(finalMessages, tokens, krText);
+            if (!handledByPresetSection) {
+              appendSeparateAgentInjection("knowledge-retrieval", krText);
+            }
             contextInjections.push({ agentType: "knowledge-retrieval", text: krText });
           }
         }
@@ -5180,10 +5432,18 @@ export async function generateRoutes(app: FastifyInstance) {
               ? routerResult.data
               : ((routerResult.data as { text?: string })?.text ?? "");
           if (routerText) {
-            appendSeparateAgentInjection("knowledge-router", routerText);
+            const tokens = runtimeAgentSectionTokens.get("knowledge-router");
+            const handledByPresetSection =
+              !runtimeHandledPreGen.handledTypes.has("knowledge-router") &&
+              tokens !== undefined &&
+              replaceRuntimeAgentSection(finalMessages, tokens, routerText);
+            if (!handledByPresetSection) {
+              appendSeparateAgentInjection("knowledge-router", routerText);
+            }
             contextInjections.push({ agentType: "knowledge-router", text: routerText });
           }
         }
+        clearUnusedRuntimeAgentSections(finalMessages, runtimeAgentSectionTokens);
       } else if (input.regenerateMessageId) {
         // Regeneration — try to reuse cached context injections from the original generation.
         // This must run regardless of whether `hasPreGenAgents` is true, because the cached
@@ -5259,10 +5519,16 @@ export async function generateRoutes(app: FastifyInstance) {
         // Without this split, KR/Router cached output would be replayed in the wrong prompt
         // position with different wrapping than the original generation, subtly changing the
         // model's behavior on regenerate/swipe.
-        const cachedPipelineInjections = contextInjections.filter(
+        const runtimeHandledCached = splitRuntimeHandledAgentInjections(
+          finalMessages,
+          runtimeAgentSectionTokens,
+          contextInjections,
+        );
+
+        const cachedPipelineInjections = runtimeHandledCached.fallbackInjections.filter(
           (inj) => !SEPARATE_INJECTION_AGENTS.has(inj.agentType),
         );
-        const cachedSeparateInjections = contextInjections.filter((inj) =>
+        const cachedSeparateInjections = runtimeHandledCached.fallbackInjections.filter((inj) =>
           SEPARATE_INJECTION_AGENTS.has(inj.agentType),
         );
 
@@ -5272,8 +5538,17 @@ export async function generateRoutes(app: FastifyInstance) {
         }
 
         for (const inj of cachedSeparateInjections) {
-          appendSeparateAgentInjection(inj.agentType as "knowledge-retrieval" | "knowledge-router", inj.text);
+          const runtimeType = toRuntimeAgentSectionType(inj.agentType, runtimeSectionEligibleAgentTypes);
+          const tokens = runtimeType ? runtimeAgentSectionTokens.get(runtimeType) : undefined;
+          const handledByPresetSection =
+            tokens !== undefined && replaceRuntimeAgentSection(finalMessages, tokens, inj.text);
+          if (!handledByPresetSection) {
+            appendSeparateAgentInjection(inj.agentType as "knowledge-retrieval" | "knowledge-router", inj.text);
+          }
         }
+        clearUnusedRuntimeAgentSections(finalMessages, runtimeAgentSectionTokens);
+      } else {
+        clearUnusedRuntimeAgentSections(finalMessages, runtimeAgentSectionTokens);
       }
 
       // ────────────────────────────────────────
@@ -5499,7 +5774,10 @@ export async function generateRoutes(app: FastifyInstance) {
       // were already resolved earlier for the agent pipeline and are reused here.
 
       // ── Impersonate: inject instruction to respond as the user's character ──
-      if (input.impersonate) {
+      // Only on the user's actual turn (iteration 0). A Mari follow-up pass
+      // is a continuation of the assistant's prior message, not a new user
+      // turn, so re-injecting impersonate/prefill would scramble the prompt.
+      if (input.impersonate && followUpIteration === 0) {
         const impersonateInstruction = buildImpersonateInstruction({
           customPrompt: input.impersonatePromptTemplate || chatMeta.impersonatePrompt,
           direction: input.userMessage,
@@ -5509,7 +5787,7 @@ export async function generateRoutes(app: FastifyInstance) {
         finalMessages.push({ role: "user", content: impersonateInstruction });
       }
 
-      if (assistantPrefill.trim()) {
+      if (assistantPrefill.trim() && followUpIteration === 0) {
         finalMessages.push({ role: "assistant", content: assistantPrefill });
         logger.debug(
           "[generate] Injected assistant prefill (%d chars) as final assistant message",
@@ -6005,22 +6283,6 @@ export async function generateRoutes(app: FastifyInstance) {
 
               if (!result.toolCalls.length) break;
 
-              if (requestDebug || isDebug) {
-                for (const call of result.toolCalls) {
-                  const allowed = chatResolvedToolNames.has(call.function.name);
-                  const args = formatToolPayloadForLog(call.function.arguments, 1_200);
-                  debugLog("[tools] %s%s args=%s", call.function.name, allowed ? "" : " (denied)", args);
-                  if (requestDebug) {
-                    reply.raw.write(
-                      `data: ${JSON.stringify({
-                        type: "tool_call",
-                        data: { name: call.function.name, arguments: args, allowed },
-                      })}\n\n`,
-                    );
-                  }
-                }
-              }
-
               loopMessages.push({
                 role: "assistant",
                 content: result.content ?? "",
@@ -6054,9 +6316,6 @@ export async function generateRoutes(app: FastifyInstance) {
                 .filter((toolResult): toolResult is NonNullable<typeof toolResult> => toolResult != null);
 
               for (const tr of toolResults) {
-                if (requestDebug || isDebug) {
-                  debugLog("[tools] %s result=%s", tr.name, formatToolPayloadForLog(tr.result, 1_200));
-                }
                 reply.raw.write(
                   `data: ${JSON.stringify({
                     type: "tool_result",
@@ -6245,15 +6504,13 @@ export async function generateRoutes(app: FastifyInstance) {
           let contentReplaced = false;
           const promotableThinking = providerThinking.trim() || fullThinking.trim();
           // Some OpenAI-compatible providers misplace the actual assistant text
-          // in reasoning/thinking fields even when reasoning was not requested.
+          // in reasoning/thinking fields. Conversation mode only recovers when
+          // reasoning was not requested; game mode requests reasoning by default,
+          // so it still needs the recovery path to avoid empty GM turns.
           const isGlmModel = conn.model.toLowerCase().includes("glm");
-          if (
-            chatMode === "conversation" &&
-            !fullResponse.trim() &&
-            promotableThinking &&
-            !enableThinking &&
-            !resolvedEffort
-          ) {
+          const shouldPromoteThinkingOnlyResponse =
+            chatMode === "conversation" ? !enableThinking && !resolvedEffort : chatMode === "game";
+          if (!fullResponse.trim() && promotableThinking && shouldPromoteThinkingOnlyResponse) {
             if (isGlmModel) {
               logger.warn(
                 "[generate] Refusing to promote GLM thinking-only response for chat %s (char: %s, model: %s)",
@@ -6263,7 +6520,8 @@ export async function generateRoutes(app: FastifyInstance) {
               );
             } else {
               logger.warn(
-                "[generate] Promoting thinking-only response to visible text for chat %s (char: %s, model: %s)",
+                "[generate] Promoting thinking-only response to visible text for %s chat %s (char: %s, model: %s)",
+                chatMode,
                 input.chatId,
                 targetCharId,
                 conn.model,
@@ -6486,6 +6744,7 @@ export async function generateRoutes(app: FastifyInstance) {
             // Cache the exact prompt injections used for this swipe so future
             // regenerations and swipe switches replay the same guidance.
             extraUpdate.contextInjections = contextInjections.length > 0 ? contextInjections : null;
+            extraUpdate.generationReplay = buildGenerationReplay(input);
             // Cache the final prompt (what was actually sent to the model) for Peek Prompt
             extraUpdate.cachedPrompt = finalPromptSent.map((m) => ({ role: m.role, content: m.content }));
             await chats.updateMessageExtra(savedMsg.id, extraUpdate);
@@ -6528,9 +6787,16 @@ export async function generateRoutes(app: FastifyInstance) {
                     const persistedMsg = refreshedMsg ?? savedMsg;
                     if (latestLocation && persistedMsg?.id) {
                       const persistedSwipeIndex = persistedMsg.activeSwipeIndex ?? 0;
-                      await gameStateStore.updateByMessage(persistedMsg.id, persistedSwipeIndex, input.chatId, {
-                        location: latestLocation,
-                      });
+                      await gameStateStore.updateByMessage(
+                        persistedMsg.id,
+                        persistedSwipeIndex,
+                        input.chatId,
+                        {
+                          location: latestLocation,
+                        },
+                        undefined,
+                        { baseSnapshot: baseGameStateSnapshot },
+                      );
                       sendSseEvent(reply, { type: "game_state_patch", data: { location: latestLocation } });
                     }
 
@@ -6594,15 +6860,8 @@ export async function generateRoutes(app: FastifyInstance) {
       }
 
       // ── Run generation ──
-      let firstSavedMsg: any = null;
-      let lastSavedMsg: any = null;
-      const collectedCommands: Array<{
-        command: CharacterCommand;
-        characterId: string | null;
-        messageId: string;
-        swipeIndex: number;
-      }> = [];
-      const collectedOocMessages: string[] = [];
+      // (firstSavedMsg/lastSavedMsg/collectedCommands/collectedOocMessages
+      // are declared above the follow-up loop so they survive iterations.)
 
       const normalizedGenerationGuide = typeof input.generationGuide === "string" ? input.generationGuide.trim() : "";
       const generationGuideInstruction = normalizedGenerationGuide
@@ -6786,8 +7045,8 @@ export async function generateRoutes(app: FastifyInstance) {
       const hasPostProcessingAgents = resolvedAgents.some((a) => a.phase === "post_processing");
       const combinedResponse = allResponses.join("\n\n");
       let lorebookKeeperProcessedMessageId = "";
-      // Illustration runs asynchronously so it doesn't block other agents
-      let pendingIllustration: Promise<void> | null = null;
+      // Illustration runs asynchronously so it doesn't block other agents.
+      // (pendingIllustration is hoisted above the follow-up loop.)
       const hasPostWork = hasPostProcessingAgents || parallelResults.length > 0;
       if (hasPostWork && combinedResponse && !abortController.signal.aborted) {
         reply.raw.write(`data: ${JSON.stringify({ type: "agent_start", data: { phase: "post_generation" } })}\n\n`);
@@ -6878,7 +7137,11 @@ export async function generateRoutes(app: FastifyInstance) {
             reply.raw.write(
               `data: ${JSON.stringify({
                 type: "agents_retry_failed",
-                data: stillFailed.map((r) => ({ agentType: r.agentType, error: r.error })),
+                data: stillFailed.map((r) => ({
+                  agentType: r.agentType,
+                  agentName: resolvedAgents.find((agent) => agent.type === r.agentType)?.name ?? r.agentType,
+                  error: r.error,
+                })),
               })}\n\n`,
             );
           }
@@ -6999,6 +7262,7 @@ export async function generateRoutes(app: FastifyInstance) {
                       type: "agent_error",
                       data: {
                         agentType: "background",
+                        agentName: currentBackgroundAgent?.name ?? "Background",
                         error:
                           "No image generation connection set on the Background agent, and no default agent image connection is configured. Assign one in Settings → Agents → Background.",
                       },
@@ -7053,6 +7317,7 @@ export async function generateRoutes(app: FastifyInstance) {
                         type: "agent_error",
                         data: {
                           agentType: "background",
+                          agentName: currentBackgroundAgent?.name ?? "Background",
                           error: "Background image generation failed. Check the image connection and server logs.",
                         },
                       });
@@ -7065,6 +7330,7 @@ export async function generateRoutes(app: FastifyInstance) {
                     type: "agent_error",
                     data: {
                       agentType: "background",
+                      agentName: currentBackgroundAgent?.name ?? "Background",
                       error: `Background image generation failed: ${bgData.error}`,
                     },
                   });
@@ -7154,14 +7420,18 @@ export async function generateRoutes(app: FastifyInstance) {
               // edited and are visible to the agent as the prevSnap values, but they
               // are NOT carried forward to new snapshots.  The agent naturally reads
               // the edited prevSnap values and produces its own output.
-              const prevSnap = await gameStateStore.getLatest(input.chatId);
+              const prevSnap =
+                baseGameStateSnapshot ??
+                (allowLatestGameStateFallback ? await gameStateStore.getLatest(input.chatId) : null);
 
               // Build the new snapshot from agent output, falling back to previous snapshot.
-              const newDate = (gs.date as string) ?? (prevSnap?.date as string | null) ?? null;
-              const newTime = (gs.time as string) ?? (prevSnap?.time as string | null) ?? null;
-              const newLocation = (gs.location as string) ?? (prevSnap?.location as string | null) ?? null;
-              const newWeather = (gs.weather as string) ?? (prevSnap?.weather as string | null) ?? null;
-              const newTemperature = (gs.temperature as string) ?? (prevSnap?.temperature as string | null) ?? null;
+              const newDate = coerceGameStateTextValue(gs.date) ?? coerceGameStateTextValue(prevSnap?.date);
+              const newTime = coerceGameStateTextValue(gs.time) ?? coerceGameStateTextValue(prevSnap?.time);
+              const newLocation =
+                coerceGameStateTextValue(gs.location) ?? coerceGameStateTextValue(prevSnap?.location);
+              const newWeather = coerceGameStateTextValue(gs.weather) ?? coerceGameStateTextValue(prevSnap?.weather);
+              const newTemperature =
+                coerceGameStateTextValue(gs.temperature) ?? coerceGameStateTextValue(prevSnap?.temperature);
 
               // The world-state agent ONLY produces date/time/location/weather/temperature
               // (and optionally recentEvents).  In batch mode the model often cross-
@@ -7277,7 +7547,11 @@ export async function generateRoutes(app: FastifyInstance) {
               // 2. Fall back to stored NPC avatars (per-chat generated/uploaded)
               const NPC_AVATAR_DIR = join(DATA_DIR, "avatars", "npc");
               const storedNpcAvatarByName = new Map<string, string>();
-              for (const npc of (chatMeta.gameNpcs as GameNpc[]) ?? []) {
+              const gameNpcs = sanitizeGameNpcAvatarUrls((chatMeta.gameNpcs as GameNpc[]) ?? []);
+              if (gameNpcs !== chatMeta.gameNpcs) {
+                chatMeta.gameNpcs = gameNpcs;
+              }
+              for (const npc of gameNpcs) {
                 const name = typeof npc.name === "string" ? npc.name.trim().toLowerCase() : "";
                 if (name && npc.avatarUrl) storedNpcAvatarByName.set(name, npc.avatarUrl);
               }
@@ -7374,9 +7648,16 @@ export async function generateRoutes(app: FastifyInstance) {
                       }
 
                       // Re-persist with avatar paths and notify client
-                      await gameStateStore.updateByMessage(messageId, targetSwipeIndex, input.chatId, {
-                        presentCharacters: chars,
-                      });
+                      await gameStateStore.updateByMessage(
+                        messageId,
+                        targetSwipeIndex,
+                        input.chatId,
+                        {
+                          presentCharacters: chars,
+                        },
+                        undefined,
+                        { baseSnapshot: baseGameStateSnapshot },
+                      );
                       try {
                         logger.debug("[game_state_patch] character-tracker (avatar update): %d chars", chars.length);
                         reply.raw.write(
@@ -7392,9 +7673,16 @@ export async function generateRoutes(app: FastifyInstance) {
                 }
               }
 
-              const updated = await gameStateStore.updateByMessage(messageId, targetSwipeIndex, input.chatId, {
-                presentCharacters: chars,
-              });
+              const updated = await gameStateStore.updateByMessage(
+                messageId,
+                targetSwipeIndex,
+                input.chatId,
+                {
+                  presentCharacters: chars,
+                },
+                undefined,
+                { baseSnapshot: baseGameStateSnapshot },
+              );
               logger.info(
                 `[generate] character-tracker: updateByMessage returned ${updated ? "ok" : "null (no snapshot)"}`,
               );
@@ -7454,10 +7742,12 @@ export async function generateRoutes(app: FastifyInstance) {
 
               // Ensure a snapshot exists for this (messageId, swipeIndex).
               // If world-state didn't create one, updateByMessage clones the
-              // latest snapshot into a new row so we don't corrupt old data.
+              // generation baseline into a new row so we don't corrupt old data.
               let snap = await gameStateStore.getByMessage(messageId, targetSwipeIndex);
               if (!snap) {
-                await gameStateStore.updateByMessage(messageId, targetSwipeIndex, input.chatId, {});
+                await gameStateStore.updateByMessage(messageId, targetSwipeIndex, input.chatId, {}, undefined, {
+                  baseSnapshot: baseGameStateSnapshot,
+                });
                 snap = await gameStateStore.getByMessage(messageId, targetSwipeIndex);
               }
               if (snap) {
@@ -7524,7 +7814,9 @@ export async function generateRoutes(app: FastifyInstance) {
                 // Ensure a snapshot exists for this (messageId, swipeIndex)
                 let snap = await gameStateStore.getByMessage(messageId, targetSwipeIndex);
                 if (!snap) {
-                  await gameStateStore.updateByMessage(messageId, targetSwipeIndex, input.chatId, {});
+                  await gameStateStore.updateByMessage(messageId, targetSwipeIndex, input.chatId, {}, undefined, {
+                    baseSnapshot: baseGameStateSnapshot,
+                  });
                   snap = await gameStateStore.getByMessage(messageId, targetSwipeIndex);
                 }
                 const existingPS = snap?.playerStats
@@ -7564,7 +7856,9 @@ export async function generateRoutes(app: FastifyInstance) {
                 // Ensure a snapshot exists for this (messageId, swipeIndex)
                 let snap = await gameStateStore.getByMessage(messageId, targetSwipeIndex);
                 if (!snap) {
-                  await gameStateStore.updateByMessage(messageId, targetSwipeIndex, input.chatId, {});
+                  await gameStateStore.updateByMessage(messageId, targetSwipeIndex, input.chatId, {}, undefined, {
+                    baseSnapshot: baseGameStateSnapshot,
+                  });
                   snap = await gameStateStore.getByMessage(messageId, targetSwipeIndex);
                 }
                 const existingPS = snap?.playerStats
@@ -7974,6 +8268,7 @@ export async function generateRoutes(app: FastifyInstance) {
                         type: "agent_error",
                         data: {
                           agentType: "illustrator",
+                          agentName: illustratorAgent?.name ?? "Illustrator",
                           error: `Image generation failed: ${illErr instanceof Error ? illErr.message : String(illErr)}`,
                         },
                       })}\n\n`,
@@ -7987,6 +8282,7 @@ export async function generateRoutes(app: FastifyInstance) {
                     type: "agent_error",
                     data: {
                       agentType: "illustrator",
+                      agentName: illustratorAgent?.name ?? "Illustrator",
                       error:
                         "No image generation connection set on the Illustrator agent, and no default Illustrator image connection is configured. Go to Settings → Connections and mark an image generation connection as the default for Illustrator, or assign one directly in Settings → Agents → Illustrator.",
                     },
@@ -8042,15 +8338,6 @@ export async function generateRoutes(app: FastifyInstance) {
                 const editedText = (edData.editedText as string) ?? "";
                 const changes = (edData.changes as Array<{ description: string }>) ?? [];
                 if (editedText && changes.length > 0) {
-                  const currentMessage = await chats.getMessage(messageId);
-                  if ((currentMessage?.content ?? "") !== currentResponseForRewrite) {
-                    logger.info(
-                      "[generate] Skipping %s rewrite for message %s because the message was edited during post-processing",
-                      textRewriteAgent.name || textRewriteAgent.type,
-                      messageId,
-                    );
-                    break;
-                  }
                   currentResponseForRewrite = editedText;
                   await chats.updateMessageContent(messageId, editedText);
                   reply.raw.write(
@@ -8267,6 +8554,8 @@ export async function generateRoutes(app: FastifyInstance) {
                         ? chatMeta.selfiePositivePrompt.trim()
                         : selfieTags.join(", ").trim();
                     const selfieNegativePrompt = ((chatMeta.selfieNegativePrompt as string) ?? "").trim();
+                    const selfiePromptTemplate =
+                      typeof chatMeta.selfiePrompt === "string" ? chatMeta.selfiePrompt.trim() : "";
                     const promptBuilder = createLLMProvider(
                       conn.provider,
                       baseUrl,
@@ -8275,15 +8564,18 @@ export async function generateRoutes(app: FastifyInstance) {
                       conn.openrouterProvider,
                       conn.maxTokensOverride,
                     );
-                    const selfieSystemPrompt = await loadPrompt(
-                      createPromptOverridesStorage(app.db),
-                      CONVERSATION_SELFIE,
-                      {
-                        appearance,
-                        charName,
-                        selfieTagsBlock: "",
-                      },
-                    );
+                    const selfiePromptContext = {
+                      appearance,
+                      charName,
+                      selfieTagsBlock: "",
+                    };
+                    const selfieSystemPrompt = selfiePromptTemplate
+                      ? renderTemplate(
+                          selfiePromptTemplate,
+                          selfiePromptContext,
+                          CONVERSATION_SELFIE.variables.map((variable) => variable.name),
+                        )
+                      : await loadPrompt(createPromptOverridesStorage(app.db), CONVERSATION_SELFIE, selfiePromptContext);
                     const promptResult = await promptBuilder.chatComplete(
                       [
                         {
@@ -9293,6 +9585,17 @@ export async function generateRoutes(app: FastifyInstance) {
                     currentMeta.mariContext = mariContext;
                     await chats.updateMetadata(input.chatId, currentMeta);
 
+                    // Record success for the follow-up trigger, but only when
+                    // the fetch came from Mari (or a Mari-included chat). The
+                    // follow-up loop gates on this so a missed/errored fetch
+                    // doesn't burn another generation pass.
+                    if (
+                      characterId === PROFESSOR_MARI_ID ||
+                      (characterId === null && characterIds.includes(PROFESSOR_MARI_ID))
+                    ) {
+                      mariFetchSucceededThisIteration = true;
+                    }
+
                     reply.raw.write(
                       `data: ${JSON.stringify({
                         type: "assistant_action",
@@ -9322,6 +9625,78 @@ export async function generateRoutes(app: FastifyInstance) {
           });
         }
       }
+
+      // ── Trigger follow-up generation if Professor Mari's fetch landed ──
+      // Mari's fetched payload was persisted to chatMeta.mariContext by the
+      // fetch handler above, but mariContext is only read into the prompt at
+      // the start of a generation pass — without a follow-up turn Mari would
+      // go silent right after the fetch snackbar. Gating on the success flag
+      // (rather than just the presence of a parsed [fetch:]) avoids burning
+      // an extra pass when the fetch handler found nothing or threw.
+      if (
+        mariFetchSucceededThisIteration &&
+        chatMode === "conversation" &&
+        !input.impersonate &&
+        !input.regenerateMessageId &&
+        !abortController.signal.aborted &&
+        followUpIteration < MAX_FOLLOW_UP_ITERATIONS
+      ) {
+        followUpIteration++;
+        logger.info(
+          "[generate] Professor Mari fetch succeeded; triggering follow-up generation (iteration %d)",
+          followUpIteration,
+        );
+
+        // Carry the just-streamed assistant turn into the next prompt so
+        // Mari sees her own prior message before speaking again. Apply the
+        // same regex-script + blank-line compaction transforms here, since
+        // the iteration-0 block above only runs on the original history.
+        const lastResponseText = allResponses.join("\n\n");
+        if (lastResponseText) {
+          const newMariMsg: { role: "assistant"; content: string } = {
+            role: "assistant",
+            content: lastResponseText,
+          };
+          applyRegexScriptsToPromptMessages([newMariMsg], await regexScriptsStore.list(), {
+            resolveMacros: (value) => resolveMacros(value, promptMacroContext, { trimResult: false }),
+          });
+          newMariMsg.content = newMariMsg.content.replace(/\n([ \t]*\n){2,}/g, "\n\n");
+          runningMessagesForFollowUp.push(newMariMsg);
+        }
+
+        // Re-read chat metadata so the freshly-persisted mariContext is
+        // visible to the next pass.
+        const freshChat = await chats.getById(input.chatId);
+        if (freshChat) {
+          chatMeta = parseExtra(freshChat.metadata) as Record<string, unknown>;
+        }
+
+        // Reset hoisted per-iteration accumulators before continuing.
+        // (firstSavedMsg stays — it's "first across the whole turn".
+        //  lastSavedMsg, pendingIllustration are overwritten naturally.)
+        collectedCommands.length = 0;
+        collectedOocMessages.length = 0;
+
+        continue;
+      }
+
+      // ── Background: chunk & embed new messages for memory recall ──
+      // Runs once on the final iteration (fire-and-forget). Lives inside the
+      // loop because charInfo is scoped here; only executes when we break.
+      {
+        const charNameMap: Record<string, string> = {};
+        for (const ci of charInfo) {
+          charNameMap[ci.id] = ci.name;
+        }
+        chunkAndEmbedMessages(
+          app.db,
+          input.chatId,
+          { userName: personaName, characterNames: charNameMap },
+          { embeddingSource: memoryRecallEmbeddingSource },
+        ).catch((err) => logger.error(err, "[memory-recall] Background chunking failed"));
+      }
+      break;
+      } // end of Professor Mari follow-up loop
 
       // ── Post OOC messages to connected conversation (Roleplay → Conversation) ──
       if (collectedOocMessages.length > 0 && chat.connectedChatId && !abortController.signal.aborted) {
@@ -9356,21 +9731,6 @@ export async function generateRoutes(app: FastifyInstance) {
 
       // Signal completion
       sendSseEvent(reply, { type: "done", data: "" });
-
-      // ── Background: chunk & embed new messages for memory recall ──
-      // Always chunk (so memories are available if the user enables recall later)
-      {
-        const charNameMap: Record<string, string> = {};
-        for (const ci of charInfo) {
-          charNameMap[ci.id] = ci.name;
-        }
-        chunkAndEmbedMessages(
-          app.db,
-          input.chatId,
-          { userName: personaName, characterNames: charNameMap },
-          { embeddingSource: memoryRecallEmbeddingSource },
-        ).catch((err) => logger.error(err, "[memory-recall] Background chunking failed"));
-      }
     } catch (err) {
       const message =
         err instanceof Error
@@ -9385,7 +9745,9 @@ export async function generateRoutes(app: FastifyInstance) {
       }
       reply.raw.off("close", onClose);
       if (activeGenerations) activeGenerations.delete(input.chatId);
-      reply.raw.end();
+      if (!clientDisconnected && !reply.raw.destroyed) {
+        reply.raw.end();
+      }
     }
   });
 

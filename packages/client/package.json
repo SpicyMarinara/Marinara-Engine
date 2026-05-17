@@ -11,6 +11,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@dnd-kit/core": "6.3.1",
     "@marinara-engine/shared": "workspace:*",
     "@tanstack/react-query": "^5.100.9",
     "class-variance-authority": "^0.7.1",

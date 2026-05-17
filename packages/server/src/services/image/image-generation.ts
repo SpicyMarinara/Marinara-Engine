@@ -75,6 +75,7 @@ const EXPLICIT_IMAGE_SOURCES = new Set([
   "togetherai",
   "novelai",
   "horde",
+  "xai",
   "comfyui",
   "automatic1111",
   "gemini_image",
@@ -138,6 +139,8 @@ export async function generateImage(
       return generateNovelAI(normalizedBaseUrl, apiKey, scopedRequest);
     case "horde":
       return generateHorde(normalizedBaseUrl, apiKey, scopedRequest);
+    case "xai":
+      return generateXAI(normalizedBaseUrl, apiKey, scopedRequest);
     case "comfyui":
       return generateComfyUI(normalizedBaseUrl, scopedRequest);
     case "automatic1111":
@@ -243,6 +246,34 @@ function openAIImageSize(request: ImageGenRequest): string {
   if (ratio > 1.12) return "1536x1024";
   if (ratio < 0.88) return "1024x1536";
   return "1024x1024";
+}
+
+const XAI_IMAGE_ASPECT_RATIOS = [
+  ["1:1", 1],
+  ["16:9", 16 / 9],
+  ["9:16", 9 / 16],
+  ["4:3", 4 / 3],
+  ["3:4", 3 / 4],
+  ["3:2", 3 / 2],
+  ["2:3", 2 / 3],
+  ["2:1", 2],
+  ["1:2", 1 / 2],
+  ["19.5:9", 19.5 / 9],
+  ["9:19.5", 9 / 19.5],
+  ["20:9", 20 / 9],
+  ["9:20", 9 / 20],
+] as const;
+
+function xAIImageAspectRatio(width?: number, height?: number): string {
+  if (!width || !height) return "auto";
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    throw new Error(`xAI image generation requires positive width and height values, got ${width}x${height}`);
+  }
+
+  const ratio = width / height;
+  return XAI_IMAGE_ASPECT_RATIOS.reduce((best, candidate) =>
+    Math.abs(candidate[1] - ratio) < Math.abs(best[1] - ratio) ? candidate : best,
+  )[0];
 }
 
 function imageDataUrlFromReference(reference: string): string {
@@ -512,6 +543,50 @@ async function generateOpenAI(baseUrl: string, apiKey: string, request: ImageGen
   );
 
   return readOpenAIImageResult(resp, request, "generation");
+}
+
+function xAIImagesUrl(baseUrl: string): string {
+  return openAIImagesUrl(baseUrl, "generations");
+}
+
+async function generateXAI(baseUrl: string, apiKey: string, request: ImageGenRequest): Promise<ImageGenResult> {
+  if (request.referenceImage || request.referenceImages?.length) {
+    throw new Error("xAI image generation does not support reference images in Marinara yet.");
+  }
+
+  const body: Record<string, unknown> = {
+    prompt: request.prompt,
+    n: 1,
+    aspect_ratio: xAIImageAspectRatio(request.width, request.height),
+    response_format: "b64_json",
+  };
+  if (request.model) body.model = request.model;
+
+  const resp = await imageFetch(
+    xAIImagesUrl(baseUrl),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
+    },
+    { allowLocal: request.allowLocalUrls },
+  );
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => "Unknown error");
+    throw new Error(`xAI image generation failed (${resp.status}): ${sanitizeErrorText(errText)}`);
+  }
+
+  const data = (await resp.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+  const result = data.data?.[0];
+  if (result?.b64_json) return { base64: result.b64_json, mimeType: "image/png", ext: "png" };
+  if (result?.url) return downloadImageUrl(result.url, request.allowLocalUrls);
+
+  throw new Error("No image data in xAI response");
 }
 
 async function generateNanoGPT(baseUrl: string, apiKey: string, request: ImageGenRequest): Promise<ImageGenResult> {
@@ -946,6 +1021,41 @@ async function generateTogetherAI(baseUrl: string, apiKey: string, request: Imag
   return { base64: b64, mimeType: "image/png", ext: "png" };
 }
 
+const NOVELAI_V4_PROMPT_HINT =
+  "NovelAI V4/V4.5 prompts support roughly 512 T5 tokens and reject most Unicode prompt characters; try a shorter ASCII prompt without emoji or non-Latin text.";
+
+function isNovelAiV4Model(model: string): boolean {
+  return /^nai-diffusion-(?:4(?:-(?:curated-preview|full))?|4-5(?:-(?:curated|full))?)$/i.test(model.trim());
+}
+
+function sanitizeNovelAiV4Prompt(value: string): string {
+  return value
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+    .replace(/[\u2010-\u2015\u2212]/g, "-")
+    .replace(/\u2026/g, "...")
+    .replace(/\u00A0/g, " ")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\s*\n\s*/g, "\n")
+    .trim();
+}
+
+function prepareNovelAiPrompt(value: string, fieldName: string, model: string): string {
+  if (!isNovelAiV4Model(model)) return value;
+
+  const sanitized = sanitizeNovelAiV4Prompt(value);
+  if (value.trim() && !sanitized) {
+    throw new Error(
+      `NovelAI ${fieldName} contains only unsupported V4/V4.5 prompt characters. ${NOVELAI_V4_PROMPT_HINT}`,
+    );
+  }
+  return sanitized;
+}
+
 async function generateNovelAI(baseUrl: string, apiKey: string, request: ImageGenRequest): Promise<ImageGenResult> {
   // Only use the native NovelAI API format when hitting the actual NovelAI domain.
   // Proxies (linkapi.ai, etc.) expose OpenAI-compatible chat completions that return
@@ -957,10 +1067,14 @@ async function generateNovelAI(baseUrl: string, apiKey: string, request: ImageGe
 
   const url = `${baseUrl.replace(/\/+$/, "")}/ai/generate-image`;
   const model = request.model || "nai-diffusion-4-5-full";
-  const isV4 = model.includes("nai-diffusion-4");
+  const isV4 = isNovelAiV4Model(model);
   const defaults = resolveNovelAiDefaults(request);
-  const prompt = mergePromptPrefix(defaults.promptPrefix, request.prompt);
-  const negativePrompt = mergeNegativePrompt(defaults.negativePromptPrefix, request.negativePrompt);
+  const prompt = prepareNovelAiPrompt(mergePromptPrefix(defaults.promptPrefix, request.prompt), "prompt", model);
+  const negativePrompt = prepareNovelAiPrompt(
+    mergeNegativePrompt(defaults.negativePromptPrefix, request.negativePrompt),
+    "negative prompt",
+    model,
+  );
   const seed = resolveSeed(request.imageDefaults);
 
   const parameters: Record<string, unknown> = {
@@ -1031,7 +1145,8 @@ async function generateNovelAI(baseUrl: string, apiKey: string, request: ImageGe
 
   if (!resp.ok) {
     const errText = await resp.text().catch(() => "Unknown error");
-    throw new Error(`NovelAI image generation failed (${resp.status}): ${sanitizeErrorText(errText)}`);
+    const hint = isV4 ? ` ${NOVELAI_V4_PROMPT_HINT}` : "";
+    throw new Error(`NovelAI image generation failed (${resp.status}): ${sanitizeErrorText(errText)}${hint}`);
   }
 
   // NovelAI returns a zip file containing the image
@@ -1468,13 +1583,31 @@ function buildDefaultComfyUiWorkflow(defaults: ComfyUiDefaults): Record<string, 
   return workflow;
 }
 
-function escapeJsonString(str: string): string {
-  return str
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, "\\n")
-    .replace(/\r/g, "\\r")
-    .replace(/\t/g, "\\t");
+function replaceComfyUiPlaceholders(
+  value: unknown,
+  replacements: Record<string, string | number>,
+): unknown {
+  if (typeof value === "string") {
+    const exactReplacement = replacements[value];
+    if (exactReplacement !== undefined) return exactReplacement;
+
+    return Object.entries(replacements).reduce(
+      (resolved, [placeholder, replacement]) => resolved.replaceAll(placeholder, String(replacement)),
+      value,
+    );
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => replaceComfyUiPlaceholders(item, replacements));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, replaceComfyUiPlaceholders(entry, replacements)]),
+    );
+  }
+
+  return value;
 }
 
 async function generateComfyUI(baseUrl: string, request: ImageGenRequest): Promise<ImageGenResult> {
@@ -1496,31 +1629,31 @@ async function generateComfyUI(baseUrl: string, request: ImageGenRequest): Promi
     workflow = buildDefaultComfyUiWorkflow(defaults);
   }
 
-  // Replace placeholders in the workflow JSON string
-  let wfStr = JSON.stringify(workflow);
-  wfStr = wfStr.replace(/%prompt%/g, escapeJsonString(prompt));
-  wfStr = wfStr.replace(/%negative_prompt%/g, escapeJsonString(negativePrompt));
-  wfStr = wfStr.replace(/%width%/g, String(request.width ?? 512));
-  wfStr = wfStr.replace(/%height%/g, String(request.height ?? 768));
-  wfStr = wfStr.replace(/%seed%/g, String(seed));
-  wfStr = wfStr.replace(/%steps%/g, String(defaults.steps));
-  wfStr = wfStr.replace(/%cfg%/g, String(defaults.cfgScale));
-  wfStr = wfStr.replace(/%cfg_scale%/g, String(defaults.cfgScale));
-  wfStr = wfStr.replace(/%scale%/g, String(defaults.cfgScale));
-  wfStr = wfStr.replace(/%sampler%/g, escapeJsonString(defaults.sampler));
-  wfStr = wfStr.replace(/%scheduler%/g, escapeJsonString(defaults.scheduler));
-  wfStr = wfStr.replace(/%denoise%/g, String(defaults.denoisingStrength));
-  wfStr = wfStr.replace(/%denoising_strength%/g, String(defaults.denoisingStrength));
-  wfStr = wfStr.replace(/%clip_skip%/g, String(defaults.clipSkip ?? 0));
+  const replacements: Record<string, string | number> = {
+    "%prompt%": prompt,
+    "%negative_prompt%": negativePrompt,
+    "%width%": request.width ?? 512,
+    "%height%": request.height ?? 768,
+    "%seed%": seed,
+    "%steps%": defaults.steps,
+    "%cfg%": defaults.cfgScale,
+    "%cfg_scale%": defaults.cfgScale,
+    "%scale%": defaults.cfgScale,
+    "%sampler%": defaults.sampler,
+    "%scheduler%": defaults.scheduler,
+    "%denoise%": defaults.denoisingStrength,
+    "%denoising_strength%": defaults.denoisingStrength,
+    "%clip_skip%": defaults.clipSkip ?? 0,
+  };
   if (request.model) {
-    wfStr = wfStr.replace(/%model%/g, request.model.replace(/"/g, '\\"'));
+    replacements["%model%"] = request.model;
   }
   if (request.referenceImage) {
-    wfStr = wfStr.replace(/%reference_image%/g, request.referenceImage.replace(/"/g, '\\"'));
+    replacements["%reference_image%"] = request.referenceImage;
   } else if (request.referenceImages?.length) {
-    wfStr = wfStr.replace(/%reference_image%/g, request.referenceImages[0]!.replace(/"/g, '\\"'));
+    replacements["%reference_image%"] = request.referenceImages[0]!;
   }
-  const resolvedWorkflow = JSON.parse(wfStr);
+  const resolvedWorkflow = replaceComfyUiPlaceholders(workflow, replacements);
 
   // Queue the workflow
   const queueResp = await localImageBackendFetch(`${base}/prompt`, {

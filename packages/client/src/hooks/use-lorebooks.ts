@@ -342,8 +342,23 @@ export interface ActiveLorebookEntry {
   constant: boolean;
 }
 
+export interface BudgetSkippedLorebookEntry {
+  id: string;
+  name: string;
+  lorebookId: string;
+  lorebookName: string;
+  matchedKeys: string[];
+  estimatedTokens: number;
+  lorebookBudget: number;
+  lorebookUsedTokens: number;
+  chatBudget: number;
+  chatUsedTokens: number;
+  blockedBy: "lorebook" | "chat" | "both";
+}
+
 export interface ActiveLorebookScan {
   entries: ActiveLorebookEntry[];
+  budgetSkippedEntries: BudgetSkippedLorebookEntry[];
   totalTokens: number;
   totalEntries: number;
 }

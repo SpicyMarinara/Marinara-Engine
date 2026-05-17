@@ -7,6 +7,11 @@ import { motion, AnimatePresence, type TargetAndTransition } from "framer-motion
 import type { SpritePlacement, SpriteSide } from "@marinara-engine/shared";
 import { useCharacterSprites, type SpriteInfo } from "../../hooks/use-characters";
 import { useAgentStore } from "../../stores/agent.store";
+import {
+  isFullBodySpriteExpression,
+  normalizeSpriteDisplayModes,
+  type SpriteDisplayMode,
+} from "./sprite-display-modes";
 import { clampSpritePlacement, getDefaultSpritePlacement, type SpritePlacementMap } from "./sprite-placement";
 
 interface SpriteOverlayProps {
@@ -16,6 +21,8 @@ interface SpriteOverlayProps {
   messages: Array<{ role: string; characterId?: string | null; content: string }>;
   /** Which side the sidebar / default sprite layout prefers */
   side: SpriteSide | "center";
+  /** Which sprite file families roleplay mode should resolve against. */
+  spriteDisplayModes?: SpriteDisplayMode[];
   /** Saved expressions per character (from chat metadata) */
   spriteExpressions?: Record<string, string>;
   /** Saved freeform placements per character (from chat metadata) */
@@ -72,6 +79,7 @@ export function SpriteOverlay({
   characterIds,
   messages,
   side,
+  spriteDisplayModes,
   spriteExpressions,
   spritePlacements,
   editing = false,
@@ -82,6 +90,7 @@ export function SpriteOverlay({
   spriteOpacity = 1,
 }: SpriteOverlayProps) {
   const stageRef = useRef<HTMLDivElement>(null);
+  const resolvedSpriteDisplayModes = useMemo(() => normalizeSpriteDisplayModes(spriteDisplayModes), [spriteDisplayModes]);
 
   // Subscribe to agent expression results
   const expressionResult = useAgentStore((s) => s.lastResults.get("expression"));
@@ -220,6 +229,7 @@ export function SpriteOverlay({
           stageRef={stageRef}
           onPlacementChange={onPlacementChange}
           fullBodyOnly={fullBodyOnly}
+          spriteDisplayModes={resolvedSpriteDisplayModes}
           spriteScale={spriteScale}
           spriteOpacity={spriteOpacity}
         />
@@ -293,6 +303,7 @@ function CharacterSprite({
   stageRef,
   onPlacementChange,
   fullBodyOnly = false,
+  spriteDisplayModes,
   spriteScale = 1,
   spriteOpacity = 1,
 }: {
@@ -306,6 +317,7 @@ function CharacterSprite({
   stageRef: React.RefObject<HTMLDivElement | null>;
   onPlacementChange?: (characterId: string, placement: SpritePlacement) => void;
   fullBodyOnly?: boolean;
+  spriteDisplayModes: SpriteDisplayMode[];
   spriteScale?: number;
   spriteOpacity?: number;
 }) {
@@ -324,29 +336,51 @@ function CharacterSprite({
 
   const spriteUrl = useMemo(() => {
     if (!sprites || !(sprites as SpriteInfo[]).length) return null;
-    let spriteList = sprites as SpriteInfo[];
-
-    // When fullBodyOnly is set, restrict to full-body sprites (full_ prefix)
-    if (fullBodyOnly) {
-      spriteList = spriteList.filter((s) => s.expression.toLowerCase().startsWith("full_"));
-      if (spriteList.length === 0) return null;
-    }
-
     const exprLower = expression.toLowerCase();
-    const exact = spriteList.find((s) => s.expression.toLowerCase() === exprLower);
-    if (exact) return exact.url;
-    // Substring / contains fallback (case-insensitive)
-    const partial = spriteList.find(
-      (s) => s.expression.toLowerCase().includes(exprLower) || exprLower.includes(s.expression.toLowerCase()),
-    );
-    if (partial) return partial.url;
-    const neutral = spriteList.find((s) => {
-      const lower = s.expression.toLowerCase();
-      return lower === "neutral" || lower === "default" || lower === "full_idle" || lower === "idle";
+    const allSprites = sprites as SpriteInfo[];
+    const allowExpressions = !fullBodyOnly && spriteDisplayModes.includes("expressions");
+    const allowFullBody = fullBodyOnly || spriteDisplayModes.includes("full-body");
+    const expressionSprites = allowExpressions
+      ? allSprites.filter((sprite) => !isFullBodySpriteExpression(sprite.expression))
+      : [];
+    const fullBodySprites = allowFullBody
+      ? allSprites.filter((sprite) => isFullBodySpriteExpression(sprite.expression))
+      : [];
+    const spritePools = [fullBodySprites, expressionSprites];
+
+    const fullBodyBaseExpression = (value: string) => (value.startsWith("full_") ? value.slice(5) : value);
+    const findMatchingSprite = (predicate: (spriteExpression: string) => boolean) => {
+      for (const spriteList of spritePools) {
+        const match = spriteList.find((sprite) => predicate(sprite.expression.toLowerCase()));
+        if (match) return match.url;
+      }
+      return null;
+    };
+
+    const exact = findMatchingSprite((spriteExpression) => {
+      return spriteExpression === exprLower || fullBodyBaseExpression(spriteExpression) === exprLower;
     });
-    if (neutral) return neutral.url;
-    return spriteList[0]?.url ?? null;
-  }, [sprites, expression, fullBodyOnly]);
+    if (exact) return exact;
+
+    const partial = findMatchingSprite((spriteExpression) => {
+      const baseExpression = fullBodyBaseExpression(spriteExpression);
+      return (
+        spriteExpression.includes(exprLower) ||
+        exprLower.includes(spriteExpression) ||
+        baseExpression.includes(exprLower) ||
+        exprLower.includes(baseExpression)
+      );
+    });
+    if (partial) return partial;
+
+    const neutral = findMatchingSprite((spriteExpression) => {
+      const baseExpression = fullBodyBaseExpression(spriteExpression);
+      return baseExpression === "neutral" || baseExpression === "default" || baseExpression === "idle";
+    });
+    if (neutral) return neutral;
+
+    return fullBodySprites[0]?.url ?? expressionSprites[0]?.url ?? null;
+  }, [sprites, expression, fullBodyOnly, spriteDisplayModes]);
 
   const standardSizeClass =
     spriteCount >= 3
@@ -360,15 +394,16 @@ function CharacterSprite({
       : spriteCount === 2
         ? "h-[min(82vh,calc(60vh*var(--game-sprite-scale)))] max-w-[min(90vw,calc(64vw*var(--game-sprite-scale)))] md:h-[min(86vh,calc(56vh*var(--game-sprite-scale)))] md:max-w-[min(52vw,calc(34vw*var(--game-sprite-scale)))]"
         : "h-[min(86vh,calc(64vh*var(--game-sprite-scale)))] max-w-[min(96vw,calc(86vw*var(--game-sprite-scale)))] md:h-[min(90vh,calc(62vh*var(--game-sprite-scale)))] md:max-w-[min(70vw,calc(44vw*var(--game-sprite-scale)))]";
-  const sizeClass = fullBodyOnly ? fullBodySizeClass : standardSizeClass;
+  const fullBodyLayout = fullBodyOnly || (spriteDisplayModes.includes("full-body") && !spriteDisplayModes.includes("expressions"));
+  const sizeClass = fullBodyLayout ? fullBodySizeClass : standardSizeClass;
   const spriteScaleStyle = useMemo<CSSProperties>(
     () =>
       ({
-        "--game-sprite-scale": fullBodyOnly
+        "--game-sprite-scale": fullBodyLayout
           ? Math.max(0.75, Math.min(2.75, spriteScale))
           : Math.max(0.5, Math.min(1.75, spriteScale)),
       }) as CSSProperties,
-    [fullBodyOnly, spriteScale],
+    [fullBodyLayout, spriteScale],
   );
   const resolvedSpriteOpacity = Math.max(0.15, Math.min(1, spriteOpacity));
 

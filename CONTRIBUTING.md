@@ -25,10 +25,13 @@ Typical local setup:
 ```bash
 git clone https://github.com/Pasta-Devs/Marinara-Engine.git
 cd Marinara-Engine
+git checkout staging
 pnpm install
 pnpm build
 pnpm dev
 ```
+
+> Active development happens on `staging`, not `main`. See [Branches](#branches) below before opening a PR.
 
 Useful entry points:
 
@@ -38,6 +41,22 @@ Useful entry points:
 - `start.bat`, `start.sh`, and `start-termux.sh` run the launcher flow, including git-based auto-update and optional browser auto-open.
 
 Copy `.env.example` to `.env` when you need to change ports, HTTPS settings, or launcher behavior such as `AUTO_OPEN_BROWSER=false`.
+
+## Branches
+
+Marinara Engine uses two long-lived branches:
+
+| Branch    | Role                                                                                                |
+| --------- | --------------------------------------------------------------------------------------------------- |
+| `staging` | Active development. All feature branches, bug fixes, and documentation PRs should target this.     |
+| `main`    | Release branch. Updated by maintainers as part of the release flow; do not target it directly.     |
+
+Guidelines:
+
+- **Base your feature branch on `staging`**, not `main`. Run `git checkout staging && git pull` before branching.
+- **Open PRs against `staging`**. The GitHub web UI defaults to `main` (the repo's default branch); change the base to `staging` when filing the PR.
+- Do not target `main` directly unless a maintainer explicitly asks for a mainline-only change (e.g. release hotfix).
+- Update checks and installation guides continue to track `main`, since end users install from released versions.
 
 ## Repo Layout
 
@@ -129,6 +148,7 @@ All server-side logging goes through a shared [Pino](https://getpino.io/) logger
 
 ## Pull Request Expectations
 
+- Target the `staging` branch. The GitHub UI defaults to `main`; change the base before submitting. See [Branches](#branches).
 - Link the issue or feature request your PR addresses. If there isn't one yet, open one first (see [Before You Open a Pull Request](#before-you-open-a-pull-request)).
 - Keep PRs focused. Separate unrelated refactors from user-facing fixes or documentation work.
 - Explain the why clearly in the PR description. Reviewers should understand the user problem, regression, or tradeoff being addressed, not just the implementation summary.
@@ -178,7 +198,7 @@ Android policy:
 Release-related behavior already in the repo:
 
 - Docker publishing is triggered by `v*` tags.
-- Tagged releases are published from `CHANGELOG.md` by the GitHub release workflow.
+- Tagged releases are published from `CHANGELOG.md` by the GitHub release workflow, with a temporary Android APK notice prepended so release-page downloaders know the APK still requires Termux.
 - The server update check reads the newest GitHub `v*` tag and uses matching release metadata when it exists.
 - Git-based installs can apply updates automatically; Docker installs are prompted with the pull command instead.
 - Pull request CI runs `pnpm check`, `pnpm version:check`, and the tracked-installer guard.
@@ -197,7 +217,7 @@ Release helpers now in the repo:
 - `pnpm version:sync -- --android-version-code <next-code>` updates the derived version files and README release references from the root `package.json` version.
 - `pnpm version:check` fails when those derived files drift out of sync.
 - `pnpm guard:installer-artifacts` fails when tracked installer binaries appear under `win/installer/*.exe`.
-- `pnpm release:notes -- <version>` renders the matching `CHANGELOG.md` entry for release publication.
+- `pnpm release:notes -- <version>` renders the matching `CHANGELOG.md` entry for release publication and prepends the temporary Android APK / Termux notice.
 
 ## Immediate Way Forward
 

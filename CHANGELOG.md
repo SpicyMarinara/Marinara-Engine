@@ -8,6 +8,12 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 
 - Added optional image generation for the Background agent so Roleplay can create and reuse missing scene backgrounds from an agent-selected image connection.
 - Reworked the avatar crop tool into a square-region selector with corner handles + interior pan, so users can pick the exact part of the source image that becomes the circle avatar. Replaces the prior zoom + pan slider on Character avatars and adds the same widget to Personas (previously had no crop UI). The original avatar file is never overwritten — the Roleplay glued side panel still shows the full portrait.
+- Added in-game access to Game Assets from the top-right game controls, including per-game asset selection.
+
+### Changed
+
+- Guided `/guided` requests and guided manual character replies now use Chat reply lorebook triggers instead of Continue/Autonomous triggers. Move lorebook entries from Continue/Autonomous to Chat reply if they should fire for guided replies.
+- Expanded Android APK disclaimers across GitHub Release notes, release asset naming, install docs, FAQ/troubleshooting, in-app update metadata, APK build output, and the Android shell's connection screen so users know the APK is a WebView shell and still requires the Termux launcher to be running.
 
 ### Fixed
 
@@ -19,6 +25,7 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 - Fixed Linux NVIDIA local-runtime setup in Docker by falling back to the official Vulkan/CPU llama.cpp builds when Linux CUDA release assets are unavailable.
 - Fixed GLM 5.1 via NanoGPT returning thinking-only text in Professor Mari chats by explicitly disabling thinking when reasoning is off and refusing to expose GLM thinking as visible chat output.
 - Fixed app settings reverting after reload when stale server-synced settings overwrote newer browser-local preferences.
+- Game mode now keeps the selected Appearance background when Scene Analysis is off instead of falling back to black.
 
 ## [1.5.9]
 
@@ -578,7 +585,7 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 
 - **Bot Browser** — Browse, search, and one-click import characters from Chub.ai directly inside the app. Includes paginated grid view, sort by downloads, stars, or trending, an NSFW filter toggle, and full character detail previews.
 - **Chat Folders** — Organize chats into named, color-coded folders with drag-and-drop reorder. Move chats between folders, collapse or expand them, and filter by mode. State is persisted server-side.
-- **Slash Commands** — Added SillyTavern-style commands with autocomplete, including `/roll`, `/sys`, `/narrator`, `/continue`, `/as <character>`, `/impersonate`, `/remind <time> <message>`, `/random`, `/scene`, and `/help`.
+- **Slash Commands** — Added SillyTavern-style commands with autocomplete, including `/roll`, `/sys`, `/guided`, `/continue`, `/as <character>`, `/impersonate`, `/remind <time> <message>`, `/random`, `/scene`, and `/help`.
 - **AI Lorebook Maker** — Generate structured lorebook entries from a topic prompt using your LLM connection, with SSE streaming, batch support, and attach-to-existing-lorebook support.
 - **Connection Duplicate & Test** — Clone existing connections, including encrypted API keys, and test connectivity with provider-specific checks.
 - **ComfyUI Custom Workflows** — Paste custom workflow JSON with `%prompt%`, `%negative_prompt%`, `%width%`, `%height%`, `%seed%`, and `%model%` placeholders.

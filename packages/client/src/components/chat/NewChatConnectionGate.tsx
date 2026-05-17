@@ -5,6 +5,7 @@ import { useCreateChat } from "../../hooks/use-chats";
 import { useChatPresets, useApplyChatPreset } from "../../hooks/use-chat-presets";
 import { useChatStore } from "../../stores/chat.store";
 import { useUIStore } from "../../stores/ui.store";
+import { filterLanguageGenerationConnections } from "../../lib/connection-filters";
 import { cn } from "../../lib/utils";
 
 type Mode = "conversation" | "roleplay" | "game";
@@ -28,7 +29,13 @@ export function NewChatConnectionGate({ mode, onClose }: NewChatConnectionGatePr
   const openRightPanel = useUIStore((s) => s.openRightPanel);
   const [connectionId, setConnectionId] = useState<string>("");
 
-  const connectionRows = useMemo(() => (connections ?? []) as Array<{ id: string; name: string }>, [connections]);
+  const connectionRows = useMemo(
+    () =>
+      filterLanguageGenerationConnections(
+        (connections ?? []) as Array<{ id: string; name: string; provider?: string }>,
+      ),
+    [connections],
+  );
 
   useEffect(() => {
     if (connectionRows.length === 0) {

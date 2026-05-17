@@ -236,6 +236,7 @@ export function createCharactersStorage(db: DB) {
         nameColor?: string;
         dialogueColor?: string;
         boxColor?: string;
+        trackerCardColors?: string;
         personaStats?: string;
         altDescriptions?: string;
         tags?: string;
@@ -261,6 +262,7 @@ export function createCharactersStorage(db: DB) {
         nameColor: extra?.nameColor ?? "",
         dialogueColor: extra?.dialogueColor ?? "",
         boxColor: extra?.boxColor ?? "",
+        trackerCardColors: extra?.trackerCardColors ?? '{"mode":"chat"}',
         personaStats: extra?.personaStats ?? "",
         altDescriptions: extra?.altDescriptions ?? "[]",
         tags: extra?.tags ?? "[]",
@@ -302,6 +304,7 @@ export function createCharactersStorage(db: DB) {
         nameColor: source.nameColor ?? "",
         dialogueColor: source.dialogueColor ?? "",
         boxColor: source.boxColor ?? "",
+        trackerCardColors: source.trackerCardColors ?? '{"mode":"chat"}',
         personaStats: source.personaStats ?? "",
         altDescriptions: source.altDescriptions ?? "[]",
         tags: source.tags ?? "[]",
@@ -327,6 +330,7 @@ export function createCharactersStorage(db: DB) {
         nameColor?: string;
         dialogueColor?: string;
         boxColor?: string;
+        trackerCardColors?: string;
         personaStats?: string;
         altDescriptions?: string;
         tags?: string;
@@ -346,6 +350,7 @@ export function createCharactersStorage(db: DB) {
       if (updates.nameColor !== undefined) sets.nameColor = updates.nameColor;
       if (updates.dialogueColor !== undefined) sets.dialogueColor = updates.dialogueColor;
       if (updates.boxColor !== undefined) sets.boxColor = updates.boxColor;
+      if (updates.trackerCardColors !== undefined) sets.trackerCardColors = updates.trackerCardColors;
       if (updates.personaStats !== undefined) sets.personaStats = updates.personaStats;
       if (updates.altDescriptions !== undefined) sets.altDescriptions = updates.altDescriptions;
       if (updates.tags !== undefined) sets.tags = updates.tags;

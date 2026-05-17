@@ -1,4 +1,12 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { ChevronDown, Pencil, Plus } from "lucide-react";
 import { cn } from "../../../lib/utils";
 import { TRACKER_TEXT_MICRO } from "./tracker-data-sidebar.constants";
@@ -167,7 +175,7 @@ export function InlineEdit({
         }}
         onBlur={commit}
         className={cn(
-          "min-w-0 rounded-sm border border-[var(--border)] bg-[var(--background)]/50 px-1 py-0.5 text-xs text-[var(--foreground)] outline-none transition-colors focus:border-[var(--primary)]",
+          "min-w-0 rounded-sm border border-[var(--tracker-inline-rule,var(--border))] bg-[var(--background)]/50 px-1 py-0.5 text-xs text-[color:var(--tracker-inline-foreground,var(--foreground))] outline-none transition-colors focus:border-[var(--primary)]",
           className,
         )}
         placeholder={placeholder}
@@ -204,7 +212,12 @@ export function InlineEdit({
         <FittedText
           minScale={fitMinScale}
           align={fitAlign}
-          className={cn("flex-1", currentValue ? "text-[var(--foreground)]" : "italic text-[var(--muted-foreground)]")}
+          className={cn(
+            "flex-1",
+            currentValue
+              ? "text-[color:var(--tracker-inline-foreground,var(--foreground))]"
+              : "italic text-[color:var(--tracker-inline-muted,var(--muted-foreground))]",
+          )}
         >
           {previewText}
         </FittedText>
@@ -222,7 +235,9 @@ export function InlineEdit({
                   : fullPreview
                     ? "whitespace-nowrap leading-tight"
                     : "truncate",
-            currentValue ? "text-[var(--foreground)]" : "italic text-[var(--muted-foreground)]",
+            currentValue
+              ? "text-[color:var(--tracker-inline-foreground,var(--foreground))]"
+              : "italic text-[color:var(--tracker-inline-muted,var(--muted-foreground))]",
           )}
         >
           {useHoverScroll && currentValue && scrollActive ? (
@@ -240,7 +255,7 @@ export function InlineEdit({
       <Pencil
         size="0.5625rem"
         className={cn(
-          "shrink-0 text-[var(--muted-foreground)] opacity-0 transition-opacity group-hover/inline:opacity-60",
+          "shrink-0 text-[color:var(--tracker-inline-muted,var(--muted-foreground))] opacity-0 transition-opacity group-hover/inline:opacity-60",
           (!showEditHint || fullPreview) && "hidden",
           (useHoverScroll || editHintMode === "overlay") &&
             "pointer-events-none absolute right-0.5 top-1/2 -translate-y-1/2",
@@ -277,7 +292,7 @@ export function InlineNumber({
       title={title}
       style={{ width }}
       className={cn(
-        "rounded bg-transparent px-1 py-0.5 text-right text-[0.625rem] tabular-nums text-[var(--foreground)]/85 outline-none transition-colors hover:bg-[var(--accent)]/45 focus:bg-[var(--background)] focus:ring-1 focus:ring-[var(--primary)] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
+        "rounded bg-transparent px-1 py-0.5 text-right text-[0.625rem] tabular-nums text-[color:var(--tracker-inline-number,var(--tracker-inline-foreground,var(--foreground)))] outline-none transition-colors hover:bg-[var(--accent)]/45 focus:bg-[var(--background)] focus:ring-1 focus:ring-[var(--primary)] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
         className,
       )}
     />
@@ -473,25 +488,22 @@ export function SectionHeader({
 }
 
 export function TrackerReadabilityVeil({ strength = "soft" }: { strength?: "soft" | "strong" }) {
-  return (
-    <div
-      className={cn(
-        "pointer-events-none absolute inset-0 z-0",
-        strength === "strong"
-          ? "bg-[linear-gradient(180deg,color-mix(in_srgb,var(--background)_40%,transparent)_0%,color-mix(in_srgb,var(--card)_30%,transparent)_52%,color-mix(in_srgb,var(--background)_42%,transparent)_100%)]"
-          : "bg-[linear-gradient(180deg,color-mix(in_srgb,var(--background)_30%,transparent)_0%,color-mix(in_srgb,var(--card)_22%,transparent)_58%,color-mix(in_srgb,var(--background)_32%,transparent)_100%)]",
-      )}
-    />
-  );
+  const background =
+    strength === "strong"
+      ? "linear-gradient(180deg,color-mix(in srgb,var(--background) var(--tracker-profile-contrast-strong-top,40%),transparent) 0%,color-mix(in srgb,var(--card) var(--tracker-profile-contrast-strong-mid,30%),transparent) 52%,color-mix(in srgb,var(--background) var(--tracker-profile-contrast-strong-bottom,42%),transparent) 100%)"
+      : "linear-gradient(180deg,color-mix(in srgb,var(--background) var(--tracker-profile-contrast-soft-top,30%),transparent) 0%,color-mix(in srgb,var(--card) var(--tracker-profile-contrast-soft-mid,22%),transparent) 58%,color-mix(in srgb,var(--background) var(--tracker-profile-contrast-soft-bottom,32%),transparent) 100%)";
+
+  return <div className="pointer-events-none absolute inset-0 z-0" style={{ background }} />;
 }
 
 export function TrackerProfileDisplayWash({ className }: { className?: string }) {
   return (
     <div
-      className={cn(
-        "pointer-events-none absolute inset-0 bg-[image:var(--tracker-profile-display-layer)]",
-        className ?? "opacity-[0.12]",
-      )}
+      className={cn("pointer-events-none absolute inset-0", className ?? "opacity-[0.12]")}
+      style={{
+        backgroundImage: "var(--tracker-profile-display-layer)",
+        opacity: "var(--tracker-profile-display-opacity)",
+      }}
     />
   );
 }
@@ -499,56 +511,107 @@ export function TrackerProfileDisplayWash({ className }: { className?: string })
 export function TrackerProfileEdgeHighlight({
   className,
   strength = "soft",
+  showBottom = true,
 }: {
   className?: string;
   strength?: "soft" | "strong";
+  showBottom?: boolean;
 }) {
   return (
     <div className={cn("pointer-events-none absolute inset-0 rounded-[inherit]", className)}>
       <div
         className={cn(
-          "absolute inset-0 rounded-[inherit] ring-1 ring-inset shadow-[inset_0_1px_0_color-mix(in_srgb,var(--foreground)_8%,transparent),0_0_10px_color-mix(in_srgb,var(--tracker-profile-display-solid)_10%,transparent)]",
+          "absolute inset-0 rounded-[inherit] ring-1 ring-inset shadow-[inset_0_1px_0_color-mix(in_srgb,var(--foreground)_8%,transparent),0_0_10px_var(--tracker-profile-dialogue-glow)]",
           strength === "strong"
-            ? "ring-[var(--tracker-profile-display-solid)]/30"
-            : "ring-[var(--tracker-profile-display-solid)]/20",
+            ? "ring-[var(--tracker-profile-rule)]"
+            : "ring-[color-mix(in_srgb,var(--tracker-profile-rule)_72%,transparent)]",
         )}
       />
       <div
         className={cn(
-          "absolute inset-x-0 top-0 h-px bg-[image:var(--tracker-profile-display-layer)]",
+          "absolute inset-x-0 top-0 h-px bg-[image:var(--tracker-profile-accent-layer)]",
           strength === "strong" ? "opacity-80" : "opacity-55",
         )}
       />
-      <div className="absolute inset-x-0 bottom-0 h-px bg-[image:var(--tracker-profile-display-layer)] opacity-35" />
+      {showBottom && (
+        <div className="absolute inset-x-0 bottom-0 h-px bg-[image:var(--tracker-profile-accent-layer)] opacity-35" />
+      )}
     </div>
   );
 }
 
 export function TrackerPortraitStageBackdrop({ media, className }: { media?: string | null; className?: string }) {
+  const boxLayerStyle = {
+    backgroundImage: "var(--tracker-profile-box-layer)",
+    opacity: "var(--tracker-profile-tint-opacity, 0.12)",
+  } as CSSProperties;
+  const mediaEchoStyle = {
+    filter:
+      "blur(var(--tracker-profile-portrait-media-blur, 1.25rem)) saturate(var(--tracker-profile-portrait-media-saturate, 1.18))",
+    maskImage: "radial-gradient(ellipse at 50% 48%, black 0%, black 56%, transparent 82%)",
+    opacity: "var(--tracker-profile-portrait-media-opacity, 0.18)",
+    WebkitMaskImage: "radial-gradient(ellipse at 50% 48%, black 0%, black 56%, transparent 82%)",
+  } as CSSProperties;
+  const sideMaskStyle = {
+    maskImage: "linear-gradient(180deg, black 0%, black 62%, transparent 100%)",
+    opacity: "var(--tracker-profile-portrait-side-mask-opacity, 1)",
+    WebkitMaskImage: "linear-gradient(180deg, black 0%, black 62%, transparent 100%)",
+  } as CSSProperties;
+  const lightStyle = {
+    backgroundImage: "var(--tracker-profile-portrait-light)",
+    opacity: "var(--tracker-profile-portrait-light-opacity, 0.7)",
+  } as CSSProperties;
+  const rimStyle = {
+    backgroundImage: "var(--tracker-profile-portrait-rim)",
+    opacity: "var(--tracker-profile-portrait-rim-opacity, 0.52)",
+  } as CSSProperties;
+  const bottomGlowStyle = {
+    opacity: "var(--tracker-profile-portrait-bottom-glow-opacity, 0.75)",
+  } as CSSProperties;
+  const bottomRuleStyle = {
+    opacity: "var(--tracker-profile-portrait-bottom-rule-opacity, 0.75)",
+  } as CSSProperties;
+
   return (
     <div className={cn("pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]", className)}>
-      <div className="absolute inset-0 bg-[linear-gradient(150deg,color-mix(in_srgb,var(--tracker-profile-box)_30%,var(--background)_70%)_0%,color-mix(in_srgb,var(--background)_88%,var(--tracker-profile-display-solid)_12%)_48%,color-mix(in_srgb,var(--card)_70%,var(--tracker-profile-box)_30%)_100%)]" />
+      <div className="absolute inset-0 bg-[image:var(--tracker-profile-portrait-base)]" />
+      <div className="absolute inset-0" style={boxLayerStyle} />
       {media ? (
         <img
           src={media}
           alt=""
           aria-hidden="true"
-          className="absolute inset-[-10%] h-[120%] w-[120%] object-cover object-center opacity-[0.18] blur-xl saturate-[1.18]"
+          className="absolute inset-[-10%] h-[120%] w-[120%] object-cover object-center"
+          style={mediaEchoStyle}
           draggable={false}
         />
       ) : null}
-      <div className="absolute inset-0 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--tracker-profile-display-solid)_18%,transparent)_0%,transparent_36%,color-mix(in_srgb,var(--background)_50%,transparent)_100%)]" />
-      <div className="absolute inset-y-0 left-0 w-1/3 bg-[linear-gradient(90deg,color-mix(in_srgb,var(--background)_60%,transparent),transparent)]" />
-      <div className="absolute inset-y-0 right-0 w-1/3 bg-[linear-gradient(270deg,color-mix(in_srgb,var(--background)_60%,transparent),transparent)]" />
-      <div className="absolute inset-x-2 bottom-0 h-1/2 bg-[linear-gradient(0deg,color-mix(in_srgb,var(--tracker-profile-dialogue)_16%,transparent),transparent_72%)] opacity-75" />
-      <div className="absolute inset-x-3 bottom-2 h-px bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--tracker-profile-dialogue)_48%,transparent),transparent)] opacity-75" />
+      <div className="absolute inset-0" style={lightStyle} />
+      <div className="absolute inset-0 bg-[image:var(--tracker-profile-portrait-veil)]" />
+      <div
+        className="absolute inset-y-0 left-0 w-1/3 bg-[linear-gradient(90deg,color-mix(in_srgb,var(--background)_60%,transparent),transparent)]"
+        style={sideMaskStyle}
+      />
+      <div
+        className="absolute inset-y-0 right-0 w-1/3 bg-[linear-gradient(270deg,color-mix(in_srgb,var(--background)_60%,transparent),transparent)]"
+        style={sideMaskStyle}
+      />
+      <div
+        className="absolute inset-x-2 bottom-0 h-1/2 bg-[linear-gradient(0deg,color-mix(in_srgb,var(--tracker-profile-dialogue)_16%,transparent),transparent_72%)]"
+        style={bottomGlowStyle}
+      />
+      <div className="absolute inset-0" style={rimStyle} />
+      <div
+        className="absolute inset-x-3 bottom-2 h-px bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--tracker-profile-dialogue)_48%,transparent),transparent)]"
+        style={bottomRuleStyle}
+      />
     </div>
   );
 }
 
 export function EmptySection({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-sm border border-dashed border-[var(--border)] px-1 py-1 text-center text-[0.6875rem] text-[var(--muted-foreground)]">
+    <div className="rounded-sm border border-dashed border-[var(--tracker-inline-rule,var(--border))] px-1 py-1 text-center text-[0.6875rem] text-[color:var(--tracker-inline-muted,var(--muted-foreground))]">
       {children}
     </div>
   );

@@ -10,7 +10,7 @@ import {
   type GameMap,
 } from "@marinara-engine/shared";
 import { eq } from "drizzle-orm";
-import { buildSpriteExpressionChoices, listCharacterSprites } from "../../services/game/sprite.service.js";
+import { listCharacterSprites } from "../../services/game/sprite.service.js";
 import { DATA_DIR } from "../../utils/data-dir.js";
 import { normalizeAgentMaxParallelJobs, type ResolvedAgent } from "../../services/agents/agent-pipeline.js";
 import { executeAgent, executeAgentBatch, normalizeAgentContextSize } from "../../services/agents/agent-executor.js";
@@ -36,6 +36,7 @@ import {
   parseGameStateRow,
   preserveTrackerCharacterUiFields,
   resolveBaseUrl,
+  resolveVisibleGameStateAnchor,
 } from "./generate-route-utils.js";
 import {
   buildHistoricalLorebookKeeperContext,
@@ -54,7 +55,11 @@ import {
   resolveAgentConnectionId,
   type AgentConnectionWarning,
 } from "./agent-connection-guards.js";
-import { validateSpriteExpressionEntries } from "./expression-agent-utils.js";
+import {
+  buildAvailableSpriteCharacter,
+  normalizeSpriteDisplayModes,
+  validateSpriteExpressionEntries,
+} from "./expression-agent-utils.js";
 import {
   normalizeContextInjections,
   normalizeSecretPlotSceneDirections,
@@ -305,7 +310,11 @@ async function buildRetryAgentContext(args: {
       agentContext.gameState = null;
     }
   } else if (useLatestGameStateFallback) {
-    const latestGS = await gameStateStore.getLatestCommitted(chatId);
+    const visibleAnchor = lastAssistant ? resolveVisibleGameStateAnchor([lastAssistant]) : null;
+    const latestGS = await gameStateStore.getForGeneration(chatId, {
+      preferLatestVisible: true,
+      visibleAnchor,
+    });
     if (latestGS) {
       agentContext.gameState = parseGameStateRow(latestGS as Record<string, unknown>);
     }
@@ -324,21 +333,36 @@ async function buildRetryAgentContext(args: {
   // If the expression agent is being retried, load available sprite expressions per character
   if (resolvedAgentTypes.has("expression")) {
     try {
+      const spriteDisplayModes = normalizeSpriteDisplayModes(chatMeta.spriteDisplayModes);
+      const selectedSpriteIds = new Set(
+        Array.isArray(chatMeta.spriteCharacterIds)
+          ? chatMeta.spriteCharacterIds.filter((id): id is string => typeof id === "string")
+          : [],
+      );
+      const restrictToSelectedSprites = selectedSpriteIds.size > 0;
       const perChar: Array<{
         characterId: string;
         characterName: string;
         expressions: string[];
-        expressionChoices: string[];
+        expressionChoices?: string[];
       }> = [];
       for (const char of agentContext.characters) {
+        if (restrictToSelectedSprites && !selectedSpriteIds.has(char.id)) continue;
         const sprites = listCharacterSprites(char.id);
-        if (sprites && sprites.expressions.length > 0) {
-          perChar.push({
-            characterId: char.id,
-            characterName: char.name,
-            expressions: sprites.expressions,
-            expressionChoices: buildSpriteExpressionChoices(sprites.expressions),
-          });
+        if (!sprites) continue;
+        const spriteCharacter = buildAvailableSpriteCharacter(char.id, char.name, sprites, spriteDisplayModes);
+        if (spriteCharacter) perChar.push(spriteCharacter);
+      }
+      if (personaContext.personaId && (!restrictToSelectedSprites || selectedSpriteIds.has(personaContext.personaId))) {
+        const sprites = listCharacterSprites(personaContext.personaId);
+        if (sprites) {
+          const spritePersona = buildAvailableSpriteCharacter(
+            personaContext.personaId,
+            personaContext.personaName,
+            sprites,
+            spriteDisplayModes,
+          );
+          if (spritePersona) perChar.push(spritePersona);
         }
       }
       if (perChar.length > 0) {
@@ -1301,6 +1325,23 @@ async function applyRetryResultEffects(args: {
   const agentsStore = createAgentsStorage(app.db);
   const chatMeta = parseExtra(chat.metadata) as Record<string, unknown>;
   let currentResponseForRewrite = agentContext.mainResponse;
+  let retryBaseGameStateSnapshotPromise: ReturnType<typeof gameStateStore.getForGeneration> | null = null;
+  const loadRetryBaseGameStateSnapshot = () => {
+    retryBaseGameStateSnapshotPromise ??= gameStateStore.getForGeneration(chatId, {
+      preferLatestVisible: true,
+      visibleAnchor: retryMessageId ? { messageId: retryMessageId, swipeIndex: retrySwipeIndex } : null,
+      excludeMessageId: retryMessageId || null,
+    });
+    return retryBaseGameStateSnapshotPromise;
+  };
+  const loadRetryTargetGameStateSnapshot = async () => {
+    if (!retryMessageId) return loadRetryBaseGameStateSnapshot();
+    const existing = await gameStateStore.getByMessage(retryMessageId, retrySwipeIndex);
+    if (existing) return existing;
+    return gameStateStore.updateByMessage(retryMessageId, retrySwipeIndex, chatId, {}, undefined, {
+      baseSnapshot: await loadRetryBaseGameStateSnapshot(),
+    });
+  };
 
   for (const result of sortedResults) {
     if (result.success && result.type === "text_rewrite" && result.data && typeof result.data === "object") {
@@ -1336,7 +1377,14 @@ async function applyRetryResultEffects(args: {
         if (gs.weather != null) worldStatePatch.weather = gs.weather as string;
         if (gs.temperature != null) worldStatePatch.temperature = gs.temperature as string;
         if (Object.keys(worldStatePatch).length > 0) {
-          await gameStateStore.updateByMessage(retryMessageId, retrySwipeIndex, chatId, worldStatePatch as any);
+          await gameStateStore.updateByMessage(
+            retryMessageId,
+            retrySwipeIndex,
+            chatId,
+            worldStatePatch as any,
+            undefined,
+            { baseSnapshot: await loadRetryBaseGameStateSnapshot() },
+          );
         }
 
         const nextLocation = typeof worldStatePatch.location === "string" ? worldStatePatch.location : null;
@@ -1398,7 +1446,7 @@ async function applyRetryResultEffects(args: {
       try {
         const ctData = result.data as Record<string, unknown>;
         const presentCharacters = (ctData.presentCharacters as any[]) ?? [];
-        const previousSnapshot = await gameStateStore.getByMessage(retryMessageId, retrySwipeIndex);
+        const previousSnapshot = await loadRetryTargetGameStateSnapshot();
         let previousCharacters: any[] = [];
         if (previousSnapshot?.presentCharacters) {
           try {
@@ -1412,9 +1460,16 @@ async function applyRetryResultEffects(args: {
           }
         }
         preserveTrackerCharacterUiFields(presentCharacters, previousCharacters);
-        await gameStateStore.updateByMessage(retryMessageId, retrySwipeIndex, chatId, {
-          presentCharacters,
-        });
+        await gameStateStore.updateByMessage(
+          retryMessageId,
+          retrySwipeIndex,
+          chatId,
+          {
+            presentCharacters,
+          },
+          undefined,
+          { baseSnapshot: await loadRetryBaseGameStateSnapshot() },
+        );
         sendSseEvent(reply, { type: "game_state_patch", data: { presentCharacters } });
       } catch {
         // Non-critical patching failure.
@@ -1427,9 +1482,7 @@ async function applyRetryResultEffects(args: {
         const bars = (psData.stats as any[]) ?? [];
         const status = (psData.status as string) ?? "";
         const inventory = (psData.inventory as any[]) ?? [];
-        const latest =
-          (await gameStateStore.getByMessage(retryMessageId, retrySwipeIndex)) ??
-          (await gameStateStore.getLatest(chatId));
+        const latest = await loadRetryTargetGameStateSnapshot();
         if (latest) {
           const updates: Record<string, unknown> = {};
           if (bars.length > 0) updates.personaStats = JSON.stringify(bars);
@@ -1528,9 +1581,7 @@ async function applyRetryResultEffects(args: {
           JSON.stringify(qData).slice(0, 500),
         );
         if (updates.length > 0) {
-          const snap =
-            (await gameStateStore.getByMessage(retryMessageId, retrySwipeIndex)) ??
-            (await gameStateStore.getLatest(chatId));
+          const snap = await loadRetryTargetGameStateSnapshot();
           const existingPS = snap?.playerStats
             ? typeof snap.playerStats === "string"
               ? JSON.parse(snap.playerStats)
@@ -1618,9 +1669,7 @@ async function applyRetryResultEffects(args: {
         const ctData = result.data as Record<string, unknown>;
         const fields = (ctData.fields as any[]) ?? [];
         if (fields.length > 0) {
-          const snap =
-            (await gameStateStore.getByMessage(retryMessageId, retrySwipeIndex)) ??
-            (await gameStateStore.getLatest(chatId));
+          const snap = await loadRetryTargetGameStateSnapshot();
           if (snap) {
             const existingPS = snap.playerStats
               ? typeof snap.playerStats === "string"
@@ -1642,6 +1691,9 @@ async function applyRetryResultEffects(args: {
 
     // ── ILLUSTRATOR: generate image from agent prompt ──
     if (result.success && result.type === "image_prompt" && result.data && typeof result.data === "object") {
+      const illustratorFailureName =
+        resolvedAgents.find((a) => a.resolved.id === result.agentId || a.resolved.type === "illustrator")?.cfg.name ??
+        "Illustrator";
       try {
         const illData = result.data as Record<string, unknown>;
         const shouldGenerate = illData.shouldGenerate === true;
@@ -1658,7 +1710,8 @@ async function applyRetryResultEffects(args: {
           const rawSavedNegativePrompt = illustratorAgent?.resolved.settings?.imageNegativePrompt;
           const imagePositivePrompt = typeof rawImagePositivePrompt === "string" ? rawImagePositivePrompt.trim() : "";
           const savedNegativePrompt = typeof rawSavedNegativePrompt === "string" ? rawSavedNegativePrompt.trim() : "";
-          let imgConnId = (illustratorAgent?.resolved.settings?.imageConnectionId as string) ?? null;
+          const configuredImgConnId = illustratorAgent?.resolved.settings?.imageConnectionId;
+          let imgConnId = typeof configuredImgConnId === "string" ? configuredImgConnId.trim() : null;
           if (!imgConnId) {
             const defaultImageConn = (await conns.list()).find(
               (c) =>
@@ -1668,6 +1721,9 @@ async function applyRetryResultEffects(args: {
           }
           if (imgConnId) {
             const imgConnFull = await conns.getWithKey(imgConnId);
+            if (!imgConnFull) {
+              throw new Error("Cannot resolve Illustrator image generation connection");
+            }
             if (imgConnFull) {
               const { generateImage, saveImageToDisk } = await import("../../services/image/image-generation.js");
               const { createGalleryStorage } = await import("../../services/storage/gallery.storage.js");
@@ -1826,6 +1882,19 @@ async function applyRetryResultEffects(args: {
                 (illData.reason as string | undefined)?.slice(0, 80) ?? imagePrompt.slice(0, 80),
               );
             }
+          } else {
+            logger.warn(
+              "[retry-agents] Illustrator wants to generate but no image generation connection is configured",
+            );
+            sendSseEvent(reply, {
+              type: "agent_error",
+              data: {
+                agentType: "illustrator",
+                agentName: illustratorFailureName,
+                error:
+                  "No image generation connection set on the Illustrator agent, and no default Illustrator image connection is configured. Go to Settings -> Connections and mark an image generation connection as the default for Illustrator, or assign one directly in Settings -> Agents -> Illustrator.",
+              },
+            });
           }
         }
       } catch (illErr) {
@@ -1834,6 +1903,7 @@ async function applyRetryResultEffects(args: {
           type: "agent_error",
           data: {
             agentType: "illustrator",
+            agentName: illustratorFailureName,
             error: illErr instanceof Error ? illErr.message : "Image generation failed",
           },
         });

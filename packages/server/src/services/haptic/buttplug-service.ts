@@ -17,8 +17,7 @@ import {
   OutputType,
 } from "buttplug";
 import type { HapticDevice, HapticCapability, HapticDeviceCommand, HapticStatus } from "@marinara-engine/shared";
-
-const DEFAULT_SERVER_URL = "ws://127.0.0.1:12345";
+import { getIntifaceUrl } from "../../config/runtime-config.js";
 
 const POSITION_WITH_DURATION_OUTPUT =
   (OutputType as unknown as Record<string, OutputType | undefined>).HwPositionWithDuration ??
@@ -106,6 +105,7 @@ function deviceToDTO(device: ButtplugClientDevice): HapticDevice {
 class ButtplugService {
   private client: ButtplugClient;
   private serverUrl: string | null = null;
+  private preferredServerUrl: string | null = null;
   private stopTimers = new Map<number | "all", ReturnType<typeof setTimeout>>();
 
   constructor() {
@@ -142,6 +142,7 @@ class ButtplugService {
     return {
       connected: this.connected,
       serverUrl: this.serverUrl,
+      defaultServerUrl: this.preferredServerUrl ?? getIntifaceUrl(),
       scanning: this.scanning,
       devices: this.devices,
     };
@@ -150,10 +151,12 @@ class ButtplugService {
   /** Connect to Intiface Central server. */
   async connect(url?: string): Promise<void> {
     if (this.client.connected) return;
-    const target = url || DEFAULT_SERVER_URL;
+    const requestedUrl = url?.trim() || null;
+    const target = requestedUrl ?? this.preferredServerUrl ?? getIntifaceUrl();
     const connector = new ButtplugNodeWebsocketClientConnector(target);
     await this.client.connect(connector);
     this.serverUrl = target;
+    if (requestedUrl) this.preferredServerUrl = requestedUrl;
     logger.info(`[haptic] Connected to Intiface Central at ${target}`);
   }
 

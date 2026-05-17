@@ -256,29 +256,37 @@ export type CharacterCommand =
   | SpotifyCommand
   | AssistantCommand;
 
+// Param block matcher: any char that isn't `"` or `]`, OR a complete
+// double-quoted string (with `\"`-style escapes). Lets a `]` inside a
+// quoted parameter value (e.g. `description="Status: [VIP]"`) sit inside
+// the command instead of terminating it early. The inner alternative
+// excludes `\\` so backslash is only consumed by the escape branch —
+// otherwise an escape-heavy value can trigger catastrophic backtracking.
+const QUOTED_PARAM_BLOCK = '(?:[^"\\]]|"(?:\\\\.|[^"\\\\])*")*';
+
 /** Regex patterns for each command type */
-const SCHEDULE_UPDATE_RE = /\[schedule_update:\s*([^\]]+)\]/gi;
+const SCHEDULE_UPDATE_RE = new RegExp(`\\[schedule_update:\\s*(${QUOTED_PARAM_BLOCK})\\]`, "gi");
 const CROSS_POST_RE = /\[cross_post:\s*target="([^"]+)"\]/gi;
 const SELFIE_RE = /\[selfie(?::\s*(?:context="([^"]*)"|"([^"]*)"|([^\]\r\n"]+)))?\]/gi;
 const MEMORY_RE = /\[memory:\s*target="([^"]+)"\s*,\s*summary="([^"]+)"\]/gi;
-const SCENE_RE = /\[scene:\s*([^\]]+)\]/gi;
-const HAPTIC_RE = /\[haptic:\s*([^\]]+)\]/gi;
-const SPOTIFY_RE = /\[spotify:\s*([^\]]+)\]/gi;
-const DIRECT_MESSAGE_RE = /\[dm:\s*([^\]]+)\]/gi;
+const SCENE_RE = new RegExp(`\\[scene:\\s*(${QUOTED_PARAM_BLOCK})\\]`, "gi");
+const HAPTIC_RE = new RegExp(`\\[haptic:\\s*(${QUOTED_PARAM_BLOCK})\\]`, "gi");
+const SPOTIFY_RE = new RegExp(`\\[spotify:\\s*(${QUOTED_PARAM_BLOCK})\\]`, "gi");
+const DIRECT_MESSAGE_RE = new RegExp(`\\[dm:\\s*(${QUOTED_PARAM_BLOCK})\\]`, "gi");
 const INFLUENCE_RE = /<influence>([\s\S]*?)<\/influence>/gi;
 const NOTE_RE = /<note>([\s\S]*?)<\/note>/gi;
 
 // Assistant command regexes
-const CREATE_PERSONA_RE = /\[create_persona:\s*([^\]]+)\]/gi;
-const CREATE_CHARACTER_RE = /\[create_character:\s*([^\]]+)\]/gi;
-const UPDATE_CHARACTER_RE = /\[update_character:\s*([^\]]+)\]/gi;
-const UPDATE_PERSONA_RE = /\[update_persona:\s*([^\]]+)\]/gi;
-const CREATE_LOREBOOK_RE = /\[create_lorebook:\s*([^\]]+)\]/gi;
+const CREATE_PERSONA_RE = new RegExp(`\\[create_persona:\\s*(${QUOTED_PARAM_BLOCK})\\]`, "gi");
+const CREATE_CHARACTER_RE = new RegExp(`\\[create_character:\\s*(${QUOTED_PARAM_BLOCK})\\]`, "gi");
+const UPDATE_CHARACTER_RE = new RegExp(`\\[update_character:\\s*(${QUOTED_PARAM_BLOCK})\\]`, "gi");
+const UPDATE_PERSONA_RE = new RegExp(`\\[update_persona:\\s*(${QUOTED_PARAM_BLOCK})\\]`, "gi");
+const CREATE_LOREBOOK_RE = new RegExp(`\\[create_lorebook:\\s*(${QUOTED_PARAM_BLOCK})\\]`, "gi");
 const CREATE_LOREBOOK_BLOCK_RE = /<create_lorebook>([\s\S]*?)<\/create_lorebook>/gi;
 const UPDATE_LOREBOOK_BLOCK_RE = /<update_lorebook>([\s\S]*?)<\/update_lorebook>/gi;
-const CREATE_CHAT_RE = /\[create_chat:\s*([^\]]+)\]/gi;
-const NAVIGATE_RE = /\[navigate:\s*([^\]]+)\]/gi;
-const FETCH_RE = /\[fetch:\s*([^\]]+)\]/gi;
+const CREATE_CHAT_RE = new RegExp(`\\[create_chat:\\s*(${QUOTED_PARAM_BLOCK})\\]`, "gi");
+const NAVIGATE_RE = new RegExp(`\\[navigate:\\s*(${QUOTED_PARAM_BLOCK})\\]`, "gi");
+const FETCH_RE = new RegExp(`\\[fetch:\\s*(${QUOTED_PARAM_BLOCK})\\]`, "gi");
 
 function decodeQuotedParamValue(value: string): string {
   return value.replace(/\\(["\\nrt])/g, (_match, escaped: string) => {

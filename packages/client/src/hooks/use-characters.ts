@@ -337,6 +337,7 @@ export function useCreatePersona() {
       nameColor?: string;
       dialogueColor?: string;
       boxColor?: string;
+      trackerCardColors?: string;
       personaStats?: string;
       altDescriptions?: string;
       tags?: string;
@@ -365,6 +366,7 @@ export function useUpdatePersona() {
       nameColor?: string;
       dialogueColor?: string;
       boxColor?: string;
+      trackerCardColors?: string;
       personaStats?: string;
       altDescriptions?: string;
       tags?: string;

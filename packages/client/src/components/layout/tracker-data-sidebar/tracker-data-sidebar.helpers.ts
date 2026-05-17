@@ -1,6 +1,26 @@
 import type { CSSProperties } from "react";
-import type { CharacterStat, GameState, Persona, PresentCharacter } from "@marinara-engine/shared";
+import type {
+  CharacterStat,
+  GameState,
+  Persona,
+  PresentCharacter,
+  TrackerCardColorConfig,
+} from "@marinara-engine/shared";
 import type { SpriteInfo } from "../../../hooks/use-characters";
+import {
+  DEFAULT_TRACKER_CARD_ACCENT,
+  getTrackerCardCssPaintValue,
+  getTrackerCardFinish,
+  getTrackerCardPaintOpacity,
+  getTrackerCardPortraitStageBackground,
+  getTrackerCardSkinFinish,
+  getTrackerCardSolidColor,
+  getTrackerCardStylePalette,
+  getTrackerCardStyleVars,
+  normalizeTrackerCardColorMode,
+  parseTrackerCardColorConfig,
+  type TrackerCardStylePalette,
+} from "../../../lib/tracker-card-colors";
 import {
   FEATURED_CHARACTER_PORTRAIT_STAGE_REM,
   PERSONA_ADD_STAT_DENSITY_HEIGHT_REM,
@@ -427,49 +447,29 @@ export function getWorldAmbienceStyle(state: GameState | null): CSSProperties {
 }
 
 export function getSolidCssColor(value: string | null | undefined) {
-  const text = value?.trim();
-  if (!text || /gradient|url\(|;/.test(text.toLowerCase())) return null;
-  return text;
+  return getTrackerCardSolidColor(value);
 }
 
-function getCssPaintValue(value: string | null | undefined) {
-  const text = value?.trim();
-  if (!text || /url\(|;|expression\(/.test(text.toLowerCase())) return null;
-  return text;
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
 }
 
-function getBackgroundPaintLayer(value: string) {
-  return value.toLowerCase().includes("gradient(") ? value : `linear-gradient(${value}, ${value})`;
+function opacityWeight(value: number) {
+  return clampPercent(value) / 100;
 }
 
-function getPaintSolidFallback(value: string | null | undefined) {
-  const solidColor = getSolidCssColor(value);
-  if (solidColor) return solidColor;
-
-  const text = getCssPaintValue(value);
-  if (!text) return null;
-
-  return (
-    text.match(
-      /#[0-9a-f]{3,8}\b|rgba?\([^)]+\)|hsla?\([^)]+\)|oklch\([^)]+\)|oklab\([^)]+\)|lch\([^)]+\)|lab\([^)]+\)|var\(--[\w-]+\)/i,
-    )?.[0] ?? null
-  );
+function scalePercent(value: number, opacity: number) {
+  return Math.round(value * opacityWeight(opacity));
 }
-
-const DEFAULT_TRACKER_ACCENT = "var(--primary)";
 
 export interface TrackerProfileColors {
   dialogueColor?: string | null;
   nameColor?: string | null;
   boxColor?: string | null;
+  trackerCardColors?: TrackerCardColorConfig | null;
 }
 
-interface TrackerProfilePalette {
-  accent: string;
-  displayLayer: string;
-  displaySolid: string;
-  box: string;
-}
+type TrackerProfilePalette = TrackerCardStylePalette;
 
 function getStringValue(value: unknown) {
   return typeof value === "string" ? value : undefined;
@@ -477,28 +477,29 @@ function getStringValue(value: unknown) {
 
 function getTrackerProfilePalette(
   profileColors: TrackerProfileColors | null | undefined,
-  fallbackAccent = DEFAULT_TRACKER_ACCENT,
+  fallbackAccent = DEFAULT_TRACKER_CARD_ACCENT,
 ): TrackerProfilePalette {
-  const dialogueColor = getSolidCssColor(profileColors?.dialogueColor);
-  const display = getCssPaintValue(profileColors?.nameColor);
-  const displaySolid =
-    getPaintSolidFallback(profileColors?.nameColor) ??
-    dialogueColor ??
-    getSolidCssColor(profileColors?.boxColor) ??
-    fallbackAccent;
-  const accent = dialogueColor ?? displaySolid;
+  const trackerCardColors = profileColors?.trackerCardColors ?? null;
+  const mode = normalizeTrackerCardColorMode(trackerCardColors?.mode);
+  const finish = getTrackerCardFinish(trackerCardColors, mode);
+  const opacity = getTrackerCardPaintOpacity(trackerCardColors);
+  const effectiveColors = mode === "default" ? null : mode === "custom" ? trackerCardColors : profileColors;
+  const effectiveFallback = mode === "chat" ? fallbackAccent : DEFAULT_TRACKER_CARD_ACCENT;
 
-  return {
-    accent,
-    displayLayer: getBackgroundPaintLayer(display ?? displaySolid),
-    displaySolid,
-    box: getSolidCssColor(profileColors?.boxColor) ?? displaySolid,
-  };
+  return getTrackerCardStylePalette({
+    colors: effectiveColors,
+    finish,
+    opacity,
+    portraitStageBackground: getTrackerCardPortraitStageBackground(trackerCardColors),
+    fallbackAccent: effectiveFallback,
+  });
 }
 
-function withTrackerProfileStyle(palette: TrackerProfilePalette, background: string): CSSProperties {
+function withTrackerProfileStyle(palette: TrackerProfilePalette, background?: string): CSSProperties {
+  const vars = getTrackerCardStyleVars({ palette, background });
   const style: CSSProperties & {
     "--tracker-profile-accent": string;
+    "--tracker-profile-accent-layer": string;
     "--tracker-profile-dialogue": string;
     "--tracker-profile-dialogue-border": string;
     "--tracker-profile-dialogue-glow": string;
@@ -506,25 +507,122 @@ function withTrackerProfileStyle(palette: TrackerProfilePalette, background: str
     "--tracker-profile-display-solid": string;
     "--tracker-profile-icon": string;
     "--tracker-profile-box": string;
+    "--tracker-profile-box-layer": string;
+    "--tracker-profile-frame": string;
+    "--tracker-profile-frame-blend": string;
+    "--tracker-profile-panel": string;
+    "--tracker-profile-panel-blend": string;
+    "--tracker-profile-panel-strong": string;
+    "--tracker-profile-panel-strong-blend": string;
+    "--tracker-profile-portrait-base": string;
+    "--tracker-profile-portrait-bottom-glow-opacity": string;
+    "--tracker-profile-portrait-bottom-rule-opacity": string;
+    "--tracker-profile-portrait-media-blur": string;
+    "--tracker-profile-portrait-media-opacity": string;
+    "--tracker-profile-portrait-media-saturate": string;
+    "--tracker-profile-portrait-light": string;
+    "--tracker-profile-portrait-light-opacity": string;
+    "--tracker-profile-portrait-rim": string;
+    "--tracker-profile-portrait-rim-opacity": string;
+    "--tracker-profile-portrait-side-mask-opacity": string;
+    "--tracker-profile-portrait-veil": string;
+    "--tracker-profile-muted-panel": string;
+    "--tracker-profile-muted-panel-blend": string;
+    "--tracker-profile-rule": string;
     "--tracker-profile-surface": string;
+    "--tracker-profile-surface-blend": string;
+    "--tracker-profile-slot-rule": string;
+    "--tracker-profile-slot-shadow": string;
+    "--tracker-profile-slot-surface": string;
+    "--tracker-profile-slot-surface-blend": string;
+    "--tracker-profile-tint-opacity": string;
+    "--tracker-profile-display-opacity": string;
+    "--tracker-profile-contrast-soft-top": string;
+    "--tracker-profile-contrast-soft-mid": string;
+    "--tracker-profile-contrast-soft-bottom": string;
+    "--tracker-profile-contrast-strong-top": string;
+    "--tracker-profile-contrast-strong-mid": string;
+    "--tracker-profile-contrast-strong-bottom": string;
+    "--tracker-profile-muted-text": string;
+    "--tracker-profile-number-text": string;
+    "--tracker-profile-row-rule": string;
+    "--tracker-profile-stat-fill-glow": string;
+    "--tracker-profile-stat-fill-highlight": string;
+    "--tracker-profile-stat-track": string;
+    "--tracker-profile-stat-track-blend": string;
+    "--tracker-profile-stat-track-ring": string;
+    "--tracker-profile-stat-track-shadow": string;
+    "--tracker-profile-text": string;
+    "--tracker-inline-foreground": string;
+    "--tracker-inline-muted": string;
+    "--tracker-inline-number": string;
+    "--tracker-inline-rule": string;
     "--primary"?: string;
   } = {
-    "--tracker-profile-accent": palette.accent,
-    "--tracker-profile-dialogue": palette.accent,
-    "--tracker-profile-dialogue-border": `color-mix(in srgb, color-mix(in srgb, ${palette.box} 52%, ${palette.accent} 48%) 58%, transparent)`,
-    "--tracker-profile-dialogue-glow": `color-mix(in srgb, ${palette.accent} 26%, transparent)`,
-    "--tracker-profile-display-layer": palette.displayLayer,
-    "--tracker-profile-display-solid": palette.displaySolid,
-    "--tracker-profile-icon": palette.displaySolid,
-    "--tracker-profile-box": palette.box,
-    "--tracker-profile-surface":
-      `linear-gradient(135deg, ` +
-      `color-mix(in srgb, color-mix(in srgb, var(--card) 90%, ${palette.displaySolid} 10%) 64%, transparent), ` +
-      `color-mix(in srgb, color-mix(in srgb, var(--background) 92%, ${palette.box} 8%) 54%, transparent))`,
-    background,
+    "--tracker-profile-accent": vars.accent,
+    "--tracker-profile-accent-layer": vars.accentLayer,
+    "--tracker-profile-dialogue": vars.accent,
+    "--tracker-profile-dialogue-border": vars.dialogueBorder,
+    "--tracker-profile-dialogue-glow": vars.dialogueGlow,
+    "--tracker-profile-display-layer": vars.displayLayer,
+    "--tracker-profile-display-solid": vars.displaySolid,
+    "--tracker-profile-icon": vars.displaySolid,
+    "--tracker-profile-box": vars.box,
+    "--tracker-profile-box-layer": vars.boxLayer,
+    "--tracker-profile-frame": vars.frame,
+    "--tracker-profile-frame-blend": vars.frameBlend,
+    "--tracker-profile-panel": vars.panel,
+    "--tracker-profile-panel-blend": vars.panelBlend,
+    "--tracker-profile-panel-strong": vars.panelStrong,
+    "--tracker-profile-panel-strong-blend": vars.panelStrongBlend,
+    "--tracker-profile-portrait-base": vars.portraitBase,
+    "--tracker-profile-portrait-bottom-glow-opacity": vars.portraitBottomGlowOpacity,
+    "--tracker-profile-portrait-bottom-rule-opacity": vars.portraitBottomRuleOpacity,
+    "--tracker-profile-portrait-media-blur": vars.portraitMediaBlur,
+    "--tracker-profile-portrait-media-opacity": vars.portraitMediaOpacity,
+    "--tracker-profile-portrait-media-saturate": vars.portraitMediaSaturate,
+    "--tracker-profile-portrait-light": vars.portraitLight,
+    "--tracker-profile-portrait-light-opacity": vars.portraitLightOpacity,
+    "--tracker-profile-portrait-rim": vars.portraitRim,
+    "--tracker-profile-portrait-rim-opacity": vars.portraitRimOpacity,
+    "--tracker-profile-portrait-side-mask-opacity": vars.portraitSideMaskOpacity,
+    "--tracker-profile-portrait-veil": vars.portraitVeil,
+    "--tracker-profile-muted-panel": vars.mutedPanel,
+    "--tracker-profile-muted-panel-blend": vars.mutedPanelBlend,
+    "--tracker-profile-rule": vars.rule,
+    "--tracker-profile-surface": vars.surface,
+    "--tracker-profile-surface-blend": vars.surfaceBlend,
+    "--tracker-profile-slot-rule": vars.slotRule,
+    "--tracker-profile-slot-shadow": vars.slotShadow,
+    "--tracker-profile-slot-surface": vars.slotSurface,
+    "--tracker-profile-slot-surface-blend": vars.slotSurfaceBlend,
+    "--tracker-profile-tint-opacity": vars.tintOpacity,
+    "--tracker-profile-display-opacity": vars.displayOpacity,
+    "--tracker-profile-contrast-soft-top": vars.contrastSoftTop,
+    "--tracker-profile-contrast-soft-mid": vars.contrastSoftMid,
+    "--tracker-profile-contrast-soft-bottom": vars.contrastSoftBottom,
+    "--tracker-profile-contrast-strong-top": vars.contrastStrongTop,
+    "--tracker-profile-contrast-strong-mid": vars.contrastStrongMid,
+    "--tracker-profile-contrast-strong-bottom": vars.contrastStrongBottom,
+    "--tracker-profile-muted-text": vars.mutedText,
+    "--tracker-profile-number-text": vars.numberText,
+    "--tracker-profile-row-rule": vars.rowRule,
+    "--tracker-profile-stat-fill-glow": vars.statFillGlow,
+    "--tracker-profile-stat-fill-highlight": vars.statFillHighlight,
+    "--tracker-profile-stat-track": vars.statTrack,
+    "--tracker-profile-stat-track-blend": vars.statTrackBlend,
+    "--tracker-profile-stat-track-ring": vars.statTrackRing,
+    "--tracker-profile-stat-track-shadow": vars.statTrackShadow,
+    "--tracker-profile-text": vars.text,
+    "--tracker-inline-foreground": "var(--tracker-profile-text)",
+    "--tracker-inline-muted": "var(--tracker-profile-muted-text)",
+    "--tracker-inline-number": "var(--tracker-profile-number-text)",
+    "--tracker-inline-rule": "var(--tracker-profile-row-rule)",
+    background: vars.background,
+    backgroundBlendMode: vars.backgroundBlendMode,
   };
 
-  if (palette.accent !== DEFAULT_TRACKER_ACCENT) {
+  if (palette.accent !== DEFAULT_TRACKER_CARD_ACCENT) {
     style["--primary"] = palette.accent;
   }
 
@@ -536,17 +634,23 @@ export function getPersonaProfileColors(persona: Persona | null): TrackerProfile
     dialogueColor: persona?.dialogueColor,
     nameColor: persona?.nameColor,
     boxColor: persona?.boxColor,
+    trackerCardColors: parseTrackerCardColorConfig(persona?.trackerCardColors),
   };
 }
 
-export function getPersonaAmbienceStyle(persona: Persona | null): CSSProperties {
+export function getPersonaAmbienceStyle(
+  persona: Persona | null,
+  options: { paintBackground?: boolean } = {},
+): CSSProperties {
   const palette = getTrackerProfilePalette(getPersonaProfileColors(persona));
-  return withTrackerProfileStyle(
-    palette,
-    `radial-gradient(circle at 78% 18%, color-mix(in srgb, ${palette.displaySolid} 12%, transparent) 0%, transparent 54%), ` +
-      `linear-gradient(135deg, color-mix(in srgb, color-mix(in srgb, var(--card) 88%, ${palette.box} 12%) 58%, transparent), ` +
-      `color-mix(in srgb, color-mix(in srgb, var(--background) 88%, ${palette.displaySolid} 12%) 54%, transparent))`,
-  );
+  const style = withTrackerProfileStyle(palette);
+
+  if (options.paintBackground === false) {
+    delete style.background;
+    delete style.backgroundBlendMode;
+  }
+
+  return style;
 }
 
 export function getPersonaInitial(persona: Persona | null) {
@@ -563,13 +667,22 @@ export function getCharacterProfileColors(rawData: unknown): TrackerProfileColor
         ? (data.extensions as Record<string, unknown>)
         : null;
 
+    const trackerCardColorsRaw = extensions?.trackerCardColors;
     const profileColors: TrackerProfileColors = {
-      dialogueColor: getSolidCssColor(getStringValue(extensions?.dialogueColor)),
-      nameColor: getCssPaintValue(getStringValue(extensions?.nameColor)),
-      boxColor: getSolidCssColor(getStringValue(extensions?.boxColor)),
+      dialogueColor: getTrackerCardCssPaintValue(getStringValue(extensions?.dialogueColor)),
+      nameColor: getTrackerCardCssPaintValue(getStringValue(extensions?.nameColor)),
+      boxColor: getTrackerCardCssPaintValue(getStringValue(extensions?.boxColor)),
+      ...(trackerCardColorsRaw !== undefined && {
+        trackerCardColors: parseTrackerCardColorConfig(trackerCardColorsRaw),
+      }),
     };
 
-    return profileColors.dialogueColor || profileColors.nameColor || profileColors.boxColor ? profileColors : null;
+    return profileColors.dialogueColor ||
+      profileColors.nameColor ||
+      profileColors.boxColor ||
+      profileColors.trackerCardColors
+      ? profileColors
+      : null;
   } catch {
     return null;
   }
@@ -581,12 +694,18 @@ export function getCharacterAmbienceStyle(
 ): CSSProperties {
   const palette = getTrackerProfilePalette(
     profileColors,
-    getSolidCssColor(character.stats?.find((stat) => stat.color)?.color) ?? DEFAULT_TRACKER_ACCENT,
+    getSolidCssColor(character.stats?.find((stat) => stat.color)?.color) ?? DEFAULT_TRACKER_CARD_ACCENT,
+  );
+  const finish = getTrackerCardSkinFinish(palette.finish);
+  const boxMix = scalePercent(Math.min(32, Math.round(finish.surfaceBoxMix * 0.9)), palette.opacity.boxColorOpacity);
+  const displayMix = scalePercent(
+    Math.min(28, Math.round(finish.surfaceDisplayMix * 0.85)),
+    palette.opacity.nameColorOpacity,
   );
   return withTrackerProfileStyle(
     palette,
-    `linear-gradient(135deg, color-mix(in srgb, color-mix(in srgb, var(--card) 88%, ${palette.box} 12%) 52%, transparent), ` +
-      `color-mix(in srgb, color-mix(in srgb, var(--background) 90%, ${palette.displaySolid} 10%) 46%, transparent))`,
+    `linear-gradient(135deg, color-mix(in srgb, var(--card) ${100 - boxMix}%, ${palette.box} ${boxMix}%), ` +
+      `color-mix(in srgb, var(--background) ${100 - displayMix}%, ${palette.displaySolid} ${displayMix}%))`,
   );
 }
 

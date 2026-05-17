@@ -51,6 +51,7 @@ import {
   ToggleLeft,
   ToggleRight,
   AlertTriangle,
+  ChevronDown,
   Globe,
   Users,
   UserRound,
@@ -65,12 +66,14 @@ import {
   MoveRight,
   Tag,
   Wand2,
+  FlaskConical,
   FolderPlus,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { HelpTooltip } from "../ui/HelpTooltip";
 import { api } from "../../lib/api-client";
 import type { Lorebook, LorebookEntry, LorebookFolder, LorebookCategory } from "@marinara-engine/shared";
+import { testPrimaryKeys, testSecondaryKeys } from "@marinara-engine/shared";
 import { LorebookEntryRow } from "./LorebookEntryRow";
 import { LorebookFolderRow } from "./LorebookFolderRow";
 import { ExpandableTextarea, estimateTokens } from "./LorebookFormFields";
@@ -351,6 +354,17 @@ export function LorebookEditor() {
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [entrySearch, setEntrySearch] = useState("");
   const [entrySort, setEntrySort] = useState<EntrySortKey>("order");
+  // Keyword-test panel state. The panel is collapsed by default so it doesn't
+  // crowd the editor for users who don't need it. We debounce the text input
+  // so each keystroke doesn't re-run match computation against potentially
+  // hundreds of entries on every press.
+  const [keywordPreviewOpen, setKeywordPreviewOpen] = useState(false);
+  const [keywordPreviewText, setKeywordPreviewText] = useState("");
+  const [keywordPreviewDebounced, setKeywordPreviewDebounced] = useState("");
+  useEffect(() => {
+    const handle = window.setTimeout(() => setKeywordPreviewDebounced(keywordPreviewText), 150);
+    return () => window.clearTimeout(handle);
+  }, [keywordPreviewText]);
   const [draggingEntryIdx, setDraggingEntryIdx] = useState<number | null>(null);
   const [entryDragReadyIdx, setEntryDragReadyIdx] = useState<number | null>(null);
   const [entryDropIdx, setEntryDropIdx] = useState<number | null>(null);
@@ -571,6 +585,41 @@ export function LorebookEditor() {
 
   const canReorderEntries = showFolderGrouping && entries.length > 1 && !reorderEntries.isPending;
   const canReorderFolders = showFolderGrouping && folders.length > 1 && !reorderFolders.isPending;
+
+  // Keyword-test verdicts: for each entry, would the debounced preview text
+  // activate it? Honors useRegex / matchWholeWords / caseSensitive / selective
+  // + secondaryKeys + selectiveLogic / enabled / constant. Skips runtime gates
+  // that have no meaning outside a live chat (timing, probability, character
+  // filters, semantic embeddings, recursive scan, group selection).
+  // Logic mirrors packages/server/src/services/lorebook/keyword-scanner.ts —
+  // both sides import the same shared helpers so the preview cannot drift.
+  const previewMatches = useMemo(() => {
+    const result = new Map<string, "matched" | "constant">();
+    const text = keywordPreviewDebounced;
+    if (!text.trim()) return result;
+    for (const entry of entries) {
+      if (!entry.enabled) continue;
+      if (entry.constant) {
+        result.set(entry.id, "constant");
+        continue;
+      }
+      const opts = {
+        useRegex: entry.useRegex,
+        matchWholeWords: entry.matchWholeWords,
+        caseSensitive: entry.caseSensitive,
+      };
+      const { matched } = testPrimaryKeys(entry.keys, text, opts);
+      if (!matched) continue;
+      if (entry.selective && entry.secondaryKeys.length > 0) {
+        if (!testSecondaryKeys(entry.secondaryKeys, text, entry.selectiveLogic, opts)) continue;
+      }
+      result.set(entry.id, "matched");
+    }
+    return result;
+  }, [entries, keywordPreviewDebounced]);
+
+  const previewActive = keywordPreviewDebounced.trim().length > 0;
+  const previewMatchCount = previewMatches.size;
 
   // ── Handlers ──
   const markLorebookDirty = useCallback(() => setLorebookDirty(true), []);
@@ -1428,6 +1477,73 @@ export function LorebookEditor() {
 
             {activeTab === "entries" && (
               <div className="space-y-3">
+                {/* Keyword test — collapsible authoring aid (issue #816).
+                    Paste sample chat text or a paragraph and the editor
+                    highlights which entries would activate. Honors keyword
+                    matching rules only — see previewMatches memo for scope. */}
+                <div className="rounded-xl bg-[var(--secondary)]/60 ring-1 ring-[var(--border)]">
+                  <button
+                    type="button"
+                    onClick={() => setKeywordPreviewOpen((open) => !open)}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-xs font-medium transition-colors hover:bg-[var(--accent)]/30"
+                    aria-expanded={keywordPreviewOpen}
+                  >
+                    <FlaskConical size="0.8125rem" className="shrink-0 text-amber-400" />
+                    <span className="flex-1">Keyword test</span>
+                    {previewActive && (
+                      <span className="rounded-full bg-emerald-400/15 px-2 py-0.5 text-[0.625rem] font-medium text-emerald-300 ring-1 ring-emerald-400/25">
+                        {previewMatchCount} match{previewMatchCount === 1 ? "" : "es"}
+                      </span>
+                    )}
+                    <ChevronDown
+                      size="0.8125rem"
+                      className={cn(
+                        "shrink-0 text-[var(--muted-foreground)] transition-transform",
+                        keywordPreviewOpen ? "rotate-0" : "-rotate-90",
+                      )}
+                    />
+                  </button>
+                  {keywordPreviewOpen && (
+                    <div className="space-y-2 border-t border-[var(--border)] px-3 py-3">
+                      <p className="text-[0.6875rem] text-[var(--muted-foreground)]">
+                        Paste sample chat text and entries whose keys would trigger get an emerald accent and a
+                        &quot;Would activate&quot; chip. Constant entries are flagged separately because they
+                        activate regardless of text. Out of scope: timing, probability, character/persona filters,
+                        and semantic matching.
+                      </p>
+                      <div className="relative">
+                        <textarea
+                          value={keywordPreviewText}
+                          onChange={(e) => setKeywordPreviewText(e.target.value)}
+                          placeholder="Paste a paragraph or sample messages here…"
+                          rows={4}
+                          className="w-full resize-y rounded-xl bg-[var(--background)] px-3 py-2 pr-8 text-xs ring-1 ring-[var(--border)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                        />
+                        {keywordPreviewText && (
+                          <button
+                            type="button"
+                            onClick={() => setKeywordPreviewText("")}
+                            className="absolute right-2 top-2 rounded p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+                            title="Clear keyword test"
+                            aria-label="Clear keyword test"
+                          >
+                            <X size="0.75rem" />
+                          </button>
+                        )}
+                      </div>
+                      {previewActive && (
+                        <p className="text-[0.6875rem] text-[var(--muted-foreground)]">
+                          {previewMatchCount === 0
+                            ? "No entries would activate on this text."
+                            : `${previewMatchCount} of ${entries.filter((e) => e.enabled).length} enabled entr${
+                                entries.filter((e) => e.enabled).length === 1 ? "y" : "ies"
+                              } would activate.`}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {/* Search + Sort + Add — flex-wrap so the row collapses
                     gracefully on narrow viewports. Search keeps a 12rem
                     (~192px) flex-basis so it stays usable; the buttons tile
@@ -1731,6 +1847,7 @@ export function LorebookEditor() {
                                           selectionMode={entrySelectionMode}
                                           isSelected={selectedEntryIds.has(entry.id)}
                                           onToggleSelected={() => toggleEntrySelection(entry.id)}
+                                          previewMatch={previewMatches.get(entry.id)}
                                         />
                                         {showDropAfter && <div className="mx-2 mt-1 h-0.5 rounded-full bg-amber-400" />}
                                       </div>
@@ -1833,6 +1950,7 @@ export function LorebookEditor() {
                               selectionMode={entrySelectionMode}
                               isSelected={selectedEntryIds.has(entry.id)}
                               onToggleSelected={() => toggleEntrySelection(entry.id)}
+                              previewMatch={previewMatches.get(entry.id)}
                             />
                             {showDropAfter && <div className="mx-2 mt-1 h-0.5 rounded-full bg-amber-400" />}
                           </div>
@@ -1867,6 +1985,7 @@ export function LorebookEditor() {
                         selectionMode={entrySelectionMode}
                         isSelected={selectedEntryIds.has(entry.id)}
                         onToggleSelected={() => toggleEntrySelection(entry.id)}
+                        previewMatch={previewMatches.get(entry.id)}
                       />
                     ))}
                   </div>
@@ -1897,12 +2016,14 @@ function VectorizeSection({ lorebookId, entries }: { lorebookId: string; entries
   const [selectedConnectionId, setSelectedConnectionId] = useState<string>("");
   const [vectorizing, setVectorizing] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
-  const entryCount = entries.length;
-  const vectorizedCount = entries.filter(
+  const excludedCount = entries.filter((entry) => entry.excludeFromVectorization).length;
+  const vectorizableEntries = entries.filter((entry) => !entry.excludeFromVectorization);
+  const vectorizableEntryCount = vectorizableEntries.length;
+  const vectorizedCount = vectorizableEntries.filter(
     (entry) => Array.isArray(entry.embedding) && entry.embedding.length > 0,
   ).length;
-  const missingCount = Math.max(0, entryCount - vectorizedCount);
-  const allVectorized = entryCount > 0 && missingCount === 0;
+  const missingCount = Math.max(0, vectorizableEntryCount - vectorizedCount);
+  const allVectorized = vectorizableEntryCount > 0 && missingCount === 0;
 
   // Auto-select first embedding connection
   useEffect(() => {
@@ -1954,9 +2075,10 @@ function VectorizeSection({ lorebookId, entries }: { lorebookId: string; entries
           )}
         >
           {allVectorized ? <Check size="0.625rem" /> : <AlertTriangle size="0.625rem" />}
-          {vectorizedCount}/{entryCount} entries vectorized
+          {vectorizedCount}/{vectorizableEntryCount} entries vectorized
         </span>
         {missingCount > 0 && <span>{missingCount} still need embeddings.</span>}
+        {excludedCount > 0 && <span>{excludedCount} excluded.</span>}
       </div>
       {embeddingConnections.length === 0 ? (
         <p className="text-[0.625rem] text-[var(--muted-foreground)]">
@@ -1978,14 +2100,14 @@ function VectorizeSection({ lorebookId, entries }: { lorebookId: string; entries
             </select>
             <button
               onClick={handleVectorize}
-              disabled={vectorizing || entryCount === 0}
+              disabled={vectorizing || vectorizableEntryCount === 0}
               className="flex items-center gap-1.5 rounded-xl bg-violet-500/15 px-3 py-1.5 text-xs font-medium text-violet-400 ring-1 ring-violet-500/30 transition-all hover:bg-violet-500/25 active:scale-[0.98] disabled:opacity-50"
             >
               {vectorizing ? <Loader2 size="0.75rem" className="animate-spin" /> : <Sparkles size="0.75rem" />}
               {vectorizing
                 ? "Vectorizing..."
                 : allVectorized
-                  ? `Re-vectorize ${entryCount} entries`
+                  ? `Re-vectorize ${vectorizableEntryCount} entries`
                   : `Vectorize ${missingCount} missing`}
             </button>
           </div>

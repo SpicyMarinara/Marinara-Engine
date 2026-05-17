@@ -295,7 +295,7 @@ export const useGameModeStore = create<GameModeStore>((set) => ({
       let modified = false;
       const nextNpcs = s.npcs.map((npc) => {
         const match = avatars.find((a) => a.name.toLowerCase() === npc.name.toLowerCase());
-        if (match && !npc.avatarUrl) {
+        if (match && match.avatarUrl !== npc.avatarUrl) {
           modified = true;
           return { ...npc, avatarUrl: match.avatarUrl };
         }

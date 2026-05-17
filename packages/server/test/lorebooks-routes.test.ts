@@ -51,6 +51,7 @@ function lorebookEntry(id: string, keyword: string, name: string, content: strin
     activationConditions: "[]",
     schedule: null,
     preventRecursion: "false",
+    excludeFromVectorization: "false",
     embedding: null,
     createdAt: "2026-05-10T00:00:00.000Z",
     updatedAt: "2026-05-10T00:00:00.000Z",

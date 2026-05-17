@@ -19,6 +19,8 @@ export interface HapticDevice {
 export interface HapticStatus {
   connected: boolean;
   serverUrl: string | null;
+  /** Server-side default URL used when the client does not provide one. */
+  defaultServerUrl?: string;
   scanning: boolean;
   devices: HapticDevice[];
 }

@@ -9,11 +9,13 @@ import {
   FilePlus,
   FileText,
   Folder,
+  FolderCheck,
   Grid3X3,
   List,
   Plus,
   RefreshCw,
   Upload,
+  X,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { SearchInput } from "./SearchInput";
@@ -50,6 +52,14 @@ export interface ToolbarProps {
   listColumns: { size: boolean; modified: boolean };
   /** Toggle a list column */
   onToggleColumn: (col: "size" | "modified") => void;
+  /** Optional close action when the browser is opened as an in-game overlay. */
+  onClose?: () => void;
+  /** Optional per-game asset selection controls */
+  assetSelection?: {
+    active: boolean;
+    excludedCount: number;
+    onToggle: () => void;
+  };
 }
 
 /**
@@ -72,6 +82,8 @@ export function Toolbar({
   onBreadcrumbClick,
   listColumns,
   onToggleColumn,
+  onClose,
+  assetSelection,
 }: ToolbarProps) {
   const [newOpen, setNewOpen] = useState(false);
   const [colsOpen, setColsOpen] = useState(false);
@@ -87,18 +99,10 @@ export function Toolbar({
     if (!newOpen && !colsOpen) return;
     const handle = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (
-        newOpen &&
-        !newBtnRef.current?.contains(t) &&
-        !newDropdownRef.current?.contains(t)
-      ) {
+      if (newOpen && !newBtnRef.current?.contains(t) && !newDropdownRef.current?.contains(t)) {
         setNewOpen(false);
       }
-      if (
-        colsOpen &&
-        !colsBtnRef.current?.contains(t) &&
-        !colsDropdownRef.current?.contains(t)
-      ) {
+      if (colsOpen && !colsBtnRef.current?.contains(t) && !colsDropdownRef.current?.contains(t)) {
         setColsOpen(false);
       }
     };
@@ -152,28 +156,42 @@ export function Toolbar({
   return (
     <div className="flex flex-col gap-1.5 border-b border-[var(--border)]/40 bg-[var(--card)]/60 px-4 py-2 backdrop-blur-sm">
       {/* Breadcrumb — full width, horizontal scroll on mobile */}
-      <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap text-sm scrollbar-hide max-sm:w-full max-sm:flex-1">
-        {breadcrumb.map((part, i) => {
-          const isLast = i === breadcrumb.length - 1;
-          const pathUpToHere = breadcrumb.slice(1, i + 1).filter(Boolean).join("/");
-          return (
-            <span key={i} className="flex shrink-0 items-center gap-1">
-              {i > 0 && <ChevronRight size="0.75rem" className="text-[var(--muted-foreground)]" />}
-              {isLast ? (
-                <span className="font-medium text-[var(--foreground)]">
-                  {part || "Game Assets"}
-                </span>
-              ) : (
-                <button
-                  onClick={() => onBreadcrumbClick(pathUpToHere)}
-                  className="text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)]"
-                >
-                  {part || "Game Assets"}
-                </button>
-              )}
-            </span>
-          );
-        })}
+      <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap text-sm scrollbar-hide">
+          {breadcrumb.map((part, i) => {
+            const isLast = i === breadcrumb.length - 1;
+            const pathUpToHere = breadcrumb
+              .slice(1, i + 1)
+              .filter(Boolean)
+              .join("/");
+            return (
+              <span key={i} className="flex shrink-0 items-center gap-1">
+                {i > 0 && <ChevronRight size="0.75rem" className="text-[var(--muted-foreground)]" />}
+                {isLast ? (
+                  <span className="font-medium text-[var(--foreground)]">{part || "Game Assets"}</span>
+                ) : (
+                  <button
+                    onClick={() => onBreadcrumbClick(pathUpToHere)}
+                    className="text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)]"
+                  >
+                    {part || "Game Assets"}
+                  </button>
+                )}
+              </span>
+            );
+          })}
+        </div>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+            title="Close assets"
+            aria-label="Close assets"
+          >
+            <X size="0.875rem" />
+          </button>
+        )}
       </div>
 
       {/* Actions row */}
@@ -246,6 +264,30 @@ export function Toolbar({
               colsDropdownRef,
             )}
           </>
+        )}
+
+        {assetSelection && (
+          <button
+            type="button"
+            onClick={assetSelection.onToggle}
+            className={cn(
+              "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
+              assetSelection.active
+                ? "border-[var(--primary)]/40 bg-[var(--primary)]/10 text-[var(--primary)]"
+                : "border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] hover:bg-[var(--accent)]",
+            )}
+            title="Select assets for this game"
+            aria-label="Select assets for this game"
+            aria-pressed={assetSelection.active}
+          >
+            <FolderCheck size="0.875rem" />
+            <span className="max-md:hidden">{assetSelection.active ? "Selecting" : "Game assets"}</span>
+            {assetSelection.excludedCount > 0 && (
+              <span className="rounded-full bg-[var(--primary)]/15 px-1.5 py-0.5 text-[0.625rem] leading-none text-[var(--primary)]">
+                {assetSelection.excludedCount}
+              </span>
+            )}
+          </button>
         )}
 
         <button

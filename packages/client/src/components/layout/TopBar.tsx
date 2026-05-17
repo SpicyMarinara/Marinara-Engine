@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────
 // Layout: Top Bar (polished, with hover glow)
 // ──────────────────────────────────────────────
-import { PanelLeft, Home, Settings, Link, BookOpen, Users, Sparkles, FileText, User, Bot, Folder } from "lucide-react";
+import { PanelLeft, Home, Settings, Link, BookOpen, Users, Sparkles, FileText, User, Bot } from "lucide-react";
 import { useUIStore } from "../../stores/ui.store";
 import { useChatStore } from "../../stores/chat.store";
 import { useAgentStore } from "../../stores/agent.store";
@@ -27,9 +27,6 @@ export function TopBar() {
 
   const isBotBrowserActive = rightPanelOpen && rightPanel === "bot-browser";
   const isCharactersPanelActive = rightPanelOpen && rightPanel === "characters";
-  const gameAssetsBrowserOpen = useUIStore((s) => s.gameAssetsBrowserOpen);
-  const openGameAssetsBrowser = useUIStore((s) => s.openGameAssetsBrowser);
-  const closeGameAssetsBrowser = useUIStore((s) => s.closeGameAssetsBrowser);
 
   return (
     <header
@@ -131,23 +128,6 @@ export function TopBar() {
             </button>
           );
         })}
-
-        {/* Game Assets */}
-        <button
-          onClick={() => (gameAssetsBrowserOpen ? closeGameAssetsBrowser() : openGameAssetsBrowser())}
-          className={cn(
-            "relative rounded-lg p-2 transition-all duration-200 max-sm:p-1.5",
-            gameAssetsBrowserOpen
-              ? "bg-[var(--accent)] text-[var(--primary)] shadow-sm"
-              : "text-[var(--muted-foreground)] hover:text-[var(--primary)]",
-          )}
-          title="Assets"
-        >
-          <Folder size="0.9375rem" />
-          {gameAssetsBrowserOpen && (
-            <span className="absolute -bottom-0.5 left-1/2 h-0.5 w-3 -translate-x-1/2 rounded-full bg-gradient-to-r from-emerald-400 to-teal-500" />
-          )}
-        </button>
 
         {/* Settings */}
         <button

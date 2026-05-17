@@ -119,7 +119,6 @@ export async function adminRoutes(app: FastifyInstance) {
       await runDelete("custom_tools", () => db.delete(schema.customTools).run());
       await runDelete("regex_scripts", () => db.delete(schema.regexScripts).run());
       await runDelete("custom_themes", () => db.delete(schema.customThemes).run());
-      await runDelete("game_state_snapshots", () => db.delete(schema.gameStateSnapshots).run());
     }
 
     if (requestedScopes.includes("media")) {

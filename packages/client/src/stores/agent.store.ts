@@ -3,6 +3,7 @@
 // ──────────────────────────────────────────────
 import { create } from "zustand";
 import type { AgentResult, CharacterCardFieldUpdate } from "@marinara-engine/shared";
+import type { AgentFailure } from "../lib/agent-failures";
 
 /**
  * A character_card_update result awaiting user confirmation.
@@ -52,6 +53,8 @@ interface AgentState {
   isProcessing: boolean;
   /** Agent types that failed even after auto-retry — manual retry available */
   failedAgentTypes: string[];
+  /** Rich failure details for the retry UI and troubleshooting copy */
+  failedAgentFailures: AgentFailure[];
   thoughtBubbles: Array<{
     agentId: string;
     agentName: string;
@@ -83,6 +86,7 @@ interface AgentState {
   addDebugEntry: (entry: Omit<AgentDebugEntry, "timestamp"> & { timestamp?: number }) => void;
   clearDebugLog: () => void;
   setFailedAgentTypes: (types: string[]) => void;
+  setFailedAgentFailures: (failures: AgentFailure[]) => void;
   clearFailedAgentTypes: () => void;
   addThoughtBubble: (agentId: string, agentName: string, content: string) => void;
   dismissThoughtBubble: (index: number) => void;
@@ -107,6 +111,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   debugLog: [],
   isProcessing: false,
   failedAgentTypes: [],
+  failedAgentFailures: [],
   thoughtBubbles: [],
   echoMessages: [],
   echoVisibleCount: 0,
@@ -138,8 +143,22 @@ export const useAgentStore = create<AgentState>((set) => ({
 
   clearDebugLog: () => set({ debugLog: [] }),
 
-  setFailedAgentTypes: (types) => set({ failedAgentTypes: types }),
-  clearFailedAgentTypes: () => set({ failedAgentTypes: [] }),
+  setFailedAgentTypes: (types) =>
+    set({
+      failedAgentTypes: types,
+      failedAgentFailures: types.map((agentType) => ({
+        agentType,
+        agentName: agentType,
+        error: null,
+        reasonLabel: null,
+      })),
+    }),
+  setFailedAgentFailures: (failures) =>
+    set({
+      failedAgentTypes: failures.map((failure) => failure.agentType),
+      failedAgentFailures: failures,
+    }),
+  clearFailedAgentTypes: () => set({ failedAgentTypes: [], failedAgentFailures: [] }),
 
   addThoughtBubble: (agentId, agentName, content) =>
     set((s) => ({
@@ -182,6 +201,7 @@ export const useAgentStore = create<AgentState>((set) => ({
       debugLog: [],
       isProcessing: false,
       failedAgentTypes: [],
+      failedAgentFailures: [],
       thoughtBubbles: [],
       echoMessages: [],
       echoVisibleCount: 0,

@@ -6,6 +6,7 @@ import type { AvatarCropValue } from "../lib/utils";
 import { useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "../lib/api-client";
+import { formatAgentFailuresToast, toAgentFailure } from "../lib/agent-failures";
 import { chatBackgroundMetadataToUrl } from "../lib/backgrounds";
 import { agentKeys } from "./use-agents";
 import type { PendingCardUpdate } from "../stores/agent.store";
@@ -401,6 +402,45 @@ function getCachedChatMode(qc: QueryClient, chatId: string): Chat["mode"] | unde
   return list?.find((chat) => chat.id === chatId)?.mode;
 }
 
+function getCachedChatForGeneration(qc: QueryClient, chatId: string): Chat | undefined {
+  const activeChat = useChatStore.getState().activeChat;
+  if (activeChat?.id === chatId) return activeChat;
+  const detail = qc.getQueryData<Chat>(chatKeys.detail(chatId));
+  if (detail) return detail;
+  const list = qc.getQueryData<Chat[]>(chatKeys.list());
+  return list?.find((chat) => chat.id === chatId);
+}
+
+function shouldRefreshGameStateAfterGeneration(qc: QueryClient, chatId: string) {
+  const chat = getCachedChatForGeneration(qc, chatId);
+  if (chat?.mode === "game") return true;
+  if (chat?.mode !== "roleplay" && chat?.mode !== "visual_novel") return false;
+  const enableAgents = parseChatMetadata(chat.metadata).enableAgents;
+  return enableAgents === true || enableAgents === "true";
+}
+
+const pendingVisibleGameStateRefreshes = new Map<string, Promise<void>>();
+
+async function refreshVisibleGameStateAfterGeneration(chatId: string) {
+  const existing = pendingVisibleGameStateRefreshes.get(chatId);
+  if (existing) return existing;
+
+  const refreshPromise = (async () => {
+    try {
+      const gs = await api.get<import("@marinara-engine/shared").GameState | null>(`/chats/${chatId}/game-state`);
+      if (useChatStore.getState().activeChatId === chatId) {
+        useGameStateStore.getState().setGameState(gs ?? null);
+      }
+    } catch {
+      /* best-effort — SSE patches already populated the store */
+    } finally {
+      pendingVisibleGameStateRefreshes.delete(chatId);
+    }
+  })();
+  pendingVisibleGameStateRefreshes.set(chatId, refreshPromise);
+  return refreshPromise;
+}
+
 function slugifyGameMapId(value: string): string {
   return value
     .trim()
@@ -460,11 +500,15 @@ function applyGameMapUpdate(qc: QueryClient, chatId: string, map: GameMap) {
   }
 }
 
-function applyGameStatePatchToStore(chatId: string, patch: Record<string, unknown>) {
+function applyGameStatePatchToStore(
+  chatId: string,
+  patch: Record<string, unknown>,
+  anchor?: { messageId: string; swipeIndex: number } | null,
+) {
   const current = useGameStateStore.getState().current;
 
   if (current?.chatId === chatId) {
-    const merged = { ...current, ...patch, chatId };
+    const merged = { ...current, ...patch, chatId, ...(anchor ?? {}) };
     if (patch.playerStats && typeof patch.playerStats === "object" && current.playerStats) {
       const mergedPS = { ...current.playerStats, ...(patch.playerStats as object) };
       const patchPS = patch.playerStats as Record<string, unknown>;
@@ -483,7 +527,7 @@ function applyGameStatePatchToStore(chatId: string, patch: Record<string, unknow
 
   // Agent data may arrive before the base game state is loaded. Seed a minimal
   // state with chatId so mounted tracker/HUD views recognise it as current.
-  useGameStateStore.getState().setGameState({ ...patch, chatId } as any);
+  useGameStateStore.getState().setGameState({ ...patch, chatId, ...(anchor ?? {}) } as any);
 }
 
 /**
@@ -514,7 +558,7 @@ export function useGenerate() {
   const setCyoaChoices = useAgentStore((s) => s.setCyoaChoices);
   const clearCyoaChoices = useAgentStore((s) => s.clearCyoaChoices);
   const enqueuePendingCardUpdate = useAgentStore((s) => s.enqueuePendingCardUpdate);
-  const setFailedAgentTypes = useAgentStore((s) => s.setFailedAgentTypes);
+  const setFailedAgentFailures = useAgentStore((s) => s.setFailedAgentFailures);
   const clearFailedAgentTypes = useAgentStore((s) => s.clearFailedAgentTypes);
   const setGameState = useGameStateStore((s) => s.setGameState);
 
@@ -531,6 +575,7 @@ export function useGenerate() {
       mentionedCharacterNames?: string[];
       forCharacterId?: string;
       generationGuide?: string;
+      generationGuideSource?: "narrator" | "guide" | "game_start";
       agentInjectionOverrides?: Array<{ agentType: string; agentName?: string; text: string }>;
       impersonatePresetId?: string;
       impersonateConnectionId?: string;
@@ -560,6 +605,7 @@ export function useGenerate() {
       // buffer, etc.) so that a background chat's events don't corrupt the active view.
       const isActiveChat = () => useChatStore.getState().activeChatId === params.chatId;
       const isGameGeneration = getCachedChatMode(qc, params.chatId) === "game";
+      const shouldRefreshGameState = shouldRefreshGameStateAfterGeneration(qc, params.chatId);
 
       // Only touch global streaming UI state if the user is viewing this chat.
       // Background generations (e.g. autonomous messaging) run silently,
@@ -663,6 +709,7 @@ export function useGenerate() {
       let typewriterDone: (() => void) | null = null;
       let rafId = 0;
       const persistedMessages = new Map<string, Message>();
+      let gameStatePatchAnchor: { messageId: string; swipeIndex: number } | null = null;
 
       // ── Streaming think-tag filter ──
       // Models may emit <think>...</think>, <thinking>...</thinking>, or
@@ -1154,7 +1201,7 @@ export function useGenerate() {
               const patch = event.data as Record<string, unknown>;
               console.warn(`[Generate] ${event.type} received:`, patch);
               if (!isActiveChat()) break;
-              applyGameStatePatchToStore(params.chatId, patch);
+              applyGameStatePatchToStore(params.chatId, patch, gameStatePatchAnchor);
               break;
             }
 
@@ -1211,6 +1258,13 @@ export function useGenerate() {
               const savedMessage = event.data as Message;
               await qc.cancelQueries({ queryKey: chatKeys.messages(params.chatId), exact: true });
               persistedMessages.set(savedMessage.id, savedMessage);
+              gameStatePatchAnchor = {
+                messageId: savedMessage.id,
+                swipeIndex:
+                  typeof savedMessage.activeSwipeIndex === "number" && Number.isInteger(savedMessage.activeSwipeIndex)
+                    ? savedMessage.activeSwipeIndex
+                    : 0,
+              };
               // During non-regeneration streaming, defer the cache upsert until
               // streaming ends. Otherwise the saved message appears in the list
               // while the StreamingIndicator is still visible — causing a
@@ -1306,8 +1360,10 @@ export function useGenerate() {
             }
 
             case "agent_error": {
-              const errData = event.data as { agentType: string; error: string };
-              toast.error(errData.error);
+              const errData = event.data as { agentType: string; agentName?: string | null; error: string };
+              const failure = toAgentFailure(errData);
+              setFailedAgentFailures([failure]);
+              showError(formatAgentFailuresToast([failure]));
               break;
             }
 
@@ -1468,12 +1524,14 @@ export function useGenerate() {
             }
 
             case "agents_retry_failed": {
-              const failedList = event.data as Array<{ agentType: string; error: string | null }>;
-              const types = failedList.map((f) => f.agentType);
-              setFailedAgentTypes(types);
-              showError(
-                `${types.length} agent${types.length > 1 ? "s" : ""} failed after retry. Use the retry button in the chat header to try again.`,
-              );
+              const failedList = event.data as Array<{
+                agentType: string;
+                agentName?: string | null;
+                error: string | null;
+              }>;
+              const failures = failedList.map(toAgentFailure);
+              setFailedAgentFailures(failures);
+              showError(formatAgentFailuresToast(failures));
               break;
             }
           }
@@ -1507,18 +1565,10 @@ export function useGenerate() {
         // Cancel any pending animation frame to prevent leaks
         cancelAnimationFrame(rafId);
 
-        if (isGameGeneration) {
-          // Refresh game state from DB so the HUD shows the correct tracker data
-          // for the active swipe. Conversation and roleplay chats skip this
-          // game-only request; on large chats it can dominate the cleanup tail.
-          try {
-            const gs = await api.get<import("@marinara-engine/shared").GameState | null>(
-              `/chats/${params.chatId}/game-state`,
-            );
-            if (gs) useGameStateStore.getState().setGameState(gs);
-          } catch {
-            /* best-effort — SSE patches already populated the store */
-          }
+        if (shouldRefreshGameState) {
+          // Refresh game state from DB so HUD/sidebar trackers settle on the
+          // persisted active-swipe row after generation-time SSE patches.
+          await refreshVisibleGameStateAfterGeneration(params.chatId);
         }
         // Re-sort sidebar so this chat floats to the top
         qc.invalidateQueries({ queryKey: chatKeys.list() });
@@ -1695,7 +1745,7 @@ export function useGenerate() {
       clearCyoaChoices,
       enqueuePendingCardUpdate,
       clearFailedAgentTypes,
-      setFailedAgentTypes,
+      setFailedAgentFailures,
       setGameState,
     ],
   );
@@ -1717,7 +1767,18 @@ export function useGenerate() {
       clearThoughtBubbles();
 
       try {
+        const flushPatch = useGameStateStore.getState().flushPatch;
+        if (flushPatch) {
+          try {
+            await flushPatch();
+          } catch (error) {
+            const detail = error instanceof Error && error.message ? `: ${error.message}` : "";
+            throw new Error(`Failed to flush pending game-state edits${detail}`, { cause: error });
+          }
+        }
+
         let hasError = false;
+        const failedRetryFailures: Array<ReturnType<typeof toAgentFailure>> = [];
         for await (const event of api.streamEvents(
           "/generate/retry-agents",
           {
@@ -1852,17 +1913,22 @@ export function useGenerate() {
               }
               if (!result.success && result.error) {
                 hasError = true;
-                showError(`${result.agentName ?? result.agentType} failed: ${result.error}`);
+                const failure = toAgentFailure(result);
+                failedRetryFailures.push(failure);
+                setFailedAgentFailures(failedRetryFailures);
+                showError(formatAgentFailuresToast([failure]));
               }
               break;
             }
             case "agents_retry_failed": {
-              const failedList = event.data as Array<{ agentType: string; error: string | null }>;
-              const types = failedList.map((f) => f.agentType);
-              setFailedAgentTypes(types);
-              showError(
-                `${types.length} agent${types.length > 1 ? "s" : ""} failed after retry. Use the retry button in the chat header to try again.`,
-              );
+              const failedList = event.data as Array<{
+                agentType: string;
+                agentName?: string | null;
+                error: string | null;
+              }>;
+              const failures = failedList.map(toAgentFailure);
+              setFailedAgentFailures(failures);
+              showError(formatAgentFailuresToast(failures));
               break;
             }
             case "game_state":
@@ -1886,6 +1952,14 @@ export function useGenerate() {
                 qc.invalidateQueries({ queryKey: ["messages", chatId] });
                 qc.invalidateQueries({ queryKey: ["gallery", chatId] });
               }
+              break;
+            }
+            case "agent_error": {
+              const errData = event.data as { agentType: string; agentName?: string | null; error: string };
+              hasError = true;
+              const failure = toAgentFailure(errData);
+              setFailedAgentFailures([failure]);
+              showError(formatAgentFailuresToast([failure]));
               break;
             }
             case "error": {
@@ -1914,14 +1988,8 @@ export function useGenerate() {
         showError(msg);
       } finally {
         setProcessing(false);
-        if (getCachedChatMode(qc, chatId) === "game") {
-          // Refresh game state from DB for the same reason as normal generation.
-          api
-            .get<import("@marinara-engine/shared").GameState | null>(`/chats/${chatId}/game-state`)
-            .then((gs) => {
-              if (gs) useGameStateStore.getState().setGameState(gs);
-            })
-            .catch(() => {});
+        if (shouldRefreshGameStateAfterGeneration(qc, chatId)) {
+          void refreshVisibleGameStateAfterGeneration(chatId);
         }
       }
     },
@@ -1933,7 +2001,7 @@ export function useGenerate() {
       clearFailedAgentTypes,
       clearThoughtBubbles,
       setCyoaChoices,
-      setFailedAgentTypes,
+      setFailedAgentFailures,
       setProcessing,
       setGameState,
       qc,

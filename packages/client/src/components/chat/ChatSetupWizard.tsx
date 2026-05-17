@@ -30,6 +30,7 @@ import { useChatPresets, useApplyChatPreset } from "../../hooks/use-chat-presets
 import { useUIStore } from "../../stores/ui.store";
 import { useChatStore } from "../../stores/chat.store";
 import { api } from "../../lib/api-client";
+import { filterLanguageGenerationConnections } from "../../lib/connection-filters";
 import { getCharacterTitle, parseCharacterDisplayData } from "../../lib/character-display";
 import { ChoiceSelectionModal } from "../presets/ChoiceSelectionModal";
 import type { Chat, ChatMode, ChatPreset } from "@marinara-engine/shared";
@@ -337,10 +338,9 @@ function ConversationQuickSetup({ chat, onFinish }: ChatSetupWizardProps) {
     const raw = (chat as unknown as { metadata?: string | Record<string, unknown> }).metadata;
     return typeof raw === "string" ? JSON.parse(raw) : (raw ?? {});
   }, [chat]);
-  const connectionOptions = useMemo(() => ((connections ?? []) as ConnectionSetupOption[]) ?? [], [connections]);
-  const textConnectionOptions = useMemo(
-    () => connectionOptions.filter((connection) => connection.provider !== "image_generation"),
-    [connectionOptions],
+  const connectionOptions = useMemo(
+    () => filterLanguageGenerationConnections((connections ?? []) as ConnectionSetupOption[]),
+    [connections],
   );
   const selectedConnection = useMemo(
     () => connectionOptions.find((connection) => connection.id === chat.connectionId) ?? null,
@@ -550,13 +550,13 @@ function ConversationQuickSetup({ chat, onFinish }: ChatSetupWizardProps) {
               >
                 <option value="">None</option>
                 <option value="random">🎲 Random</option>
-                {textConnectionOptions.map((c) => (
+                {connectionOptions.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
                   </option>
                 ))}
               </select>
-              {textConnectionOptions.length === 0 && (
+              {connectionOptions.length === 0 && (
                 <button
                   onClick={() => {
                     openRightPanel("connections");
@@ -869,7 +869,10 @@ function RoleplaySetupWizard({ chat, onFinish }: ChatSetupWizardProps) {
       (allCharacters ?? []) as Array<{ id: string; data: string; comment?: string | null; avatarPath: string | null }>,
     [allCharacters],
   );
-  const connectionOptions = useMemo(() => ((connections ?? []) as ConnectionSetupOption[]) ?? [], [connections]);
+  const connectionOptions = useMemo(
+    () => filterLanguageGenerationConnections((connections ?? []) as ConnectionSetupOption[]),
+    [connections],
+  );
   const selectedConnection = useMemo(
     () => connectionOptions.find((connection) => connection.id === chat.connectionId) ?? null,
     [connectionOptions, chat.connectionId],

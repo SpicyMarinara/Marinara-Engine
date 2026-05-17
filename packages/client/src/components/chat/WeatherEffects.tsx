@@ -7,6 +7,7 @@ import { useEffect, useRef, useMemo } from "react";
 interface WeatherEffectsProps {
   weather?: string | null;
   timeOfDay?: string | null;
+  showCelestial?: boolean;
 }
 
 // ── Particle types ──
@@ -682,7 +683,7 @@ function drawMoon(ctx: CanvasRenderingContext2D, x: number, y: number, radius: n
 // Main component
 // ═══════════════════════════════════════════════
 
-export function WeatherEffects({ weather, timeOfDay }: WeatherEffectsProps) {
+export function WeatherEffects({ weather, timeOfDay, showCelestial = true }: WeatherEffectsProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particlesRef = useRef<Particle[]>([]);
   const frameRef = useRef<number>(0);
@@ -699,8 +700,9 @@ export function WeatherEffects({ weather, timeOfDay }: WeatherEffectsProps) {
   }, [weather, timeOfDay]);
 
   // Render when we have particles, celestial bodies, or time-based ambient effects
+  const shouldDrawCelestial = showCelestial && config.celestial !== "none";
   const shouldRender =
-    config.count > 0 || config.addFireflies || config.addStars || config.celestial !== "none" || config.sunsetGlow;
+    config.count > 0 || config.addFireflies || config.addStars || shouldDrawCelestial || config.sunsetGlow;
 
   useEffect(() => {
     if (!shouldRender) return;
@@ -786,7 +788,7 @@ export function WeatherEffects({ weather, timeOfDay }: WeatherEffectsProps) {
       // ── Celestial bodies (sun / moon) ──
       const cw = canvas.width / dpr;
       const ch = canvas.height / dpr;
-      if (config.celestial !== "none" && config.isClearSky) {
+      if (shouldDrawCelestial && config.isClearSky) {
         const bodyRadius = Math.min(cw, ch) * 0.035; // ~3.5% of smallest dimension
         const hour = config.hour >= 0 ? config.hour : 12;
 
@@ -853,7 +855,7 @@ export function WeatherEffects({ weather, timeOfDay }: WeatherEffectsProps) {
       window.removeEventListener("resize", resize);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [config, shouldRender]);
+  }, [config, shouldDrawCelestial, shouldRender]);
 
   if (!shouldRender) return null;
 

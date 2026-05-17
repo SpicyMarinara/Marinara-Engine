@@ -739,6 +739,7 @@ export class OpenAIProvider extends BaseLLMProvider {
       method: "POST",
       headers: this.buildHeaders(),
       body: JSON.stringify(body),
+      bufferResponse: !effectiveStream,
       ...(options.signal ? { signal: options.signal } : {}),
     });
 
@@ -937,6 +938,7 @@ export class OpenAIProvider extends BaseLLMProvider {
       method: "POST",
       headers: this.buildHeaders(),
       body: JSON.stringify(body),
+      bufferResponse: !useStream,
       ...(options.signal ? { signal: options.signal } : {}),
     });
 
@@ -1324,6 +1326,7 @@ export class OpenAIProvider extends BaseLLMProvider {
   ): AsyncGenerator<string, LLMUsage | void, unknown> {
     const url = `${this.baseUrl}/responses`;
     const body = this.buildResponsesBody(messages, options);
+    const parseAsStream = this.isOpenAIChatGPTProvider() || (options.stream ?? true);
     logger.debug(
       "[OpenAI chatResponses] model=%s stream=%s reasoning=%j enableThinking=%s verbosity=%s max_output_tokens=%s tools=%s",
       body.model,
@@ -1341,6 +1344,7 @@ export class OpenAIProvider extends BaseLLMProvider {
       method: "POST",
       headers: this.buildHeaders(),
       body: JSON.stringify(body),
+      bufferResponse: !parseAsStream,
       ...(options.signal ? { signal: options.signal } : {}),
     });
 
@@ -1359,6 +1363,7 @@ export class OpenAIProvider extends BaseLLMProvider {
           method: "POST",
           headers: this.buildHeaders(),
           body: JSON.stringify(body),
+          bufferResponse: !parseAsStream,
           ...(options.signal ? { signal: options.signal } : {}),
         });
         if (!response.ok) {
@@ -1369,8 +1374,6 @@ export class OpenAIProvider extends BaseLLMProvider {
         throw new Error(`OpenAI Responses API error ${response.status}: ${sanitizeApiError(errorText)}`);
       }
     }
-
-    const parseAsStream = this.isOpenAIChatGPTProvider() || (options.stream ?? true);
 
     if (!parseAsStream) {
       // Non-streaming: parse the full response
@@ -1527,6 +1530,7 @@ export class OpenAIProvider extends BaseLLMProvider {
       method: "POST",
       headers: this.buildHeaders(),
       body: JSON.stringify(body),
+      bufferResponse: !useStream,
       ...(options.signal ? { signal: options.signal } : {}),
     });
 
@@ -1545,6 +1549,7 @@ export class OpenAIProvider extends BaseLLMProvider {
           method: "POST",
           headers: this.buildHeaders(),
           body: JSON.stringify(body),
+          bufferResponse: !useStream,
           ...(options.signal ? { signal: options.signal } : {}),
         });
         if (!response.ok) {

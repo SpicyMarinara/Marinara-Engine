@@ -2,10 +2,12 @@
 // Routes: Backup
 // ──────────────────────────────────────────────
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { basename, join, relative } from "path";
+import { basename, dirname, join, relative } from "path";
 import { existsSync, readdirSync, statSync } from "fs";
-import { cp, mkdir, copyFile, readFile, writeFile } from "fs/promises";
+import { cp, mkdir, copyFile, readFile, readdir, writeFile } from "fs/promises";
 import AdmZip from "adm-zip";
+import { FILE_BACKED_TABLES } from "../db/file-backed-store.js";
+import * as schema from "../db/schema/index.js";
 import { createCharactersStorage } from "../services/storage/characters.storage.js";
 import { createLorebooksStorage } from "../services/storage/lorebooks.storage.js";
 import { createPromptsStorage } from "../services/storage/prompts.storage.js";
@@ -22,9 +24,38 @@ import { logger } from "../lib/logger.js";
 
 /** Directories inside DATA_DIR that should be included in every backup. */
 const BACKUP_DIRS = ["storage", "avatars", "sprites", "backgrounds", "gallery", "fonts", "knowledge-sources"];
+const PROFILE_ASSET_DIRS = BACKUP_DIRS.filter((dirName) => dirName !== "storage");
 const PROFILE_IMPORT_BODY_LIMIT_BYTES = 256 * 1024 * 1024;
 
 type ExportFormat = "native" | "compatible";
+type ProfileTableSnapshots = Record<string, Array<Record<string, unknown>>>;
+type ProfileFileAsset = { path: string; data: string; size: number };
+type ProfileStorageSnapshot = {
+  version: 1;
+  tables: ProfileTableSnapshots;
+  files: ProfileFileAsset[];
+};
+type ProfileImportStats = {
+  characters: number;
+  personas: number;
+  lorebooks: number;
+  presets: number;
+  agents: number;
+  themes: number;
+  chats?: number;
+  messages?: number;
+  connections?: number;
+  files?: number;
+  tables?: Record<string, number>;
+};
+type ProfileImportProgress = {
+  phase: string;
+  label: string;
+  completedItems: number;
+  totalItems: number;
+  imported: ProfileImportStats;
+};
+type ProfileImportProgressReporter = (progress: ProfileImportProgress) => void;
 
 function resolveBackupDir(dataDir: string, dirName: string) {
   return dirName === "storage" ? getFileStorageDir() : join(dataDir, dirName);
@@ -182,6 +213,196 @@ function redactAgentSecrets(agent: any) {
   return { ...agent, settings: redactSettings(agent.settings) };
 }
 
+function symbolValue<T>(target: object, symbolName: string): T | undefined {
+  const symbol = Object.getOwnPropertySymbols(target).find((entry) => String(entry) === symbolName);
+  return symbol ? (target as Record<symbol, T>)[symbol] : undefined;
+}
+
+function isSchemaTable(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && symbolValue(value as object, "Symbol(drizzle:IsDrizzleTable)"));
+}
+
+function schemaTableName(table: Record<string, unknown>) {
+  return symbolValue<string>(table, "Symbol(drizzle:Name)") ?? null;
+}
+
+const profileTableObjects = new Map<string, Record<string, unknown>>();
+for (const candidate of Object.values(schema)) {
+  if (!isSchemaTable(candidate)) continue;
+  const tableName = schemaTableName(candidate);
+  if (tableName && FILE_BACKED_TABLES.includes(tableName as (typeof FILE_BACKED_TABLES)[number])) {
+    profileTableObjects.set(tableName, candidate);
+  }
+}
+
+function sanitizeProfileTableRows(tableName: string, rows: Array<Record<string, unknown>>) {
+  if (tableName === "api_connections") {
+    return rows.map((row) => ({ ...row, apiKeyEncrypted: "" }));
+  }
+  if (tableName === "agent_configs") {
+    return rows.map((row) => redactAgentSecrets(row));
+  }
+  return rows;
+}
+
+async function buildProfileTableSnapshot(app: FastifyInstance): Promise<ProfileTableSnapshots> {
+  const tables: ProfileTableSnapshots = {};
+
+  for (const tableName of FILE_BACKED_TABLES) {
+    const table = profileTableObjects.get(tableName);
+    if (!table) continue;
+    const rows = (await app.db.select().from(table as any)) as Array<Record<string, unknown>>;
+    tables[tableName] = sanitizeProfileTableRows(tableName, rows);
+  }
+
+  return tables;
+}
+
+function normalizeProfileAssetPath(pathValue: unknown) {
+  if (typeof pathValue !== "string" || !pathValue.trim()) return null;
+  if (pathValue.includes("\0")) return null;
+  const parts = pathValue.replace(/\\/g, "/").split("/").filter(Boolean);
+  if (parts.length < 2) return null;
+  if (!PROFILE_ASSET_DIRS.includes(parts[0]!)) return null;
+  if (parts.some((part) => part === "." || part === ".." || part.includes(":"))) return null;
+  return parts.join("/");
+}
+
+async function collectProfileAssetFiles(dataDir: string): Promise<ProfileFileAsset[]> {
+  const files: ProfileFileAsset[] = [];
+
+  for (const dirName of PROFILE_ASSET_DIRS) {
+    const src = join(dataDir, dirName);
+    if (!existsSync(src)) continue;
+    const stack = [src];
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      for (const entry of await readdir(current, { withFileTypes: true })) {
+        const full = join(current, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(full);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        const relPath = [dirName, relative(src, full)].filter(Boolean).join("/").split(/[\\/]/g).join("/");
+        const safePath = normalizeProfileAssetPath(relPath);
+        if (!safePath) continue;
+        const buffer = await readFile(full);
+        files.push({ path: safePath, data: buffer.toString("base64"), size: buffer.length });
+      }
+    }
+  }
+
+  return files;
+}
+
+async function buildProfileStorageSnapshot(app: FastifyInstance): Promise<ProfileStorageSnapshot> {
+  return {
+    version: 1,
+    tables: await buildProfileTableSnapshot(app),
+    files: await collectProfileAssetFiles(getDataDir()),
+  };
+}
+
+function isProfileStorageSnapshot(value: unknown): value is ProfileStorageSnapshot {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<ProfileStorageSnapshot>;
+  return candidate.version === 1 && !!candidate.tables && typeof candidate.tables === "object";
+}
+
+function buildProfileImportStats(tableCounts: Record<string, number>, files: number) {
+  return {
+    characters: tableCounts.characters ?? 0,
+    personas: tableCounts.personas ?? 0,
+    lorebooks: tableCounts.lorebooks ?? 0,
+    presets: tableCounts.prompt_presets ?? 0,
+    agents: tableCounts.agent_configs ?? 0,
+    themes: tableCounts.custom_themes ?? 0,
+    chats: tableCounts.chats ?? 0,
+    messages: tableCounts.messages ?? 0,
+    connections: tableCounts.api_connections ?? 0,
+    files,
+    tables: tableCounts,
+  };
+}
+
+function countProfileStorageSnapshotItems(snapshot: ProfileStorageSnapshot) {
+  const tableRows = FILE_BACKED_TABLES.reduce((count, tableName) => {
+    const rows = snapshot.tables[tableName];
+    return count + (Array.isArray(rows) ? rows.length : 0);
+  }, 0);
+  return tableRows + (Array.isArray(snapshot.files) ? snapshot.files.length : 0);
+}
+
+function countLegacyProfileImportItems(data: Record<string, any>) {
+  return ["characters", "personas", "lorebooks", "presets", "agents", "themes"].reduce((count, key) => {
+    const value = data[key];
+    return count + (Array.isArray(value) ? value.length : 0);
+  }, 0);
+}
+
+async function importProfileStorageSnapshot(
+  app: FastifyInstance,
+  snapshot: ProfileStorageSnapshot,
+  onProgress?: ProfileImportProgressReporter,
+) {
+  const totalItems = Math.max(1, countProfileStorageSnapshotItems(snapshot));
+  let completedItems = 0;
+  const tableCounts: Record<string, number> = {};
+
+  const emit = (phase: string, label: string, files = 0) => {
+    onProgress?.({
+      phase,
+      label,
+      completedItems,
+      totalItems,
+      imported: buildProfileImportStats(tableCounts, files),
+    });
+  };
+
+  for (const tableName of FILE_BACKED_TABLES) {
+    const table = profileTableObjects.get(tableName);
+    const rows = snapshot.tables[tableName];
+    if (!table || !Array.isArray(rows) || rows.length === 0) {
+      tableCounts[tableName] = 0;
+      continue;
+    }
+
+    emit("tables", `Importing ${tableName.replace(/_/g, " ")}`);
+    const primaryKey = (table as Record<string, unknown>).id;
+    for (const row of rows) {
+      const cleanRow = { ...row };
+      if (tableName === "api_connections") cleanRow.apiKeyEncrypted = "";
+      const insert = app.db.insert(table as any).values(cleanRow as any) as any;
+      if (primaryKey) {
+        await insert.onConflictDoUpdate({ target: primaryKey, set: cleanRow });
+      } else {
+        await insert;
+      }
+      completedItems++;
+      tableCounts[tableName] = (tableCounts[tableName] ?? 0) + 1;
+      emit("tables", `Importing ${tableName.replace(/_/g, " ")}`);
+    }
+  }
+
+  let files = 0;
+  if (Array.isArray(snapshot.files)) {
+    for (const file of snapshot.files) {
+      const safePath = normalizeProfileAssetPath(file?.path);
+      if (!safePath || typeof file.data !== "string") continue;
+      const outputPath = assertInsideDir(getDataDir(), join(getDataDir(), ...safePath.split("/")));
+      await mkdir(dirname(outputPath), { recursive: true });
+      await writeFile(outputPath, Buffer.from(file.data, "base64"));
+      files++;
+      completedItems++;
+      emit("files", `Restoring ${safePath}`, files);
+    }
+  }
+
+  await flushDB();
+  return buildProfileImportStats(tableCounts, files);
+}
+
 async function buildProfileExportEnvelope(app: FastifyInstance): Promise<ExportEnvelope> {
   const chars = createCharactersStorage(app.db);
   const lbs = createLorebooksStorage(app.db);
@@ -247,6 +468,7 @@ async function buildProfileExportEnvelope(app: FastifyInstance): Promise<ExportE
       presets: presetExports,
       agents: allAgents,
       themes: allThemes,
+      fileStorage: await buildProfileStorageSnapshot(app),
     },
   };
 }
@@ -468,317 +690,409 @@ export async function backupRoutes(app: FastifyInstance) {
     }
 
     const data = envelope.data as Record<string, any>;
-    const chars = createCharactersStorage(app.db);
-    const lbs = createLorebooksStorage(app.db);
-    const presets = createPromptsStorage(app.db);
-    const agents = createAgentsStorage(app.db);
-    const themes = createThemesStorage(app.db);
-
-    const stats = { characters: 0, personas: 0, lorebooks: 0, presets: 0, agents: 0, themes: 0 };
-
-    // Import characters
-    if (Array.isArray(data.characters)) {
-      for (const c of data.characters) {
-        try {
-          const charData = typeof c.data === "string" ? JSON.parse(c.data) : c.data;
-          const result = await chars.create(
-            charData,
-            c.avatarPath ?? undefined,
-            normalizeTimestampOverrides({ createdAt: c.createdAt, updatedAt: c.updatedAt }),
-            typeof c.comment === "string" ? c.comment : undefined,
-          );
-          // Restore avatar from base64 if provided
-          if (c.avatarBase64 && result?.avatarPath) {
-            const dataDir = getDataDir();
-            const avatarDir = join(dataDir, "avatars");
-            await mkdir(avatarDir, { recursive: true });
-            const { writeFile } = await import("fs/promises");
-            const avatarFile = resolveAvatarWritePath(dataDir, result.avatarPath);
-            if (avatarFile) {
-              await writeFile(avatarFile, Buffer.from(c.avatarBase64, "base64"));
-            }
-          }
-          stats.characters++;
-        } catch {
-          /* skip failed entries */
-        }
+    const wantsProgressStream = String(req.headers.accept ?? "").includes("text/event-stream");
+    const totalItems = isProfileStorageSnapshot(data.fileStorage)
+      ? Math.max(1, countProfileStorageSnapshotItems(data.fileStorage))
+      : Math.max(1, countLegacyProfileImportItems(data));
+    const sendEvent = (event: { type: string; data?: unknown; [key: string]: unknown }) => {
+      if (wantsProgressStream && !reply.raw.destroyed) {
+        reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
       }
+    };
+    const sendProgress = (progress: ProfileImportProgress) => {
+      sendEvent({ type: "progress", data: progress });
+    };
+
+    if (wantsProgressStream) {
+      reply.raw.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+      sendEvent({
+        type: "started",
+        data: {
+          label: "Profile import started",
+          totalItems,
+        },
+      });
     }
 
-    // Import personas
-    if (Array.isArray(data.personas)) {
-      for (const p of data.personas) {
-        try {
-          // Restore persona avatar from base64 if provided
-          let personaAvatarPath: string | undefined;
-          if (p.avatarBase64) {
-            const dataDir = getDataDir();
-            const avatarDir = join(dataDir, "avatars");
-            await mkdir(avatarDir, { recursive: true });
-            const ext = ".png";
-            const avatarName = `persona-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
-            personaAvatarPath = `avatars/${avatarName}`;
-            const { writeFile } = await import("fs/promises");
-            await writeFile(join(dataDir, personaAvatarPath), Buffer.from(p.avatarBase64, "base64"));
+    try {
+      if (isProfileStorageSnapshot(data.fileStorage)) {
+        const imported = await importProfileStorageSnapshot(
+          app,
+          data.fileStorage,
+          wantsProgressStream ? sendProgress : undefined,
+        );
+        if (wantsProgressStream) {
+          sendEvent({ type: "done", data: { success: true, imported } });
+          reply.raw.end();
+          return;
+        }
+        return { success: true, imported };
+      }
+
+      const chars = createCharactersStorage(app.db);
+      const lbs = createLorebooksStorage(app.db);
+      const presets = createPromptsStorage(app.db);
+      const agents = createAgentsStorage(app.db);
+      const themes = createThemesStorage(app.db);
+
+      const stats = { characters: 0, personas: 0, lorebooks: 0, presets: 0, agents: 0, themes: 0 };
+      let completedItems = 0;
+      const emitLegacyProgress = (phase: string, label: string) => {
+        if (!wantsProgressStream) return;
+        sendProgress({
+          phase,
+          label,
+          completedItems,
+          totalItems,
+          imported: { ...stats },
+        });
+      };
+
+      // Import characters
+      if (Array.isArray(data.characters)) {
+        for (const c of data.characters) {
+          try {
+            emitLegacyProgress("characters", "Importing characters");
+            const charData = typeof c.data === "string" ? JSON.parse(c.data) : c.data;
+            const result = await chars.create(
+              charData,
+              c.avatarPath ?? undefined,
+              normalizeTimestampOverrides({ createdAt: c.createdAt, updatedAt: c.updatedAt }),
+              typeof c.comment === "string" ? c.comment : undefined,
+            );
+            // Restore avatar from base64 if provided
+            if (c.avatarBase64 && result?.avatarPath) {
+              const dataDir = getDataDir();
+              const avatarDir = join(dataDir, "avatars");
+              await mkdir(avatarDir, { recursive: true });
+              const { writeFile } = await import("fs/promises");
+              const avatarFile = resolveAvatarWritePath(dataDir, result.avatarPath);
+              if (avatarFile) {
+                await writeFile(avatarFile, Buffer.from(c.avatarBase64, "base64"));
+              }
+            }
+            stats.characters++;
+          } catch {
+            /* skip failed entries */
           }
-          await chars.createPersona(
-            p.name,
-            p.description ?? "",
-            personaAvatarPath,
-            {
-              comment: p.comment,
-              personality: p.personality,
-              backstory: p.backstory,
-              appearance: p.appearance,
-              scenario: p.scenario,
-              nameColor: p.nameColor,
-              dialogueColor: p.dialogueColor,
-              boxColor: p.boxColor,
-              personaStats: p.personaStats,
-              altDescriptions:
-                typeof p.altDescriptions === "string" ? p.altDescriptions : JSON.stringify(p.altDescriptions ?? []),
-            },
-            normalizeTimestampOverrides({ createdAt: p.createdAt, updatedAt: p.updatedAt }),
-          );
-          stats.personas++;
-        } catch {
-          /* skip */
+          completedItems++;
+          emitLegacyProgress("characters", "Importing characters");
         }
       }
-    }
 
-    // Import lorebooks + entries
-    if (Array.isArray(data.lorebooks)) {
-      for (const lb of data.lorebooks) {
-        try {
-          const created = await lbs.create(
-            {
-              name: lb.name,
-              description: lb.description ?? "",
-              category: lb.category ?? "uncategorized",
-              scanDepth: lb.scanDepth,
-              tokenBudget: lb.tokenBudget,
-              recursiveScanning: lb.recursiveScanning,
-              maxRecursionDepth: lb.maxRecursionDepth,
-              enabled: lb.enabled ?? true,
-              characterId: lb.characterId ?? null,
-              characterIds: Array.isArray(lb.characterIds)
-                ? lb.characterIds.filter((value: unknown): value is string => typeof value === "string")
-                : typeof lb.characterId === "string"
-                  ? [lb.characterId]
-                  : [],
-              personaId: lb.personaId ?? null,
-              personaIds: Array.isArray(lb.personaIds)
-                ? lb.personaIds.filter((value: unknown): value is string => typeof value === "string")
-                : typeof lb.personaId === "string"
-                  ? [lb.personaId]
-                  : [],
-              chatId: lb.chatId ?? null,
-              isGlobal: lb.isGlobal ?? false,
-              tags: Array.isArray(lb.tags) ? lb.tags : [],
-              generatedBy: lb.generatedBy ?? null,
-              sourceAgentId: lb.sourceAgentId ?? null,
-            },
-            normalizeTimestampOverrides({ createdAt: lb.createdAt, updatedAt: lb.updatedAt }),
-          );
-          const folderIdMap = new Map<string, string>();
-          if (created && Array.isArray(lb.folders)) {
-            for (const folder of lb.folders) {
-              const oldId = typeof folder.id === "string" ? folder.id : null;
-              const createdFolder = (await lbs.createFolder((created as any).id, {
-                name: folder.name ?? "Folder",
-                enabled: folder.enabled === "true" || folder.enabled === true,
-                parentFolderId: null,
-                order: folder.order ?? 0,
-              })) as { id?: string } | null;
-              if (oldId && createdFolder?.id) folderIdMap.set(oldId, createdFolder.id);
+      // Import personas
+      if (Array.isArray(data.personas)) {
+        for (const p of data.personas) {
+          try {
+            emitLegacyProgress("personas", "Importing personas");
+            // Restore persona avatar from base64 if provided
+            let personaAvatarPath: string | undefined;
+            if (p.avatarBase64) {
+              const dataDir = getDataDir();
+              const avatarDir = join(dataDir, "avatars");
+              await mkdir(avatarDir, { recursive: true });
+              const ext = ".png";
+              const avatarName = `persona-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+              personaAvatarPath = `avatars/${avatarName}`;
+              const { writeFile } = await import("fs/promises");
+              await writeFile(join(dataDir, personaAvatarPath), Buffer.from(p.avatarBase64, "base64"));
             }
-          }
-          if (created && Array.isArray(lb.entries)) {
-            for (const entry of lb.entries) {
-              const folderId =
-                typeof entry.folderId === "string" && folderIdMap.has(entry.folderId)
-                  ? folderIdMap.get(entry.folderId)
-                  : null;
-              await lbs.createEntry({ ...entry, lorebookId: (created as any).id, folderId });
-            }
-          }
-          stats.lorebooks++;
-        } catch {
-          /* skip */
-        }
-      }
-    }
-
-    // Import presets with full hierarchy (groups, sections, choice blocks)
-    if (Array.isArray(data.presets)) {
-      for (const p of data.presets) {
-        try {
-          const existing = await presets.getById(p.id);
-          if (!existing) {
-            const created = await presets.create(
+            await chars.createPersona(
+              p.name,
+              p.description ?? "",
+              personaAvatarPath,
               {
-                name: `${p.name} (imported)`,
-                description: p.description ?? "",
-                parameters:
-                  typeof p.parameters === "string" ? JSON.parse(p.parameters) : (p.parameters ?? p.generationParams),
-                variableGroups:
-                  typeof p.variableGroups === "string" ? JSON.parse(p.variableGroups) : (p.variableGroups ?? []),
-                variableValues:
-                  typeof p.variableValues === "string" ? JSON.parse(p.variableValues) : (p.variableValues ?? {}),
+                comment: p.comment,
+                personality: p.personality,
+                backstory: p.backstory,
+                appearance: p.appearance,
+                scenario: p.scenario,
+                nameColor: p.nameColor,
+                dialogueColor: p.dialogueColor,
+                boxColor: p.boxColor,
+                trackerCardColors:
+                  typeof p.trackerCardColors === "string"
+                    ? p.trackerCardColors
+                    : JSON.stringify(p.trackerCardColors ?? { mode: "chat" }),
+                personaStats: p.personaStats,
+                altDescriptions:
+                  typeof p.altDescriptions === "string" ? p.altDescriptions : JSON.stringify(p.altDescriptions ?? []),
               },
               normalizeTimestampOverrides({ createdAt: p.createdAt, updatedAt: p.updatedAt }),
             );
-            if (created) {
-              const newPresetId = (created as any).id;
-              // Map old group IDs → new group IDs for section groupId references
-              const groupIdMap = new Map<string, string>();
+            stats.personas++;
+          } catch {
+            /* skip */
+          }
+          completedItems++;
+          emitLegacyProgress("personas", "Importing personas");
+        }
+      }
 
-              // Import groups — two passes to handle parent→child ordering
-              if (Array.isArray(p.groups)) {
-                // Pass 1: create all groups without parent references
-                for (const g of p.groups) {
-                  try {
-                    const newGroup = await presets.createGroup({
-                      presetId: newPresetId,
-                      name: g.name,
-                      parentGroupId: null,
-                      order: g.order ?? 100,
-                      enabled: g.enabled === "true" || g.enabled === true,
-                    });
-                    if (newGroup) groupIdMap.set(g.id, (newGroup as any).id);
-                  } catch {
-                    /* skip individual group */
-                  }
-                }
-                // Pass 2: fix parent references using the fully-populated map
-                for (const g of p.groups) {
-                  if (g.parentGroupId && groupIdMap.has(g.id) && groupIdMap.has(g.parentGroupId)) {
+      // Import lorebooks + entries
+      if (Array.isArray(data.lorebooks)) {
+        for (const lb of data.lorebooks) {
+          try {
+            emitLegacyProgress("lorebooks", "Importing lorebooks");
+            const created = await lbs.create(
+              {
+                name: lb.name,
+                description: lb.description ?? "",
+                category: lb.category ?? "uncategorized",
+                scanDepth: lb.scanDepth,
+                tokenBudget: lb.tokenBudget,
+                recursiveScanning: lb.recursiveScanning,
+                maxRecursionDepth: lb.maxRecursionDepth,
+                enabled: lb.enabled ?? true,
+                characterId: lb.characterId ?? null,
+                characterIds: Array.isArray(lb.characterIds)
+                  ? lb.characterIds.filter((value: unknown): value is string => typeof value === "string")
+                  : typeof lb.characterId === "string"
+                    ? [lb.characterId]
+                    : [],
+                personaId: lb.personaId ?? null,
+                personaIds: Array.isArray(lb.personaIds)
+                  ? lb.personaIds.filter((value: unknown): value is string => typeof value === "string")
+                  : typeof lb.personaId === "string"
+                    ? [lb.personaId]
+                    : [],
+                chatId: lb.chatId ?? null,
+                isGlobal: lb.isGlobal ?? false,
+                tags: Array.isArray(lb.tags) ? lb.tags : [],
+                generatedBy: lb.generatedBy ?? null,
+                sourceAgentId: lb.sourceAgentId ?? null,
+              },
+              normalizeTimestampOverrides({ createdAt: lb.createdAt, updatedAt: lb.updatedAt }),
+            );
+            const folderIdMap = new Map<string, string>();
+            if (created && Array.isArray(lb.folders)) {
+              for (const folder of lb.folders) {
+                const oldId = typeof folder.id === "string" ? folder.id : null;
+                const createdFolder = (await lbs.createFolder((created as any).id, {
+                  name: folder.name ?? "Folder",
+                  enabled: folder.enabled === "true" || folder.enabled === true,
+                  parentFolderId: null,
+                  order: folder.order ?? 0,
+                })) as { id?: string } | null;
+                if (oldId && createdFolder?.id) folderIdMap.set(oldId, createdFolder.id);
+              }
+            }
+            if (created && Array.isArray(lb.entries)) {
+              for (const entry of lb.entries) {
+                const folderId =
+                  typeof entry.folderId === "string" && folderIdMap.has(entry.folderId)
+                    ? folderIdMap.get(entry.folderId)
+                    : null;
+                await lbs.createEntry({ ...entry, lorebookId: (created as any).id, folderId });
+              }
+            }
+            stats.lorebooks++;
+          } catch {
+            /* skip */
+          }
+          completedItems++;
+          emitLegacyProgress("lorebooks", "Importing lorebooks");
+        }
+      }
+
+      // Import presets with full hierarchy (groups, sections, choice blocks)
+      if (Array.isArray(data.presets)) {
+        for (const p of data.presets) {
+          try {
+            emitLegacyProgress("presets", "Importing presets");
+            const existing = await presets.getById(p.id);
+            if (!existing) {
+              const created = await presets.create(
+                {
+                  name: `${p.name} (imported)`,
+                  description: p.description ?? "",
+                  parameters:
+                    typeof p.parameters === "string" ? JSON.parse(p.parameters) : (p.parameters ?? p.generationParams),
+                  variableGroups:
+                    typeof p.variableGroups === "string" ? JSON.parse(p.variableGroups) : (p.variableGroups ?? []),
+                  variableValues:
+                    typeof p.variableValues === "string" ? JSON.parse(p.variableValues) : (p.variableValues ?? {}),
+                },
+                normalizeTimestampOverrides({ createdAt: p.createdAt, updatedAt: p.updatedAt }),
+              );
+              if (created) {
+                const newPresetId = (created as any).id;
+                // Map old group IDs → new group IDs for section groupId references
+                const groupIdMap = new Map<string, string>();
+
+                // Import groups — two passes to handle parent→child ordering
+                if (Array.isArray(p.groups)) {
+                  // Pass 1: create all groups without parent references
+                  for (const g of p.groups) {
                     try {
-                      await presets.updateGroup(groupIdMap.get(g.id)!, {
-                        parentGroupId: groupIdMap.get(g.parentGroupId)!,
+                      const newGroup = await presets.createGroup({
+                        presetId: newPresetId,
+                        name: g.name,
+                        parentGroupId: null,
+                        order: g.order ?? 100,
+                        enabled: g.enabled === "true" || g.enabled === true,
                       });
+                      if (newGroup) groupIdMap.set(g.id, (newGroup as any).id);
                     } catch {
-                      /* skip */
+                      /* skip individual group */
+                    }
+                  }
+                  // Pass 2: fix parent references using the fully-populated map
+                  for (const g of p.groups) {
+                    if (g.parentGroupId && groupIdMap.has(g.id) && groupIdMap.has(g.parentGroupId)) {
+                      try {
+                        await presets.updateGroup(groupIdMap.get(g.id)!, {
+                          parentGroupId: groupIdMap.get(g.parentGroupId)!,
+                        });
+                      } catch {
+                        /* skip */
+                      }
                     }
                   }
                 }
-              }
 
-              // Import sections
-              if (Array.isArray(p.sections)) {
-                for (const s of p.sections) {
-                  try {
-                    await presets.createSection({
-                      presetId: newPresetId,
-                      identifier: s.identifier,
-                      name: s.name,
-                      content: s.content ?? "",
-                      role: s.role ?? "system",
-                      enabled: s.enabled === "true" || s.enabled === true,
-                      isMarker: s.isMarker === "true" || s.isMarker === true,
-                      groupId: s.groupId ? (groupIdMap.get(s.groupId) ?? null) : null,
-                      markerConfig:
-                        typeof s.markerConfig === "string" ? JSON.parse(s.markerConfig) : (s.markerConfig ?? null),
-                      injectionPosition: s.injectionPosition ?? "ordered",
-                      injectionDepth: s.injectionDepth ?? 0,
-                      injectionOrder: s.injectionOrder ?? 100,
-                      forbidOverrides: s.forbidOverrides === "true" || s.forbidOverrides === true,
-                    });
-                  } catch {
-                    /* skip individual section */
+                // Import sections
+                if (Array.isArray(p.sections)) {
+                  for (const s of p.sections) {
+                    try {
+                      await presets.createSection({
+                        presetId: newPresetId,
+                        identifier: s.identifier,
+                        name: s.name,
+                        content: s.content ?? "",
+                        role: s.role ?? "system",
+                        enabled: s.enabled === "true" || s.enabled === true,
+                        isMarker: s.isMarker === "true" || s.isMarker === true,
+                        groupId: s.groupId ? (groupIdMap.get(s.groupId) ?? null) : null,
+                        markerConfig:
+                          typeof s.markerConfig === "string" ? JSON.parse(s.markerConfig) : (s.markerConfig ?? null),
+                        injectionPosition: s.injectionPosition ?? "ordered",
+                        injectionDepth: s.injectionDepth ?? 0,
+                        injectionOrder: s.injectionOrder ?? 100,
+                        forbidOverrides: s.forbidOverrides === "true" || s.forbidOverrides === true,
+                      });
+                    } catch {
+                      /* skip individual section */
+                    }
                   }
                 }
-              }
 
-              // Import choice blocks
-              if (Array.isArray(p.choices)) {
-                for (const cb of p.choices) {
-                  try {
-                    await presets.createChoiceBlock({
-                      presetId: newPresetId,
-                      variableName: cb.variableName,
-                      question: cb.question,
-                      options: typeof cb.options === "string" ? JSON.parse(cb.options) : (cb.options ?? []),
-                      multiSelect: cb.multiSelect === "true" || cb.multiSelect === true,
-                      separator: cb.separator ?? ", ",
-                      randomPick: cb.randomPick === "true" || cb.randomPick === true,
-                    });
-                  } catch {
-                    /* skip individual choice block */
+                // Import choice blocks
+                if (Array.isArray(p.choices)) {
+                  for (const cb of p.choices) {
+                    try {
+                      await presets.createChoiceBlock({
+                        presetId: newPresetId,
+                        variableName: cb.variableName,
+                        question: cb.question,
+                        options: typeof cb.options === "string" ? JSON.parse(cb.options) : (cb.options ?? []),
+                        multiSelect: cb.multiSelect === "true" || cb.multiSelect === true,
+                        separator: cb.separator ?? ", ",
+                        randomPick: cb.randomPick === "true" || cb.randomPick === true,
+                      });
+                    } catch {
+                      /* skip individual choice block */
+                    }
                   }
                 }
-              }
 
-              stats.presets++;
+                stats.presets++;
+              }
             }
+          } catch {
+            /* skip */
           }
-        } catch {
-          /* skip */
+          completedItems++;
+          emitLegacyProgress("presets", "Importing presets");
         }
       }
-    }
 
-    // Import agent configs
-    if (Array.isArray(data.agents)) {
-      for (const a of data.agents) {
+      // Import agent configs
+      if (Array.isArray(data.agents)) {
+        for (const a of data.agents) {
+          try {
+            emitLegacyProgress("agents", "Importing agents");
+            // Only import if this agent type doesn't already exist
+            const existing = await agents.getByType(a.type);
+            if (!existing) {
+              await agents.create({
+                type: a.type,
+                name: a.name,
+                description: a.description ?? "",
+                phase: a.phase,
+                enabled: a.enabled === "true" || a.enabled === true,
+                connectionId: a.connectionId ?? null,
+                promptTemplate: a.promptTemplate ?? "",
+                settings: typeof a.settings === "string" ? JSON.parse(a.settings) : (a.settings ?? {}),
+              });
+              stats.agents++;
+            }
+          } catch {
+            /* skip */
+          }
+          completedItems++;
+          emitLegacyProgress("agents", "Importing agents");
+        }
+      }
+
+      // Import synced custom themes
+      let importedActiveThemeId: string | null = null;
+      if (Array.isArray(data.themes)) {
+        for (const theme of data.themes) {
+          try {
+            emitLegacyProgress("themes", "Importing themes");
+            const duplicate = await themes.findDuplicate(theme.name ?? "", theme.css ?? "");
+            const syncedTheme =
+              duplicate ??
+              (await themes.create({
+                name: theme.name ?? "Imported Theme",
+                css: theme.css ?? "",
+                installedAt: theme.installedAt,
+              }));
+
+            if (!duplicate && syncedTheme) {
+              stats.themes++;
+            }
+
+            if (syncedTheme && (theme.isActive === true || theme.isActive === "true")) {
+              importedActiveThemeId = syncedTheme.id;
+            }
+          } catch {
+            /* skip */
+          }
+          completedItems++;
+          emitLegacyProgress("themes", "Importing themes");
+        }
+      }
+
+      if (importedActiveThemeId) {
         try {
-          // Only import if this agent type doesn't already exist
-          const existing = await agents.getByType(a.type);
-          if (!existing) {
-            await agents.create({
-              type: a.type,
-              name: a.name,
-              description: a.description ?? "",
-              phase: a.phase,
-              enabled: a.enabled === "true" || a.enabled === true,
-              connectionId: a.connectionId ?? null,
-              promptTemplate: a.promptTemplate ?? "",
-              settings: typeof a.settings === "string" ? JSON.parse(a.settings) : (a.settings ?? {}),
-            });
-            stats.agents++;
-          }
+          await themes.setActive(importedActiveThemeId);
         } catch {
           /* skip */
         }
       }
-    }
 
-    // Import synced custom themes
-    let importedActiveThemeId: string | null = null;
-    if (Array.isArray(data.themes)) {
-      for (const theme of data.themes) {
-        try {
-          const duplicate = await themes.findDuplicate(theme.name ?? "", theme.css ?? "");
-          const syncedTheme =
-            duplicate ??
-            (await themes.create({
-              name: theme.name ?? "Imported Theme",
-              css: theme.css ?? "",
-              installedAt: theme.installedAt,
-            }));
-
-          if (!duplicate && syncedTheme) {
-            stats.themes++;
-          }
-
-          if (syncedTheme && (theme.isActive === true || theme.isActive === "true")) {
-            importedActiveThemeId = syncedTheme.id;
-          }
-        } catch {
-          /* skip */
-        }
+      if (wantsProgressStream) {
+        sendEvent({ type: "done", data: { success: true, imported: stats } });
+        reply.raw.end();
+        return;
       }
-    }
-
-    if (importedActiveThemeId) {
-      try {
-        await themes.setActive(importedActiveThemeId);
-      } catch {
-        /* skip */
+      return { success: true, imported: stats };
+    } catch (err) {
+      if (wantsProgressStream) {
+        const message = getBackupErrorMessage(err, "Profile import failed. Check the server logs for details.");
+        const logError = err instanceof Error ? err : new Error(message);
+        logger.error(logError, "[backup] Profile import failed");
+        sendEvent({ type: "error", data: { error: "Profile import failed", message } });
+        reply.raw.end();
+        return;
       }
+      return sendBackupRouteError(reply, err, "Profile import");
     }
-
-    return { success: true, imported: stats };
   });
 }

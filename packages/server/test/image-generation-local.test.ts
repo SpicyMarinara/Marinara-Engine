@@ -277,8 +277,8 @@ test("native NovelAI image generation sends stable request settings and embeds m
     });
 
     const result = await generateImage("novelai", `http://127.0.0.1:${port}/novelai.net`, "test-key", "novelai", {
-      prompt: "cat cafe with 東京 neon",
-      negativePrompt: "lowres, déjà vu",
+      prompt: "cat cafe with \u201Cquoted\u201D neon \u2728",
+      negativePrompt: "lowres, d\u00E9j\u00E0 vu",
       model: "nai-diffusion-4-5-full",
       width: 640,
       height: 960,
@@ -287,7 +287,7 @@ test("native NovelAI image generation sends stable request settings and embeds m
     });
 
     const parameters = capturedBody?.parameters as Record<string, unknown>;
-    assert.equal(capturedBody?.input, "best quality, cat cafe with 東京 neon");
+    assert.equal(capturedBody?.input, 'best quality, cat cafe with "quoted" neon');
     assert.equal(capturedBody?.model, "nai-diffusion-4-5-full");
     assert.equal(parameters.seed, 12345);
     assert.equal(parameters.steps, 33);
@@ -296,13 +296,13 @@ test("native NovelAI image generation sends stable request settings and embeds m
     assert.equal(parameters.sampler, "k_dpmpp_2m");
     assert.equal(parameters.noise_schedule, "native");
     assert.equal(parameters.ucPreset, 2);
-    assert.equal(parameters.negative_prompt, "bad anatomy, lowres, déjà vu");
+    assert.equal(parameters.negative_prompt, "bad anatomy, lowres, deja vu");
     assert.deepEqual((parameters.v4_prompt as Record<string, unknown>).caption, {
-      base_caption: "best quality, cat cafe with 東京 neon",
+      base_caption: 'best quality, cat cafe with "quoted" neon',
       char_captions: [],
     });
     assert.deepEqual((parameters.v4_negative_prompt as Record<string, unknown>).caption, {
-      base_caption: "bad anatomy, lowres, déjà vu",
+      base_caption: "bad anatomy, lowres, deja vu",
       char_captions: [],
     });
 
@@ -363,6 +363,46 @@ test("native NovelAI image generation keeps V3 prompt shape", async () => {
     assert.equal(parameters.params_version, undefined);
     assert.equal(parameters.v4_prompt, undefined);
     assert.equal(parameters.v4_negative_prompt, undefined);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+  }
+});
+
+test("native NovelAI V4 generation errors include prompt guidance", async () => {
+  let port = 0;
+  const server = createServer((req, res) => {
+    if (req.method === "POST" && req.url?.endsWith("/ai/generate-image")) {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ statusCode: 500, message: "Internal Server Error" }));
+      });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const addressInfo = server.address();
+  assert.ok(addressInfo && typeof addressInfo === "object");
+  port = addressInfo.port;
+
+  try {
+    await assert.rejects(
+      () =>
+        generateImage("novelai", `http://127.0.0.1:${port}/novelai.net`, "test-key", "novelai", {
+          prompt: "cat cafe",
+          model: "nai-diffusion-4-5-full",
+          width: 640,
+          height: 960,
+          allowLocalUrls: true,
+        }),
+      /shorter ASCII prompt/,
+    );
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));

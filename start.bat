@@ -258,6 +258,12 @@ if defined AUTO_OPEN_BROWSER (
     if /I "%AUTO_OPEN_BROWSER%"=="off" set "AUTO_OPEN_BROWSER_ENABLED="
 )
 
+node scripts\check-port-available.mjs
+if errorlevel 1 (
+    pause
+    goto :eof
+)
+
 echo.
 echo  ==========================================
 echo    Starting Marinara Engine on %PROTOCOL%://127.0.0.1:%PORT%

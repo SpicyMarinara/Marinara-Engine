@@ -5,7 +5,12 @@ import { api } from "./api-client";
 import { useChatStore } from "../stores/chat.store";
 import { useUIStore } from "../stores/ui.store";
 import { toast } from "sonner";
-import { SUPPORTED_MACROS, type SceneCreateResponse, type ScenePlanResponse } from "@marinara-engine/shared";
+import {
+  SUPPORTED_MACROS,
+  buildNarratorInstructionMessage,
+  type SceneCreateResponse,
+  type ScenePlanResponse,
+} from "@marinara-engine/shared";
 
 export interface SlashCommand {
   name: string;
@@ -26,6 +31,8 @@ export interface SlashCommandContext {
     chatId: string;
     connectionId: string | null;
     userMessage?: string;
+    generationGuide?: string;
+    generationGuideSource?: "narrator" | "guide" | "game_start";
     impersonate?: boolean;
     attachments?: { type: string; data: string }[];
     impersonatePresetId?: string;
@@ -293,16 +300,17 @@ const COMMANDS: SlashCommand[] = [
     },
   },
   {
-    name: "narrator",
-    aliases: ["narrate", "nar"],
+    name: "guided",
+    aliases: ["narrator", "narrate", "nar"],
     description: "Steer the narrative — the AI will narrate events in the direction you describe",
-    usage: "/narrator <direction>",
+    usage: "/guided <direction>",
     async execute(args, ctx) {
-      if (!args.trim()) return { handled: true, feedback: "Usage: /narrator <direction to steer the narrative>" };
+      if (!args.trim()) return { handled: true, feedback: "Usage: /guided <direction to steer the narrative>" };
       await ctx.generate({
         chatId: ctx.chatId,
         connectionId: null,
-        userMessage: `[Narrator instruction — do not include a reply from {{user}}. Instead, write the next part of the narrative steering it toward the following: ${args.trim()}]`,
+        generationGuide: buildNarratorInstructionMessage(args),
+        generationGuideSource: "narrator",
       });
       return { handled: true };
     },

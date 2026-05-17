@@ -23,7 +23,7 @@ import {
 import type { GameSetupConfig, GameGmMode } from "@marinara-engine/shared";
 import { getCharacterTitle } from "../../lib/character-display";
 import { api } from "../../lib/api-client";
-import { cn, getAvatarCropStyle, type AvatarCropValue } from "../../lib/utils";
+import { cn, getAvatarCropStyle, parseAvatarCropJson, type AvatarCropValue } from "../../lib/utils";
 import { Modal } from "../ui/Modal";
 import {
   GenerationParametersFields,
@@ -381,7 +381,14 @@ export function GameSetupWizard({ onComplete, onCancel, isLoading, characters }:
   );
   const imageConnections = useMemo(() => connections.filter((c) => c.provider === "image_generation"), [connections]);
   const personas = useMemo(
-    () => (personasList as Array<{ id: string; name: string; avatarPath?: string | null; comment?: string }>) ?? [],
+    () =>
+      (personasList as Array<{
+        id: string;
+        name: string;
+        avatarPath?: string | null;
+        avatarCrop?: string | null;
+        comment?: string;
+      }>) ?? [],
     [personasList],
   );
 
@@ -1051,18 +1058,13 @@ export function GameSetupWizard({ onComplete, onCancel, isLoading, characters }:
                   const title = getPersonaTitle(p);
                   return (
                     <div className="mb-2 flex items-center gap-2.5 rounded-lg bg-[var(--primary)]/10 px-3 py-2 ring-1 ring-[var(--primary)]/30">
-                      {p.avatarPath ? (
-                        <img
-                          src={p.avatarPath}
-                          alt={p.name}
-                          loading="lazy"
-                          className="h-6 w-6 rounded-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent)] text-[0.5625rem] font-bold">
-                          {p.name[0]}
-                        </div>
-                      )}
+                      <CharacterAvatar
+                        character={{
+                          name: p.name,
+                          avatarUrl: p.avatarPath ?? null,
+                          avatarCrop: parseAvatarCropJson(p.avatarCrop),
+                        }}
+                      />
                       <div className="flex-1 min-w-0">
                         <span className="block truncate text-xs">{p.name}</span>
                         {title && (
@@ -1101,18 +1103,13 @@ export function GameSetupWizard({ onComplete, onCancel, isLoading, characters }:
                           p.id === personaId && "bg-[var(--primary)]/5",
                         )}
                       >
-                        {p.avatarPath ? (
-                          <img
-                            src={p.avatarPath}
-                            alt={p.name}
-                            loading="lazy"
-                            className="h-6 w-6 rounded-full object-cover"
-                          />
-                        ) : (
-                          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent)] text-[0.5625rem] font-bold">
-                            {p.name[0]}
-                          </div>
-                        )}
+                        <CharacterAvatar
+                          character={{
+                            name: p.name,
+                            avatarUrl: p.avatarPath ?? null,
+                            avatarCrop: parseAvatarCropJson(p.avatarCrop),
+                          }}
+                        />
                         <div className="flex-1 min-w-0">
                           <span className="block truncate text-xs">{p.name}</span>
                           {title && (

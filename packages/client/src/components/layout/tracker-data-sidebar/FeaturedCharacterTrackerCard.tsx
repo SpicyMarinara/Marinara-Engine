@@ -43,6 +43,7 @@ import {
   InlineEdit,
   TrackerProfileDisplayWash,
   TrackerProfileEdgeHighlight,
+  TrackerReadabilityVeil,
   TrackerPortraitStageBackdrop,
 } from "./tracker-data-sidebar.controls";
 import { StatList } from "./tracker-data-sidebar.stats";
@@ -110,8 +111,8 @@ function FeaturedCharacterPortrait({
       className={cn(
         "relative z-[1] flex h-5 min-h-5 w-full items-center justify-center bg-transparent text-[var(--tracker-profile-display-solid)]/72 transition-all hover:bg-[var(--primary)]/12 hover:text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--primary)] active:scale-95",
         thoughtControlSide === "left"
-          ? "border-r border-[var(--tracker-profile-dialogue-border)]"
-          : "border-l border-[var(--tracker-profile-dialogue-border)]",
+          ? "border-r border-[var(--tracker-profile-rule)]"
+          : "border-l border-[var(--tracker-profile-rule)]",
         thoughtsOpen && "bg-[var(--primary)]/16 text-[var(--primary)]",
       )}
     >
@@ -123,7 +124,7 @@ function FeaturedCharacterPortrait({
     <div className="relative min-w-0">
       <div
         className={cn(
-          "relative z-[2] grid min-h-5 overflow-hidden rounded-t-md border border-b-0 border-[var(--tracker-profile-dialogue-border)] bg-[color-mix(in_srgb,var(--background)_88%,var(--tracker-profile-box)_12%)] text-[0.625rem] text-[var(--muted-foreground)]",
+          "relative z-[2] grid min-h-5 overflow-hidden rounded-t-md border border-b-0 border-[var(--tracker-profile-rule)] bg-[image:var(--tracker-profile-panel)] text-[0.625rem] text-[var(--muted-foreground)] [background-blend-mode:var(--tracker-profile-panel-blend)]",
           headerAttachmentSide === "left" && "rounded-tl-none",
           headerAttachmentSide === "right" && "rounded-tr-none",
           brainButton
@@ -133,7 +134,7 @@ function FeaturedCharacterPortrait({
             : "grid-cols-1",
         )}
       >
-        <TrackerProfileDisplayWash className="opacity-[0.14]" />
+        <TrackerProfileDisplayWash />
         {thoughtControlSide === "left" && brainButton}
         <div className="relative z-[1] grid min-w-0 grid-cols-[0.8rem_minmax(0,1fr)] items-center gap-0.5 px-1 py-0.5">
           <HeartPulse size="0.625rem" className="shrink-0 text-[var(--primary)]/76" />
@@ -164,7 +165,7 @@ function FeaturedCharacterPortrait({
         <TrackerPortraitStageBackdrop media={media} />
         <div
           className={cn(
-            "pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--primary)_20%,transparent)_0%,transparent_42%,color-mix(in_srgb,var(--background)_55%,transparent)_100%)]",
+            "pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--tracker-profile-accent)_16%,transparent)_0%,transparent_42%,color-mix(in_srgb,var(--background)_55%,transparent)_100%)]",
             spriteUrl ? "opacity-95" : "opacity-80",
           )}
         />
@@ -183,7 +184,7 @@ function FeaturedCharacterPortrait({
           />
         ) : (
           <div className="relative z-[1] flex h-full w-full items-center justify-center px-2 py-3">
-            <div className="pointer-events-none absolute inset-x-3 bottom-2 h-px bg-[var(--tracker-profile-box)]/16" />
+            <div className="pointer-events-none absolute inset-x-3 bottom-2 h-px bg-[color-mix(in_srgb,var(--tracker-profile-rule)_42%,transparent)]" />
             <div className="relative flex h-12 w-12 items-center justify-center rounded-full border border-[var(--tracker-profile-dialogue-border)] bg-[color-mix(in_srgb,var(--background)_54%,var(--card)_42%,transparent)] text-lg font-semibold leading-none text-[var(--tracker-profile-icon)] shadow-[0_8px_18px_rgba(0,0,0,0.24),0_0_10px_var(--tracker-profile-dialogue-glow),inset_0_1px_0_color-mix(in_srgb,var(--foreground)_8%,transparent)]">
               <span className="translate-y-px">{getCharacterPortraitFallback(character)}</span>
               {onUploadAvatar && (
@@ -204,7 +205,7 @@ function FeaturedCharacterPortrait({
               }}
               title="Move portrait up"
               aria-label="Move portrait up"
-              className="col-span-2 mx-auto flex h-5 w-5 items-center justify-center rounded-sm border border-[var(--tracker-profile-box)]/22 bg-[color-mix(in_srgb,var(--background)_62%,transparent)] text-[var(--tracker-profile-icon)] backdrop-blur-sm transition-colors hover:bg-[var(--primary)]/14 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] active:scale-90"
+              className="col-span-2 mx-auto flex h-5 w-5 items-center justify-center rounded-sm border border-[color-mix(in_srgb,var(--tracker-profile-rule)_70%,transparent)] bg-[color-mix(in_srgb,var(--background)_62%,transparent)] text-[var(--tracker-profile-icon)] backdrop-blur-sm transition-colors hover:bg-[var(--primary)]/14 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] active:scale-90"
             >
               <ChevronUp size="0.75rem" />
             </button>
@@ -216,7 +217,7 @@ function FeaturedCharacterPortrait({
               }}
               title="Move portrait left"
               aria-label="Move portrait left"
-              className="flex h-5 w-5 items-center justify-center rounded-sm border border-[var(--tracker-profile-box)]/22 bg-[color-mix(in_srgb,var(--background)_62%,transparent)] text-[var(--tracker-profile-icon)] backdrop-blur-sm transition-colors hover:bg-[var(--primary)]/14 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] active:scale-90"
+              className="flex h-5 w-5 items-center justify-center rounded-sm border border-[color-mix(in_srgb,var(--tracker-profile-rule)_70%,transparent)] bg-[color-mix(in_srgb,var(--background)_62%,transparent)] text-[var(--tracker-profile-icon)] backdrop-blur-sm transition-colors hover:bg-[var(--primary)]/14 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] active:scale-90"
             >
               <ChevronLeft size="0.75rem" />
             </button>
@@ -228,7 +229,7 @@ function FeaturedCharacterPortrait({
               }}
               title="Move portrait right"
               aria-label="Move portrait right"
-              className="flex h-5 w-5 items-center justify-center rounded-sm border border-[var(--tracker-profile-box)]/22 bg-[color-mix(in_srgb,var(--background)_62%,transparent)] text-[var(--tracker-profile-icon)] backdrop-blur-sm transition-colors hover:bg-[var(--primary)]/14 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] active:scale-90"
+              className="flex h-5 w-5 items-center justify-center rounded-sm border border-[color-mix(in_srgb,var(--tracker-profile-rule)_70%,transparent)] bg-[color-mix(in_srgb,var(--background)_62%,transparent)] text-[var(--tracker-profile-icon)] backdrop-blur-sm transition-colors hover:bg-[var(--primary)]/14 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] active:scale-90"
             >
               <ChevronRight size="0.75rem" />
             </button>
@@ -240,7 +241,7 @@ function FeaturedCharacterPortrait({
               }}
               title="Move portrait down"
               aria-label="Move portrait down"
-              className="col-span-2 mx-auto flex h-5 w-5 items-center justify-center rounded-sm border border-[var(--tracker-profile-box)]/22 bg-[color-mix(in_srgb,var(--background)_62%,transparent)] text-[var(--tracker-profile-icon)] backdrop-blur-sm transition-colors hover:bg-[var(--primary)]/14 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] active:scale-90"
+              className="col-span-2 mx-auto flex h-5 w-5 items-center justify-center rounded-sm border border-[color-mix(in_srgb,var(--tracker-profile-rule)_70%,transparent)] bg-[color-mix(in_srgb,var(--background)_62%,transparent)] text-[var(--tracker-profile-icon)] backdrop-blur-sm transition-colors hover:bg-[var(--primary)]/14 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] active:scale-90"
             >
               <ChevronDown size="0.75rem" />
             </button>
@@ -259,7 +260,7 @@ function FeaturedCharacterPortrait({
               }
               className="absolute inset-0 z-[1] cursor-pointer rounded-b-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--primary)] active:scale-[0.99]"
             />
-            <span className="pointer-events-none absolute right-1 top-1 z-[3] flex h-5 w-5 items-center justify-center rounded-sm border border-[var(--border)]/36 bg-[color-mix(in_srgb,var(--background)_52%,transparent)] text-[var(--muted-foreground)]/70 opacity-0 backdrop-blur-sm transition-opacity group-hover/portrait:opacity-100 group-focus-within/portrait:opacity-100">
+            <span className="pointer-events-none absolute right-1 top-1 z-[3] flex h-5 w-5 items-center justify-center rounded-sm border border-[color-mix(in_srgb,var(--tracker-profile-rule)_70%,transparent)] bg-[color-mix(in_srgb,var(--background)_52%,transparent)] text-[var(--muted-foreground)]/70 opacity-0 backdrop-blur-sm transition-opacity group-hover/portrait:opacity-100 group-focus-within/portrait:opacity-100">
               <ImagePlus size="0.6875rem" />
             </span>
           </>
@@ -298,12 +299,12 @@ function FeaturedFieldTile({
       className={cn(
         fillAvailable
           ? cn(
-              "grid min-h-0 min-w-0 items-center gap-1 overflow-hidden rounded-sm border border-[var(--border)]/24 bg-[color-mix(in_srgb,var(--background)_24%,transparent)] shadow-[inset_0_1px_0_color-mix(in_srgb,var(--foreground)_6%,transparent)]",
+              "grid min-h-0 min-w-0 items-center gap-1 overflow-hidden rounded-sm border border-[var(--tracker-profile-rule)] bg-[image:var(--tracker-profile-muted-panel)] shadow-[inset_0_1px_0_color-mix(in_srgb,var(--foreground)_6%,transparent)] [background-blend-mode:var(--tracker-profile-muted-panel-blend)]",
               balancedFill
                 ? "grid-cols-[1.25rem_minmax(0,1fr)] px-1 py-1"
                 : "grid-cols-[1.5rem_minmax(0,1fr)] px-1.5 py-1.5",
             )
-          : "grid min-h-5 min-w-0 grid-cols-[1rem_minmax(0,1fr)] items-center gap-1 border-b border-[var(--border)]/18 px-0.5 py-0.5 last:border-b-0",
+          : "grid min-h-5 min-w-0 grid-cols-[1rem_minmax(0,1fr)] items-center gap-1 border-b border-[var(--tracker-profile-rule)] px-0.5 py-0.5 last:border-b-0",
         !fillAvailable && !stacked && "@min-[220px]:border-b-0",
       )}
     >
@@ -327,7 +328,7 @@ function FeaturedFieldTile({
           onSave={onSave}
           placeholder={placeholder}
           className={cn(
-            "w-full min-w-0 px-0 py-0 text-[var(--foreground)]/90 hover:bg-[var(--accent)]/25",
+            "w-full min-w-0 px-0 py-0 text-[color:var(--tracker-profile-text)] hover:bg-[var(--accent)]/25",
             fillAvailable
               ? balancedFill
                 ? "min-h-5 text-[0.625rem] leading-[1.08]"
@@ -341,7 +342,7 @@ function FeaturedFieldTile({
       ) : (
         <span
           className={cn(
-            "text-[var(--foreground)]/90",
+            "text-[color:var(--tracker-profile-text)]",
             fillAvailable
               ? balancedFill
                 ? "line-clamp-2 min-h-5 break-words text-[0.625rem] leading-[1.08]"
@@ -380,7 +381,7 @@ function FeaturedFieldList({
   return (
     <div
       className={cn(
-        "relative grid border-t border-[var(--border)]/32",
+        "relative z-[1] grid border-t border-[var(--tracker-profile-rule)]",
         filled
           ? cn(
               "mt-1 min-h-0 flex-1 auto-rows-fr grid-cols-1 gap-1 overflow-hidden px-1",
@@ -445,7 +446,7 @@ function FeaturedStatGrid({
   return (
     <div
       className={cn(
-        "group/statbox relative flex min-h-0 flex-col overflow-x-hidden border-t border-[var(--border)]/28 px-1 max-h-[7.75rem] @min-[380px]:max-h-[9.25rem]",
+        "group/statbox relative flex min-h-0 flex-col overflow-x-hidden border-t border-[var(--tracker-profile-rule)] px-1 max-h-[7.75rem] @min-[380px]:max-h-[9.25rem]",
         fillAvailable && "h-[7.75rem] @min-[380px]:h-[9.25rem]",
         scrollable ? "overflow-y-auto" : "overflow-y-hidden",
       )}
@@ -628,11 +629,12 @@ export function FeaturedCharacterTrackerCard({
   return (
     <article
       ref={cardRef}
-      className="group/character relative min-w-0 overflow-hidden rounded-md border border-[var(--tracker-profile-box)]/28 shadow-[inset_0_1px_0_color-mix(in_srgb,var(--foreground)_10%,transparent)] transition-colors duration-200 hover:border-[var(--primary)]/34 @min-[380px]:mx-1"
+      className="group/character relative min-w-0 overflow-hidden rounded-md border border-[var(--tracker-profile-rule)] bg-[image:var(--tracker-profile-frame)] shadow-[inset_0_1px_0_color-mix(in_srgb,var(--foreground)_10%,transparent)] transition-colors duration-200 hover:border-[var(--primary)]/34 [background-blend-mode:var(--tracker-profile-frame-blend)] @min-[380px]:mx-1"
       style={getCharacterAmbienceStyle(character, profileColors)}
     >
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--primary)_14%,transparent)_0%,transparent_34%,color-mix(in_srgb,var(--background)_22%,transparent)_100%)]" />
-      <TrackerProfileDisplayWash className="opacity-[0.06]" />
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--tracker-profile-accent)_10%,transparent)_0%,transparent_34%,color-mix(in_srgb,var(--background)_22%,transparent)_100%)]" />
+      <TrackerProfileDisplayWash />
+      <TrackerReadabilityVeil strength={hasCharacterStatBlock || customFields.length > 0 ? "strong" : "soft"} />
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-[image:var(--tracker-profile-display-layer)] opacity-45" />
       <TrackerProfileEdgeHighlight />
 
@@ -651,7 +653,7 @@ export function FeaturedCharacterTrackerCard({
 
       <div
         className={cn(
-          "relative grid gap-y-1 gap-x-0",
+          "relative z-[1] grid gap-y-1 gap-x-0",
           hasDeleteAction && "pr-5",
           trackerPanelSide === "left"
             ? "grid-cols-[minmax(0,1fr)_clamp(5.25rem,38cqw,6.75rem)] @min-[380px]:grid-cols-[minmax(0,1fr)_9.25rem]"
@@ -693,7 +695,7 @@ export function FeaturedCharacterTrackerCard({
           <div ref={statCoreRef} className="relative flex min-w-0 flex-col gap-0">
             <div
               className={cn(
-                "relative min-h-5 overflow-hidden rounded-t-md border border-[var(--tracker-profile-box)]/18 bg-[color-mix(in_srgb,var(--background)_88%,var(--tracker-profile-box)_12%)] px-1 py-0",
+                "relative min-h-5 overflow-hidden rounded-t-md border border-[var(--tracker-profile-rule)] bg-[image:var(--tracker-profile-panel-strong)] px-1 py-0 [background-blend-mode:var(--tracker-profile-panel-strong-blend)]",
                 trackerPanelSide === "left" ? "rounded-tr-none border-r-0" : "rounded-tl-none border-l-0",
                 hasHeaderControls &&
                   (trackerPanelSide === "left"
@@ -705,7 +707,7 @@ export function FeaturedCharacterTrackerCard({
                       : "pr-5 @min-[380px]:pl-5"),
               )}
             >
-              <TrackerProfileDisplayWash className="opacity-[0.16]" />
+              <TrackerProfileDisplayWash />
               <TrackerProfileEdgeHighlight strength="strong" />
               {hasHeaderControls && (
                 <div
@@ -734,7 +736,7 @@ export function FeaturedCharacterTrackerCard({
                   value={character.name}
                   onSave={(name) => onUpdate({ ...character, name: name || "Character" })}
                   placeholder="Character"
-                  className="relative z-[1] h-5 w-full min-w-0 overflow-hidden px-0 py-0 text-[0.75rem] font-semibold leading-5 text-[var(--foreground)] @min-[340px]:text-[0.875rem] @min-[340px]:font-bold @min-[380px]:justify-center @min-[380px]:text-center"
+                  className="relative z-[1] h-5 w-full min-w-0 overflow-hidden px-0 py-0 text-[0.75rem] font-semibold leading-5 text-[color:var(--tracker-profile-text)] @min-[340px]:text-[0.875rem] @min-[340px]:font-bold @min-[380px]:justify-center @min-[380px]:text-center"
                   showEditHint={false}
                   fitPreview
                   fitAlign="center"
@@ -742,7 +744,7 @@ export function FeaturedCharacterTrackerCard({
                 />
               ) : (
                 <FittedText
-                  className="relative z-[1] w-full text-[0.75rem] font-semibold leading-5 text-[var(--foreground)] @min-[340px]:text-[0.875rem] @min-[340px]:font-bold"
+                  className="relative z-[1] w-full text-[0.75rem] font-semibold leading-5 text-[color:var(--tracker-profile-text)] @min-[340px]:text-[0.875rem] @min-[340px]:font-bold"
                   title={visibleText(character.name, "Character")}
                   align="center"
                   minScale={0.6}
@@ -799,11 +801,11 @@ export function FeaturedCharacterTrackerCard({
       {!showFieldsInStatColumn && <FeaturedFieldList character={character} onUpdate={onUpdate} placement="footer" />}
 
       {customFields.length > 0 && (
-        <div className="relative mx-1 mb-1 mt-1 grid gap-px border-t border-[var(--border)]/32 pt-0.5 text-[0.625rem]">
+        <div className="relative z-[1] mx-1 mb-1 mt-1 grid gap-px border-t border-[var(--tracker-profile-rule)] pt-0.5 text-[0.625rem]">
           {customFields.map(([name, value]) => (
             <div
               key={name}
-              className="grid min-w-0 grid-cols-[minmax(3rem,0.42fr)_minmax(0,1fr)] items-center gap-1 border-b border-[var(--border)]/20 px-0.5 py-px last:border-b-0"
+              className="grid min-w-0 grid-cols-[minmax(3rem,0.42fr)_minmax(0,1fr)] items-center gap-1 border-b border-[var(--tracker-profile-rule)] px-0.5 py-px last:border-b-0"
             >
               {onUpdate ? (
                 <InlineEdit
@@ -814,7 +816,7 @@ export function FeaturedCharacterTrackerCard({
                   scrollOnHover
                 />
               ) : (
-                <span className="truncate font-medium text-[var(--muted-foreground)]">{name}</span>
+                <span className="truncate font-medium text-[color:var(--tracker-profile-muted-text)]">{name}</span>
               )}
               {onUpdate ? (
                 <InlineEdit
@@ -825,7 +827,7 @@ export function FeaturedCharacterTrackerCard({
                   scrollOnHover
                 />
               ) : (
-                <span className="min-w-0 truncate text-[var(--foreground)]">{value}</span>
+                <span className="min-w-0 truncate text-[color:var(--tracker-profile-text)]">{value}</span>
               )}
             </div>
           ))}

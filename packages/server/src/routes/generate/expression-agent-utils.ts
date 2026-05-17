@@ -1,3 +1,7 @@
+import { buildSpriteExpressionChoices } from "../../services/game/sprite.service.js";
+
+export type SpriteDisplayMode = "expressions" | "full-body";
+
 export type AvailableSpriteCharacter = {
   characterId: string;
   characterName: string;
@@ -20,6 +24,60 @@ export type ExpressionValidationResult<T extends SpriteExpressionEntry> = {
   expressions: T[];
   warnings: ExpressionValidationWarning[];
 };
+
+const DEFAULT_SPRITE_DISPLAY_MODES: SpriteDisplayMode[] = ["expressions", "full-body"];
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(trimmed);
+  }
+
+  return result;
+}
+
+export function normalizeSpriteDisplayModes(value: unknown): SpriteDisplayMode[] {
+  const rawModes = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
+  const modes: SpriteDisplayMode[] = [];
+
+  for (const mode of rawModes) {
+    const normalized = mode === "fullBody" || mode === "full_body" ? "full-body" : mode;
+    if (normalized === "expressions" && !modes.includes("expressions")) {
+      modes.push("expressions");
+    } else if (normalized === "full-body" && !modes.includes("full-body")) {
+      modes.push("full-body");
+    }
+  }
+
+  return modes.length > 0 ? modes : [...DEFAULT_SPRITE_DISPLAY_MODES];
+}
+
+export function buildAvailableSpriteCharacter(
+  characterId: string,
+  characterName: string,
+  sprites: { expressions: string[]; fullBody: string[]; automaticFullBody: string[] },
+  displayModes: readonly SpriteDisplayMode[],
+): AvailableSpriteCharacter | null {
+  const expressions = uniqueStrings([
+    ...(displayModes.includes("expressions") ? sprites.expressions : []),
+    ...(displayModes.includes("full-body") ? [...sprites.fullBody, ...sprites.automaticFullBody] : []),
+  ]);
+
+  if (expressions.length === 0) return null;
+  return {
+    characterId,
+    characterName,
+    expressions,
+    expressionChoices: buildSpriteExpressionChoices(expressions),
+  };
+}
 
 function normalizeLookupToken(value: unknown): string {
   if (typeof value !== "string") return "";

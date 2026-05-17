@@ -86,6 +86,7 @@ function parseEntryRow(row: Record<string, unknown>) {
     useRegex: row.useRegex === "true",
     locked: row.locked === "true",
     preventRecursion: row.preventRecursion === "true",
+    excludeFromVectorization: row.excludeFromVectorization === "true",
     folderId: (row.folderId as string | null | undefined) ?? null,
     keys: parseStringArray(row.keys),
     secondaryKeys: parseStringArray(row.secondaryKeys),
@@ -468,6 +469,7 @@ export function createLorebooksStorage(db: DB) {
         schedule: input.schedule ? JSON.stringify(input.schedule) : null,
         locked: String(input.locked ?? false),
         preventRecursion: String(input.preventRecursion ?? false),
+        excludeFromVectorization: String(input.excludeFromVectorization ?? false),
         createdAt: timestamp,
         updatedAt: timestamp,
       });
@@ -480,7 +482,8 @@ export function createLorebooksStorage(db: DB) {
         input.name !== undefined ||
         input.content !== undefined ||
         input.keys !== undefined ||
-        input.secondaryKeys !== undefined;
+        input.secondaryKeys !== undefined ||
+        input.excludeFromVectorization === true;
       if (input.name !== undefined) updates.name = input.name;
       if (input.content !== undefined) updates.content = input.content;
       if (input.description !== undefined) updates.description = input.description;
@@ -548,6 +551,8 @@ export function createLorebooksStorage(db: DB) {
       if (input.schedule !== undefined) updates.schedule = input.schedule ? JSON.stringify(input.schedule) : null;
       if (input.locked !== undefined) updates.locked = String(input.locked);
       if (input.preventRecursion !== undefined) updates.preventRecursion = String(input.preventRecursion);
+      if (input.excludeFromVectorization !== undefined)
+        updates.excludeFromVectorization = String(input.excludeFromVectorization);
       if (shouldClearEmbedding) updates.embedding = null;
 
       await db.update(lorebookEntries).set(updates).where(eq(lorebookEntries.id, id));

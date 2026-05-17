@@ -77,6 +77,10 @@ const TYPE_ICONS: Record<string, typeof ScrollText> = {
   note: ScrollText,
 };
 
+function isMobileGameViewport(): boolean {
+  return typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+}
+
 const TRAILING_REPUTATION_LABEL = /(devoted|allied|friendly|neutral|unfriendly|hostile|enemy)$/i;
 
 function normalizeNpcName(value: string): string {
@@ -374,6 +378,20 @@ function NpcsView({
 }) {
   const trackedNpcs = npcs ?? [];
   const hasContent = trackedNpcs.length > 0;
+  const [mobilePortraitActionsNpc, setMobilePortraitActionsNpc] = useState<string | null>(null);
+
+  const handleNpcPortraitAvatarClick = useCallback(
+    (npcName: string) => {
+      if (isMobileGameViewport() && onNpcPortraitGenerate && npcPortraitGenerationEnabled === true) {
+        const normalizedName = npcName.trim().toLowerCase();
+        setMobilePortraitActionsNpc((current) => (current === normalizedName ? null : normalizedName));
+        return;
+      }
+
+      onNpcPortraitClick?.(npcName);
+    },
+    [npcPortraitGenerationEnabled, onNpcPortraitClick, onNpcPortraitGenerate],
+  );
 
   if (!hasContent) {
     return <div className="text-center text-xs text-white/40">No NPCs encountered yet.</div>;
@@ -421,7 +439,7 @@ function NpcsView({
                 <div className="group/journal-avatar relative shrink-0">
                   <button
                     type="button"
-                    onClick={() => onNpcPortraitClick?.(entry.npc.name)}
+                    onClick={() => handleNpcPortraitAvatarClick(entry.npc.name)}
                     className="rounded-full transition-transform hover:scale-[1.05] focus:outline-none focus:ring-2 focus:ring-white/20"
                     title="Upload or replace NPC portrait"
                   >
@@ -445,7 +463,11 @@ function NpcsView({
                         onNpcPortraitGenerate?.(entry.npc.name);
                       }}
                       disabled={portraitGenerating}
-                      className="absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-black/75 text-[var(--primary)] opacity-0 ring-1 ring-white/15 transition-opacity disabled:cursor-wait group-hover/journal-avatar:opacity-100 max-md:opacity-100"
+                      className={cn(
+                        "absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-black/75 text-[var(--primary)] opacity-0 ring-1 ring-white/15 transition-opacity disabled:cursor-wait md:group-hover/journal-avatar:opacity-100",
+                        (portraitGenerating || mobilePortraitActionsNpc === entry.npc.name.trim().toLowerCase()) &&
+                          "max-md:opacity-100",
+                      )}
                       title="Generate NPC portrait"
                     >
                       {portraitGenerating ? (

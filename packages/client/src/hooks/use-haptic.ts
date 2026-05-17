@@ -6,6 +6,7 @@ import { api } from "../lib/api-client";
 import type { HapticStatus, HapticDeviceCommand } from "@marinara-engine/shared";
 
 const HAPTIC_KEY = ["haptic", "status"] as const;
+export const HAPTIC_INTIFACE_URL_STORAGE_KEY = "marinara_haptic_intiface_url";
 
 /** Current haptic connection status and devices. */
 export function useHapticStatus() {

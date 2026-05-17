@@ -38,15 +38,18 @@ import {
   chatKeys,
   useCreateMessage,
   useDeleteChat,
+  useUpdateChat,
   useUpdateChatMetadata,
   useUpdateMessage,
 } from "../../hooks/use-chats";
+import { useConnections } from "../../hooks/use-connections";
 import { useGenerate } from "../../hooks/use-generate";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { spriteKeys, type SpriteInfo } from "../../hooks/use-characters";
 import { api, getJsonRepairRequest, type JsonRepairRequest } from "../../lib/api-client";
 import { showConfirmDialog } from "../../lib/app-dialogs";
 import { cn, type AvatarCrop, type LegacyAvatarCrop, type AvatarCropValue } from "../../lib/utils";
+import { filterLanguageGenerationConnections } from "../../lib/connection-filters";
 import { audioManager } from "../../lib/game-audio";
 import {
   parseGmTags,
@@ -59,6 +62,7 @@ import {
   type PartyChangeTag,
 } from "../../lib/game-tag-parser";
 import { resolveAssetTag } from "../../lib/asset-fuzzy-match";
+import { filterGameAssetMap, parseGameAssetExcludedFolders } from "../../lib/game-asset-selection";
 import { resolveCombatFullBodyPose, resolveDialogueFullBodyPose } from "../../lib/game-full-body-pose";
 import { characterNamesMatch, findNamedEntry } from "../../lib/game-character-name-match";
 import { normalizeGameSegmentEdit, serializeGameSegmentEdit, type GameSegmentEdit } from "../../lib/game-segment-edits";
@@ -115,6 +119,10 @@ import { GameWidgetPanel, GameWidgetSessionPrepModal, MobileWidgetPanel } from "
 import { WeatherEffects } from "../chat/WeatherEffects";
 import { GameInventory } from "./GameInventory";
 import { GameReadableDisplay } from "./GameReadableDisplay";
+import {
+  buildMissingSceneAssetGenerationPayload,
+  normalizeSceneAssetNameForGeneration,
+} from "./game-asset-generation-payload";
 import { ChatGalleryDrawer } from "../chat/ChatGalleryDrawer";
 import type { ReadableTag } from "../../lib/game-tag-parser";
 import type { DirectionCommand, GameNpc } from "@marinara-engine/shared";
@@ -167,7 +175,38 @@ type GameSpotifyPlayResponse = {
   device: string | null;
 };
 
+type SpotifyPlayerSnapshot = {
+  device?: {
+    id: string | null;
+    name?: string | null;
+    type?: string | null;
+    isActive?: boolean;
+  } | null;
+};
+
+type SpotifyDevicesSnapshot = {
+  devices?: Array<{
+    id: string | null;
+    name?: string | null;
+    type?: string | null;
+    isActive?: boolean;
+  }>;
+};
+
 type GameDirectAddressMode = "party" | "gm";
+
+function isMobileGameViewport(): boolean {
+  return typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+}
+
+function isBrowserSpotifyDeviceName(name: string | null | undefined): boolean {
+  return name === "Marinara Engine";
+}
+
+function isPersonalMobileSpotifyDeviceType(type: string | null | undefined): boolean {
+  const normalized = type?.toLowerCase() ?? "";
+  return normalized === "smartphone" || normalized === "tablet";
+}
 
 function getGameDirectAddressMode(content: string | null | undefined): GameDirectAddressMode | null {
   const normalized = content?.trimStart().toLowerCase() ?? "";
@@ -748,7 +787,7 @@ function extractNarrationNpcCandidates(
     const name = rawName.trim();
     if (!isLikelyNarrationNpcName(name)) return;
 
-    const normalizedName = normalizeSceneAssetName(name);
+    const normalizedName = normalizeSceneAssetNameForGeneration(name);
     if (
       !normalizedName ||
       excluded.has(normalizedName) ||
@@ -964,16 +1003,6 @@ function addInventoryUnit<T extends { name: string; quantity: number }>(items: T
 
 function normalizeInventoryName(value: string): string {
   return value.trim().replace(/\s+/g, " ");
-}
-
-function getMissingBackgroundTag(
-  backgroundTag: string | undefined | null,
-  manifest: Record<string, { path: string }> | null,
-): string | null {
-  const cleaned = backgroundTag?.trim();
-  if (!cleaned || cleaned === "black" || cleaned === "none") return null;
-  const resolved = resolveAssetTag(cleaned, "backgrounds", manifest);
-  return manifest?.[resolved] ? null : cleaned;
 }
 
 function interactiveCommandKey(chatId: string, messageId: string): string {
@@ -1434,6 +1463,7 @@ function renameInventoryItem<T extends { name: string; quantity: number }>(
 import {
   AlertTriangle,
   BookOpen,
+  Folder,
   Globe,
   HelpCircle,
   History,
@@ -1441,6 +1471,7 @@ import {
   Loader2,
   MoreHorizontal,
   Play,
+  Plug,
   RefreshCw,
   RotateCcw,
   ScrollText,
@@ -1464,6 +1495,7 @@ interface GameVolumeMixerProps {
   onTtsVolumeChange: (value: number) => void;
   onAmbientVolumeChange: (value: number) => void;
   onToggleMute: () => void;
+  onAudioInteract?: () => void;
   className?: string;
 }
 
@@ -1480,6 +1512,7 @@ function GameVolumeMixer({
   onTtsVolumeChange,
   onAmbientVolumeChange,
   onToggleMute,
+  onAudioInteract,
   className,
 }: GameVolumeMixerProps) {
   const rows = [
@@ -1523,7 +1556,16 @@ function GameVolumeMixer({
               min={0}
               max={100}
               value={row.value}
-              onChange={(e) => row.onChange(Number(e.target.value))}
+              onPointerDown={onAudioInteract}
+              onTouchStart={onAudioInteract}
+              onInput={(e) => {
+                onAudioInteract?.();
+                row.onChange(Number(e.currentTarget.value));
+              }}
+              onChange={(e) => {
+                onAudioInteract?.();
+                row.onChange(Number(e.target.value));
+              }}
               className="h-1.5 w-full cursor-pointer accent-[var(--primary)]"
             />
             <span className="text-right text-[0.6875rem] tabular-nums text-white/55">{row.value}</span>
@@ -1686,7 +1728,7 @@ export function GameSurface({
   characterMap,
   characters,
   personaInfo,
-  chatBackground: _chatBackground,
+  chatBackground,
   onOpenSettings,
   onDeleteMessage,
   multiSelectMode = false,
@@ -1735,9 +1777,25 @@ export function GameSurface({
   const gameFullBodySpriteScale = useUIStore((s) => s.gameFullBodySpriteScale);
   const gameMiddleMouseNav = useUIStore((s) => s.gameMiddleMouseNav);
   const messagesPerPage = useUIStore((s) => s.messagesPerPage);
+  const openGameAssetsBrowser = useUIStore((s) => s.openGameAssetsBrowser);
   const gameSnapshot = useGameStateStore((s) => (s.current?.chatId === activeChatId ? s.current : null));
   const chatCharacterIds = useMemo(() => getChatCharacterIds(chat.characterIds), [chat.characterIds]);
   const useSpotifyGameMusic = chatMeta.gameUseSpotifyMusic === true;
+  const { data: connectionsList } = useConnections();
+  const updateChat = useUpdateChat();
+  const languageConnections = useMemo(
+    () =>
+      filterLanguageGenerationConnections(
+        (connectionsList ?? []) as Array<{ id: string; name: string; model?: string; provider?: string }>,
+      ).sort((a, b) => (a.name || "").localeCompare(b.name || "")),
+    [connectionsList],
+  );
+  const handleStartScreenConnectionChange = useCallback(
+    (connectionId: string) => {
+      updateChat.mutate({ id: activeChatId, connectionId: connectionId || null });
+    },
+    [activeChatId, updateChat],
+  );
 
   const sceneWrapCharacterNames = useMemo(() => {
     const partyIds = mergeUniqueIds(getActivePartyIds(chatMeta), chatCharacterIds);
@@ -1868,6 +1926,18 @@ export function GameSurface({
   );
   const assetManifest = useGameAssetStore((s) => s.manifest);
   const currentBackground = useGameAssetStore((s) => s.currentBackground);
+  const gameAssetExcludedFolders = useMemo(
+    () => parseGameAssetExcludedFolders(chatMeta.gameAssetSelection),
+    [chatMeta.gameAssetSelection],
+  );
+  const scopedAssetMap = useMemo(
+    () => filterGameAssetMap(assetManifest?.assets ?? null, gameAssetExcludedFolders),
+    [assetManifest?.assets, gameAssetExcludedFolders],
+  );
+  const getScopedAssetMap = useCallback(
+    () => filterGameAssetMap(useGameAssetStore.getState().manifest?.assets ?? null, gameAssetExcludedFolders),
+    [gameAssetExcludedFolders],
+  );
   const audioMuted = useGameAssetStore((s) => s.audioMuted);
   const fetchManifest = useGameAssetStore((s) => s.fetchManifest);
 
@@ -2098,6 +2168,7 @@ export function GameSurface({
   const [pendingAssetGeneration, setPendingAssetGeneration] = useState<GameAssetGenerationPayload | null>(null);
   const [assetGenerationBlocksScene, setAssetGenerationBlocksScene] = useState(false);
   const [assetGenerationFailed, setAssetGenerationFailed] = useState(false);
+  const [failedNpcAvatarNames, setFailedNpcAvatarNames] = useState<Set<string>>(() => new Set());
   const [imagePromptReviewItems, setImagePromptReviewItems] = useState<GameImagePromptReviewItem[]>([]);
   const [imagePromptReviewSubmitting, setImagePromptReviewSubmitting] = useState(false);
   const imagePromptReviewResolveRef = useRef<((overrides: GameImagePromptOverride[] | null) => void) | null>(null);
@@ -2334,6 +2405,7 @@ export function GameSurface({
   // Apply segment-tied effects when the user progresses to a new segment
   const handleSegmentEnter = useCallback(
     (segmentIndex: number) => {
+      useGameModeStore.getState().setDiceRollResult(null);
       const sceneEffectsApplied = appliedSegmentsRef.current.has(segmentIndex);
       const inventoryApplied = appliedInventorySegmentsRef.current.has(segmentIndex);
       const effects = sceneEffectsApplied ? [] : pendingSegmentEffects.filter((e) => e.segment === segmentIndex);
@@ -2342,7 +2414,7 @@ export function GameSurface({
         .map((entry) => entry.update);
       if (effects.length === 0 && inventoryUpdates.length === 0) return;
 
-      const assetMap = assetManifest?.assets ?? null;
+      const assetMap = scopedAssetMap;
       if (effects.length > 0) {
         appliedSegmentsRef.current.add(segmentIndex);
         for (const fx of effects) {
@@ -2381,7 +2453,7 @@ export function GameSurface({
     [
       pendingSegmentEffects,
       pendingInventorySegmentUpdates,
-      assetManifest,
+      scopedAssetMap,
       applyInventoryUpdates,
       playDirections,
       useSpotifyGameMusic,
@@ -2415,7 +2487,7 @@ export function GameSurface({
   useEffect(() => {
     if (!assetManifest || !isRestoredRef.current) return;
     const { currentMusic, currentAmbient, currentBackground: storeBg } = useGameAssetStore.getState();
-    const assetMap = assetManifest.assets ?? null;
+    const assetMap = scopedAssetMap;
     // Restore background from metadata if the store was reset
     if (!storeBg) {
       const savedBg = chatMeta.gameSceneBackground as string | undefined;
@@ -2423,13 +2495,13 @@ export function GameSurface({
         useGameAssetStore.getState().setCurrentBackground(savedBg);
       }
     }
-    if (!useSpotifyGameMusic && currentMusic && !audioManager.getState().musicTag) {
+    if (!useSpotifyGameMusic && currentMusic && assetMap?.[currentMusic] && !audioManager.getState().musicTag) {
       audioManager.playMusic(currentMusic, assetMap);
     }
-    if (currentAmbient && !audioManager.getState().ambientTag) {
+    if (currentAmbient && assetMap?.[currentAmbient] && !audioManager.getState().ambientTag) {
       audioManager.playAmbient(currentAmbient, assetMap);
     }
-  }, [assetManifest, chatMeta.gameSceneBackground, useSpotifyGameMusic]);
+  }, [assetManifest, chatMeta.gameSceneBackground, scopedAssetMap, useSpotifyGameMusic]);
 
   const gameCharacterIds = useMemo(() => {
     const ids = new Set<string>();
@@ -2673,6 +2745,7 @@ export function GameSurface({
   const sidecarFailedRuntimeVariant = useSidecarStore((s) => s.failedRuntimeVariant);
   const openSidecarModal = useSidecarStore((s) => s.setShowDownloadModal);
   const refreshSidecarStatus = useSidecarStore((s) => s.fetchStatus);
+  const sceneAnalysisEnabled = chatMeta.enableAgents === true || chatMeta.enableAgents === "true";
 
   // Process GM tags from the latest assistant message
   const latestAssistantMsg = useMemo(() => {
@@ -2787,28 +2860,27 @@ export function GameSurface({
     chatMeta.gameImageConnectionId.trim().length > 0;
 
   const missingSceneAssetGeneration = useMemo(() => {
-    if (!gameImageGenerationEnabled) return null;
-    if (!activeChatId) return null;
-
-    const unresolvedBackground = getMissingBackgroundTag(
-      currentBackground || (chatMeta.gameSceneBackground as string | undefined),
-      assetManifest?.assets ?? null,
-    );
-
-    if (!unresolvedBackground && npcsNeedingAvatars.length === 0) return null;
-
-    return {
-      chatId: activeChatId,
-      backgroundTag: unresolvedBackground ?? undefined,
-      npcsNeedingAvatars: npcsNeedingAvatars.length > 0 ? npcsNeedingAvatars : undefined,
-    };
+    return buildMissingSceneAssetGenerationPayload({
+      gameImageGenerationEnabled,
+      activeChatId,
+      currentBackground,
+      savedSceneBackground: chatMeta.gameSceneBackground as string | undefined,
+      assetMap: scopedAssetMap,
+      sceneAssetNpcs,
+      npcAvatarLookup,
+      npcsNeedingAvatars,
+      failedNpcAvatarNames,
+    });
   }, [
     activeChatId,
-    assetManifest,
+    scopedAssetMap,
     chatMeta.gameSceneBackground,
     currentBackground,
     gameImageGenerationEnabled,
+    failedNpcAvatarNames,
+    npcAvatarLookup,
     npcsNeedingAvatars,
+    sceneAssetNpcs,
   ]);
 
   const retryableAssetGeneration = pendingAssetGeneration ?? missingSceneAssetGeneration;
@@ -2817,8 +2889,31 @@ export function GameSurface({
     autoAssetGenerationKeyRef.current = null;
   }, [activeChatId]);
 
+  const clearFailedNpcAvatars = useCallback((names: Iterable<string>) => {
+    const normalizedNames = new Set([...names].map(normalizeSceneAssetName).filter(Boolean));
+    if (normalizedNames.size === 0) return;
+    setFailedNpcAvatarNames((current) => {
+      let modified = false;
+      const next = new Set(current);
+      for (const name of normalizedNames) {
+        if (next.delete(name)) modified = true;
+      }
+      return modified ? next : current;
+    });
+  }, []);
+
+  const handleNpcPortraitLoadError = useCallback((npcName: string) => {
+    const normalizedName = normalizeSceneAssetName(npcName);
+    if (!normalizedName) return;
+    setFailedNpcAvatarNames((current) => {
+      if (current.has(normalizedName)) return current;
+      return new Set(current).add(normalizedName);
+    });
+  }, []);
+
   const canRetryTurn = !!latestAssistantMsg?.id && !isStreaming;
-  const canRetryScene = !!latestAssistantMsg?.content && !isStreaming && !sceneAnalysis.isPending;
+  const canRetryScene =
+    sceneAnalysisEnabled && !!latestAssistantMsg?.content && !isStreaming && !sceneAnalysis.isPending;
   const canRetryAssets = !!retryableAssetGeneration && (assetGenerationFailed || !pendingAssetGeneration);
   const canRetrySpotifyMusic =
     useSpotifyGameMusic && !!activeChatId && !isStreaming && !sceneAnalysis.isPending && !spotifyRetryPending;
@@ -2859,10 +2954,38 @@ export function GameSurface({
       if (!activeChatId || !useSpotifyGameMusic || !track?.uri) return;
       setSpotifyRetryPending(true);
       try {
+        const cachedPlayer = queryClient.getQueryData<SpotifyPlayerSnapshot>(["spotify", "player"]) ?? null;
+        let spotifyPlayer = cachedPlayer;
+        if (!spotifyPlayer?.device?.id) {
+          spotifyPlayer = await api.get<SpotifyPlayerSnapshot>("/spotify/player").catch(() => cachedPlayer);
+        }
+
+        const mobileViewport = isMobileGameViewport();
+        const currentDevice = spotifyPlayer?.device ?? null;
+        let spotifyDeviceId = currentDevice?.id ?? null;
+        const currentDeviceIsMobile = isPersonalMobileSpotifyDeviceType(currentDevice?.type);
+        const shouldPreferMobileDevice =
+          mobileViewport &&
+          (!spotifyDeviceId || !currentDeviceIsMobile || isBrowserSpotifyDeviceName(currentDevice?.name));
+
+        if (shouldPreferMobileDevice) {
+          const devices = await api.get<SpotifyDevicesSnapshot>("/spotify/devices").catch(() => null);
+          const mobileDevices = (devices?.devices ?? []).filter(
+            (device) =>
+              !!device.id && !isBrowserSpotifyDeviceName(device.name) && isPersonalMobileSpotifyDeviceType(device.type),
+          );
+          const preferredDevice = mobileDevices.find((device) => device.isActive) ?? mobileDevices[0] ?? null;
+          if (preferredDevice?.id) {
+            spotifyDeviceId = preferredDevice.id;
+          } else if (!currentDeviceIsMobile) {
+            spotifyDeviceId = null;
+          }
+        }
+
         dispatchSpotifySceneTrackChange(track.uri);
         await api.post<GameSpotifyPlayResponse>(
           "/game/spotify/play",
-          { chatId: activeChatId, track },
+          { chatId: activeChatId, track, deviceId: spotifyDeviceId ?? undefined, mobileDeviceOnly: mobileViewport },
           { signal: AbortSignal.timeout(20_000) },
         );
         recentSpotifyTrackHistoryRef.current = appendRecentSpotifyTrack(
@@ -2960,7 +3083,7 @@ export function GameSurface({
     const savedBg = chatMeta.gameSceneBackground as string | undefined;
     const savedMusic = chatMeta.gameSceneMusic as string | undefined;
     const savedAmbient = chatMeta.gameSceneAmbient as string | undefined;
-    const assetMap = assetManifest.assets ?? null;
+    const assetMap = scopedAssetMap;
     recentMusicHistoryRef.current = appendRecentMusic(
       normalizeRecentMusicHistory(chatMeta.gameRecentMusic),
       savedMusic,
@@ -2971,7 +3094,7 @@ export function GameSurface({
     // same-chat remount (store may already match) and different-chat mount.
     useGameAssetStore.getState().setCurrentBackground(savedBg ?? null);
 
-    if (savedMusic && !useSpotifyGameMusic) {
+    if (savedMusic && !useSpotifyGameMusic && assetMap?.[savedMusic]) {
       useGameAssetStore.getState().setCurrentMusic(savedMusic);
       // Play music — may be blocked by autoplay, audioManager queues retry on gesture
       if (audioManager.getState().musicTag !== savedMusic) {
@@ -2981,7 +3104,7 @@ export function GameSurface({
       useGameAssetStore.getState().setCurrentMusic(null);
     }
 
-    if (savedAmbient) {
+    if (savedAmbient && assetMap?.[savedAmbient]) {
       useGameAssetStore.getState().setCurrentAmbient(savedAmbient);
       if (audioManager.getState().ambientTag !== savedAmbient) {
         audioManager.playAmbient(savedAmbient, assetMap);
@@ -3019,6 +3142,7 @@ export function GameSurface({
     latestAssistantMsg?.content,
     latestAssistantMsg?.id,
     assetManifest,
+    scopedAssetMap,
     chatMeta.gameSceneBackground,
     chatMeta.gameSceneMusic,
     chatMeta.gameRecentMusic,
@@ -3319,11 +3443,18 @@ export function GameSurface({
 
   // Check if async scene preparation exists (sidecar or connection-based scene model)
   const hasAsyncScenePrep = useMemo(() => {
+    if (!sceneAnalysisEnabled) return false;
     const useSidecar = sidecarConfig.useForGameScene && sidecarReady;
     const setupCfg = chatMeta.gameSetupConfig as Record<string, unknown> | null;
     const sceneConnId = (chatMeta.gameSceneConnectionId as string) || (setupCfg?.sceneConnectionId as string) || null;
     return useSidecar || !!sceneConnId;
-  }, [sidecarConfig.useForGameScene, sidecarReady, chatMeta.gameSetupConfig, chatMeta.gameSceneConnectionId]);
+  }, [
+    sceneAnalysisEnabled,
+    sidecarConfig.useForGameScene,
+    sidecarReady,
+    chatMeta.gameSetupConfig,
+    chatMeta.gameSceneConnectionId,
+  ]);
 
   // True when latest message needs scene effects that haven't been applied yet
   const scenePreparing =
@@ -3386,9 +3517,7 @@ export function GameSurface({
       return;
     }
 
-    // Read asset manifest from store directly (not from dependency)
-    const manifest = useGameAssetStore.getState().manifest;
-    const assets = manifest?.assets ?? null;
+    const assets = getScopedAssetMap();
 
     console.warn("[scene-process] FIRING for message:", msg.id, "| assets:", !!assets);
     lastProcessedMsgRef.current = msg.id;
@@ -3435,10 +3564,11 @@ export function GameSurface({
         : tags.stateChange === "exploration" || tags.stateChange === "dialogue" || tags.stateChange === "travel_rest"
           ? tags.stateChange
           : gameState;
-    const useSidecar = sidecarConfig.useForGameScene && sidecarReady;
+    const useSidecar = sceneAnalysisEnabled && sidecarConfig.useForGameScene && sidecarReady;
     const setupConfig = chatMeta.gameSetupConfig as Record<string, unknown> | null;
-    const sceneConnId =
-      (chatMeta.gameSceneConnectionId as string) || (setupConfig?.sceneConnectionId as string) || null;
+    const sceneConnId = sceneAnalysisEnabled
+      ? (chatMeta.gameSceneConnectionId as string) || (setupConfig?.sceneConnectionId as string) || null
+      : null;
 
     // Inline directions can come from the GM model; sidecar scene analysis can
     // also return cinematic directions for the fully generated turn.
@@ -3925,9 +4055,10 @@ export function GameSurface({
       }
       if (res.generatedNpcAvatars?.length) {
         useGameModeStore.getState().patchNpcAvatars(res.generatedNpcAvatars);
+        clearFailedNpcAvatars(res.generatedNpcAvatars.map((avatar) => avatar.name));
       }
     },
-    [fetchManifest, installGeneratedIllustration],
+    [clearFailedNpcAvatars, fetchManifest, installGeneratedIllustration],
   );
 
   async function applySceneResult(result: import("@marinara-engine/shared").SceneAnalysis, msg: { id: string }) {
@@ -3982,7 +4113,7 @@ export function GameSurface({
       }));
       _updateReputation.mutate({ chatId: activeChatId, actions: repActions });
     }
-    const assetMap = useGameAssetStore.getState().manifest?.assets ?? null;
+    const assetMap = getScopedAssetMap();
     if (result.background) {
       const resolved = resolveAssetTag(result.background, "backgrounds", assetMap);
       useGameAssetStore.getState().setCurrentBackground(resolved);
@@ -4051,10 +4182,11 @@ export function GameSurface({
     }
     if (result.generatedNpcAvatars?.length) {
       useGameModeStore.getState().patchNpcAvatars(result.generatedNpcAvatars);
+      clearFailedNpcAvatars(result.generatedNpcAvatars.map((avatar) => avatar.name));
     }
 
-    const manifest = useGameAssetStore.getState().manifest;
-    if (manifest) {
+    const latestAssetMap = getScopedAssetMap();
+    if (latestAssetMap) {
       const allBgTags = [
         result.background,
         ...(result.segmentEffects?.map((fx) => fx.background).filter(Boolean) ?? []),
@@ -4062,9 +4194,9 @@ export function GameSurface({
 
       const generatedIllustrationTag = result.generatedIllustration?.tag;
       const unresolvedBg = allBgTags.find((t) => {
-        if (t === generatedIllustrationTag || manifest.assets[t]) return false;
-        const resolved = resolveAssetTag(t, "backgrounds", manifest.assets);
-        return !manifest.assets[resolved];
+        if (t === generatedIllustrationTag || latestAssetMap[t]) return false;
+        const resolved = resolveAssetTag(t, "backgrounds", latestAssetMap);
+        return !latestAssetMap[resolved];
       });
       // Pre-cache portraits for any tracked named NPC with a description, even if not
       // met yet — by the time the party encounters them their avatar is ready, and the
@@ -4133,11 +4265,10 @@ export function GameSurface({
   const skipSceneAnalysis = useCallback(() => {
     const msg = latestAssistantMsgRef.current;
     if (!msg?.content) return;
-    const manifest = useGameAssetStore.getState().manifest;
     const tags = parseGmTags(msg.content);
     setSceneAnalysisFailed(false);
-    applyInlineTags(tags, manifest?.assets ?? null, msg);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    applyInlineTags(tags, getScopedAssetMap(), msg);
+  }, [getScopedAssetMap]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Retry failed image/NPC avatar generation. */
   const requestAssetGeneration = useCallback(
@@ -4279,20 +4410,32 @@ export function GameSurface({
     setActiveDirections(blueprint.introSequence);
   }, [blueprint, latestAssistantMsg?.content]);
 
-  // Sync mute state
-  useEffect(() => {
-    if (!audioSettingsHydrated) return;
-    audioManager.setMuted(audioMuted || masterVolume === 0);
-  }, [audioMuted, audioSettingsHydrated, masterVolume]);
+  const applyGameAudioSettings = useCallback(
+    (overrides: Partial<GameAudioSettings> = {}, options: { unlock?: boolean } = {}) => {
+      const nextMasterVolume = overrides.masterVolume ?? masterVolume;
+      const nextMusicVolume = overrides.musicVolume ?? musicVolume;
+      const nextSfxVolume = overrides.sfxVolume ?? sfxVolume;
+      const nextAmbientVolume = overrides.ambientVolume ?? ambientVolume;
+      const nextAudioMuted = overrides.audioMuted ?? audioMuted;
+
+      if (options.unlock) {
+        audioManager.unlock();
+      }
+
+      audioManager.setMuted(nextAudioMuted || nextMasterVolume === 0);
+      audioManager.setVolumes(
+        getEffectiveVolume(nextMasterVolume, nextMusicVolume),
+        getEffectiveVolume(nextMasterVolume, nextSfxVolume),
+        getEffectiveVolume(nextMasterVolume, nextAmbientVolume),
+      );
+    },
+    [ambientVolume, audioMuted, masterVolume, musicVolume, sfxVolume],
+  );
 
   useEffect(() => {
     if (!audioSettingsHydrated) return;
 
-    audioManager.setVolumes(
-      getEffectiveVolume(masterVolume, musicVolume),
-      getEffectiveVolume(masterVolume, sfxVolume),
-      getEffectiveVolume(masterVolume, ambientVolume),
-    );
+    applyGameAudioSettings();
 
     try {
       localStorage.setItem(
@@ -4309,7 +4452,16 @@ export function GameSurface({
     } catch {
       // Ignore storage failures and keep the in-memory setting.
     }
-  }, [ambientVolume, audioMuted, audioSettingsHydrated, masterVolume, musicVolume, sfxVolume, ttsVolume]);
+  }, [
+    ambientVolume,
+    applyGameAudioSettings,
+    audioMuted,
+    audioSettingsHydrated,
+    masterVolume,
+    musicVolume,
+    sfxVolume,
+    ttsVolume,
+  ]);
 
   // Message sending via generate hook
   const { generate, retryAgents } = useGenerate();
@@ -4324,6 +4476,7 @@ export function GameSurface({
       chatId: activeChatId,
       connectionId: null,
       generationGuide: GAME_START_GENERATION_GUIDE,
+      generationGuideSource: "game_start",
     });
   }, [activeChatId, generate]);
 
@@ -4381,8 +4534,7 @@ export function GameSurface({
     setMobileRetryMenuOpen(false);
     setMobileActionsOpen(false);
 
-    const manifest = useGameAssetStore.getState().manifest;
-    const assets = manifest?.assets ?? null;
+    const assets = getScopedAssetMap();
     const tags = parseGmTags(msg.content);
     const sceneAnalysisState: GameActiveState =
       tags.combatEncounter || tags.stateChange === "combat"
@@ -4478,6 +4630,7 @@ export function GameSurface({
     gameSnapshot?.time,
     gameSnapshot?.weather,
     gameState,
+    getScopedAssetMap,
     hudWidgets,
     isStreaming,
     npcs,
@@ -4544,7 +4697,14 @@ export function GameSurface({
     startGame.mutate(
       { chatId: activeChatId },
       {
-        onSuccess: () => {
+        onSuccess: (res) => {
+          // Race recovery (#821): if the server detected an existing GM turn,
+          // it has already restored status to "active" — skip the duplicate
+          // generation and let the UI move past the Start Game screen on the
+          // next chat refetch.
+          if (res?.alreadyStarted) {
+            return;
+          }
           generateInitialGameTurn();
         },
         onError: (err) => {
@@ -4698,12 +4858,13 @@ export function GameSurface({
         });
 
         useGameModeStore.getState().patchNpcAvatars([{ name: targetNpc.name, avatarUrl: response.avatarPath }]);
+        clearFailedNpcAvatars([targetNpc.name]);
         toast.success(`${targetNpc.name} portrait updated.`);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : `Failed to update ${npcName} portrait.`);
       }
     },
-    [activeChatId, updateChatMetadata],
+    [activeChatId, clearFailedNpcAvatars, updateChatMetadata],
   );
 
   const handleNpcPortraitGenerate = useCallback(
@@ -4753,6 +4914,7 @@ export function GameSurface({
           (avatar) => avatar.name.trim().toLowerCase() === targetNpc.name.trim().toLowerCase(),
         );
         if (generated) {
+          clearFailedNpcAvatars([targetNpc.name]);
           toast.success(`${targetNpc.name} portrait generated.`);
         } else {
           toast.error(`No portrait was generated for ${targetNpc.name}.`);
@@ -4772,6 +4934,7 @@ export function GameSurface({
       applyGeneratedAssets,
       chatMeta.enableSpriteGeneration,
       chatMeta.gameImageConnectionId,
+      clearFailedNpcAvatars,
       runGameAssetGeneration,
     ],
   );
@@ -4843,6 +5006,9 @@ export function GameSurface({
         });
       }
 
+      setInventoryNotifications([`You gained ${addedItemName}!`]);
+      if (notificationTimerRef.current) clearTimeout(notificationTimerRef.current);
+      notificationTimerRef.current = setTimeout(() => setInventoryNotifications([]), 4000);
       toast.success(`Added ${addedItemName} to inventory.`);
       return addedItemName;
     } catch (error) {
@@ -4899,6 +5065,9 @@ export function GameSurface({
           });
         }
 
+        setInventoryNotifications([`You gained ${normalizedItemName}!`]);
+        if (notificationTimerRef.current) clearTimeout(notificationTimerRef.current);
+        notificationTimerRef.current = setTimeout(() => setInventoryNotifications([]), 4000);
         toast.success(`Added 1 ${normalizedItemName}.`);
       } catch (error) {
         if (patchedGameState) {
@@ -5107,6 +5276,41 @@ export function GameSurface({
         const message = error instanceof Error ? error.message : `Failed to rename ${currentName} to ${resolvedName}.`;
         toast.error(message);
         return null;
+      }
+    },
+    [activeChatId, inventoryItems, updateChatMetadata],
+  );
+
+  const handleReorderInventoryItem = useCallback(
+    async (fromIndex: number, toIndex: number) => {
+      if (!activeChatId) return;
+      if (fromIndex === toIndex) return;
+      if (fromIndex < 0 || toIndex < 0) return;
+      if (fromIndex >= inventoryItems.length || toIndex >= inventoryItems.length) return;
+
+      const previousInventory = inventoryItems;
+      const updatedInventory = inventoryItems.slice();
+      [updatedInventory[fromIndex], updatedInventory[toIndex]] = [
+        updatedInventory[toIndex],
+        updatedInventory[fromIndex],
+      ];
+
+      // Optimistic local update so the swap feels instant; rollback on error.
+      // Only the visible gameInventory order is persisted — playerStats.inventory
+      // is name-indexed by the agent, so its array order is not observable.
+      setInventoryItems(updatedInventory);
+
+      try {
+        await updateChatMetadata.mutateAsync({
+          id: activeChatId,
+          gameInventory: updatedInventory,
+        });
+      } catch (error) {
+        // Rollback only if no newer reorder superseded this one — otherwise
+        // a late failure from an older request would clobber newer state.
+        setInventoryItems((current) => (current === updatedInventory ? previousInventory : current));
+        const message = error instanceof Error ? error.message : "Failed to reorder inventory.";
+        toast.error(message);
       }
     },
     [activeChatId, inventoryItems, updateChatMetadata],
@@ -5401,6 +5605,7 @@ export function GameSurface({
           id: personaId,
           name: personaInfo.name,
           avatarUrl: personaInfo.avatarUrl ?? null,
+          avatarCrop: personaInfo.avatarCrop ?? null,
           nameColor: personaInfo.nameColor,
           dialogueColor: personaInfo.dialogueColor,
           canRemove: false,
@@ -6073,6 +6278,7 @@ export function GameSurface({
         title: personaInfo.name,
         subtitle: "Player Character",
         avatarUrl: personaInfo.avatarUrl ?? null,
+        avatarCrop: personaInfo.avatarCrop ?? null,
         level: sessionNumber,
         status: gameSnapshot?.playerStats?.status || undefined,
         stats: [
@@ -6525,6 +6731,7 @@ export function GameSurface({
       options?: { commitPendingMove?: boolean },
     ) => {
       if (!sessionInteractive) return;
+      audioManager.unlock();
       // Commit a pending interrupt: persist the truncated GM message before generating
       // so the server-side prompt build doesn't see segments the player never read. We
       // await so the PATCH (and the optional risky-mode system message) land before
@@ -6843,26 +7050,46 @@ export function GameSurface({
 
   // Toggle audio mute
   const handleToggleMute = useCallback(() => {
-    useGameAssetStore.getState().setAudioMuted(!audioMuted);
-  }, [audioMuted]);
+    const nextAudioMuted = !audioMuted;
+    useGameAssetStore.getState().setAudioMuted(nextAudioMuted);
+    applyGameAudioSettings({ audioMuted: nextAudioMuted }, { unlock: true });
+  }, [applyGameAudioSettings, audioMuted]);
+
+  const handleAudioInteract = useCallback(() => {
+    audioManager.unlock();
+    audioManager.retryPending();
+  }, []);
 
   // Handle master volume change from slider (0–100)
   const handleMasterVolumeChange = useCallback(
     (value: number) => {
       const nextValue = normalizeVolume(value, masterVolume);
       setMasterVolume(nextValue);
+      let nextAudioMuted = audioMuted;
       if (nextValue === 0 && !audioMuted) {
+        nextAudioMuted = true;
         useGameAssetStore.getState().setAudioMuted(true);
       } else if (nextValue > 0 && audioMuted) {
+        nextAudioMuted = false;
         useGameAssetStore.getState().setAudioMuted(false);
       }
+      applyGameAudioSettings({ masterVolume: nextValue, audioMuted: nextAudioMuted }, { unlock: true });
     },
-    [audioMuted, masterVolume],
+    [applyGameAudioSettings, audioMuted, masterVolume],
   );
 
-  const handleChannelVolumeChange = useCallback((setter: (value: number) => void, value: number) => {
-    setter(normalizeVolume(value, 0));
-  }, []);
+  const handleChannelVolumeChange = useCallback(
+    (
+      channel: "musicVolume" | "sfxVolume" | "ttsVolume" | "ambientVolume",
+      setter: (value: number) => void,
+      value: number,
+    ) => {
+      const nextValue = normalizeVolume(value, 0);
+      setter(nextValue);
+      applyGameAudioSettings({ [channel]: nextValue } as Partial<GameAudioSettings>, { unlock: true });
+    },
+    [applyGameAudioSettings],
+  );
 
   // Apply saved volume on mount so audioManager matches the persisted level
   useEffect(() => {
@@ -6902,7 +7129,7 @@ export function GameSurface({
 
   // Retry scene analysis for the latest message
   const handleRetryScene = useCallback(() => {
-    if (!latestAssistantMsg?.content) return;
+    if (!sceneAnalysisEnabled || !latestAssistantMsg?.content) return;
     setRetryMenuOpen(false);
     const onSuccess = applySceneResultRef.current;
     if (!onSuccess) return;
@@ -6915,7 +7142,7 @@ export function GameSurface({
     appliedInventorySegmentsRef.current = new Set();
 
     const tags = parseGmTags(latestAssistantMsg.content);
-    const assets = assetManifest?.assets ?? null;
+    const assets = scopedAssetMap;
     const assetKeys = Object.keys(assets ?? {});
     const bgTags = sampleTags(getSceneBackgroundTags(assetKeys), 50);
     const sfxTags = sampleTags(
@@ -6971,7 +7198,7 @@ export function GameSurface({
     }
   }, [
     latestAssistantMsg,
-    assetManifest,
+    scopedAssetMap,
     gameState,
     hudWidgets,
     npcs,
@@ -6981,6 +7208,7 @@ export function GameSurface({
     activeChatId,
     sceneAnalysis,
     sceneWrapCharacterNames,
+    sceneAnalysisEnabled,
   ]);
 
   // Remap legacy hud_bottom widgets to left/right (hud_bottom was removed)
@@ -7087,40 +7315,43 @@ export function GameSurface({
 
   // Resolve background image URL — supports exact tag match, partial/fuzzy match, and "black" override
   const resolvedBackground = useMemo(() => {
-    if (currentBackground && assetManifest?.assets) {
+    if (!sceneAnalysisEnabled) {
+      return chatBackground ?? undefined;
+    }
+
+    if (currentBackground && scopedAssetMap) {
       // Special value: "black" means no background (e.g. character waking up)
       if (currentBackground === "black" || currentBackground === "none") {
         return "black";
       }
       // 1. Exact tag match
-      let entry = assetManifest.assets[currentBackground];
+      let entry = scopedAssetMap[currentBackground];
       // 2. Fuzzy match: try to find a tag that ends with or contains the given value
       if (!entry) {
         const lowerTag = currentBackground.toLowerCase();
-        const keys = Object.keys(assetManifest.assets);
+        const keys = Object.keys(scopedAssetMap);
         // Try suffix match first (e.g. "forest-night" matches "backgrounds:fantasy:forest-night")
         const suffixMatch = keys.find((k) => k.toLowerCase().endsWith(`:${lowerTag}`) || k.toLowerCase() === lowerTag);
-        if (suffixMatch) entry = assetManifest.assets[suffixMatch];
+        if (suffixMatch) entry = scopedAssetMap[suffixMatch];
         // Try contains match (e.g. "forest" matches "backgrounds:fantasy:forest-night")
         if (!entry) {
           const containsMatch = keys.find((k) => k.startsWith("backgrounds:") && k.toLowerCase().includes(lowerTag));
-          if (containsMatch) entry = assetManifest.assets[containsMatch];
+          if (containsMatch) entry = scopedAssetMap[containsMatch];
         }
       }
       if (entry) {
         return backgroundAssetUrl(entry);
       }
-      const fallbackTag = pickFallbackBackgroundTag(currentBackground, assetManifest.assets);
-      const fallbackEntry = fallbackTag ? assetManifest.assets[fallbackTag] : undefined;
+      const fallbackTag = pickFallbackBackgroundTag(currentBackground, scopedAssetMap);
+      const fallbackEntry = fallbackTag ? scopedAssetMap[fallbackTag] : undefined;
       if (fallbackEntry) {
         console.warn("[bg-resolve] No asset match for background tag; using fallback:", currentBackground, fallbackTag);
         return backgroundAssetUrl(fallbackEntry);
       }
       console.warn("[bg-resolve] No asset match for background tag:", currentBackground);
     }
-    // In game mode, do NOT fall back to the roleplay chat background.
     return undefined;
-  }, [currentBackground, assetManifest]);
+  }, [sceneAnalysisEnabled, chatBackground, currentBackground, scopedAssetMap]);
 
   const lastResolvedBackgroundRef = useRef<{ chatId: string; url?: string }>({ chatId: activeChatId });
   useEffect(() => {
@@ -7287,12 +7518,34 @@ export function GameSurface({
             )}
 
             {/* Start button or generating indicator */}
-            <div className="flex-shrink-0">
+            <div className="flex w-full flex-shrink-0 flex-col items-center gap-4">
+              <label className="flex w-full max-w-sm flex-col gap-1.5 text-left">
+                <span className="flex items-center gap-1.5 text-xs font-medium text-[var(--muted-foreground)] dark:text-white/50">
+                  <Plug size={12} />
+                  GM / Party Model
+                </span>
+                <select
+                  value={chat.connectionId ?? ""}
+                  onChange={(e) => handleStartScreenConnectionChange(e.target.value)}
+                  disabled={isStreaming || startGame.isPending || updateChat.isPending}
+                  className="w-full rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs text-[var(--foreground)] outline-none ring-1 ring-[var(--border)] transition-all focus:ring-[var(--primary)]/40 disabled:opacity-60 dark:bg-white/10"
+                >
+                  <option value="">None</option>
+                  <option value="random">Random</option>
+                  {languageConnections.map((connection) => (
+                    <option key={connection.id} value={connection.id}>
+                      {connection.name}
+                      {connection.model ? ` - ${connection.model}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
               {introPhase === "intro" ? (
                 <div className="flex flex-col items-center gap-3">
                   {firstTurnFullyReady && introTypewriterDone ? (
                     <button
                       onClick={() => {
+                        audioManager.unlock();
                         setIntroPresented(true);
                         try {
                           localStorage.setItem(introPresentationStorageKey, "1");
@@ -7355,7 +7608,10 @@ export function GameSurface({
                 </div>
               ) : (
                 <button
-                  onClick={handleStartGameRequest}
+                  onClick={() => {
+                    audioManager.unlock();
+                    handleStartGameRequest();
+                  }}
                   disabled={startGame.isPending || startGameRequested}
                   className="group flex items-center gap-2 rounded-xl bg-[var(--primary)] px-6 py-3 text-sm font-semibold text-white transition-all hover:scale-105 hover:shadow-lg hover:shadow-[var(--primary)]/30 disabled:opacity-50 disabled:hover:scale-100"
                 >
@@ -7366,8 +7622,6 @@ export function GameSurface({
             </div>
           </div>
         </div>
-        {/* Widget prep modal — must be available on the Start Game screen because
-            handleStartGameRequest opens it before handleStartGameNow runs. */}
         <GameWidgetSessionPrepModal
           open={prepareInitialWidgetsOpen}
           widgets={normalizedWidgets}
@@ -7493,11 +7747,14 @@ export function GameSurface({
                         ttsVolume={ttsVolume}
                         ambientVolume={ambientVolume}
                         onMasterVolumeChange={handleMasterVolumeChange}
-                        onMusicVolumeChange={(value) => handleChannelVolumeChange(setMusicVolume, value)}
-                        onSfxVolumeChange={(value) => handleChannelVolumeChange(setSfxVolume, value)}
-                        onTtsVolumeChange={(value) => handleChannelVolumeChange(setTtsVolume, value)}
-                        onAmbientVolumeChange={(value) => handleChannelVolumeChange(setAmbientVolume, value)}
+                        onMusicVolumeChange={(value) => handleChannelVolumeChange("musicVolume", setMusicVolume, value)}
+                        onSfxVolumeChange={(value) => handleChannelVolumeChange("sfxVolume", setSfxVolume, value)}
+                        onTtsVolumeChange={(value) => handleChannelVolumeChange("ttsVolume", setTtsVolume, value)}
+                        onAmbientVolumeChange={(value) =>
+                          handleChannelVolumeChange("ambientVolume", setAmbientVolume, value)
+                        }
                         onToggleMute={handleToggleMute}
+                        onAudioInteract={handleAudioInteract}
                       />
                     )}
                   </div>
@@ -7507,6 +7764,13 @@ export function GameSurface({
                     title="Gallery"
                   >
                     <Image size={14} />
+                  </button>
+                  <button
+                    onClick={openGameAssetsBrowser}
+                    className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white/80 backdrop-blur-md transition-colors hover:bg-black/60 hover:text-white"
+                    title="Game Assets"
+                  >
+                    <Folder size={14} />
                   </button>
                   <div className="relative" ref={retryMenuRef}>
                     <button
@@ -7683,11 +7947,16 @@ export function GameSurface({
                               ttsVolume={ttsVolume}
                               ambientVolume={ambientVolume}
                               onMasterVolumeChange={handleMasterVolumeChange}
-                              onMusicVolumeChange={(value) => handleChannelVolumeChange(setMusicVolume, value)}
-                              onSfxVolumeChange={(value) => handleChannelVolumeChange(setSfxVolume, value)}
-                              onTtsVolumeChange={(value) => handleChannelVolumeChange(setTtsVolume, value)}
-                              onAmbientVolumeChange={(value) => handleChannelVolumeChange(setAmbientVolume, value)}
+                              onMusicVolumeChange={(value) =>
+                                handleChannelVolumeChange("musicVolume", setMusicVolume, value)
+                              }
+                              onSfxVolumeChange={(value) => handleChannelVolumeChange("sfxVolume", setSfxVolume, value)}
+                              onTtsVolumeChange={(value) => handleChannelVolumeChange("ttsVolume", setTtsVolume, value)}
+                              onAmbientVolumeChange={(value) =>
+                                handleChannelVolumeChange("ambientVolume", setAmbientVolume, value)
+                              }
                               onToggleMute={handleToggleMute}
+                              onAudioInteract={handleAudioInteract}
                             />
                           )}
                         </div>
@@ -7700,6 +7969,16 @@ export function GameSurface({
                           title="Gallery"
                         >
                           <Image size={14} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            openGameAssetsBrowser();
+                            setMobileActionsOpen(false);
+                          }}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+                          title="Game Assets"
+                        >
+                          <Folder size={14} />
                         </button>
                         <div className="relative">
                           <button
@@ -7860,7 +8139,11 @@ export function GameSurface({
                 {/* Dynamic weather effects from tracked game state */}
                 {weatherEffectsEnabled && (gameSnapshot?.weather || gameSnapshot?.time) && (
                   <div className="pointer-events-none absolute inset-0 z-[1]">
-                    <WeatherEffects weather={gameSnapshot?.weather ?? null} timeOfDay={gameSnapshot?.time ?? null} />
+                    <WeatherEffects
+                      weather={gameSnapshot?.weather ?? null}
+                      timeOfDay={gameSnapshot?.time ?? null}
+                      showCelestial={false}
+                    />
                   </div>
                 )}
 
@@ -8072,6 +8355,7 @@ export function GameSurface({
                           onReadable={handleReadable}
                           onNpcPortraitClick={handleNpcPortraitClick}
                           onNpcPortraitGenerate={handleNpcPortraitGenerate}
+                          onNpcPortraitLoadError={handleNpcPortraitLoadError}
                           npcPortraitGenerationEnabled={
                             chatMeta.enableSpriteGeneration === true &&
                             typeof chatMeta.gameImageConnectionId === "string"
@@ -8151,6 +8435,7 @@ export function GameSurface({
                       onReadable={handleReadable}
                       onNpcPortraitClick={handleNpcPortraitClick}
                       onNpcPortraitGenerate={handleNpcPortraitGenerate}
+                      onNpcPortraitLoadError={handleNpcPortraitLoadError}
                       npcPortraitGenerationEnabled={
                         chatMeta.enableSpriteGeneration === true && typeof chatMeta.gameImageConnectionId === "string"
                       }
@@ -8393,6 +8678,7 @@ export function GameSurface({
                 onRenameItem={handleRenameInventoryItem}
                 onRemoveItem={handleRemoveInventoryItem}
                 onIncrementItem={handleIncrementInventoryItem}
+                onReorderItem={handleReorderInventoryItem}
                 canInteract={sessionInteractive && narrationDone && !isStreaming}
                 onUseItem={(itemName) => {
                   setInventoryOpen(false);

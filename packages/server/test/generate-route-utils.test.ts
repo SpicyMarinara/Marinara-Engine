@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { shouldEnableAgentsForGeneration } from "../src/routes/generate/generate-route-utils.js";
+import {
+  shouldAbortOnPassiveGenerationDisconnect,
+  shouldEnableAgentsForGeneration,
+} from "../src/routes/generate/generate-route-utils.js";
 
 test("disables agents before resolution when impersonate blocks agents", () => {
   assert.equal(
@@ -82,4 +85,27 @@ test("keeps conversation mode agent pipeline disabled", () => {
     }),
     false,
   );
+});
+
+test("does not abort normal conversation generation on passive SSE disconnect", () => {
+  assert.equal(
+    shouldAbortOnPassiveGenerationDisconnect({
+      chatMode: "conversation",
+      impersonate: false,
+    }),
+    false,
+  );
+});
+
+test("keeps passive disconnect aborts for non-conversation or impersonation generations", () => {
+  const cases = [
+    { chatMode: "conversation", impersonate: true },
+    { chatMode: "roleplay", impersonate: false },
+    { chatMode: "game", impersonate: false },
+    { chatMode: "visual_novel", impersonate: false },
+  ];
+
+  for (const item of cases) {
+    assert.equal(shouldAbortOnPassiveGenerationDisconnect(item), true);
+  }
 });

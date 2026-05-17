@@ -1,8 +1,9 @@
 // ──────────────────────────────────────────────
 // File Browser — Folder Tree (sidebar)
 // ──────────────────────────────────────────────
-import { ChevronDown, ChevronRight, Folder } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Folder, Minus } from "lucide-react";
 import type { TreeNode } from "../../hooks/use-game-assets";
+import type { GameAssetSelectionStatus } from "../../lib/game-asset-selection";
 import { cn } from "../../lib/utils";
 import { CATEGORY_ICONS } from "./constants";
 
@@ -22,6 +23,18 @@ export interface FolderTreeProps {
   onToggle: (path: string) => void;
   /** Select/navigate to a folder */
   onSelect: (path: string) => void;
+  /** Show per-game folder inclusion controls */
+  assetSelectionMode?: boolean;
+  /** Resolve the inclusion status for a folder */
+  getFolderSelectionStatus?: (node: TreeNode) => GameAssetSelectionStatus;
+  /** Open the per-game folder selection menu */
+  onOpenFolderSelection?: (node: TreeNode, anchorEl: HTMLElement) => void;
+}
+
+function FolderSelectionMark({ status }: { status: GameAssetSelectionStatus }) {
+  if (status === "included") return <Check size="0.625rem" />;
+  if (status === "partial") return <Minus size="0.625rem" />;
+  return null;
 }
 
 /**
@@ -36,11 +49,15 @@ export function FolderTree({
   expanded,
   onToggle,
   onSelect,
+  assetSelectionMode = false,
+  getFolderSelectionStatus,
+  onOpenFolderSelection,
 }: FolderTreeProps) {
   const isExpanded = expanded.has(node.path);
   const isSelected = selectedPath === node.path;
   const hasChildren = !!(node.children && node.children.length > 0);
   const isRoot = depth === 0;
+  const selectionStatus = !isRoot && assetSelectionMode ? (getFolderSelectionStatus?.(node) ?? "included") : null;
 
   const CategoryIcon = isRoot ? Folder : CATEGORY_ICONS[node.name] || Folder;
 
@@ -58,7 +75,11 @@ export function FolderTree({
         {hasChildren ? (
           <button
             type="button"
-            aria-label={isExpanded ? `Collapse ${isRoot ? "Game Assets" : node.name}` : `Expand ${isRoot ? "Game Assets" : node.name}`}
+            aria-label={
+              isExpanded
+                ? `Collapse ${isRoot ? "Game Assets" : node.name}`
+                : `Expand ${isRoot ? "Game Assets" : node.name}`
+            }
             aria-expanded={isExpanded}
             onClick={() => onToggle(node.path)}
             className="flex shrink-0 items-center justify-center rounded p-0.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
@@ -76,6 +97,25 @@ export function FolderTree({
           <CategoryIcon size="0.875rem" className="shrink-0" />
           <span className="truncate">{isRoot ? "Game Assets" : node.name}</span>
         </button>
+        {selectionStatus && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenFolderSelection?.(node, e.currentTarget);
+            }}
+            className={
+              "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors " +
+              (selectionStatus === "excluded"
+                ? "border-[var(--border)] text-[var(--muted-foreground)] hover:border-[var(--primary)]"
+                : "border-[var(--primary)]/40 bg-[var(--primary)] text-white hover:opacity-90")
+            }
+            title="Select assets for this game"
+            aria-label={`Select ${node.name} assets for this game`}
+          >
+            <FolderSelectionMark status={selectionStatus} />
+          </button>
+        )}
       </div>
       {isExpanded &&
         hasChildren &&
@@ -90,6 +130,9 @@ export function FolderTree({
               expanded={expanded}
               onToggle={onToggle}
               onSelect={onSelect}
+              assetSelectionMode={assetSelectionMode}
+              getFolderSelectionStatus={getFolderSelectionStatus}
+              onOpenFolderSelection={onOpenFolderSelection}
             />
           ))}
     </div>

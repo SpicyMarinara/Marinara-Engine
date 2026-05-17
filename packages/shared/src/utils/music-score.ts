@@ -131,9 +131,9 @@ const WEATHER_AMBIENT: Record<string, string[]> = {
   clear: ["birds", "wind", "water"],
   cloudy: ["wind"],
   overcast: ["wind", "eerie"],
-  rain: ["rain", "thunder"],
-  rainy: ["rain", "thunder"],
-  heavy_rain: ["rain", "thunder", "howling"],
+  rain: ["rain"],
+  rainy: ["rain"],
+  heavy_rain: ["rain", "howling"],
   storm: ["rain", "thunder", "howling"],
   stormy: ["rain", "thunder", "howling"],
   snow: ["wind", "howling"],
@@ -394,6 +394,17 @@ function ambientKeywordScore(parts: string[], keywords: string[]): number {
   return score;
 }
 
+function weatherAllowsStormAudio(weather?: string | null): boolean {
+  const normalized = normalizeToken(weather);
+  return normalized === "storm" || normalized === "stormy" || normalized === "thunderstorm";
+}
+
+function ambientStormAudioScore(parts: string[], weather?: string | null): number {
+  const hasStormAudio = parts.includes("thunder") || parts.includes("lightning") || parts.includes("storm");
+  if (!hasStormAudio) return 0;
+  return weatherAllowsStormAudio(weather) ? 2 : -6;
+}
+
 function ambientLocationScore(parts: string[], locationKind: LocationKind | null): number {
   if (!locationKind) return 0;
   const subcategory = parts[1] ?? "";
@@ -446,7 +457,10 @@ export function scoreAmbient(input: AmbientScoreInput): string | null {
       .toLowerCase()
       .split(/[:\-_]+/)
       .filter((part) => part.length > 1);
-    const score = ambientLocationScore(parts, locationKind) + ambientKeywordScore(parts, keywords);
+    const score =
+      ambientLocationScore(parts, locationKind) +
+      ambientKeywordScore(parts, keywords) +
+      ambientStormAudioScore(parts, weather);
     return { tag, score };
   });
 

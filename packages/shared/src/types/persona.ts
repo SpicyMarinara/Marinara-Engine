@@ -27,6 +27,8 @@ export interface Persona {
   dialogueColor: string;
   /** Chat bubble / dialogue box background color */
   boxColor: string;
+  /** Tracker card color source + optional custom palette. */
+  trackerCardColors?: TrackerCardColorConfig | string;
   /** Persona status bars configuration (Satiety, Energy, etc.) */
   personaStats?: PersonaStatsConfig;
   /** Alternative description extensions (toggleable additions to the main description) */
@@ -37,6 +39,33 @@ export interface Persona {
   savedStatusOptions?: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+export type TrackerCardColorMode = "default" | "chat" | "custom";
+export type TrackerCardPortraitStageBackground = "ambient" | "spotlight" | "soft" | "plain";
+
+export interface TrackerCardColorConfig {
+  mode?: TrackerCardColorMode;
+  /** Tracker card display color/gradient. */
+  nameColor?: string;
+  /** Tracker card display paint opacity, 0-100. */
+  nameColorOpacity?: number;
+  /** Tracker card dialogue/accent color. */
+  dialogueColor?: string;
+  /** Tracker card dialogue/accent paint opacity, 0-100. */
+  dialogueColorOpacity?: number;
+  /** Tracker card surface tint color. */
+  boxColor?: string;
+  /** Tracker card surface paint opacity, 0-100. */
+  boxColorOpacity?: number;
+  /** How strongly selected colors wash into the card surface, 0-100. */
+  tintIntensity?: number;
+  /** How strongly selected colors affect glows, borders, and hairlines, 0-100. */
+  glowIntensity?: number;
+  /** How much neutral readability veil sits over the card, 0-100. */
+  contrastIntensity?: number;
+  /** Portrait stage background treatment behind transparent sprites. */
+  portraitStageBackground?: TrackerCardPortraitStageBackground;
 }
 
 /** Avatar crop — current source-rectangle format. A square region of the source

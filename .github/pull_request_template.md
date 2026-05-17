@@ -1,3 +1,7 @@
+<!-- Target branch: `staging`. The default base in this UI is `main` (release branch). -->
+<!-- Change the base to `staging` before submitting unless this is a maintainer-approved mainline change. -->
+<!-- See CONTRIBUTING.md § Branches. -->
+
 ## Linked issue
 
 <!-- Every PR should reference a feature request or issue report. If there isn't one yet, open one first to gather opinions: -->

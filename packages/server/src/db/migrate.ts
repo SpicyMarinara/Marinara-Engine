@@ -75,6 +75,7 @@ const CREATE_TABLES: string[] = [
     name_color TEXT NOT NULL DEFAULT '',
     dialogue_color TEXT NOT NULL DEFAULT '',
     box_color TEXT NOT NULL DEFAULT '',
+    tracker_card_colors TEXT NOT NULL DEFAULT '{"mode":"chat"}',
     persona_stats TEXT NOT NULL DEFAULT '',
     alt_descriptions TEXT NOT NULL DEFAULT '[]',
     tags TEXT NOT NULL DEFAULT '[]',
@@ -185,6 +186,7 @@ const CREATE_TABLES: string[] = [
     activation_conditions TEXT NOT NULL DEFAULT '[]',
     schedule TEXT,
     prevent_recursion TEXT NOT NULL DEFAULT 'false',
+    exclude_from_vectorization TEXT NOT NULL DEFAULT 'false',
     embedding TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -699,6 +701,11 @@ const COLUMN_MIGRATIONS: ColumnMigration[] = [
     definition: "TEXT NOT NULL DEFAULT '[]'",
   },
   {
+    table: "lorebook_entries",
+    column: "exclude_from_vectorization",
+    definition: "TEXT NOT NULL DEFAULT 'false'",
+  },
+  {
     table: "api_connections",
     column: "claude_fast_mode",
     definition: "TEXT NOT NULL DEFAULT 'false'",
@@ -707,6 +714,11 @@ const COLUMN_MIGRATIONS: ColumnMigration[] = [
     table: "personas",
     column: "avatar_crop",
     definition: "TEXT NOT NULL DEFAULT ''",
+  },
+  {
+    table: "personas",
+    column: "tracker_card_colors",
+    definition: `TEXT NOT NULL DEFAULT '{"mode":"chat"}'`,
   },
   {
     table: "api_connections",

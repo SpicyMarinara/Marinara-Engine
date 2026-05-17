@@ -9,13 +9,14 @@ import {
   Copy,
   RefreshCw,
   Eye,
+  ScrollText,
   Brain,
   X,
   User,
   Languages,
 } from "lucide-react";
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
-import type { Message } from "@marinara-engine/shared";
+import type { Message, MessageExtra } from "@marinara-engine/shared";
 import { useUIStore } from "../../stores/ui.store";
 import { useChatStore } from "../../stores/chat.store";
 import { cn, copyToClipboard, getAvatarCropStyle, parseAvatarCropJson } from "../../lib/utils";
@@ -25,6 +26,7 @@ import { resolveMessageMacros } from "../../lib/chat-macros";
 import { useTranslate } from "../../hooks/use-translate";
 import { api } from "../../lib/api-client";
 import type { CharacterMap, MessageSelectionToggle, PersonaInfo } from "./chat-area.types";
+import { GenerationReplayDetailsModal, hasGenerationReplayDetails } from "./GenerationReplayDetailsModal";
 import { ImagePromptPanel } from "./ImagePromptPanel";
 import { SwipeJumpControl } from "./SwipeJumpControl";
 
@@ -228,6 +230,7 @@ interface MessageData {
     } | null;
     isConversationStart?: boolean;
     thinking?: string | null;
+    generationReplay?: MessageExtra["generationReplay"];
     attachments?: Array<{ type: string; url: string; filename?: string; prompt?: string; galleryId?: string }>;
   };
   createdAt: string;
@@ -288,6 +291,7 @@ export const ConversationMessage = memo(function ConversationMessage({
   const [showActions, setShowActions] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showThinking, setShowThinking] = useState(false);
+  const [showGenerationReplay, setShowGenerationReplay] = useState(false);
   const [imageLightbox, setImageLightbox] = useState<{ url: string; prompt?: string | null } | null>(null);
   const editRef = useRef<HTMLTextAreaElement>(null);
   const hasInput = useChatStore((s) => s.currentInput.trim().length > 0);
@@ -314,6 +318,14 @@ export const ConversationMessage = memo(function ConversationMessage({
     if (!message.extra) return {} as Record<string, any>;
     return typeof message.extra === "string" ? JSON.parse(message.extra) : message.extra;
   }, [message.extra]);
+  const generationReplay = hasGenerationReplayDetails(extra.generationReplay) ? extra.generationReplay : null;
+  // canRegenerate lets assistant messages retry; isUser messages need generationReplay
+  // metadata from hasGenerationReplayDetails, such as /impersonate.
+  const canRegenerate = !isUser || generationReplay !== null;
+
+  useEffect(() => {
+    if (!generationReplay) setShowGenerationReplay(false);
+  }, [generationReplay]);
 
   const scopedCharacterMap = useMemo(() => {
     if (!characterMap) return null;
@@ -814,6 +826,13 @@ export const ConversationMessage = memo(function ConversationMessage({
           {isLastAssistantMessage && (
             <MsgAction icon={<Eye size="0.75rem" />} onClick={() => onPeekPrompt?.()} title="Peek prompt" />
           )}
+          {generationReplay && (
+            <MsgAction
+              icon={<ScrollText size="0.75rem" />}
+              onClick={() => setShowGenerationReplay(true)}
+              title="Stored guidance"
+            />
+          )}
           {thinking && (
             <MsgAction icon={<Brain size="0.75rem" />} onClick={() => setShowThinking(true)} title="View thoughts" />
           )}
@@ -858,6 +877,13 @@ export const ConversationMessage = memo(function ConversationMessage({
             </div>,
             document.body,
           )}
+        {generationReplay && (
+          <GenerationReplayDetailsModal
+            open={showGenerationReplay}
+            replay={generationReplay}
+            onClose={() => setShowGenerationReplay(false)}
+          />
+        )}
       </div>
     );
   }
@@ -1090,7 +1116,7 @@ export const ConversationMessage = memo(function ConversationMessage({
             className={translatedText ? "text-blue-400" : undefined}
           />
           <MsgAction icon={<Pencil size="0.75rem" />} onClick={onEditClick ?? startEditing} title="Edit" />
-          {!isUser && (
+          {canRegenerate && (
             <MsgAction
               icon={<RefreshCw size="0.75rem" />}
               onClick={() => onRegenerate?.(message.id)}
@@ -1100,6 +1126,13 @@ export const ConversationMessage = memo(function ConversationMessage({
           )}
           {isLastAssistantMessage && !isUser && (
             <MsgAction icon={<Eye size="0.75rem" />} onClick={() => onPeekPrompt?.()} title="Peek prompt" />
+          )}
+          {generationReplay && (
+            <MsgAction
+              icon={<ScrollText size="0.75rem" />}
+              onClick={() => setShowGenerationReplay(true)}
+              title="Stored guidance"
+            />
           )}
           {thinking && !isUser && (
             <MsgAction icon={<Brain size="0.75rem" />} onClick={() => setShowThinking(true)} title="View thoughts" />
@@ -1143,9 +1176,16 @@ export const ConversationMessage = memo(function ConversationMessage({
                 </pre>
               </div>
             </div>
-          </div>,
-          document.body,
-        )}
+            </div>,
+            document.body,
+          )}
+      {generationReplay && (
+        <GenerationReplayDetailsModal
+          open={showGenerationReplay}
+          replay={generationReplay}
+          onClose={() => setShowGenerationReplay(false)}
+        />
+      )}
 
       {imageLightbox &&
         createPortal(

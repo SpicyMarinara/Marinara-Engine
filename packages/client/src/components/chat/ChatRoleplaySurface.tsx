@@ -37,6 +37,7 @@ import { ChatBranchSelector } from "./ChatBranchSelector";
 import { EndSceneBar } from "./SceneBanner";
 import { ChatCommonOverlays } from "./ChatCommonOverlays";
 import { ActiveWorldInfoButton } from "./ActiveWorldInfoButton";
+import type { SpriteDisplayMode } from "./sprite-display-modes";
 import type {
   CharacterMap,
   MessageSelectionToggle,
@@ -482,6 +483,7 @@ type RoleplaySurfaceProps = {
   encounterActive: boolean;
   spritePosition: SpriteSide;
   spriteCharacterIds: string[];
+  spriteDisplayModes: SpriteDisplayMode[];
   spriteExpressions: Record<string, string>;
   spritePlacements: Record<string, SpritePlacement>;
   spriteScale: number;
@@ -581,6 +583,7 @@ export function ChatRoleplaySurface({
   encounterActive,
   spritePosition,
   spriteCharacterIds,
+  spriteDisplayModes,
   spriteExpressions,
   spritePlacements,
   spriteScale,
@@ -685,6 +688,7 @@ export function ChatRoleplaySurface({
               characterIds={spriteCharacterIds}
               messages={msgPayload}
               side={spritePosition}
+              spriteDisplayModes={spriteDisplayModes}
               spriteExpressions={spriteExpressions}
               spritePlacements={spritePlacements}
               editing={spriteArrangeMode}

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { AgentContext } from "@marinara-engine/shared";
 import type { BaseLLMProvider, ChatMessage, ChatCompletionResult } from "../src/services/llm/base-provider.js";
 import {
+  buildKnowledgeRetrievalAgentMessagesForTest,
   executeAgent,
   executeAgentBatch,
   normalizeAgentContextSize,
@@ -132,4 +133,35 @@ test("batched execution runs expression separately from larger tracker prompts",
   const expressionPrompt = expressionCall.map((message) => message.content).join("\n");
   assert.doesNotMatch(expressionPrompt, /agent_task id="world-state"/);
   assert.doesNotMatch(expressionPrompt, /ancient-history-marker-0/);
+});
+
+test("knowledge retrieval receives conversation as neutral source context", () => {
+  const messages = buildKnowledgeRetrievalAgentMessagesForTest(
+    makeConfig("knowledge-retrieval", { contextSize: 5 }),
+    "Extract relevant source facts only.",
+    {
+      ...makeExpressionContext(),
+      recentMessages: [
+        { role: "user", content: "Let's enter the old library." },
+        { role: "assistant", characterId: "mira", content: "Mira opens the door and whispers about dusk." },
+      ],
+      memory: {
+        _sourceMaterial: "## Old Library\nThe old library closes at dusk.",
+      },
+    },
+  );
+
+  assert.equal(messages.length, 2);
+  assert.deepEqual(messages.map((message) => message.role), ["system", "user"]);
+
+  const system = messages[0]!.content;
+  const user = messages[1]!.content;
+  assert.match(system, /<source_material>/);
+  assert.match(system, /old library closes at dusk/i);
+  assert.match(system, /do not roleplay, continue the conversation/i);
+  assert.doesNotMatch(system, /Fulfill the requested task here/);
+  assert.match(user, /<conversation_messages>/);
+  assert.match(user, /Player: Let's enter the old library\./);
+  assert.match(user, /Mira: Mira opens the door/);
+  assert.match(user, /Now return the requested format\./);
 });

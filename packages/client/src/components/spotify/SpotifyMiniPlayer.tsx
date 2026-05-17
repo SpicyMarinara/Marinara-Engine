@@ -29,7 +29,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { toast } from "sonner";
-import { api } from "../../lib/api-client";
+import { api, ApiError } from "../../lib/api-client";
 import {
   SPOTIFY_SCENE_TRACK_CHANGE_EVENT,
   SPOTIFY_SCENE_TRACK_CHANGE_SUPPRESS_MS,
@@ -65,6 +65,16 @@ type SpotifyPlaybackState = {
   } | null;
 };
 
+type SpotifyDevicesState = {
+  devices: Array<{
+    id: string | null;
+    name: string;
+    type: string | null;
+    volume: number | null;
+    isActive: boolean;
+  }>;
+};
+
 type SpotifyAccessTokenResponse = {
   accessToken: string;
   expiresAt: number;
@@ -89,6 +99,11 @@ type SpotifyControlAction =
   | { type: "transfer"; deviceId: string; play?: boolean }
   | { type: "shuffle"; enabled: boolean; deviceId?: string | null }
   | { type: "repeat"; state: SpotifyRepeatState; deviceId?: string | null };
+
+type SpotifyVolumeAction = {
+  volume: number;
+  deviceId?: string | null;
+};
 
 type SpotifyWebPlaybackPlayer = {
   connect: () => Promise<boolean>;
@@ -115,6 +130,7 @@ declare global {
 
 const spotifyKeys = {
   player: ["spotify", "player"] as const,
+  devices: ["spotify", "devices"] as const,
 };
 
 const SPOTIFY_GREEN_CLASS = "text-[oklch(0.72_0.18_145)]";
@@ -124,6 +140,13 @@ const REPEAT_TRACK_REPLAY_COOLDOWN_MS = 8_000;
 const MANUAL_CONTROL_REPEAT_SUPPRESS_MS = 15_000;
 const DJ_MARI_PLAYLIST_READY_TOAST_MS = 20_000;
 const DOTTOR_SUPPORT_GIF = "/sprites/dottore/dottore_jumping.gif";
+const MOBILE_WIDGET_COLLAPSED_SIZE = 48;
+const MOBILE_WIDGET_EXPANDED_MAX_WIDTH = 320;
+const MOBILE_WIDGET_EXPANDED_HORIZONTAL_GUTTER = 24;
+const MOBILE_WIDGET_EXPANDED_HEIGHT = 132;
+const MOBILE_WIDGET_VIEWPORT_PADDING = 8;
+const SPOTIFY_VOLUME_UNSUPPORTED_MESSAGE =
+  "This Spotify device does not allow remote volume control. Use the device volume buttons instead.";
 
 let spotifySdkPromise: Promise<void> | null = null;
 
@@ -163,14 +186,91 @@ function getShuffleTitle(shuffle: boolean) {
   return "Shuffle off";
 }
 
+function isBrowserSpotifyDeviceName(name: string | null | undefined): boolean {
+  return name === "Marinara Engine";
+}
+
+function isPersonalMobileSpotifyDeviceType(type: string | null | undefined): boolean {
+  const normalized = type?.toLowerCase() ?? "";
+  return normalized === "smartphone" || normalized === "tablet";
+}
+
 function clampMobilePosition(x: number, y: number, collapsed: boolean) {
   if (typeof window === "undefined") return { x, y };
-  const width = collapsed ? 56 : Math.min(320, window.innerWidth - 24);
-  const height = collapsed ? 56 : 132;
+  const width = collapsed
+    ? MOBILE_WIDGET_COLLAPSED_SIZE
+    : Math.min(MOBILE_WIDGET_EXPANDED_MAX_WIDTH, window.innerWidth - MOBILE_WIDGET_EXPANDED_HORIZONTAL_GUTTER);
+  const height = collapsed ? MOBILE_WIDGET_COLLAPSED_SIZE : MOBILE_WIDGET_EXPANDED_HEIGHT;
   return {
-    x: Math.max(8, Math.min(window.innerWidth - width - 8, x)),
-    y: Math.max(8, Math.min(window.innerHeight - height - 8, y)),
+    x: Math.max(
+      MOBILE_WIDGET_VIEWPORT_PADDING,
+      Math.min(window.innerWidth - width - MOBILE_WIDGET_VIEWPORT_PADDING, x),
+    ),
+    y: Math.max(
+      MOBILE_WIDGET_VIEWPORT_PADDING,
+      Math.min(window.innerHeight - height - MOBILE_WIDGET_VIEWPORT_PADDING, y),
+    ),
   };
+}
+
+function getMobileWidgetStyle(
+  position: { x: number; y: number },
+  collapsed: boolean,
+): Pick<CSSProperties, "left" | "top"> {
+  if (typeof window === "undefined") {
+    return { left: position.x, top: position.y };
+  }
+
+  return {
+    left: Math.max(
+      MOBILE_WIDGET_VIEWPORT_PADDING,
+      Math.min(window.innerWidth - MOBILE_WIDGET_COLLAPSED_SIZE - MOBILE_WIDGET_VIEWPORT_PADDING, position.x),
+    ),
+    top: collapsed
+      ? position.y
+      : Math.max(
+          MOBILE_WIDGET_VIEWPORT_PADDING,
+          Math.min(window.innerHeight - MOBILE_WIDGET_EXPANDED_HEIGHT - MOBILE_WIDGET_VIEWPORT_PADDING, position.y),
+        ),
+  };
+}
+
+function getMobileExpandedPanelStyle(position: { x: number; y: number }): CSSProperties {
+  if (typeof window === "undefined") return {};
+
+  const width = Math.min(
+    MOBILE_WIDGET_EXPANDED_MAX_WIDTH,
+    window.innerWidth - MOBILE_WIDGET_EXPANDED_HORIZONTAL_GUTTER,
+  );
+  const opensLeft =
+    position.x + width > window.innerWidth - MOBILE_WIDGET_VIEWPORT_PADDING ||
+    position.x + MOBILE_WIDGET_COLLAPSED_SIZE / 2 > window.innerWidth / 2;
+  const preferredLeft = opensLeft ? position.x + MOBILE_WIDGET_COLLAPSED_SIZE - width : position.x;
+  const clampedLeft = Math.max(
+    MOBILE_WIDGET_VIEWPORT_PADDING,
+    Math.min(window.innerWidth - width - MOBILE_WIDGET_VIEWPORT_PADDING, preferredLeft),
+  );
+
+  return {
+    width,
+    transform: `translateX(${Math.round(clampedLeft - position.x)}px)`,
+  };
+}
+
+function isSpotifyVolumeUnsupportedError(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    const payload = error.payload;
+    if (payload && typeof payload === "object" && "code" in payload && payload.code === "SPOTIFY_VOLUME_UNSUPPORTED") {
+      return true;
+    }
+  }
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /cannot\s+control\s+device\s+volume|does not allow remote volume control/i.test(message);
+}
+
+function isSpotifyRestrictionError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /restriction\s+violated/i.test(message);
 }
 
 export function SpotifyMiniPlayer({ mobile = false }: { mobile?: boolean }) {
@@ -185,6 +285,7 @@ export function SpotifyMiniPlayer({ mobile = false }: { mobile?: boolean }) {
   const [sdkDeviceId, setSdkDeviceId] = useState<string | null>(null);
   const [sdkError, setSdkError] = useState<string | null>(null);
   const [volumeDraft, setVolumeDraft] = useState(50);
+  const [volumeUnsupportedDeviceKey, setVolumeUnsupportedDeviceKey] = useState<string | null>(null);
   const previousVolumeRef = useRef(50);
   const previousPlaybackRef = useRef<SpotifyPlaybackState | null>(null);
   const repeatReplayRef = useRef<{ key: string; at: number } | null>(null);
@@ -207,18 +308,64 @@ export function SpotifyMiniPlayer({ mobile = false }: { mobile?: boolean }) {
     retry: false,
   });
 
+  const devicesQuery = useQuery({
+    queryKey: spotifyKeys.devices,
+    queryFn: () => api.get<SpotifyDevicesState>("/spotify/devices"),
+    enabled: enabled && mobile,
+    staleTime: 2_000,
+    refetchInterval: 5_000,
+    retry: false,
+  });
+
   const player = playerQuery.data;
+  const preferredMobileDevice = useMemo(() => {
+    if (!mobile) return null;
+    const mobileDevices = (devicesQuery.data?.devices ?? []).filter(
+      (device) =>
+        !!device.id && !isBrowserSpotifyDeviceName(device.name) && isPersonalMobileSpotifyDeviceType(device.type),
+    );
+    return mobileDevices.find((device) => device.isActive) ?? mobileDevices[0] ?? null;
+  }, [devicesQuery.data?.devices, mobile]);
+  const playerDeviceIsBrowser = isBrowserSpotifyDeviceName(player?.device?.name);
+  const playerDeviceIsMobile = isPersonalMobileSpotifyDeviceType(player?.device?.type);
+  const controlDeviceId =
+    mobile && preferredMobileDevice?.id
+      ? preferredMobileDevice.id
+      : mobile && (!playerDeviceIsMobile || playerDeviceIsBrowser)
+        ? undefined
+        : (player?.device?.id ?? undefined);
+  const controlDevice =
+    mobile && preferredMobileDevice
+      ? preferredMobileDevice
+      : mobile && !playerDeviceIsMobile
+        ? null
+        : (player?.device ?? null);
   const item = player?.item ?? null;
-  const deviceVolume = player?.device?.volume;
+  const deviceVolume = controlDevice?.volume;
+  const volumeDeviceId = mobile ? controlDeviceId : (sdkDeviceId ?? player?.device?.id ?? undefined);
+  const volumeDeviceKey = volumeDeviceId ?? controlDevice?.name ?? null;
+  const volumeControlUnsupported =
+    !!controlDevice &&
+    (typeof deviceVolume !== "number" || (!!volumeDeviceKey && volumeUnsupportedDeviceKey === volumeDeviceKey));
 
   useEffect(() => {
-    if (typeof deviceVolume !== "number") return;
+    if (!controlDevice) {
+      setVolumeUnsupportedDeviceKey(null);
+      return;
+    }
+
+    if (typeof deviceVolume !== "number") {
+      if (volumeDeviceKey) setVolumeUnsupportedDeviceKey(volumeDeviceKey);
+      return;
+    }
+
+    setVolumeUnsupportedDeviceKey((current) => (current === volumeDeviceKey ? null : current));
     setVolumeDraft(deviceVolume);
     if (deviceVolume > 0) previousVolumeRef.current = deviceVolume;
-  }, [deviceVolume]);
+  }, [controlDevice, deviceVolume, volumeDeviceKey]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || mobile) return;
     let disposed = false;
     let sdkPlayer: SpotifyWebPlaybackPlayer | null = null;
 
@@ -274,7 +421,7 @@ export function SpotifyMiniPlayer({ mobile = false }: { mobile?: boolean }) {
         sdkPlayer.disconnect();
       }
     };
-  }, [enabled, qc]);
+  }, [enabled, mobile, qc]);
 
   const invalidate = useCallback(() => {
     void qc.invalidateQueries({ queryKey: spotifyKeys.player });
@@ -335,24 +482,35 @@ export function SpotifyMiniPlayer({ mobile = false }: { mobile?: boolean }) {
     },
     onError: (error, _action, context) => {
       if (context?.previous) qc.setQueryData(spotifyKeys.player, context.previous);
+      if (isSpotifyRestrictionError(error)) {
+        toast.info("Spotify rejected that command on the current device. Open the Spotify app and try again.");
+        return;
+      }
       toast.error(error instanceof Error ? error.message : "Spotify control failed.");
     },
   });
 
   const setVolume = useMutation({
-    mutationFn: (volume: number) => api.put("/spotify/player/volume", { volume }),
-    onMutate: async (volume) => {
+    mutationFn: (action: SpotifyVolumeAction) =>
+      api.put("/spotify/player/volume", { volume: action.volume, deviceId: action.deviceId ?? undefined }),
+    onMutate: async (action) => {
       await qc.cancelQueries({ queryKey: spotifyKeys.player });
       const previous = qc.getQueryData<SpotifyPlaybackState>(spotifyKeys.player);
       qc.setQueryData<SpotifyPlaybackState>(spotifyKeys.player, (current) => {
         if (!current?.device) return current;
-        return { ...current, device: { ...current.device, volume } };
+        return { ...current, device: { ...current.device, volume: action.volume } };
       });
       return { previous };
     },
     onSuccess: invalidate,
-    onError: (error, _volume, context) => {
+    onError: (error, volume, context) => {
       if (context?.previous) qc.setQueryData(spotifyKeys.player, context.previous);
+      if (isSpotifyVolumeUnsupportedError(error)) {
+        const key = volume.deviceId ?? player?.device?.name ?? null;
+        if (key) setVolumeUnsupportedDeviceKey(key);
+        toast.info(SPOTIFY_VOLUME_UNSUPPORTED_MESSAGE);
+        return;
+      }
       toast.error(error instanceof Error ? error.message : "Spotify volume failed.");
     },
   });
@@ -407,7 +565,7 @@ export function SpotifyMiniPlayer({ mobile = false }: { mobile?: boolean }) {
   const createDjMariPlaylist = useMutation({
     mutationFn: () =>
       api.post<DjMariPlaylistResponse>("/spotify/dj-mari-playlist", {
-        deviceId: sdkDeviceId ?? player?.device?.id ?? undefined,
+        deviceId: mobile ? controlDeviceId : (sdkDeviceId ?? player?.device?.id ?? undefined),
       }),
     onMutate: showDjMariToast,
     onSuccess: (result) => {
@@ -436,15 +594,15 @@ export function SpotifyMiniPlayer({ mobile = false }: { mobile?: boolean }) {
   const handlePlayPause = useCallback(async () => {
     if (runControl.isPending) return;
     if (player?.isPlaying) {
-      runControl.mutate({ type: "pause", deviceId: player.device?.id ?? undefined });
+      runControl.mutate({ type: "pause", deviceId: controlDeviceId });
       return;
     }
     runControl.mutate({
       type: "play",
-      deviceId: sdkDeviceId ?? player?.device?.id ?? undefined,
-      shouldTransfer: !player?.active && !!sdkDeviceId,
+      deviceId: mobile ? controlDeviceId : (sdkDeviceId ?? player?.device?.id ?? undefined),
+      shouldTransfer: !mobile && !player?.active && !!sdkDeviceId,
     });
-  }, [player?.active, player?.device?.id, player?.isPlaying, runControl, sdkDeviceId]);
+  }, [controlDeviceId, mobile, player?.active, player?.device?.id, player?.isPlaying, runControl, sdkDeviceId]);
 
   const openSpotifyAgent = useCallback(() => {
     openRightPanel("agents");
@@ -452,16 +610,27 @@ export function SpotifyMiniPlayer({ mobile = false }: { mobile?: boolean }) {
   }, [openAgentDetail, openRightPanel]);
 
   const commitVolume = useCallback(() => {
-    setVolume.mutate(Math.max(0, Math.min(100, Math.round(volumeDraft))));
-  }, [setVolume, volumeDraft]);
+    if (volumeControlUnsupported) {
+      toast.info(SPOTIFY_VOLUME_UNSUPPORTED_MESSAGE);
+      return;
+    }
+    setVolume.mutate({
+      volume: Math.max(0, Math.min(100, Math.round(volumeDraft))),
+      deviceId: volumeDeviceId,
+    });
+  }, [setVolume, volumeControlUnsupported, volumeDeviceId, volumeDraft]);
 
   const toggleMute = useCallback(() => {
+    if (volumeControlUnsupported) {
+      toast.info(SPOTIFY_VOLUME_UNSUPPORTED_MESSAGE);
+      return;
+    }
     const currentVolume = Math.max(0, Math.min(100, Math.round(volumeDraft)));
     const nextVolume = currentVolume > 0 ? 0 : Math.max(1, Math.min(100, Math.round(previousVolumeRef.current || 50)));
     if (currentVolume > 0) previousVolumeRef.current = currentVolume;
     setVolumeDraft(nextVolume);
-    setVolume.mutate(nextVolume);
-  }, [setVolume, volumeDraft]);
+    setVolume.mutate({ volume: nextVolume, deviceId: volumeDeviceId });
+  }, [setVolume, volumeControlUnsupported, volumeDeviceId, volumeDraft]);
 
   const handleShufflePress = useCallback(
     (args: { shuffle: boolean; smartShuffle: boolean; deviceId?: string | null }) => {
@@ -557,23 +726,88 @@ export function SpotifyMiniPlayer({ mobile = false }: { mobile?: boolean }) {
   const RepeatIcon = repeatState === "track" ? Repeat1 : Repeat2;
   const repeatTitle =
     repeatState === "track" ? "Repeat track" : repeatState === "context" ? "Repeat playlist" : "Repeat off";
-  const canTransferToApp = !!sdkDeviceId && player?.device?.id !== sdkDeviceId;
+  const canTransferToApp = !mobile && !!sdkDeviceId && player?.device?.id !== sdkDeviceId;
   const progressPercent =
     typeof player?.progressMs === "number" && typeof player.durationMs === "number" && player.durationMs > 0
       ? Math.max(0, Math.min(100, (player.progressMs / player.durationMs) * 100))
       : 0;
-  const deviceId = player?.device?.id ?? undefined;
+  const deviceId = controlDeviceId;
   const volumeMuted = volumeDraft <= 0;
   const VolumeIcon = volumeMuted ? VolumeX : Volume2;
-  const spotifyVolumeStyle: RangeCssProperties = {
-    "--range-progress": `${volumeDraft}%`,
-    "--range-track-color": "oklch(0.36 0.006 145)",
-    "--range-fill-color": "oklch(0.96 0.006 145)",
-    "--range-thumb-color": "oklch(0.96 0.006 145)",
-    "--range-thumb-size": "0.6875rem",
-    "--range-track-height": "0.25rem",
-    "--range-thumb-shadow": "0 0 0 0.125rem oklch(0.16 0.006 145)",
-  };
+  const spotifyVolumeStyle: RangeCssProperties = useMemo(
+    () => ({
+      "--range-progress": `${volumeDraft}%`,
+      "--range-track-color": "oklch(0.36 0.006 145)",
+      "--range-fill-color": "oklch(0.96 0.006 145)",
+      "--range-thumb-color": "oklch(0.96 0.006 145)",
+      "--range-thumb-size": "0.6875rem",
+      "--range-track-height": "0.25rem",
+      "--range-thumb-shadow": "0 0 0 0.125rem oklch(0.16 0.006 145)",
+    }),
+    [volumeDraft],
+  );
+  const mobileWidgetStyle = useMemo(() => getMobileWidgetStyle(mobilePosition, collapsed), [collapsed, mobilePosition]);
+  const mobileExpandedPanelStyle = useMemo(() => getMobileExpandedPanelStyle(mobilePosition), [mobilePosition]);
+  const volumeControls = useMemo(() => {
+    const stopPointer = (event: ReactPointerEvent<HTMLElement>) => event.stopPropagation();
+
+    if (volumeControlUnsupported) {
+      return (
+        <button
+          type="button"
+          className="flex w-full shrink-0 items-center gap-1 rounded-md px-1 py-0.5 text-left text-[oklch(0.70_0.012_145)] transition-colors hover:bg-[oklch(0.22_0.008_145)] hover:text-[oklch(0.96_0.006_145)]"
+          onPointerDown={stopPointer}
+          onPointerMove={stopPointer}
+          onPointerUp={stopPointer}
+          onPointerCancel={stopPointer}
+          onClick={(event) => {
+            event.stopPropagation();
+            toast.info(SPOTIFY_VOLUME_UNSUPPORTED_MESSAGE);
+          }}
+          title={SPOTIFY_VOLUME_UNSUPPORTED_MESSAGE}
+        >
+          <Volume2 size="0.75rem" className="shrink-0" />
+          <span className="min-w-0 truncate text-[0.58rem] font-medium leading-tight">Use device volume</span>
+        </button>
+      );
+    }
+
+    return (
+      <div
+        className="flex w-full shrink-0 items-center gap-1"
+        onPointerDown={stopPointer}
+        onPointerMove={stopPointer}
+        onPointerUp={stopPointer}
+        onPointerCancel={stopPointer}
+      >
+        <button
+          type="button"
+          onClick={toggleMute}
+          className={cn(
+            "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[oklch(0.70_0.012_145)] transition-colors hover:text-[oklch(0.96_0.006_145)]",
+            volumeMuted && SPOTIFY_GREEN_CLASS,
+          )}
+          title={volumeMuted ? "Restore volume" : "Mute"}
+        >
+          <VolumeIcon size="0.75rem" />
+        </button>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={volumeDraft}
+          onChange={(event) => setVolumeDraft(Number(event.target.value))}
+          onPointerUp={commitVolume}
+          onKeyUp={commitVolume}
+          onBlur={commitVolume}
+          className="mari-spotify-volume-slider w-full"
+          style={spotifyVolumeStyle}
+          title="Volume"
+        />
+      </div>
+    );
+  }, [VolumeIcon, commitVolume, spotifyVolumeStyle, toggleMute, volumeControlUnsupported, volumeDraft, volumeMuted]);
 
   const compactBody = useMemo(
     () => (
@@ -712,7 +946,7 @@ export function SpotifyMiniPlayer({ mobile = false }: { mobile?: boolean }) {
     return (
       <div
         className="fixed z-[60] md:hidden"
-        style={{ left: mobilePosition.x, top: mobilePosition.y }}
+        style={mobileWidgetStyle}
         onPointerDown={startDrag}
         onPointerMove={moveDrag}
         onPointerUp={endDrag}
@@ -723,7 +957,10 @@ export function SpotifyMiniPlayer({ mobile = false }: { mobile?: boolean }) {
             <Music2 size="1.125rem" />
           </div>
         ) : (
-          <div className="w-[min(20rem,calc(100vw-1.5rem))] rounded-xl border border-[oklch(0.30_0.012_145)] bg-[oklch(0.16_0.006_145)] p-2 shadow-2xl backdrop-blur-xl">
+          <div
+            className="rounded-xl border border-[oklch(0.30_0.012_145)] bg-[oklch(0.16_0.006_145)] p-2 shadow-2xl backdrop-blur-xl"
+            style={mobileExpandedPanelStyle}
+          >
             <div className="mb-1 flex items-center gap-1">
               <GripVertical size="0.875rem" className="text-[oklch(0.70_0.012_145)]" />
               <span className="flex-1 truncate text-[0.625rem] font-medium text-[oklch(0.70_0.012_145)]">
@@ -746,6 +983,7 @@ export function SpotifyMiniPlayer({ mobile = false }: { mobile?: boolean }) {
               </button>
             </div>
             <div className="flex items-center gap-2">{compactBody}</div>
+            <div className="mt-2">{volumeControls}</div>
           </div>
         )}
       </div>
@@ -755,32 +993,7 @@ export function SpotifyMiniPlayer({ mobile = false }: { mobile?: boolean }) {
   return (
     <div className="relative hidden h-10 min-w-0 max-w-[31rem] flex-1 items-center gap-2 overflow-hidden rounded-full border border-[oklch(0.30_0.012_145)] bg-[oklch(0.16_0.006_145)] px-2.5 md:flex">
       {compactBody}
-      <div className="hidden w-24 shrink-0 items-center gap-1 lg:flex">
-        <button
-          type="button"
-          onClick={toggleMute}
-          className={cn(
-            "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[oklch(0.70_0.012_145)] transition-colors hover:text-[oklch(0.96_0.006_145)]",
-            volumeMuted && SPOTIFY_GREEN_CLASS,
-          )}
-          title={volumeMuted ? "Restore volume" : "Mute"}
-        >
-          <VolumeIcon size="0.75rem" />
-        </button>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={1}
-          value={volumeDraft}
-          onChange={(event) => setVolumeDraft(Number(event.target.value))}
-          onPointerUp={commitVolume}
-          onKeyUp={commitVolume}
-          className="mari-spotify-volume-slider w-full"
-          style={spotifyVolumeStyle}
-          title="Volume"
-        />
-      </div>
+      <div className="hidden w-24 lg:flex">{volumeControls}</div>
       <div className="pointer-events-none absolute bottom-0 left-3 right-3 h-px overflow-hidden rounded-full bg-[oklch(0.28_0.01_145)]">
         <div className={cn("h-full rounded-full", SPOTIFY_GREEN_BG_CLASS)} style={{ width: `${progressPercent}%` }} />
       </div>

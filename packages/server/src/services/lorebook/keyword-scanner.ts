@@ -10,8 +10,9 @@ import type {
   LorebookFilterMode,
   LorebookMatchingSource,
   LorebookSchedule,
-  SelectiveLogic,
 } from "@marinara-engine/shared";
+import { testPrimaryKeys, testSecondaryKeys } from "@marinara-engine/shared";
+import { vmRegexExecutor } from "./regex-timeout.js";
 
 /** Compute cosine similarity between two vectors. Returns 0 for empty/mismatched vectors. */
 function cosineSimilarity(a: number[], b: number[]): number {
@@ -74,85 +75,6 @@ export interface GameStateForScanning {
   temperature?: string | null;
   presentCharacters?: Array<{ name: string; characterId: string }>;
   [key: string]: unknown;
-}
-
-/**
- * Test if a single keyword matches the given text.
- */
-function testKeyword(
-  keyword: string,
-  text: string,
-  options: { useRegex: boolean; matchWholeWords: boolean; caseSensitive: boolean },
-): boolean {
-  if (!keyword) return false;
-
-  try {
-    if (options.useRegex) {
-      const flags = options.caseSensitive ? "g" : "gi";
-      const regex = new RegExp(keyword, flags);
-      return regex.test(text);
-    }
-
-    const needle = options.caseSensitive ? keyword : keyword.toLowerCase();
-    const haystack = options.caseSensitive ? text : text.toLowerCase();
-
-    if (options.matchWholeWords) {
-      // Word boundary matching
-      const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const flags = options.caseSensitive ? "g" : "gi";
-      const regex = new RegExp(`\\b${escaped}\\b`, flags);
-      return regex.test(text);
-    }
-
-    return haystack.includes(needle);
-  } catch {
-    // Invalid regex — fall back to plain text
-    const needle = options.caseSensitive ? keyword : keyword.toLowerCase();
-    const haystack = options.caseSensitive ? text : text.toLowerCase();
-    return haystack.includes(needle);
-  }
-}
-
-/**
- * Test if primary keys match the text.
- */
-function testPrimaryKeys(
-  keys: string[],
-  text: string,
-  options: { useRegex: boolean; matchWholeWords: boolean; caseSensitive: boolean },
-): { matched: boolean; matchedKeys: string[] } {
-  const matchedKeys: string[] = [];
-  for (const key of keys) {
-    if (testKeyword(key, text, options)) {
-      matchedKeys.push(key);
-    }
-  }
-  return { matched: matchedKeys.length > 0, matchedKeys };
-}
-
-/**
- * Test secondary keys with selective logic.
- */
-function testSecondaryKeys(
-  secondaryKeys: string[],
-  text: string,
-  logic: SelectiveLogic,
-  options: { useRegex: boolean; matchWholeWords: boolean; caseSensitive: boolean },
-): boolean {
-  if (secondaryKeys.length === 0) return true;
-
-  const results = secondaryKeys.map((key) => testKeyword(key, text, options));
-
-  switch (logic) {
-    case "and":
-      return results.every(Boolean);
-    case "or":
-      return results.some(Boolean);
-    case "not":
-      return !results.some(Boolean);
-    default:
-      return true;
-  }
 }
 
 /**
@@ -542,6 +464,7 @@ export function scanForActivatedEntries(
       useRegex: entry.useRegex,
       matchWholeWords: entry.matchWholeWords,
       caseSensitive: entry.caseSensitive,
+      regexExecutor: vmRegexExecutor,
     };
 
     // Test primary keys
@@ -569,6 +492,7 @@ export function scanForActivatedEntries(
   if (chatEmbedding && chatEmbedding.length > 0) {
     for (const entry of entries) {
       if (!entry.enabled || entry.constant || activatedIds.has(entry.id)) continue;
+      if (entry.excludeFromVectorization) continue;
       if (!entry.embedding || entry.embedding.length === 0) continue;
       const timingState = timingStates.get(entry.id);
       if (!passesActivationGate(entry, timingState, filterContext, gameState, ignoreTiming)) continue;

@@ -437,6 +437,33 @@ export function useUpdateChatMetadata() {
   });
 }
 
+export function useMarkAutonomousUnread() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ chatId, characterId, count }: { chatId: string; characterId?: string | null; count?: number }) =>
+      api.post<Chat>(`/chats/${chatId}/autonomous-unread`, { characterId: characterId ?? null, count }),
+    onSuccess: (data, vars) => {
+      if (data) {
+        qc.setQueryData(chatKeys.detail(vars.chatId), data);
+      }
+      qc.invalidateQueries({ queryKey: chatKeys.list() });
+    },
+  });
+}
+
+export function useClearAutonomousUnread() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (chatId: string) => api.delete<Chat>(`/chats/${chatId}/autonomous-unread`),
+    onSuccess: (data, chatId) => {
+      if (data) {
+        qc.setQueryData(chatKeys.detail(chatId), data);
+      }
+      qc.invalidateQueries({ queryKey: chatKeys.list() });
+    },
+  });
+}
+
 /** Patch day/week summaries via entry-level merge (concurrent-edit safe). */
 export function useUpdateChatSummaries() {
   const qc = useQueryClient();
