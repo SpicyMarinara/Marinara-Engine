@@ -6,6 +6,7 @@ import type { TrackerPanelSizeProfile, TrackerTemperatureUnit } from "../../../.
 import { cn } from "../../../../lib/utils";
 import {
   getWorldAmbienceStyle,
+  getWorldDashboardGridClass,
   getWorldDateDisplay,
   WORLD_FREEFORM_DATE_GRID_BASE_CLASS,
   WORLD_GRID_BASE_CLASS,
@@ -34,6 +35,9 @@ export function WorldStatePanel({
 }) {
   const dateDisplay = getWorldDateDisplay(state?.date);
   const hasFreeformDate = dateDisplay.kind === "freeform";
+  const dashboardGridClass = getWorldDashboardGridClass(state?.weather, state?.temperature, state?.location, {
+    hasFreeformDate,
+  });
 
   return (
     <div
@@ -55,6 +59,7 @@ export function WorldStatePanel({
           className={cn(
             "relative grid gap-px p-1 @min-[380px]:gap-1 @min-[380px]:p-1.5",
             hasFreeformDate ? WORLD_FREEFORM_DATE_GRID_BASE_CLASS : WORLD_GRID_BASE_CLASS,
+            dashboardGridClass,
           )}
         >
           <WorldDateTile
@@ -74,7 +79,7 @@ export function WorldStatePanel({
           <WorldLocationPlate
             value={state?.location}
             onSave={(value) => onSaveField("location", value || null)}
-            className="col-span-3"
+            className="col-span-3 @min-[380px]:col-span-1"
           />
         </div>
       )}

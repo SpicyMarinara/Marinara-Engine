@@ -334,7 +334,10 @@ export function cleanTrackerCardColorConfig(config: TrackerCardColorConfig | nul
   const legacyTintIntensity = getClampedFinishValue(config?.tintIntensity);
   const materialBrightness = getClampedFinishValue(config?.materialBrightness);
   // Legacy Tint controlled how much Surface paint entered material; preserve that as Surface strength.
-  const boxColorOpacity = rawBoxColorOpacity ?? (materialBrightness === undefined ? legacyTintIntensity : undefined);
+  const boxColorOpacity =
+    materialBrightness === undefined && legacyTintIntensity !== undefined
+      ? Math.round(((rawBoxColorOpacity ?? TRACKER_CARD_PAINT_OPACITY_DEFAULTS.boxColorOpacity) * legacyTintIntensity) / 100)
+      : rawBoxColorOpacity;
   const glowIntensity = getClampedFinishValue(config?.glowIntensity);
   const contrastIntensity = getClampedFinishValue(config?.contrastIntensity);
   const portraitStageBackground = normalizeTrackerCardPortraitStageBackground(config?.portraitStageBackground);

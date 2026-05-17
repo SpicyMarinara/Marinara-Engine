@@ -11,6 +11,7 @@ import {
 } from "../../../hooks/use-characters";
 import { useChat } from "../../../hooks/use-chats";
 import { useChatStore } from "../../../stores/chat.store";
+import { useUIStore } from "../../../stores/ui.store";
 import { parseCharacterDisplayData } from "../../../lib/character-display";
 import { cn } from "../../../lib/utils";
 import {
@@ -20,7 +21,10 @@ import {
   type TrackerCardPaintColors,
 } from "../../../lib/tracker-card-colors";
 import { useTrackerGameState } from "../../../features/tracker-panel/hooks/use-tracker-game-state";
-import { normalizeLookupText } from "../../../features/tracker-panel/lib/tracker-metadata";
+import {
+  normalizeLookupText,
+  normalizeMaybeJsonStringArray,
+} from "../../../features/tracker-panel/lib/tracker-metadata";
 import { TrackerCardColorControls, type TrackerCardColorEntityLabel } from "../../ui/TrackerCardColorControls";
 
 type TrackerCardColorTargetKind = "persona" | "character";
@@ -126,6 +130,7 @@ function resolvePresentCharacterId(
 export function TrackerCardColorSettings() {
   const queryClient = useQueryClient();
   const activeChatId = useChatStore((s) => s.activeChatId);
+  const settingsTab = useUIStore((s) => s.settingsTab);
   const { data: activeChat } = useChat(activeChatId);
   const { currentGameState, isLoadingGameState } = useTrackerGameState(activeChatId);
   const { data: personasData } = usePersonas(!!activeChatId);
@@ -169,14 +174,30 @@ export function TrackerCardColorSettings() {
     [queryClient],
   );
 
+  const restorePreviewSnapshot = useCallback(() => {
+    const previewSnapshot = previewSnapshotRef.current;
+    if (!previewSnapshot) return false;
+    updateCachedTargetConfig(previewSnapshot.target, previewSnapshot.savedConfig.serializedConfig);
+    previewSnapshotRef.current = null;
+    return true;
+  }, [updateCachedTargetConfig]);
+
   useEffect(() => {
     return () => {
-      const previewSnapshot = previewSnapshotRef.current;
-      if (!previewSnapshot) return;
-      updateCachedTargetConfig(previewSnapshot.target, previewSnapshot.savedConfig.serializedConfig);
-      previewSnapshotRef.current = null;
+      restorePreviewSnapshot();
     };
-  }, [updateCachedTargetConfig]);
+  }, [restorePreviewSnapshot]);
+
+  useEffect(() => {
+    if (settingsTab === "appearance") return;
+    const restored = restorePreviewSnapshot();
+    if (!restored) return;
+    selectedKeyRef.current = null;
+    savedConfigRef.current = null;
+    draftChangedRef.current = false;
+    setDraftConfig(null);
+    setSaveState("idle");
+  }, [restorePreviewSnapshot, settingsTab]);
 
   const targets = useMemo<TrackerCardColorTarget[]>(() => {
     const personas = Array.isArray(personasData) ? (personasData as Persona[]) : [];
@@ -220,7 +241,10 @@ export function TrackerCardColorSettings() {
     }
 
     const presentCharacterIds = new Set<string>();
-    for (const id of activeChat?.characterIds ?? []) {
+    const activeChatCharacterIds = normalizeMaybeJsonStringArray(
+      (activeChat as { characterIds?: unknown } | null | undefined)?.characterIds,
+    );
+    for (const id of activeChatCharacterIds) {
       if (charactersById.has(id)) presentCharacterIds.add(id);
     }
     for (const character of currentGameState?.presentCharacters ?? []) {

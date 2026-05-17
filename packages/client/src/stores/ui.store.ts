@@ -178,7 +178,7 @@ function normalizeSummaryPopoverSettings(value: unknown): SummaryPopoverSettings
   };
 }
 
-function normalizeTrackerThoughtBubbleDisplay(value: unknown): TrackerThoughtBubbleDisplay {
+export function normalizeTrackerThoughtBubbleDisplay(value: unknown): TrackerThoughtBubbleDisplay {
   return value === "inline" || value === "floating" ? value : "inline";
 }
 

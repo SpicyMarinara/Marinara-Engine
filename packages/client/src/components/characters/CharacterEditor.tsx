@@ -333,7 +333,7 @@ export function CharacterEditor() {
       // framing, so the prior normalized crop coords are meaningless and would
       // produce a stale framing on the new file.
       if (shouldClearAvatarCrop) {
-        setExtensionValue("avatarCrop", undefined);
+        setExtensionValue("avatarCrop", null);
       }
       if (fallbackDirty || shouldClearAvatarCrop) {
         setDirtyState(true);
@@ -387,7 +387,7 @@ export function CharacterEditor() {
 
       setAvatarPreview(avatarDataUrl);
       if (shouldClearAvatarCrop) {
-        setExtensionValue("avatarCrop", undefined);
+        setExtensionValue("avatarCrop", null);
       }
       if (fallbackDirty || shouldClearAvatarCrop) {
         setDirtyState(true);

@@ -15,6 +15,7 @@ import { api } from "../lib/api-client";
 import {
   normalizeTrackerPanelSizeProfile,
   normalizeTrackerTemperatureUnit,
+  normalizeTrackerThoughtBubbleDisplay,
   pickSyncedSettings,
   useUIStore,
 } from "../stores/ui.store";
@@ -162,13 +163,16 @@ export function useSettingsSync() {
                 delete parsed.settings.convoGradientFrom;
                 delete parsed.settings.convoGradientTo;
               }
-              if (!("trackerPanelSizeProfile" in parsed.settings) || "trackerPanelWidth" in parsed.settings) {
-                parsed.settings.trackerPanelSizeProfile = normalizeTrackerPanelSizeProfile(
-                  parsed.settings.trackerPanelSizeProfile,
-                  parsed.settings.trackerPanelWidth,
-                );
-                delete parsed.settings.trackerPanelWidth;
-              }
+              parsed.settings.trackerPanelSizeProfile = normalizeTrackerPanelSizeProfile(
+                parsed.settings.trackerPanelSizeProfile,
+                parsed.settings.trackerPanelWidth,
+              );
+              delete parsed.settings.trackerPanelWidth;
+              parsed.settings.trackerPanelThoughtBubbleDisplay = normalizeTrackerThoughtBubbleDisplay(
+                parsed.settings.trackerPanelThoughtBubbleDisplay,
+              );
+              parsed.settings.trackerPanelDockedThoughtsAlwaysVisible =
+                parsed.settings.trackerPanelDockedThoughtsAlwaysVisible === true;
               parsed.settings.trackerTemperatureUnit = normalizeTrackerTemperatureUnit(
                 parsed.settings.trackerTemperatureUnit,
               );

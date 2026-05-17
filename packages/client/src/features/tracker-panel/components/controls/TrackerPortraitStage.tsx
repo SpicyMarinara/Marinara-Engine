@@ -22,6 +22,7 @@ import { TrackerPortraitStageBackdrop } from "./TrackerProfileChrome";
 
 export type TrackerPortraitStageMediaKind = "expression" | "art";
 type TrackerPortraitStageFrameTone = "featured" | "persona";
+type TrackerPortraitStageStyle = CSSProperties & Record<`--${string}`, string | number>;
 
 interface TrackerPortraitStageView {
   defaultX?: number;
@@ -99,7 +100,7 @@ const PORTRAIT_UPLOAD_HIT_TARGET_CLASS =
   "absolute inset-0 z-[3] cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--primary)] active:scale-[0.99]";
 const PORTRAIT_UPLOAD_BUTTON_CLASS =
   "pointer-events-none absolute bottom-1 right-1 z-[4] flex h-6 w-6 items-center justify-center rounded-sm border border-[color-mix(in_srgb,var(--tracker-profile-rule)_86%,transparent)] bg-[color-mix(in_srgb,var(--background)_66%,transparent)] text-[var(--muted-foreground)]/80 opacity-0 shadow-[0_5px_12px_rgba(0,0,0,0.24)] backdrop-blur-sm transition-all hover:bg-[var(--primary)]/16 hover:text-[var(--tracker-profile-icon)] focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] group-hover/portrait:pointer-events-auto group-hover/portrait:opacity-100 group-focus-within/portrait:pointer-events-auto group-focus-within/portrait:opacity-100 [@media(pointer:coarse)]:pointer-events-auto [@media(pointer:coarse)]:opacity-100";
-const EMPTY_AVATAR_STAGE_STYLE = {
+const EMPTY_AVATAR_STAGE_STYLE: TrackerPortraitStageStyle = {
   "--tracker-profile-surface":
     "radial-gradient(ellipse at 50% 42%, color-mix(in srgb, var(--muted-foreground) 10%, transparent) 0%, transparent 42%), linear-gradient(180deg, color-mix(in srgb, var(--card) 82%, var(--background) 18%) 0%, color-mix(in srgb, var(--background) 92%, var(--card) 8%) 100%)",
   "--tracker-profile-surface-blend": "normal",
@@ -122,7 +123,7 @@ const EMPTY_AVATAR_STAGE_STYLE = {
   "--tracker-profile-portrait-bottom-rule-opacity": "0.28",
   "--tracker-profile-portrait-side-mask-opacity": "0.22",
   "--tracker-portrait-frame-accent": "color-mix(in srgb, var(--tracker-profile-rule) 72%, var(--muted-foreground) 28%)",
-} satisfies CSSProperties;
+};
 
 function normalizeZoom(value: number) {
   return Math.round(clampNumber(value, TRACKER_PORTRAIT_MIN_ZOOM, TRACKER_PORTRAIT_MAX_ZOOM) * 100) / 100;

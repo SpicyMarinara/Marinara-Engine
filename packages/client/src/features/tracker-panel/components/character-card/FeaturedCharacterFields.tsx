@@ -5,10 +5,6 @@ import type { TrackerPanelSizeProfile } from "../../../../stores/ui.store";
 import { cn } from "../../../../lib/utils";
 import type { TrackerStatDensity } from "../../tracker-panel.types";
 import { visibleText } from "../../lib/tracker-display";
-import {
-  TRACKER_PROFILE_DETAILS_SEAM_EDGE_CLASS_BY_SIDE,
-  type TrackerProfileSide,
-} from "../../lib/tracker-profile-layout";
 import { InlineEdit } from "../controls/InlineControls";
 import { StatList } from "../controls/StatList";
 import { TRACKER_PROFILE_FIELD_TILE_CLASS } from "../controls/TrackerProfileChrome";
@@ -115,13 +111,11 @@ export function FeaturedFieldList({
   character,
   onUpdate,
   readableRows = true,
-  seamSide,
   sizeProfile,
 }: {
   character: PresentCharacter;
   onUpdate?: (character: PresentCharacter) => void;
   readableRows?: boolean;
-  seamSide?: TrackerProfileSide;
   sizeProfile: TrackerPanelSizeProfile;
 }) {
   const fields = [
@@ -160,14 +154,6 @@ export function FeaturedFieldList({
 
   return (
     <div className={FEATURED_FIELD_LIST_CLASS} style={{ gridTemplateRows: `repeat(${fields.length}, minmax(0, 1fr))` }}>
-      {seamSide && (
-        <div
-          className={cn(
-            "pointer-events-none absolute inset-y-1 w-px bg-[linear-gradient(180deg,transparent,color-mix(in_srgb,var(--tracker-profile-dialogue-border)_34%,transparent)_18%,color-mix(in_srgb,var(--tracker-profile-dialogue-border)_22%,transparent)_82%,transparent)] opacity-55",
-            TRACKER_PROFILE_DETAILS_SEAM_EDGE_CLASS_BY_SIDE[seamSide],
-          )}
-        />
-      )}
       {fields.map((field) => (
         <FeaturedFieldTile
           key={field.key}
@@ -193,7 +179,6 @@ export function FeaturedStatGrid({
   addMode,
   density,
   scrollable,
-  seamSide,
   wideColumns,
   className,
 }: {
@@ -204,20 +189,11 @@ export function FeaturedStatGrid({
   addMode: boolean;
   density: TrackerStatDensity;
   scrollable: boolean;
-  seamSide?: TrackerProfileSide;
   wideColumns?: boolean;
   className?: string;
 }) {
   return (
     <div className={cn(FEATURED_STAT_SHELF_CLASS, scrollable ? "overflow-y-auto" : "overflow-y-hidden", className)}>
-      {seamSide && (
-        <div
-          className={cn(
-            "pointer-events-none absolute inset-y-1 w-px bg-[linear-gradient(180deg,transparent,color-mix(in_srgb,var(--tracker-profile-dialogue-border)_36%,transparent)_16%,color-mix(in_srgb,var(--tracker-profile-dialogue-border)_24%,transparent)_84%,transparent)] opacity-58",
-            TRACKER_PROFILE_DETAILS_SEAM_EDGE_CLASS_BY_SIDE[seamSide],
-          )}
-        />
-      )}
       <div className="relative z-[2]">
         <StatList
           stats={stats}
