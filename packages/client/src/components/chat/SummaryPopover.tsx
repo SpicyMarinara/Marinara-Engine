@@ -476,9 +476,9 @@ export function SummaryPopover({
     if (entriesToUpdate.length === 0) return;
 
     try {
-      await Promise.all(
-        entriesToUpdate.map((entry) => toggleSummaryEntry.mutateAsync({ chatId, entryId: entry.id, enabled: nextEnabled })),
-      );
+      for (const entry of entriesToUpdate) {
+        await toggleSummaryEntry.mutateAsync({ chatId, entryId: entry.id, enabled: nextEnabled });
+      }
       if (nextEnabled) setShowInactiveSummaries(false);
     } catch {
       toast.error("Could not update summary entries.");

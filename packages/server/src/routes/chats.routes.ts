@@ -430,7 +430,13 @@ export async function chatsRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "Invalid summary entry operation" });
     }
     if (body.operation === "replace") {
-      if (!body.entry || typeof body.entry.id !== "string" || typeof body.entry.content !== "string") {
+      if (
+        !body.entry ||
+        typeof body.entry.id !== "string" ||
+        !body.entry.id.trim() ||
+        typeof body.entry.content !== "string" ||
+        !body.entry.content.trim()
+      ) {
         return reply.status(400).send({ error: "replace requires entry.id and entry.content" });
       }
     } else if (body.operation === "delete") {

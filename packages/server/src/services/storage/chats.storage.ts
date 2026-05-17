@@ -658,11 +658,17 @@ export function createChatsStorage(db: DB) {
     async bulkSetHiddenFromAI(chatId: string, messageIds: string[], hidden: boolean): Promise<number> {
       if (messageIds.length === 0) return 0;
       const uniqueIds = Array.from(new Set(messageIds));
-      const scopedRows = await db
-        .select({ id: messages.id })
-        .from(messages)
-        .where(and(eq(messages.chatId, chatId), inArray(messages.id, uniqueIds)));
-      const scopedIds = scopedRows.map((row) => row.id);
+      const scopedRows: { id: string }[] = [];
+      const CHUNK = 500;
+      for (let i = 0; i < uniqueIds.length; i += CHUNK) {
+        const batch = uniqueIds.slice(i, i + CHUNK);
+        const batchRows = await db
+          .select({ id: messages.id })
+          .from(messages)
+          .where(and(eq(messages.chatId, chatId), inArray(messages.id, batch)));
+        scopedRows.push(...batchRows);
+      }
+      const scopedIds = Array.from(new Set(scopedRows.map((row) => row.id)));
 
       for (const id of scopedIds) {
         await this.updateMessageExtra(id, { hiddenFromAI: hidden });
