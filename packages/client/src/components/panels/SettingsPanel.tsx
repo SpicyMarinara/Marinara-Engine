@@ -60,9 +60,7 @@ import {
   Download,
   Dock,
   FolderOpen,
-  Maximize2,
   MessageCircle,
-  Minimize2,
   RefreshCw,
   RotateCcw,
   ExternalLink,
@@ -76,6 +74,7 @@ import { useGameAssetStore } from "../../stores/game-asset.store";
 import { chatKeys } from "../../hooks/use-chats";
 import { HelpTooltip } from "../ui/HelpTooltip";
 import { TrackerPanelIcon } from "../ui/TrackerPanelIcon";
+import { TrackerSizeTierIcon } from "../ui/TrackerSizeTierIcon";
 import { ConversationSoundSetting, ToggleSetting } from "./settings/SettingControls";
 import { TrackerCardColorSettings } from "./settings/TrackerCardColorSettings";
 import { DraftNumberInput } from "../ui/DraftNumberInput";
@@ -549,7 +548,6 @@ function TrackerPanelAppearanceDrawer({
             <div className="grid grid-cols-3 gap-0.5 rounded-lg border border-[var(--border)] bg-[var(--secondary)]/45 p-0.5">
               {TRACKER_PANEL_SIZE_PROFILE_OPTIONS.map((opt) => {
                 const selected = trackerPanelSizeProfile === opt.id;
-                const Icon = opt.id === "compact" ? Minimize2 : opt.id === "expanded" ? Maximize2 : TrackerPanelIcon;
                 return (
                   <button
                     key={opt.id}
@@ -565,7 +563,9 @@ function TrackerPanelAppearanceDrawer({
                     )}
                   >
                     <span className="inline-flex items-center gap-1 font-semibold">
-                      <Icon size="0.72rem" strokeWidth={1.95} className={selected ? "text-[var(--primary)]" : ""} />
+                      <span className={cn("inline-flex", selected && "text-[var(--primary)]")}>
+                        <TrackerSizeTierIcon sizeProfile={opt.id} />
+                      </span>
                       {opt.label}
                     </span>
                     <span className="shrink-0 font-mono text-[0.5625rem] tabular-nums opacity-65">

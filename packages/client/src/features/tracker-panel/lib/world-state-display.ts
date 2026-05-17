@@ -264,13 +264,13 @@ export function parseTemperatureValue(temperature: string | null | undefined) {
   const match = (temperature ?? "").match(/-?\d+(\.\d+)?/);
   if (!match) return null;
   const numeric = parseFloat(match[0]!);
-  if (/°?\s*f/i.test(temperature ?? "")) return Math.round((numeric - 32) * (5 / 9));
-  return Math.round(numeric);
+  if (/°?\s*f/i.test(temperature ?? "")) return (numeric - 32) * (5 / 9);
+  return numeric;
 }
 
 function formatTemperatureValue(celsius: number, unit: TrackerTemperatureUnit) {
   if (unit === "fahrenheit") return `${Math.round(celsius * (9 / 5) + 32)}°F`;
-  return `${celsius}°C`;
+  return `${Math.round(celsius)}°C`;
 }
 
 export function getTemperatureKeywordHint(temperature: string | null | undefined) {
