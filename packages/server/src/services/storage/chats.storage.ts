@@ -657,7 +657,14 @@ export function createChatsStorage(db: DB) {
      */
     async bulkSetHiddenFromAI(chatId: string, messageIds: string[], hidden: boolean): Promise<number> {
       if (messageIds.length === 0) return 0;
-      for (const id of messageIds) {
+      const uniqueIds = Array.from(new Set(messageIds));
+      const scopedRows = await db
+        .select({ id: messages.id })
+        .from(messages)
+        .where(and(eq(messages.chatId, chatId), inArray(messages.id, uniqueIds)));
+      const scopedIds = scopedRows.map((row) => row.id);
+
+      for (const id of scopedIds) {
         await this.updateMessageExtra(id, { hiddenFromAI: hidden });
         // Mirror what the single-message /extra route does: propagate the flag
         // to all swipe rows so setActiveSwipe() cannot clobber it.
@@ -666,7 +673,7 @@ export function createChatsStorage(db: DB) {
           await this.updateSwipeExtra(id, swipe.index, { hiddenFromAI: hidden });
         }
       }
-      return messageIds.length;
+      return scopedIds.length;
     },
 
     /** Atomically append an attachment to a message's extra JSON field. */

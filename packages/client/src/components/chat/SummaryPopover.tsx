@@ -1068,7 +1068,15 @@ export function SummaryPopover({
                       className="w-full rounded-md bg-[var(--card)] px-2 py-1 text-center text-xs tabular-nums text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
                     />
                   </label>
-                </div>                
+                </div>
+                <p
+                  className={cn(
+                    "px-0.5 text-[0.625rem] leading-snug",
+                    rangeTooLarge ? "text-[var(--destructive)]" : "text-[var(--muted-foreground)]",
+                  )}
+                >
+                  {rangeStatusText}
+                </p>
               </div>
             )}
           </div>
