@@ -141,6 +141,7 @@ export function QuestRow({
             onClick={onRemove}
             className={QUEST_REMOVE_BUTTON_CLASS}
             title="Remove quest"
+            aria-label={`Remove ${visibleText(quest.name, "quest")}`}
           >
             <X size="0.625rem" />
           </button>

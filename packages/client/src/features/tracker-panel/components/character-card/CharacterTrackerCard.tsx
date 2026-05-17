@@ -221,7 +221,13 @@ export function CharacterTrackerCard({
       <div className={cn(CHARACTER_AVATAR_SOCKET_CLASS, CHARACTER_AVATAR_SOCKET_SIZE_CLASS[avatarSocketSize])} />
       {hasDeleteAction && (
         <div className="absolute right-1 top-1 z-10">
-          <button type="button" onClick={onRemove} className={CHARACTER_REMOVE_BUTTON_CLASS} title="Remove character">
+          <button
+            type="button"
+            onClick={onRemove}
+            className={CHARACTER_REMOVE_BUTTON_CLASS}
+            title="Remove character"
+            aria-label={`Remove ${visibleText(character.name, "character")}`}
+          >
             <X size="0.6875rem" />
           </button>
         </div>

@@ -399,21 +399,21 @@ export function preserveTrackerCharacterUiFields(
     const previousPortraitFocusY = previous?.portraitFocusY;
     const previousPortraitZoom = previous?.portraitZoom;
     if (
-      typeof character.portraitFocusX !== "number" &&
+      (typeof character.portraitFocusX !== "number" || !Number.isFinite(character.portraitFocusX)) &&
       typeof previousPortraitFocusX === "number" &&
       Number.isFinite(previousPortraitFocusX)
     ) {
       character.portraitFocusX = previousPortraitFocusX;
     }
     if (
-      typeof character.portraitFocusY !== "number" &&
+      (typeof character.portraitFocusY !== "number" || !Number.isFinite(character.portraitFocusY)) &&
       typeof previousPortraitFocusY === "number" &&
       Number.isFinite(previousPortraitFocusY)
     ) {
       character.portraitFocusY = previousPortraitFocusY;
     }
     if (
-      typeof character.portraitZoom !== "number" &&
+      (typeof character.portraitZoom !== "number" || !Number.isFinite(character.portraitZoom)) &&
       typeof previousPortraitZoom === "number" &&
       Number.isFinite(previousPortraitZoom)
     ) {

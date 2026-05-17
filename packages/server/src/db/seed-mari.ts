@@ -484,11 +484,15 @@ export async function seedProfessorMari(db: DB) {
   const existing = await db.select().from(characters).where(eq(characters.id, PROFESSOR_MARI_ID));
 
   if (existing.length > 0) {
-    const seedData = getSeedDataForExistingMari(existing[0]!.data);
+    const existingData = existing[0]!.data;
+    const currentData = parseExistingMariData(existingData);
+    const seedData = getSeedDataForExistingMari(existingData);
     const serialized = JSON.stringify(seedData);
+    const currentSerialized =
+      currentData !== null ? JSON.stringify(currentData) : typeof existingData === "string" ? existingData : null;
 
     // Update her card data and avatar if changed (e.g. after an app update)
-    const needsUpdate = existing[0]!.data !== serialized || existing[0]!.avatarPath !== MARI_AVATAR;
+    const needsUpdate = currentSerialized !== serialized || existing[0]!.avatarPath !== MARI_AVATAR;
     if (needsUpdate) {
       await db
         .update(characters)

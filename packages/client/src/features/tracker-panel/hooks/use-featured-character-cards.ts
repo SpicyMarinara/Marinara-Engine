@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useUpdateChatMetadata } from "../../../hooks/use-chats";
 import { TRACKER_FEATURED_CHARACTER_META_KEY } from "../lib/tracker-panel.constants";
 
@@ -11,16 +11,13 @@ export function useFeaturedCharacterCards({
 }) {
   const updateChatMetadata = useUpdateChatMetadata();
   const [featuredCharacterCards, setFeaturedCharacterCards] = useState<Set<string>>(() => new Set());
-  const featuredCharacterCardsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    featuredCharacterCardsRef.current = featuredCharacterCardKeys;
-    setFeaturedCharacterCards(featuredCharacterCardKeys);
-  }, [activeChatId, featuredCharacterCardKeys]);
+    setFeaturedCharacterCards(new Set(featuredCharacterCardKeys));
+  }, [featuredCharacterCardKeys]);
 
   const persistFeaturedCharacterCards = useCallback(
     (next: Set<string>) => {
-      featuredCharacterCardsRef.current = next;
       setFeaturedCharacterCards(next);
       if (!activeChatId) return;
       updateChatMetadata.mutate({
@@ -33,7 +30,7 @@ export function useFeaturedCharacterCards({
 
   const toggleFeaturedCharacterCard = useCallback(
     (key: string) => {
-      const next = new Set(featuredCharacterCardsRef.current);
+      const next = new Set(featuredCharacterCards);
       if (next.has(key)) {
         next.delete(key);
       } else {
@@ -41,17 +38,17 @@ export function useFeaturedCharacterCards({
       }
       persistFeaturedCharacterCards(next);
     },
-    [persistFeaturedCharacterCards],
+    [featuredCharacterCards, persistFeaturedCharacterCards],
   );
 
   const removeFeaturedCharacterCard = useCallback(
     (key: string) => {
-      if (!featuredCharacterCardsRef.current.has(key)) return;
-      const next = new Set(featuredCharacterCardsRef.current);
+      if (!featuredCharacterCards.has(key)) return;
+      const next = new Set(featuredCharacterCards);
       next.delete(key);
       persistFeaturedCharacterCards(next);
     },
-    [persistFeaturedCharacterCards],
+    [featuredCharacterCards, persistFeaturedCharacterCards],
   );
 
   return {

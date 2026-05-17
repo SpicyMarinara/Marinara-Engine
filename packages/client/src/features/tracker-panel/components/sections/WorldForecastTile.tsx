@@ -107,7 +107,10 @@ export function WorldForecastTile({
                 useHorizontalTempRail ? "h-full w-full" : "order-first h-[1.55rem] w-full @min-[14rem]:h-[1.6rem]",
               )}
             >
-              <WorldThermometerGauge value={temperature} variant={useHorizontalTempRail ? "expanded" : "compact"} />
+              <WorldThermometerGauge
+                display={temperatureDisplay}
+                variant={useHorizontalTempRail ? "expanded" : "compact"}
+              />
             </span>
           </WorldRenderedEdit>
         </div>
@@ -255,13 +258,12 @@ function WorldWeatherLabel({
 }
 
 function WorldThermometerGauge({
-  value,
+  display,
   variant = "compact",
 }: {
-  value: string | null | undefined;
+  display: ReturnType<typeof getTemperatureGaugeDisplay>;
   variant?: "compact" | "expanded";
 }) {
-  const display = getTemperatureGaugeDisplay(value);
   const fillStyle = { backgroundColor: display.color };
   const expanded = variant === "expanded";
   return (

@@ -12,6 +12,14 @@ import { useGameStateStore } from "../../../stores/game-state.store";
 import type { GameStatePatchField } from "../../../hooks/use-game-state-patcher";
 import { getCharacterFeatureKey } from "../lib/character-tracker-data";
 
+function makeManualTrackerId() {
+  const id =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return `manual-${id}`;
+}
+
 export function useTrackerMutations({
   activeChatId,
   inventory,
@@ -111,7 +119,7 @@ export function useTrackerMutations({
     patchField("presentCharacters", [
       ...presentCharacters,
       {
-        characterId: `manual-${Date.now()}`,
+        characterId: makeManualTrackerId(),
         name: "New Character",
         emoji: "?",
         mood: "",
@@ -174,7 +182,7 @@ export function useTrackerMutations({
     updateQuests([
       ...quests,
       {
-        questEntryId: `manual-${Date.now()}`,
+        questEntryId: makeManualTrackerId(),
         name: "New Quest",
         currentStage: 0,
         objectives: [{ text: "Objective 1", completed: false }],

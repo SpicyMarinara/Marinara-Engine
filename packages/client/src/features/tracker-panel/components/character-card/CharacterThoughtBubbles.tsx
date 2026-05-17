@@ -395,7 +395,10 @@ export function ExternalThoughtBubble({
 
     const updatePosition = () => {
       const anchor = anchorRef.current;
-      if (!anchor) return;
+      if (!anchor) {
+        setPosition((current) => (current === null ? current : null));
+        return;
+      }
       const rect = anchor.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) {
         setPosition((current) => (current === null ? current : null));
@@ -442,7 +445,8 @@ export function ExternalThoughtBubble({
 
     updatePosition();
     const anchor = anchorRef.current;
-    const resizeObserver = anchor ? new ResizeObserver(updatePosition) : null;
+    const resizeObserver =
+      anchor && typeof ResizeObserver !== "undefined" ? new ResizeObserver(updatePosition) : null;
     if (anchor) resizeObserver?.observe(anchor);
     window.addEventListener("resize", updatePosition);
     window.addEventListener("scroll", updatePosition, true);

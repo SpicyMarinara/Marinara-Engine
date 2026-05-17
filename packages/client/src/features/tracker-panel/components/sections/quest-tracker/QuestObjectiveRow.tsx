@@ -99,6 +99,7 @@ export function QuestObjectiveRow({
           onClick={onRemove}
           className={OBJECTIVE_REMOVE_BUTTON_CLASS}
           title="Remove objective"
+          aria-label="Remove objective"
         >
           <X size="0.5rem" />
         </button>

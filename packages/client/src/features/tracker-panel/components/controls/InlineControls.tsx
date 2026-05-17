@@ -133,6 +133,7 @@ export function InlineEdit({
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollFieldRef = useRef<HTMLSpanElement>(null);
   const scrollMeasureRef = useRef<HTMLSpanElement>(null);
+  const committedRef = useRef(false);
 
   useEffect(() => {
     if (!editing) setDraft(currentValue);
@@ -140,6 +141,7 @@ export function InlineEdit({
 
   useEffect(() => {
     if (!editing) return;
+    committedRef.current = false;
     inputRef.current?.focus();
     inputRef.current?.select();
   }, [editing]);
@@ -162,6 +164,8 @@ export function InlineEdit({
   };
 
   const commit = () => {
+    if (committedRef.current) return;
+    committedRef.current = true;
     const trimmed = draft.trim();
     if (trimmed !== currentValue) onSave(trimmed);
     setEditing(false);

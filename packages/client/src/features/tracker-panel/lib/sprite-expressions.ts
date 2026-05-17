@@ -66,7 +66,8 @@ export function resolveSpriteUrl(sprites: SpriteInfo[] | undefined, expression: 
   const exact = spriteList.find((sprite) => sprite.expression.toLowerCase() === exprLower);
   if (exact) return exact.url;
   const partial = spriteList.find((sprite) => {
-    const stored = sprite.expression.toLowerCase();
+    const stored = sprite.expression.trim().toLowerCase();
+    if (!stored) return false;
     return stored.includes(exprLower) || exprLower.includes(stored);
   });
   if (partial) return partial.url;

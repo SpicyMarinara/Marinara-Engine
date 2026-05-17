@@ -210,7 +210,13 @@ export function FeaturedCharacterTrackerCard({
 
       {hasDeleteAction && (
         <div className="absolute right-1 top-1 z-10">
-          <button type="button" onClick={onRemove} className={FEATURED_REMOVE_BUTTON_CLASS} title="Remove character">
+          <button
+            type="button"
+            onClick={onRemove}
+            className={FEATURED_REMOVE_BUTTON_CLASS}
+            title="Remove character"
+            aria-label={`Remove ${character.name.trim() || "character"}`}
+          >
             <X size="0.6875rem" />
           </button>
         </div>

@@ -46,6 +46,7 @@ export function WorldRenderedEdit({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(currentValue);
   const inputRef = useRef<HTMLInputElement>(null);
+  const committedRef = useRef(false);
   const title = `${label}: ${visibleText(value)}`;
 
   useEffect(() => {
@@ -54,11 +55,14 @@ export function WorldRenderedEdit({
 
   useEffect(() => {
     if (!editing) return;
+    committedRef.current = false;
     inputRef.current?.focus();
     inputRef.current?.select();
   }, [editing]);
 
   const commit = () => {
+    if (committedRef.current) return;
+    committedRef.current = true;
     const trimmed = draft.trim();
     if (trimmed !== currentValue) onSave?.(trimmed);
     setEditing(false);
