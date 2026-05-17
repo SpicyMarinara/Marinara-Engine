@@ -64,11 +64,11 @@ const PERSONA_STAT_SHELF_CLASS =
   "group/statbox relative min-h-0 min-w-0 flex-1 overflow-y-auto px-1.5 py-1.5";
 const PERSONA_LOWER_DECK_CLASS =
   cn(
-    "relative z-[1] order-3 col-span-2 border-t border-[color-mix(in_srgb,var(--tracker-profile-dialogue-border)_50%,transparent)] px-1 pb-1 pt-1",
+    "relative z-[1] order-3 col-span-2 flex flex-col gap-1 border-t border-[color-mix(in_srgb,var(--tracker-profile-dialogue-border)_50%,transparent)] px-1 py-1",
     TRACKER_PROFILE_MATERIAL_PANEL_CLASS,
   );
 const PERSONA_STATUS_STRIP_CLASS =
-  cn(TRACKER_PROFILE_STATUS_STRIP_CLASS, "mx-0.5 mb-1.5 px-1.5 py-0.5");
+  cn(TRACKER_PROFILE_STATUS_STRIP_CLASS, "mx-0.5 items-center px-1.5 py-[0.1875rem]");
 const PERSONA_INVENTORY_HEADER_CLASS =
   "relative mx-0.5 flex h-4 items-center gap-1 overflow-hidden px-0.5 text-[0.625rem] leading-3";
 const PERSONA_INVENTORY_SHELF_CLASS =

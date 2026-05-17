@@ -47,7 +47,7 @@ const CHARACTER_NAMEPLATE_CLASS =
 const CHARACTER_NAMEPLATE_GLEAM_CLASS =
   "pointer-events-none absolute inset-x-0 top-0 z-[2] h-px bg-[image:var(--tracker-profile-accent-layer)] opacity-[var(--tracker-profile-accent-highlight-opacity,0.32)] [mask-image:linear-gradient(90deg,transparent_0%,black_20%,black_82%,transparent_100%)]";
 const CHARACTER_AVATAR_SOCKET_CLASS =
-  "pointer-events-none absolute z-[4] rounded-full bg-[linear-gradient(180deg,oklch(0.205_0.024_315),oklch(0.15_0.018_315))] shadow-[inset_0_1px_3px_color-mix(in_srgb,var(--background)_30%,transparent)]";
+  "pointer-events-none absolute z-[2] rounded-full border border-[color-mix(in_srgb,var(--tracker-profile-nameplate-rule)_34%,transparent)] bg-[image:var(--tracker-profile-nameplate)] shadow-[inset_0_1px_0_color-mix(in_srgb,var(--foreground)_4%,transparent),inset_0_-2px_4px_color-mix(in_srgb,var(--background)_24%,transparent)] [background-blend-mode:normal]";
 const CHARACTER_AVATAR_SOCKET_SIZE_CLASS = {
   regular: "left-[0.32rem] top-[0.7rem] h-[clamp(3.06rem,35cqw,3.75rem)] w-[clamp(3.06rem,35cqw,3.75rem)]",
   dense: "left-[0.32rem] top-[0.7rem] h-[clamp(2.36rem,29cqw,3rem)] w-[clamp(2.36rem,29cqw,3rem)]",

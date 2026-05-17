@@ -32,7 +32,7 @@ export function CharacterTrackerAvatar({
             : `Upload ${visibleText(character.name, "character")} avatar`
         }
         className={cn(
-          "group/avatar relative z-[1] flex aspect-square w-full shrink-0 items-center justify-center overflow-hidden rounded-full border border-[color-mix(in_srgb,var(--background)_88%,var(--tracker-card-nameplate-base-mid,var(--card))_12%)] bg-[var(--muted)] text-xs text-[var(--foreground)] shadow-[0_4px_10px_rgba(0,0,0,0.24)] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)]",
+          "group/avatar relative z-[1] flex aspect-square w-full shrink-0 items-center justify-center overflow-hidden rounded-full border border-[color-mix(in_srgb,var(--tracker-profile-nameplate-rule)_34%,transparent)] bg-[var(--muted)] text-xs text-[var(--foreground)] shadow-[0_4px_10px_rgba(0,0,0,0.24)] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)]",
           onUploadAvatar && "cursor-pointer hover:ring-[var(--primary)]/36 active:scale-95",
           !onUploadAvatar && "cursor-default",
         )}
