@@ -1094,7 +1094,7 @@ export async function generateRoutes(app: FastifyInstance) {
       const allChatMessages = await chats.listMessages(input.chatId);
       const chatMode = requestChatMode;
       const lorebookGenerationTriggers = resolveLorebookGenerationTriggers(input, chatMode);
-      const supportsHiddenFromAI = chatMode === "roleplay" || chatMode === "visual_novel";
+      const supportsHiddenFromAI = chatMode === "conversation" || chatMode === "roleplay" || chatMode === "visual_novel";
       const preferLatestVisibleGameState = shouldPreferLatestVisibleGameState(input);
 
       // ── Conversation-start filter: find the latest "isConversationStart" marker ──

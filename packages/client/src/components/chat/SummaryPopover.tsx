@@ -1080,6 +1080,14 @@ export function SummaryPopover({
                     />
                   </label>
                 </div>
+                <p
+                  className={cn(
+                    "px-0.5 text-[0.625rem] leading-snug",
+                    rangeTooLarge ? "text-[var(--destructive)]" : "text-[var(--muted-foreground)]",
+                  )}
+                >
+                  {rangeStatusText}
+                </p>
               </div>
             )}
           </div>
