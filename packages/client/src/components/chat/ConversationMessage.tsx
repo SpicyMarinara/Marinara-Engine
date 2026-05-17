@@ -360,6 +360,7 @@ export const ConversationMessage = memo(function ConversationMessage({
   const collapseHiddenMessages = useUIStore((s) => s.summaryPopoverSettings.collapseHiddenMessages);
   const [imageLightbox, setImageLightbox] = useState<{ url: string; prompt?: string | null } | null>(null);
   const editRef = useRef<HTMLTextAreaElement>(null);
+  const msgRef = useRef<HTMLDivElement>(null);
   const hasInput = useChatStore((s) => s.currentInput.trim().length > 0);
   const guideGenerations = useUIStore((s) => s.guideGenerations);
   const chatFontSize = useUIStore((s) => s.chatFontSize);
@@ -401,6 +402,37 @@ export const ConversationMessage = memo(function ConversationMessage({
   useEffect(() => {
     if (!generationReplay) setShowGenerationReplay(false);
   }, [generationReplay]);
+
+  useEffect(() => {
+    if (!showActions) return;
+    const handleTouch = (e: TouchEvent) => {
+      if (msgRef.current && !msgRef.current.contains(e.target as Node)) {
+        setShowActions(false);
+      }
+    };
+    document.addEventListener("touchstart", handleTouch);
+    return () => document.removeEventListener("touchstart", handleTouch);
+  }, [showActions]);
+
+  const handleMobileTap = useCallback(
+    (e: React.MouseEvent) => {
+      if (multiSelectMode) {
+        onToggleSelect?.({
+          messageId: message.id,
+          orderIndex: messageOrderIndex ?? 0,
+          checked: !isSelected,
+          shiftKey: e.shiftKey,
+        });
+        return;
+      }
+
+      if (!matchMedia("(pointer: coarse)").matches) return;
+      const target = e.target as HTMLElement;
+      if (target.closest("button, a, textarea")) return;
+      setShowActions((v) => !v);
+    },
+    [isSelected, message.id, messageOrderIndex, multiSelectMode, onToggleSelect],
+  );
 
   const scopedCharacterMap = useMemo(() => {
     if (!characterMap) return null;
@@ -627,22 +659,12 @@ export const ConversationMessage = memo(function ConversationMessage({
   if (isSystem) {
     return (
       <div
+        ref={msgRef}
         className={cn(
           "group flex justify-center py-1",
           multiSelectMode && isSelected && "rounded-lg bg-[var(--destructive)]/10",
         )}
-        onClick={(e) => {
-          if (multiSelectMode) {
-            onToggleSelect?.({
-              messageId: message.id,
-              orderIndex: messageOrderIndex ?? 0,
-              checked: !isSelected,
-              shiftKey: e.shiftKey,
-            });
-          } else {
-            setShowActions((v) => !v);
-          }
-        }}
+        onClick={handleMobileTap}
       >
         <div className="relative">
           {!multiSelectMode && onDelete && (
@@ -683,6 +705,7 @@ export const ConversationMessage = memo(function ConversationMessage({
   if (groupedSegments && !editing && !isUser) {
     return (
       <div
+        ref={msgRef}
         className={cn(
           "relative px-4 py-0.5 transition-colors hover:bg-[var(--secondary)]/30",
           !noHoverGroup && "group",
@@ -690,18 +713,7 @@ export const ConversationMessage = memo(function ConversationMessage({
           isStreaming && "bg-[var(--secondary)]/20",
           multiSelectMode && isSelected && "bg-[var(--destructive)]/10",
         )}
-        onClick={(e) => {
-          if (multiSelectMode) {
-            onToggleSelect?.({
-              messageId: message.id,
-              orderIndex: messageOrderIndex ?? 0,
-              checked: !isSelected,
-              shiftKey: e.shiftKey,
-            });
-          } else {
-            setShowActions((v) => !v);
-          }
-        }}
+        onClick={handleMobileTap}
       >
         {/* Multi-select checkbox */}
         {multiSelectMode && (
@@ -998,6 +1010,7 @@ export const ConversationMessage = memo(function ConversationMessage({
 
   return (
     <div
+      ref={msgRef}
       className={cn(
         "mari-message relative flex gap-4 px-4 py-0.5 transition-colors hover:bg-[var(--secondary)]/30",
         isUser ? "mari-message-user" : "mari-message-assistant",
@@ -1008,18 +1021,7 @@ export const ConversationMessage = memo(function ConversationMessage({
       )}
       data-message-id={message.id}
       data-message-role={message.role}
-      onClick={(e) => {
-        if (multiSelectMode) {
-          onToggleSelect?.({
-            messageId: message.id,
-            orderIndex: messageOrderIndex ?? 0,
-            checked: !isSelected,
-            shiftKey: e.shiftKey,
-          });
-        } else {
-          setShowActions((v) => !v);
-        }
-      }}
+      onClick={handleMobileTap}
     >
       {/* Multi-select checkbox */}
       {multiSelectMode && (
