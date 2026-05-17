@@ -46,6 +46,7 @@ export async function syncRollingSummaryRecallChunks(
   const existing = await db
     .select({
       id: memoryChunks.id,
+      embedding: memoryChunks.embedding,
       sourceId: memoryChunks.sourceId,
       sourceUpdatedAt: memoryChunks.sourceUpdatedAt,
     })
@@ -66,7 +67,7 @@ export async function syncRollingSummaryRecallChunks(
 
   for (const entry of entries) {
     const current = existingBySourceId.get(entry.id);
-    if (current?.sourceUpdatedAt === entry.updatedAt) continue;
+    if (current?.sourceUpdatedAt === entry.updatedAt && current.embedding) continue;
 
     if (current) {
       await db.delete(memoryChunks).where(eq(memoryChunks.id, current.id));

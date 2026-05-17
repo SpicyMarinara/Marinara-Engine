@@ -233,6 +233,14 @@ test("summary recall sync creates, updates, and removes rolling summary chunks",
     assert.equal(unchanged, 1);
     assert.equal(embeddedTexts.length, 0);
 
+    await db.update(memoryChunks).set({ embedding: null }).where(eq(memoryChunks.id, chunks[0]!.id));
+    embeddedTexts = [];
+    const repaired = await syncRollingSummaryRecallChunks(db, "chat-summary-sync", metadata, { localEmbedder });
+    assert.equal(repaired, 1);
+    assert.equal(embeddedTexts.length, 1);
+    chunks = await db.select().from(memoryChunks).where(eq(memoryChunks.chatId, "chat-summary-sync"));
+    assert.equal(chunks[0]!.embedding, "[1,0,0]");
+
     const editedAt = "2026-05-10T00:05:00.000Z";
     const edited = await syncRollingSummaryRecallChunks(
       db,
