@@ -29,9 +29,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-function mergeCharacterData(current: CharacterData, data: Partial<CharacterData>): CharacterData {
+function mergeCharacterData(
+  current: CharacterData,
+  data: Partial<CharacterData>,
+  options?: { mergeExtensions?: boolean },
+): CharacterData {
   const merged = { ...current, ...data };
-  if (!isRecord(data.extensions)) return merged;
+  if ((options?.mergeExtensions ?? true) === false || !isRecord(data.extensions)) return merged;
 
   const extensions = {
     ...(isRecord(current.extensions) ? current.extensions : {}),
@@ -139,12 +143,15 @@ export function createCharactersStorage(db: DB) {
         versionSource?: string | null;
         versionReason?: string | null;
         skipVersionSnapshot?: boolean;
+        mergeExtensions?: boolean;
       },
     ) {
       const existing = await this.getById(id);
       if (!existing) return null;
       const currentData = parseCharacterData(existing.data);
-      const merged = mergeCharacterData(currentData, data);
+      const merged = mergeCharacterData(currentData, data, {
+        mergeExtensions: options?.mergeExtensions,
+      });
       const nextComment = options?.comment !== undefined ? (options.comment ?? "") : (existing.comment ?? "");
       const nextAvatarPath = avatarPath !== undefined ? avatarPath : existing.avatarPath;
       const shouldSnapshot =
