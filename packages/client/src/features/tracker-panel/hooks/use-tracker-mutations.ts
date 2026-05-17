@@ -41,6 +41,8 @@ export function useTrackerMutations({
 }) {
   const [avatarUploadIndex, setAvatarUploadIndex] = useState<number | null>(null);
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
+  const avatarUploadSerialRef = useRef(0);
+  const avatarUploadTokenByCharacterRef = useRef(new Map<string, number>());
 
   const openAvatarUpload = useCallback((index: number) => {
     setAvatarUploadIndex(index);
@@ -50,20 +52,34 @@ export function useTrackerMutations({
   const handleAvatarUpload = useCallback(
     (index: number, file: File) => {
       if (!activeChatId) return;
+      const currentState = useGameStateStore.getState().current;
+      const currentCharacters = currentState?.chatId === activeChatId ? (currentState.presentCharacters ?? []) : [];
+      const character = currentCharacters[index];
+      if (!character) return;
+
+      const targetCharacterId = character.characterId;
+      const uploadToken = avatarUploadSerialRef.current + 1;
+      avatarUploadSerialRef.current = uploadToken;
+      avatarUploadTokenByCharacterRef.current.set(targetCharacterId, uploadToken);
+
       const reader = new FileReader();
       reader.onload = async () => {
-        const currentState = useGameStateStore.getState().current;
-        const currentCharacters = currentState?.chatId === activeChatId ? (currentState.presentCharacters ?? []) : [];
-        const character = currentCharacters[index];
         const dataUrl = typeof reader.result === "string" ? reader.result : "";
-        if (!character || !dataUrl) return;
-        const targetCharacterId = character.characterId;
+        if (!dataUrl) {
+          if (avatarUploadTokenByCharacterRef.current.get(targetCharacterId) === uploadToken) {
+            avatarUploadTokenByCharacterRef.current.delete(targetCharacterId);
+          }
+          return;
+        }
+        if (avatarUploadTokenByCharacterRef.current.get(targetCharacterId) !== uploadToken) return;
 
         try {
           const response = await api.post<{ avatarPath: string }>(`/avatars/npc/${activeChatId}`, {
             name: character.name,
             avatar: dataUrl,
           });
+          if (avatarUploadTokenByCharacterRef.current.get(targetCharacterId) !== uploadToken) return;
+
           const latestState = useGameStateStore.getState().current;
           const latestCharacters = latestState?.chatId === activeChatId ? (latestState.presentCharacters ?? []) : [];
           const targetIndex = latestCharacters.findIndex((candidate) => candidate.characterId === targetCharacterId);
@@ -74,6 +90,15 @@ export function useTrackerMutations({
           patchField("presentCharacters", nextCharacters);
         } catch {
           // Match the original HUD widget behavior: failed avatar uploads leave tracker data unchanged.
+        } finally {
+          if (avatarUploadTokenByCharacterRef.current.get(targetCharacterId) === uploadToken) {
+            avatarUploadTokenByCharacterRef.current.delete(targetCharacterId);
+          }
+        }
+      };
+      reader.onerror = () => {
+        if (avatarUploadTokenByCharacterRef.current.get(targetCharacterId) === uploadToken) {
+          avatarUploadTokenByCharacterRef.current.delete(targetCharacterId);
         }
       };
       reader.readAsDataURL(file);

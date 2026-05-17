@@ -3,10 +3,27 @@
 // ──────────────────────────────────────────────
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api-client";
+import {
+  parseTrackerCardColorConfig,
+  serializeTrackerCardColorConfig,
+  TRACKER_CARD_COLOR_PREVIEW_BASE_FIELD,
+} from "../lib/tracker-card-colors";
 import type { CharacterCardVersion } from "@marinara-engine/shared";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function mergeTrackerCardPortraitFields(baseRaw: unknown, portraitRaw: unknown) {
+  const baseConfig = parseTrackerCardColorConfig(baseRaw);
+  const portraitConfig = parseTrackerCardColorConfig(portraitRaw);
+
+  return serializeTrackerCardColorConfig({
+    ...baseConfig,
+    portraitFocusX: portraitConfig.portraitFocusX,
+    portraitFocusY: portraitConfig.portraitFocusY,
+    portraitZoom: portraitConfig.portraitZoom,
+  });
 }
 
 export const characterKeys = {
@@ -403,7 +420,17 @@ export function useUpdatePersona() {
           const row = p as Record<string, unknown> & { id?: string };
           if (row?.id !== updatedId) return p;
           if (!updatedPersona || typeof updatedPersona !== "object") return p;
-          return { ...row, ...(updatedPersona as Record<string, unknown>) };
+          const updatedRow = updatedPersona as Record<string, unknown>;
+          const nextPersona = { ...row, ...updatedRow };
+          const previewBaseTrackerCardColors = row[TRACKER_CARD_COLOR_PREVIEW_BASE_FIELD];
+          const updatedTrackerCardColors = updatedRow.trackerCardColors;
+
+          if (typeof previewBaseTrackerCardColors === "string" && typeof updatedTrackerCardColors === "string") {
+            nextPersona[TRACKER_CARD_COLOR_PREVIEW_BASE_FIELD] = updatedTrackerCardColors;
+            nextPersona.trackerCardColors = mergeTrackerCardPortraitFields(row.trackerCardColors, updatedTrackerCardColors);
+          }
+
+          return nextPersona;
         });
       });
 

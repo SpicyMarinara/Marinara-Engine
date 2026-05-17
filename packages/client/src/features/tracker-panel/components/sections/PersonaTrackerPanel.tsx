@@ -13,6 +13,7 @@ import {
   getTrackerCardPortraitView,
   parseTrackerCardColorConfig,
   serializeTrackerCardColorConfig,
+  TRACKER_CARD_COLOR_PREVIEW_BASE_FIELD,
 } from "../../../../lib/tracker-card-colors";
 import { cn } from "../../../../lib/utils";
 import {
@@ -70,7 +71,7 @@ const PERSONA_LOWER_DECK_CLASS =
 const PERSONA_STATUS_STRIP_CLASS =
   cn(TRACKER_PROFILE_STATUS_STRIP_CLASS, "mx-0.5 items-center px-1.5 py-[0.1875rem]");
 const PERSONA_INVENTORY_HEADER_CLASS =
-  "relative mx-0.5 flex h-4 items-center gap-1 overflow-hidden px-0.5 text-[0.625rem] leading-3";
+  "relative mx-0.5 flex min-h-6 items-center gap-1 overflow-hidden px-0.5 text-[0.625rem] leading-3";
 const PERSONA_INVENTORY_SHELF_CLASS =
   cn(TRACKER_PROFILE_EMPTY_SURFACE_CLASS, "min-h-0 flex-1");
 
@@ -174,8 +175,15 @@ export function PersonaInventoryPanel({
     const cachedPersona = Array.isArray(cachedPersonas)
       ? cachedPersonas.find((candidate) => isRecord(candidate) && candidate.id === pendingSave.id)
       : null;
+    const previewBaseTrackerCardColors = isRecord(cachedPersona)
+      ? cachedPersona[TRACKER_CARD_COLOR_PREVIEW_BASE_FIELD]
+      : null;
     const latestTrackerCardColors = parseTrackerCardColorConfig(
-      isRecord(cachedPersona) ? cachedPersona.trackerCardColors : personaTrackerCardColorsRef.current,
+      typeof previewBaseTrackerCardColors === "string"
+        ? previewBaseTrackerCardColors
+        : isRecord(cachedPersona)
+          ? cachedPersona.trackerCardColors
+          : personaTrackerCardColorsRef.current,
     );
     const trackerCardColors = serializeTrackerCardColorConfig({
       ...latestTrackerCardColors,

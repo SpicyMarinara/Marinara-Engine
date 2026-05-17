@@ -18,6 +18,7 @@ import {
   cleanTrackerCardColorConfig,
   parseTrackerCardColorConfig,
   serializeTrackerCardColorConfig,
+  TRACKER_CARD_COLOR_PREVIEW_BASE_FIELD,
   type TrackerCardPaintColors,
 } from "../../../lib/tracker-card-colors";
 import { useTrackerGameState } from "../../../features/tracker-panel/hooks/use-tracker-game-state";
@@ -47,6 +48,8 @@ interface TrackerCardColorTarget {
   chatColors: TrackerCardPaintColors;
   config: TrackerCardColorConfig;
   serializedConfig: string;
+  savedConfig: TrackerCardColorConfig;
+  savedSerializedConfig: string;
   characterData?: Record<string, unknown>;
 }
 
@@ -99,6 +102,26 @@ function getPersonaChatColors(persona: Persona): TrackerCardPaintColors {
   };
 }
 
+function mergeTrackerCardPortraitFields(
+  config: TrackerCardColorConfig,
+  portraitSource: TrackerCardColorConfig,
+): TrackerCardColorConfig {
+  return cleanTrackerCardColorConfig({
+    ...config,
+    portraitFocusX: portraitSource.portraitFocusX,
+    portraitFocusY: portraitSource.portraitFocusY,
+    portraitZoom: portraitSource.portraitZoom,
+  });
+}
+
+function getTargetSavedConfig(target: TrackerCardColorTarget): SavedTrackerCardColorConfig {
+  return {
+    key: target.key,
+    config: target.savedConfig,
+    serializedConfig: target.savedSerializedConfig,
+  };
+}
+
 function patchCharacterDataTrackerCardColors(rawData: unknown, serializedConfig: string) {
   const characterData = parseCharacterData(rawData);
   if (!characterData) return rawData;
@@ -146,14 +169,19 @@ export function TrackerCardColorSettings() {
   const draftChangedRef = useRef(false);
 
   const updateCachedTargetConfig = useCallback(
-    (target: TrackerCardColorTarget, serializedConfig: string) => {
+    (target: TrackerCardColorTarget, serializedConfig: string, previewBaseSerializedConfig?: string) => {
       if (target.kind === "persona") {
         queryClient.setQueryData<unknown[] | undefined>(characterKeys.personas, (old) => {
           if (!Array.isArray(old)) return old;
 
           return old.map((persona) => {
             if (!isRecord(persona) || persona.id !== target.id) return persona;
-            return { ...persona, trackerCardColors: serializedConfig };
+            const nextPersona: Record<string, unknown> = { ...persona, trackerCardColors: serializedConfig };
+            delete nextPersona[TRACKER_CARD_COLOR_PREVIEW_BASE_FIELD];
+            if (previewBaseSerializedConfig !== undefined) {
+              nextPersona[TRACKER_CARD_COLOR_PREVIEW_BASE_FIELD] = previewBaseSerializedConfig;
+            }
+            return nextPersona;
           });
         });
         return;
@@ -227,6 +255,13 @@ export function TrackerCardColorSettings() {
 
     if (activePersona) {
       const config = parseTrackerCardColorConfig(activePersona.trackerCardColors);
+      const serializedConfig = serializeTrackerCardColorConfig(config);
+      const previewBaseSerializedConfig = isRecord(activePersona)
+        ? activePersona[TRACKER_CARD_COLOR_PREVIEW_BASE_FIELD]
+        : null;
+      const savedSerializedConfig =
+        typeof previewBaseSerializedConfig === "string" ? previewBaseSerializedConfig : serializedConfig;
+      const savedConfig = parseTrackerCardColorConfig(savedSerializedConfig);
       nextTargets.push({
         key: `persona:${activePersona.id}`,
         id: activePersona.id,
@@ -236,7 +271,9 @@ export function TrackerCardColorSettings() {
         optionLabel: activePersona.name || "Persona",
         chatColors: getPersonaChatColors(activePersona),
         config,
-        serializedConfig: serializeTrackerCardColorConfig(config),
+        serializedConfig,
+        savedConfig,
+        savedSerializedConfig,
       });
     }
 
@@ -259,6 +296,7 @@ export function TrackerCardColorSettings() {
       const display = parseCharacterDisplayData(character);
       const extensions = getCharacterExtensions(characterData);
       const config = parseTrackerCardColorConfig(extensions.trackerCardColors);
+      const serializedConfig = serializeTrackerCardColorConfig(config);
       nextTargets.push({
         key: `character:${id}`,
         id,
@@ -268,7 +306,9 @@ export function TrackerCardColorSettings() {
         optionLabel: display.name,
         chatColors: getCharacterChatColors(characterData),
         config,
-        serializedConfig: serializeTrackerCardColorConfig(config),
+        serializedConfig,
+        savedConfig: config,
+        savedSerializedConfig: serializedConfig,
         characterData,
       });
     }
@@ -279,12 +319,13 @@ export function TrackerCardColorSettings() {
   const targetKeySignature = targets.map((target) => target.key).join("|");
   const selectedTarget = targets.find((target) => target.key === selectedTargetKey) ?? null;
   const getSavedConfigForTarget = useCallback((target: TrackerCardColorTarget): SavedTrackerCardColorConfig => {
-    if (savedConfigRef.current?.key === target.key) return savedConfigRef.current;
-    return {
-      key: target.key,
-      config: target.config,
-      serializedConfig: target.serializedConfig,
-    };
+    if (
+      savedConfigRef.current?.key === target.key &&
+      savedConfigRef.current.serializedConfig === target.savedSerializedConfig
+    ) {
+      return savedConfigRef.current;
+    }
+    return getTargetSavedConfig(target);
   }, []);
   const draftSerializedConfig = useMemo(
     () => (draftConfig ? serializeTrackerCardColorConfig(draftConfig) : ""),
@@ -326,25 +367,29 @@ export function TrackerCardColorSettings() {
         previewSnapshotRef.current = null;
       }
       selectedKeyRef.current = selectedTarget.key;
-      savedConfigRef.current = {
-        key: selectedTarget.key,
-        config: selectedTarget.config,
-        serializedConfig: selectedTarget.serializedConfig,
-      };
+      savedConfigRef.current = getTargetSavedConfig(selectedTarget);
       draftChangedRef.current = false;
       setDraftConfig(selectedTarget.config);
       setSaveState("idle");
       return;
     }
 
-    if (!draftChangedRef.current) {
-      savedConfigRef.current = {
-        key: selectedTarget.key,
-        config: selectedTarget.config,
-        serializedConfig: selectedTarget.serializedConfig,
-      };
-      setDraftConfig(selectedTarget.config);
+    const targetSavedConfig = getTargetSavedConfig(selectedTarget);
+    if (draftChangedRef.current) {
+      if (savedConfigRef.current?.serializedConfig !== targetSavedConfig.serializedConfig) {
+        savedConfigRef.current = targetSavedConfig;
+        if (previewSnapshotRef.current?.target.key === selectedTarget.key) {
+          previewSnapshotRef.current = {
+            target: selectedTarget,
+            savedConfig: targetSavedConfig,
+          };
+        }
+      }
+      return;
     }
+
+    savedConfigRef.current = targetSavedConfig;
+    setDraftConfig(selectedTarget.config);
   }, [selectedTarget, updateCachedTargetConfig]);
 
   const persistTargetConfig = useCallback(
@@ -380,23 +425,27 @@ export function TrackerCardColorSettings() {
   );
 
   const handleChange = (nextConfig: TrackerCardColorConfig) => {
-    const cleanConfig = cleanTrackerCardColorConfig(nextConfig);
+    const cleanConfig = cleanTrackerCardColorConfig(
+      selectedTarget ? mergeTrackerCardPortraitFields(nextConfig, selectedTarget.config) : nextConfig,
+    );
     const serializedConfig = serializeTrackerCardColorConfig(cleanConfig);
     if (selectedTarget) {
       const savedTargetConfig = getSavedConfigForTarget(selectedTarget);
-      updateCachedTargetConfig(selectedTarget, serializedConfig);
+      updateCachedTargetConfig(
+        selectedTarget,
+        serializedConfig,
+        serializedConfig === savedTargetConfig.serializedConfig ? undefined : savedTargetConfig.serializedConfig,
+      );
 
       if (serializedConfig === savedTargetConfig.serializedConfig) {
         previewSnapshotRef.current = null;
         draftChangedRef.current = false;
         setSaveState("idle");
       } else {
-        if (previewSnapshotRef.current?.target.key !== selectedTarget.key) {
-          previewSnapshotRef.current = {
-            target: selectedTarget,
-            savedConfig: savedTargetConfig,
-          };
-        }
+        previewSnapshotRef.current = {
+          target: selectedTarget,
+          savedConfig: savedTargetConfig,
+        };
         draftChangedRef.current = true;
         setSaveState("dirty");
       }
@@ -407,7 +456,7 @@ export function TrackerCardColorSettings() {
   const handleSave = useCallback(async () => {
     if (!selectedTarget || !draftConfig) return;
 
-    const cleanConfig = cleanTrackerCardColorConfig(draftConfig);
+    const cleanConfig = cleanTrackerCardColorConfig(mergeTrackerCardPortraitFields(draftConfig, selectedTarget.config));
     const serializedConfig = serializeTrackerCardColorConfig(cleanConfig);
     const savedTargetConfig = getSavedConfigForTarget(selectedTarget);
 

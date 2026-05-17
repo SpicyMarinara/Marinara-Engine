@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { ChevronDown, Plus } from "lucide-react";
 import { cn } from "../../../../lib/utils";
 import { TRACKER_TEXT_MICRO } from "../../lib/tracker-panel.constants";
@@ -23,7 +23,7 @@ export function AddRowButton({
       aria-label={label}
       className={cn(
         "flex items-center justify-center rounded-sm bg-[var(--primary)]/8 text-[0.625rem] font-medium text-[var(--primary)] ring-1 ring-[var(--primary)]/16 transition-colors hover:bg-[var(--primary)]/14 hover:ring-[var(--primary)]/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] active:scale-95",
-        children ? "min-h-5 gap-1 px-1 py-0.5" : "h-4 w-4 p-0",
+        children ? "min-h-6 gap-1 px-1.5 py-0.5" : "h-6 min-h-6 w-6 min-w-6 p-0",
         className,
       )}
     >
@@ -59,7 +59,7 @@ export function SectionIconButton({
       aria-label={title}
       aria-pressed={pressed}
       className={cn(
-        "flex h-4 w-4 shrink-0 items-center justify-center rounded-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40",
+        "flex h-6 min-h-6 w-6 min-w-6 shrink-0 items-center justify-center rounded-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40",
         tone === "feature"
           ? pressed
             ? "bg-[var(--primary)]/10 text-[var(--primary)] ring-1 ring-[var(--primary)]/18 hover:bg-[var(--primary)]/14"
@@ -96,29 +96,13 @@ export function SectionHeader({
 }) {
   const collapsible = !!onToggle;
   const toggleTitle = `${collapsed ? "Expand" : "Collapse"} ${title}`;
-  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!onToggle || event.target !== event.currentTarget) return;
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      onToggle();
-    }
-  };
-
-  return (
-    <div
-      role={collapsible ? "button" : undefined}
-      tabIndex={collapsible ? 0 : undefined}
-      aria-expanded={collapsible ? !collapsed : undefined}
-      title={collapsible ? toggleTitle : undefined}
-      onClick={onToggle}
-      onKeyDown={handleKeyDown}
-      className={cn(
-        "relative flex min-h-5 items-center gap-1 border-b border-[var(--border)]/42 px-1 py-0.5",
-        collapsible &&
-          "cursor-pointer select-none transition-colors hover:bg-[var(--accent)]/18 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--primary)]/50",
-        className,
-      )}
-    >
+  const mainClassName = cn(
+    "flex min-w-0 flex-1 items-center gap-1 self-stretch rounded-sm px-0 text-left",
+    collapsible &&
+      "cursor-pointer select-none transition-colors hover:bg-[var(--accent)]/18 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--primary)]/50",
+  );
+  const mainContent = (
+    <>
       {collapsible && (
         <span className="flex h-3.5 w-3 shrink-0 items-center justify-center" aria-hidden="true">
           <ChevronDown
@@ -144,8 +128,31 @@ export function SectionHeader({
       >
         {title}
       </span>
+    </>
+  );
+
+  return (
+    <div
+      className={cn(
+        "relative flex min-h-7 items-center gap-1 border-b border-[var(--border)]/42 px-1 py-0.5",
+        className,
+      )}
+    >
+      {collapsible ? (
+        <button
+          type="button"
+          aria-expanded={!collapsed}
+          title={toggleTitle}
+          onClick={onToggle}
+          className={mainClassName}
+        >
+          {mainContent}
+        </button>
+      ) : (
+        <div className={mainClassName}>{mainContent}</div>
+      )}
       {(badge !== undefined && badge !== null) || action || addAction ? (
-        <div className="ml-0.5 flex shrink-0 items-center gap-0.5" onClick={(event) => event.stopPropagation()}>
+        <div className="ml-0.5 flex min-h-6 shrink-0 items-center gap-0.5">
           {badge !== undefined && badge !== null && (
             <span
               className="shrink-0 rounded-sm border border-[var(--border)]/26 bg-[var(--background)]/16 px-1 py-0.5 text-[0.5625rem] font-semibold uppercase leading-none tabular-nums text-[var(--foreground)]/62"

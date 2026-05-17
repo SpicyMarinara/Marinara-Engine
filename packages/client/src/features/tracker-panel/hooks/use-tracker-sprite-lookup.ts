@@ -46,7 +46,6 @@ export function useTrackerSpriteLookup({ enabled, chatCharacterIds }: UseTracker
     (character: PresentCharacter) => {
       const rawId = character.characterId?.trim() ?? "";
       if (rawId && characterSpriteLookup.knownIds.has(rawId)) return rawId;
-      if (rawId && !isSpriteLookupCharacterId(rawId)) return null;
       const idNameMatch = characterSpriteLookup.idByName.get(normalizeLookupText(rawId));
       if (idNameMatch) return idNameMatch;
       const nameMatch = characterSpriteLookup.idByName.get(normalizeLookupText(character.name));

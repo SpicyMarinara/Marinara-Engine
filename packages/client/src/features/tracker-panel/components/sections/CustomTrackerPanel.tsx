@@ -181,7 +181,7 @@ export function CustomTrackerPanel({
               <AddRowButton
                 title="Add custom stat"
                 onClick={() => onUpdateFields([...fields, { name: "New Field", value: "" }])}
-                className="h-4 w-4 rounded-sm"
+                className="rounded-sm"
               />
             ) : undefined
           }

@@ -163,7 +163,7 @@ export function CharacterTrackerPanel({
         action={action}
         addAction={
           addMode ? (
-            <AddRowButton title="Add character" onClick={onAddCharacter} className="h-4 w-4 rounded-sm" />
+            <AddRowButton title="Add character" onClick={onAddCharacter} className="rounded-sm" />
           ) : undefined
         }
         collapsed={collapsed}
