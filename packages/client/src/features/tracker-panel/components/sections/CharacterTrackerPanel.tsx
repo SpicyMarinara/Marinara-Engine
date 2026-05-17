@@ -1,15 +1,20 @@
 import type { ReactNode } from "react";
 import { Users } from "lucide-react";
 import type { PresentCharacter } from "@marinara-engine/shared";
-import type { TrackerPanelSide } from "../../../stores/ui.store";
-import { cn } from "../../../lib/utils";
-import {
-  getCharacterFeatureKey,
-  getSpriteExpressionForCharacter,
-  type TrackerProfileColors,
-} from "./tracker-data-sidebar.helpers";
-import { AddRowButton, EmptySection, SectionHeader } from "./tracker-data-sidebar.controls";
-import { CharacterTrackerCard } from "./CharacterTrackerCard";
+import type {
+  TrackerPanelSide,
+  TrackerPanelSizeProfile,
+  TrackerThoughtBubbleDisplay,
+} from "../../../../stores/ui.store";
+import { cn } from "../../../../lib/utils";
+import { getCharacterFeatureKey } from "../../lib/character-tracker-data";
+import { getSpriteExpressionForCharacter } from "../../lib/sprite-expressions";
+import type { TrackerProfileColors } from "../../lib/tracker-profile-style";
+import { AddRowButton, EmptySection, SectionHeader } from "../controls/SectionControls";
+import { CharacterTrackerCard } from "../character-card/CharacterTrackerCard";
+
+const COMPACT_CHARACTER_GHOST_SLOT_CLASS =
+  "pointer-events-none relative hidden min-h-0 self-stretch overflow-hidden rounded-md border border-[color-mix(in_srgb,var(--border)_28%,transparent)] bg-[linear-gradient(135deg,color-mix(in_srgb,var(--card)_18%,transparent),color-mix(in_srgb,var(--background)_12%,transparent)_48%,transparent)] opacity-55 shadow-[inset_0_1px_0_color-mix(in_srgb,var(--foreground)_3%,transparent),inset_0_-1px_0_color-mix(in_srgb,var(--background)_18%,transparent)] @min-[260px]:block before:pointer-events-none before:absolute before:left-0 before:right-2 before:top-0.5 before:h-5 before:rounded-l-[4px] before:rounded-r-[2px] before:bg-[linear-gradient(180deg,color-mix(in_srgb,var(--background)_78%,var(--card)_22%),color-mix(in_srgb,var(--card)_42%,transparent))] before:opacity-65 after:pointer-events-none after:absolute after:inset-1 after:rounded-[4px] after:bg-[repeating-linear-gradient(135deg,color-mix(in_srgb,var(--border)_12%,transparent)_0_1px,transparent_1px_7px)] after:opacity-35";
 
 export function CharacterTrackerPanel({
   activeChatId,
@@ -21,6 +26,9 @@ export function CharacterTrackerPanel({
   characterProfileColors,
   resolveSpriteCharacterId,
   trackerPanelSide,
+  trackerPanelSizeProfile,
+  thoughtBubbleDisplay,
+  dockedThoughtsAlwaysVisible,
   onUpdateCharacter,
   onRemoveCharacter,
   onAddCharacter,
@@ -41,6 +49,9 @@ export function CharacterTrackerPanel({
   characterProfileColors: Record<string, TrackerProfileColors>;
   resolveSpriteCharacterId: (character: PresentCharacter) => string | null;
   trackerPanelSide: TrackerPanelSide;
+  trackerPanelSizeProfile: TrackerPanelSizeProfile;
+  thoughtBubbleDisplay: TrackerThoughtBubbleDisplay;
+  dockedThoughtsAlwaysVisible: boolean;
   onUpdateCharacter: (index: number, character: PresentCharacter) => void;
   onRemoveCharacter: (index: number) => void;
   onAddCharacter: () => void;
@@ -98,6 +109,9 @@ export function CharacterTrackerPanel({
         characterPicture={characterPicture}
         profileColors={profileColors}
         trackerPanelSide={trackerPanelSide}
+        trackerPanelSizeProfile={trackerPanelSizeProfile}
+        thoughtBubbleDisplay={thoughtBubbleDisplay}
+        dockedThoughtsAlwaysVisible={dockedThoughtsAlwaysVisible}
         onUpdate={(updated) => onUpdateCharacter(index, updated)}
         onRemove={() => onRemoveCharacter(index)}
         deleteMode={deleteMode}
@@ -107,6 +121,13 @@ export function CharacterTrackerPanel({
         onUploadAvatar={() => onUploadAvatar(index)}
       />
     );
+    const useCompactCardColumns = trackerPanelSizeProfile !== "compact";
+    const shouldRenderCompactGhostSlot = useCompactCardColumns && compactEntries.length % 2 === 1;
+    const renderCompactCharacterCard = (entry: (typeof characterEntries)[number]) => (
+      <div key={`${activeChatId ?? "chat"}-${entry.character.characterId}-${entry.index}`}>
+        {renderCharacterCard(entry)}
+      </div>
+    );
 
     return (
       <div className="space-y-1">
@@ -115,12 +136,12 @@ export function CharacterTrackerPanel({
           <div
             className={cn(
               "grid grid-cols-1 items-start gap-1 px-1",
-              compactEntries.length > 1 && "@min-[220px]:grid-cols-2",
-              compactEntries.length > 2 && "@min-[420px]:grid-cols-3",
+              useCompactCardColumns && "@min-[260px]:grid-cols-2",
               featuredEntries.length === 0 && "pt-1",
             )}
           >
-            {compactEntries.map(renderCharacterCard)}
+            {compactEntries.map(renderCompactCharacterCard)}
+            {shouldRenderCompactGhostSlot && <div aria-hidden="true" className={COMPACT_CHARACTER_GHOST_SLOT_CLASS} />}
           </div>
         )}
       </div>

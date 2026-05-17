@@ -57,6 +57,8 @@ export interface PresentCharacter {
   portraitFocusX?: number;
   /** Featured tracker portrait focus, 0 = top, 100 = bottom. */
   portraitFocusY?: number;
+  /** Featured tracker portrait zoom multiplier. */
+  portraitZoom?: number;
   /** Per-character custom fields */
   customFields: Record<string, string>;
   /** Per-character stats (HP, etc.) */

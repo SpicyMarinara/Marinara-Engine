@@ -12,7 +12,12 @@
 // is filtered out via `pickSyncedSettings`.
 import { useEffect } from "react";
 import { api } from "../lib/api-client";
-import { pickSyncedSettings, useUIStore } from "../stores/ui.store";
+import {
+  normalizeTrackerPanelSizeProfile,
+  normalizeTrackerTemperatureUnit,
+  pickSyncedSettings,
+  useUIStore,
+} from "../stores/ui.store";
 
 type SettingsResponse = { value: string | null };
 
@@ -157,6 +162,16 @@ export function useSettingsSync() {
                 delete parsed.settings.convoGradientFrom;
                 delete parsed.settings.convoGradientTo;
               }
+              if (!("trackerPanelSizeProfile" in parsed.settings) || "trackerPanelWidth" in parsed.settings) {
+                parsed.settings.trackerPanelSizeProfile = normalizeTrackerPanelSizeProfile(
+                  parsed.settings.trackerPanelSizeProfile,
+                  parsed.settings.trackerPanelWidth,
+                );
+                delete parsed.settings.trackerPanelWidth;
+              }
+              parsed.settings.trackerTemperatureUnit = normalizeTrackerTemperatureUnit(
+                parsed.settings.trackerTemperatureUnit,
+              );
 
               const serverUpdatedAt = parsed.updatedAt;
               const localIsNewer =

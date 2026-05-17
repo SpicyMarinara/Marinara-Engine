@@ -18,6 +18,11 @@ type FontSize = 12 | 14 | 16 | 17 | 19 | 22;
 export type VisualTheme = "default" | "sillytavern";
 export type HudPosition = "top" | "left" | "right";
 export type TrackerPanelSide = "left" | "right";
+export type TrackerThoughtBubbleDisplay = "inline" | "floating";
+export const TRACKER_TEMPERATURE_UNITS = ["celsius", "fahrenheit"] as const;
+export type TrackerTemperatureUnit = (typeof TRACKER_TEMPERATURE_UNITS)[number];
+export const TRACKER_PANEL_SIZE_PROFILES = ["compact", "standard", "expanded"] as const;
+export type TrackerPanelSizeProfile = (typeof TRACKER_PANEL_SIZE_PROFILES)[number];
 export type TrackerDataPanelSection = "world" | "persona" | "characters" | "quests" | "custom";
 export type TrackerPanelCollapsedSections = Partial<Record<TrackerDataPanelSection, boolean>>;
 export type TrackerPanelSectionOrder = TrackerDataPanelSection[];
@@ -58,9 +63,14 @@ export const SIDEBAR_WIDTH_MIN = 240;
 export const SIDEBAR_WIDTH_MAX = 480;
 export const RIGHT_PANEL_WIDTH_MIN = 280;
 export const RIGHT_PANEL_WIDTH_MAX = 520;
-export const TRACKER_PANEL_WIDTH_DEFAULT = 288;
-export const TRACKER_PANEL_WIDTH_MIN = 220;
-export const TRACKER_PANEL_WIDTH_MAX = 440;
+export const TRACKER_PANEL_SIZE_PROFILE_WIDTHS: Record<TrackerPanelSizeProfile, number> = {
+  compact: 280,
+  standard: 340,
+  expanded: 420,
+};
+export const TRACKER_PANEL_WIDTH_DEFAULT = TRACKER_PANEL_SIZE_PROFILE_WIDTHS.standard;
+export const TRACKER_PANEL_WIDTH_MIN = TRACKER_PANEL_SIZE_PROFILE_WIDTHS.compact;
+export const TRACKER_PANEL_WIDTH_MAX = TRACKER_PANEL_SIZE_PROFILE_WIDTHS.expanded;
 const IMAGE_DIMENSION_MIN = 64;
 const IMAGE_DIMENSION_MAX = 4096;
 const GAME_SETUP_LEARNED_LIMIT = 60;
@@ -107,6 +117,24 @@ function clampTrackerPanelWidth(value: unknown) {
   return Math.max(TRACKER_PANEL_WIDTH_MIN, Math.min(TRACKER_PANEL_WIDTH_MAX, width));
 }
 
+export function getTrackerPanelWidthForProfile(profile: TrackerPanelSizeProfile) {
+  return TRACKER_PANEL_SIZE_PROFILE_WIDTHS[profile] ?? TRACKER_PANEL_SIZE_PROFILE_WIDTHS.standard;
+}
+
+export function normalizeTrackerPanelSizeProfile(value: unknown, legacyWidth?: unknown): TrackerPanelSizeProfile {
+  if (TRACKER_PANEL_SIZE_PROFILES.includes(value as TrackerPanelSizeProfile)) {
+    return value as TrackerPanelSizeProfile;
+  }
+
+  const width = typeof legacyWidth === "number" && Number.isFinite(legacyWidth) ? clampTrackerPanelWidth(legacyWidth) : null;
+  if (width !== null) {
+    if (width <= 300) return "compact";
+    if (width >= 380) return "expanded";
+  }
+
+  return "standard";
+}
+
 function normalizeTrackerPanelCollapsedSections(value: unknown): TrackerPanelCollapsedSections {
   const raw = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
   const collapsed: TrackerPanelCollapsedSections = {};
@@ -148,6 +176,16 @@ function normalizeSummaryPopoverSettings(value: unknown): SummaryPopoverSettings
     hideSummarisedMessages: raw.hideSummarisedMessages === true,
     collapseHiddenMessages: raw.collapseHiddenMessages === true,
   };
+}
+
+function normalizeTrackerThoughtBubbleDisplay(value: unknown): TrackerThoughtBubbleDisplay {
+  return value === "inline" || value === "floating" ? value : "inline";
+}
+
+export function normalizeTrackerTemperatureUnit(value: unknown): TrackerTemperatureUnit {
+  return TRACKER_TEMPERATURE_UNITS.includes(value as TrackerTemperatureUnit)
+    ? (value as TrackerTemperatureUnit)
+    : "celsius";
 }
 
 function normalizeLearnedGameSetupOption(value: unknown) {
@@ -217,7 +255,10 @@ interface UIState {
   trackerPanelSide: TrackerPanelSide;
   trackerPanelHideHudWidgets: boolean;
   trackerPanelUseExpressionSprites: boolean;
-  trackerPanelWidth: number;
+  trackerPanelThoughtBubbleDisplay: TrackerThoughtBubbleDisplay;
+  trackerPanelDockedThoughtsAlwaysVisible: boolean;
+  trackerPanelSizeProfile: TrackerPanelSizeProfile;
+  trackerTemperatureUnit: TrackerTemperatureUnit;
   trackerPanelCollapsedSections: TrackerPanelCollapsedSections;
   trackerPanelSectionOrder: TrackerPanelSectionOrder;
   settingsTab: string;
@@ -442,7 +483,10 @@ interface UIState {
   setTrackerPanelSide: (side: TrackerPanelSide) => void;
   setTrackerPanelHideHudWidgets: (hidden: boolean) => void;
   setTrackerPanelUseExpressionSprites: (enabled: boolean) => void;
-  setTrackerPanelWidth: (width: number) => void;
+  setTrackerPanelThoughtBubbleDisplay: (display: TrackerThoughtBubbleDisplay) => void;
+  setTrackerPanelDockedThoughtsAlwaysVisible: (visible: boolean) => void;
+  setTrackerPanelSizeProfile: (profile: TrackerPanelSizeProfile) => void;
+  setTrackerTemperatureUnit: (unit: TrackerTemperatureUnit) => void;
   setTrackerPanelSectionOrder: (order: TrackerPanelSectionOrder) => void;
   setTrackerPanelSectionCollapsed: (section: TrackerDataPanelSection, collapsed: boolean) => void;
   toggleTrackerPanelSectionCollapsed: (section: TrackerDataPanelSection) => void;
@@ -598,7 +642,10 @@ export function pickSyncedSettings(state: UIState) {
     trackerPanelSide: state.trackerPanelSide,
     trackerPanelHideHudWidgets: state.trackerPanelHideHudWidgets,
     trackerPanelUseExpressionSprites: state.trackerPanelUseExpressionSprites,
-    trackerPanelWidth: state.trackerPanelWidth,
+    trackerPanelThoughtBubbleDisplay: state.trackerPanelThoughtBubbleDisplay,
+    trackerPanelDockedThoughtsAlwaysVisible: state.trackerPanelDockedThoughtsAlwaysVisible,
+    trackerPanelSizeProfile: state.trackerPanelSizeProfile,
+    trackerTemperatureUnit: state.trackerTemperatureUnit,
     trackerPanelCollapsedSections: state.trackerPanelCollapsedSections,
     trackerPanelSectionOrder: state.trackerPanelSectionOrder,
     theme: state.theme,
@@ -699,7 +746,10 @@ export const useUIStore = create<UIState>()(
       trackerPanelSide: "right" as TrackerPanelSide,
       trackerPanelHideHudWidgets: false,
       trackerPanelUseExpressionSprites: false,
-      trackerPanelWidth: TRACKER_PANEL_WIDTH_DEFAULT,
+      trackerPanelThoughtBubbleDisplay: "inline" as TrackerThoughtBubbleDisplay,
+      trackerPanelDockedThoughtsAlwaysVisible: false,
+      trackerPanelSizeProfile: "standard" as TrackerPanelSizeProfile,
+      trackerTemperatureUnit: "celsius" as TrackerTemperatureUnit,
       trackerPanelCollapsedSections: {},
       trackerPanelSectionOrder: [...TRACKER_DATA_PANEL_SECTIONS],
       settingsTab: "general",
@@ -836,7 +886,14 @@ export const useUIStore = create<UIState>()(
       setTrackerPanelSide: (side) => set({ trackerPanelSide: side }),
       setTrackerPanelHideHudWidgets: (hidden) => set({ trackerPanelHideHudWidgets: hidden }),
       setTrackerPanelUseExpressionSprites: (enabled) => set({ trackerPanelUseExpressionSprites: enabled }),
-      setTrackerPanelWidth: (width) => set({ trackerPanelWidth: clampTrackerPanelWidth(width) }),
+      setTrackerPanelThoughtBubbleDisplay: (display) =>
+        set({ trackerPanelThoughtBubbleDisplay: normalizeTrackerThoughtBubbleDisplay(display) }),
+      setTrackerPanelDockedThoughtsAlwaysVisible: (visible) =>
+        set({ trackerPanelDockedThoughtsAlwaysVisible: visible }),
+      setTrackerPanelSizeProfile: (profile) =>
+        set({ trackerPanelSizeProfile: normalizeTrackerPanelSizeProfile(profile) }),
+      setTrackerTemperatureUnit: (unit) =>
+        set({ trackerTemperatureUnit: normalizeTrackerTemperatureUnit(unit) }),
       setTrackerPanelSectionOrder: (order) =>
         set({ trackerPanelSectionOrder: normalizeTrackerPanelSectionOrder(order) }),
       setTrackerPanelSectionCollapsed: (section, collapsed) =>
@@ -1229,7 +1286,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "marinara-engine-ui",
-      version: 32,
+      version: 36,
       // Debounce localStorage writes to avoid sync I/O on every state change
       storage: createJSONStorage(() => {
         let timer: ReturnType<typeof setTimeout> | null = null;
@@ -1508,6 +1565,39 @@ export const useUIStore = create<UIState>()(
         if (version <= 31 && persisted.chatBackgroundBlur === undefined) {
           persisted.chatBackgroundBlur = 0;
         }
+        // v32 -> v33: make tracker character thought placement an explicit user preference.
+        if (version <= 32) {
+          persisted.trackerPanelThoughtBubbleDisplay = normalizeTrackerThoughtBubbleDisplay(
+            persisted.trackerPanelThoughtBubbleDisplay,
+          );
+        }
+        persisted.trackerPanelThoughtBubbleDisplay = normalizeTrackerThoughtBubbleDisplay(
+          persisted.trackerPanelThoughtBubbleDisplay,
+        );
+        // v33 -> v34: replace arbitrary tracker desktop widths with curated size profiles.
+        if (version <= 33) {
+          persisted.trackerPanelSizeProfile = normalizeTrackerPanelSizeProfile(
+            persisted.trackerPanelSizeProfile,
+            persisted.trackerPanelWidth,
+          );
+        }
+        persisted.trackerPanelSizeProfile = normalizeTrackerPanelSizeProfile(
+          persisted.trackerPanelSizeProfile,
+          persisted.trackerPanelWidth,
+        );
+        // v34 -> v35: tracker-only temperature display unit.
+        if (version <= 34) {
+          persisted.trackerTemperatureUnit = normalizeTrackerTemperatureUnit(persisted.trackerTemperatureUnit);
+        }
+        persisted.trackerTemperatureUnit = normalizeTrackerTemperatureUnit(persisted.trackerTemperatureUnit);
+        // v35 -> v36: optional always-visible docked tracker thoughts.
+        if (version <= 35 && persisted.trackerPanelDockedThoughtsAlwaysVisible === undefined) {
+          persisted.trackerPanelDockedThoughtsAlwaysVisible = false;
+        }
+        if (persisted.trackerPanelDockedThoughtsAlwaysVisible === undefined) {
+          persisted.trackerPanelDockedThoughtsAlwaysVisible = false;
+        }
+        delete persisted.trackerPanelWidth;
         return persisted;
       },
       partialize: (state) => ({
@@ -1519,7 +1609,10 @@ export const useUIStore = create<UIState>()(
         trackerPanelSide: state.trackerPanelSide,
         trackerPanelHideHudWidgets: state.trackerPanelHideHudWidgets,
         trackerPanelUseExpressionSprites: state.trackerPanelUseExpressionSprites,
-        trackerPanelWidth: state.trackerPanelWidth,
+        trackerPanelThoughtBubbleDisplay: state.trackerPanelThoughtBubbleDisplay,
+        trackerPanelDockedThoughtsAlwaysVisible: state.trackerPanelDockedThoughtsAlwaysVisible,
+        trackerPanelSizeProfile: state.trackerPanelSizeProfile,
+        trackerTemperatureUnit: state.trackerTemperatureUnit,
         trackerPanelCollapsedSections: state.trackerPanelCollapsedSections,
         trackerPanelSectionOrder: state.trackerPanelSectionOrder,
         theme: state.theme,

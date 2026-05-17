@@ -1,25 +1,75 @@
 import { PanelLeft, PanelRight, Plus, Trash2 } from "lucide-react";
-import { TrackerPanelIcon } from "../../ui/TrackerPanelIcon";
-import type { TrackerPanelSide } from "../../../stores/ui.store";
+import { TrackerPanelIcon } from "../../../components/ui/TrackerPanelIcon";
+import type { TrackerPanelSide, TrackerPanelSizeProfile } from "../../../stores/ui.store";
 import { cn } from "../../../lib/utils";
+
+const TRACKER_PANEL_SIZE_SEQUENCE: TrackerPanelSizeProfile[] = ["compact", "standard", "expanded"];
+const TRACKER_PANEL_SIZE_LABELS: Record<TrackerPanelSizeProfile, string> = {
+  compact: "Compact",
+  standard: "Standard",
+  expanded: "Expanded",
+};
+const TRACKER_PANEL_SIZE_RING_COUNTS: Record<TrackerPanelSizeProfile, number> = {
+  compact: 1,
+  standard: 2,
+  expanded: 3,
+};
+const TRACKER_SIZE_TIER_RINGS = [
+  { className: "inset-[0.4375rem]", tier: 1 },
+  { className: "inset-[0.25rem]", tier: 2 },
+  { className: "inset-[0.0625rem]", tier: 3 },
+];
+
+function TrackerSizeTierIcon({ sizeProfile }: { sizeProfile: TrackerPanelSizeProfile }) {
+  const activeRingCount = TRACKER_PANEL_SIZE_RING_COUNTS[sizeProfile];
+
+  return (
+    <span aria-hidden="true" className="relative block h-[0.875rem] w-[0.875rem]">
+      {TRACKER_SIZE_TIER_RINGS.map((ring) => {
+        const isActive = ring.tier <= activeRingCount;
+        return (
+          <span
+            key={ring.tier}
+            className={cn(
+              "absolute rounded-full border transition-[border-color,box-shadow,opacity] duration-150",
+              ring.className,
+              isActive
+                ? "border-[var(--primary)] opacity-100 shadow-[0_0_5px_color-mix(in_srgb,var(--primary)_34%,transparent)]"
+                : "border-current opacity-28",
+            )}
+          />
+        );
+      })}
+    </span>
+  );
+}
 
 export function TrackerSidebarHeader({
   trackerPanelSide,
+  sizeProfile,
   addMode,
   deleteMode,
   onSetAddMode,
   onSetDeleteMode,
   onSetSide,
+  onSetSizeProfile,
   onClose,
 }: {
   trackerPanelSide: TrackerPanelSide;
+  sizeProfile: TrackerPanelSizeProfile;
   addMode: boolean;
   deleteMode: boolean;
   onSetAddMode: (enabled: boolean) => void;
   onSetDeleteMode: (enabled: boolean) => void;
   onSetSide: (side: TrackerPanelSide) => void;
+  onSetSizeProfile: (profile: TrackerPanelSizeProfile) => void;
   onClose: () => void;
 }) {
+  const sizeIndex = Math.max(0, TRACKER_PANEL_SIZE_SEQUENCE.indexOf(sizeProfile));
+  const nextSizeProfile = TRACKER_PANEL_SIZE_SEQUENCE[(sizeIndex + 1) % TRACKER_PANEL_SIZE_SEQUENCE.length]!;
+  const sizeLabel = TRACKER_PANEL_SIZE_LABELS[sizeProfile];
+  const nextSizeLabel = TRACKER_PANEL_SIZE_LABELS[nextSizeProfile];
+  const sizeTitle = `Tracker panel size: ${sizeLabel}. Click for ${nextSizeLabel}.`;
   const closePanelButton = (
     <button
       type="button"
@@ -74,6 +124,15 @@ export function TrackerSidebarHeader({
       </button>
       <button
         type="button"
+        onClick={() => onSetSizeProfile(nextSizeProfile)}
+        title={sizeTitle}
+        aria-label={sizeTitle}
+        className="flex h-6 w-6 items-center justify-center rounded-sm text-[var(--muted-foreground)]/62 ring-1 ring-transparent transition-all hover:bg-[var(--accent)] hover:text-[var(--primary)] hover:ring-[var(--border)] active:scale-90"
+      >
+        <TrackerSizeTierIcon sizeProfile={sizeProfile} />
+      </button>
+      <button
+        type="button"
         onClick={() => onSetSide(trackerPanelSide === "left" ? "right" : "left")}
         title={`Panel anchored ${trackerPanelSide}. Click to anchor ${trackerPanelSide === "left" ? "right" : "left"}.`}
         aria-label={`Tracker panel anchored ${trackerPanelSide}. Click to anchor ${trackerPanelSide === "left" ? "right" : "left"}.`}
@@ -100,7 +159,7 @@ export function TrackerSidebarHeader({
   );
 
   return (
-    <div className="relative z-10 flex h-7 flex-shrink-0 items-center justify-between gap-1 bg-[color-mix(in_srgb,var(--card)_16%,transparent)] px-1 backdrop-blur-sm">
+    <div className="sticky top-0 z-30 flex h-7 flex-shrink-0 items-center justify-between gap-1 bg-[color-mix(in_srgb,var(--card)_28%,var(--background)_72%)] px-1 shadow-[0_1px_0_color-mix(in_srgb,var(--border)_36%,transparent),0_8px_14px_color-mix(in_srgb,var(--background)_22%,transparent)] backdrop-blur-sm">
       <div className="absolute inset-x-0 bottom-0 h-px bg-[var(--border)]/30" />
       {trackerPanelSide === "left" ? outerHeaderControls : closePanelButton}
       <div className="min-w-0 flex-1" />

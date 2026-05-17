@@ -42,7 +42,6 @@ import { showAlertDialog, showConfirmDialog } from "../../lib/app-dialogs";
 import { extractColorsFromImage } from "../../lib/avatar-color-extraction";
 import { HelpTooltip } from "../ui/HelpTooltip";
 import { ColorPicker } from "../ui/ColorPicker";
-import { TrackerCardColorControls } from "../ui/TrackerCardColorControls";
 import { ExpandedTextarea } from "../ui/ExpandedTextarea";
 import { api } from "../../lib/api-client";
 import { parseTrackerCardColorConfig, serializeTrackerCardColorConfig } from "../../lib/tracker-card-colors";
@@ -1528,17 +1527,6 @@ function PersonaColorsTab({
         </ul>
       </div>
 
-      <TrackerCardColorControls
-        value={formData.trackerCardColors}
-        onChange={(value) => updateField("trackerCardColors", value)}
-        chatColors={{
-          nameColor: formData.nameColor,
-          dialogueColor: formData.dialogueColor,
-          boxColor: formData.boxColor,
-        }}
-        entityLabel="Persona"
-        previewName={formData.name || "You"}
-      />
     </div>
   );
 }

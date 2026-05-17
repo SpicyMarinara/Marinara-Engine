@@ -145,6 +145,7 @@ import {
   appendReadableAttachmentsToContent,
   extractImageAttachmentDataUrls,
   injectIntoOutputFormatOrLastUser,
+  isManualTrackerCharacterId,
   isMessageHiddenFromAI,
   mergeCustomParameters,
   parseExtra,
@@ -7765,6 +7766,7 @@ export async function generateRoutes(app: FastifyInstance) {
 
                 for (const char of chars) {
                   if (char.avatarPath) continue; // already set
+                  if (isManualTrackerCharacterId(char.characterId)) continue;
                   const name = (char.name as string) ?? "";
                   // Try matching against the chat's character cards (case-insensitive)
                   const matched = charInfo.find((c) => c.name.toLowerCase() === name.toLowerCase());
@@ -7800,7 +7802,11 @@ export async function generateRoutes(app: FastifyInstance) {
                 const npcImgConnId = (charTrackerAgent?.settings?.imageConnectionId as string) ?? null;
                 if (autoGenAvatars && npcImgConnId) {
                   const charsNeedingAvatars = chars.filter(
-                    (c: any) => !c.avatarPath && (c.name as string) && (c.appearance as string),
+                    (c: any) =>
+                      !c.avatarPath &&
+                      !isManualTrackerCharacterId(c.characterId) &&
+                      (c.name as string) &&
+                      (c.appearance as string),
                   );
                   if (charsNeedingAvatars.length > 0) {
                     // Fire-and-forget: generate avatars in background so we don't block

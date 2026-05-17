@@ -1,1 +1,1 @@
-export { TrackerDataSidebar } from "./tracker-data-sidebar/TrackerDataSidebar";
+export { TrackerDataSidebar } from "../../features/tracker-panel/components/TrackerDataSidebar";

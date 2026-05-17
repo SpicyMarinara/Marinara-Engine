@@ -195,6 +195,48 @@
   --sidebar-accent-foreground: #ffb3d9;
   --glow-primary: rgba(255, 179, 217, 0.15);
   --glow-accent: rgba(212, 173, 252, 0.12);
+  --tracker-card-neutral-surface-top: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--secondary) 66%, var(--accent) 34%) 91%,
+    var(--primary) 9%
+  );
+  --tracker-card-neutral-surface-bottom: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--secondary) 78%, var(--accent) 22%) 94%,
+    var(--muted-foreground) 6%
+  );
+  --tracker-card-neutral-material: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--secondary) 68%, var(--accent) 32%) 89%,
+    var(--primary) 11%
+  );
+  --tracker-card-neutral-lift: color-mix(in srgb, var(--muted-foreground) 72%, var(--primary) 28%);
+  --tracker-card-active-surface-top: color-mix(in srgb, var(--card) 72%, var(--background) 28%);
+  --tracker-card-active-surface-bottom: color-mix(in srgb, var(--background) 74%, var(--card) 26%);
+  --tracker-card-active-surface-material: color-mix(in srgb, var(--card) 52%, var(--background) 48%);
+  --tracker-card-active-surface-lift: color-mix(in srgb, var(--card) 90%, var(--card-foreground) 10%);
+  --tracker-card-material-bright-target: oklch(0.975 0.012 315);
+  --tracker-card-material-dark-target: oklch(0.055 0.014 300);
+  --tracker-card-readable-light-ink: oklch(0.94 0.012 315);
+  --tracker-card-readable-dark-ink: oklch(0.18 0.024 300);
+  --tracker-card-muted-light-ink: oklch(0.76 0.018 315);
+  --tracker-card-muted-dark-ink: oklch(0.36 0.026 300);
+  --tracker-card-nameplate-base-top: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--card) 72%, var(--background) 28%) 90%,
+    var(--primary) 10%
+  );
+  --tracker-card-nameplate-base-mid: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--card) 56%, var(--background) 44%) 92%,
+    var(--primary) 8%
+  );
+  --tracker-card-nameplate-base-bottom: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--background) 82%, var(--card) 18%) 94%,
+    var(--primary) 6%
+  );
+  --tracker-card-nameplate-text-base: color-mix(in srgb, var(--card-foreground) 92%, var(--primary) 8%);
 
   --glass-bg: linear-gradient(
     135deg,
@@ -286,6 +328,24 @@
   --sidebar-accent-foreground: #e0709a;
   --glow-primary: rgba(224, 112, 154, 0.1);
   --glow-accent: rgba(212, 173, 252, 0.08);
+  --tracker-card-neutral-surface-top: color-mix(in srgb, var(--card) 84%, var(--accent) 16%);
+  --tracker-card-neutral-surface-bottom: color-mix(in srgb, var(--secondary) 86%, var(--primary) 14%);
+  --tracker-card-neutral-material: color-mix(in srgb, var(--secondary) 88%, var(--primary) 12%);
+  --tracker-card-neutral-lift: color-mix(in srgb, var(--muted-foreground) 70%, var(--primary) 30%);
+  --tracker-card-active-surface-top: color-mix(in srgb, var(--card) 92%, var(--background) 8%);
+  --tracker-card-active-surface-bottom: color-mix(in srgb, var(--background) 90%, var(--card-foreground) 10%);
+  --tracker-card-active-surface-material: color-mix(in srgb, var(--card) 94%, var(--card-foreground) 6%);
+  --tracker-card-active-surface-lift: color-mix(in srgb, var(--card) 90%, var(--card-foreground) 10%);
+  --tracker-card-material-bright-target: oklch(0.975 0.012 315);
+  --tracker-card-material-dark-target: oklch(0.055 0.014 300);
+  --tracker-card-readable-light-ink: oklch(0.94 0.012 315);
+  --tracker-card-readable-dark-ink: oklch(0.17 0.026 300);
+  --tracker-card-muted-light-ink: oklch(0.76 0.018 315);
+  --tracker-card-muted-dark-ink: oklch(0.34 0.028 300);
+  --tracker-card-nameplate-base-top: color-mix(in srgb, var(--card) 84%, var(--primary) 16%);
+  --tracker-card-nameplate-base-mid: color-mix(in srgb, var(--secondary) 88%, var(--card) 12%);
+  --tracker-card-nameplate-base-bottom: color-mix(in srgb, var(--secondary) 92%, var(--card-foreground) 8%);
+  --tracker-card-nameplate-text-base: color-mix(in srgb, var(--card-foreground) 94%, var(--primary) 6%);
 
   --glass-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.6) 0%, rgba(245, 240, 252, 0.6) 100%);
   --glass-border: rgba(0, 0, 0, 0.06);

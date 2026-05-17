@@ -50,6 +50,7 @@ import { DATA_DIR } from "../utils/data-dir.js";
 import { normalizeTimestampOverrides } from "../services/import/import-timestamps.js";
 import {
   findLastIndex,
+  isManualTrackerCharacterId,
   parseExtra,
   isMessageHiddenFromAI,
   resolveVisibleGameStateAnchor,
@@ -1137,7 +1138,9 @@ export async function chatsRoutes(app: FastifyInstance) {
 
     // ── Enrich present characters with avatar paths ──
     // Match NPC names against the chat's known character cards, then fall back to stored NPC avatars on disk.
-    const charsNeedingAvatar = presentCharacters.filter((c) => !c.avatarPath && c.name);
+    const charsNeedingAvatar = presentCharacters.filter(
+      (c) => !c.avatarPath && c.name && !isManualTrackerCharacterId(c.characterId),
+    );
     if (charsNeedingAvatar.length > 0) {
       const chat = await storage.getById(req.params.id);
       const chatCharIds: string[] = (() => {

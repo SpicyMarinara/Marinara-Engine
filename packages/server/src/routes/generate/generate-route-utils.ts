@@ -378,6 +378,10 @@ function trackerCharacterKey(character: Record<string, unknown>) {
   return id || name || null;
 }
 
+export function isManualTrackerCharacterId(value: unknown): boolean {
+  return typeof value === "string" && value.trim().startsWith("manual-");
+}
+
 export function preserveTrackerCharacterUiFields(
   nextCharacters: Array<Record<string, unknown>>,
   previousCharacters: Array<Record<string, unknown>>,
@@ -393,6 +397,7 @@ export function preserveTrackerCharacterUiFields(
     const previous = key ? previousByKey.get(key) : null;
     const previousPortraitFocusX = previous?.portraitFocusX;
     const previousPortraitFocusY = previous?.portraitFocusY;
+    const previousPortraitZoom = previous?.portraitZoom;
     if (
       typeof character.portraitFocusX !== "number" &&
       typeof previousPortraitFocusX === "number" &&
@@ -406,6 +411,13 @@ export function preserveTrackerCharacterUiFields(
       Number.isFinite(previousPortraitFocusY)
     ) {
       character.portraitFocusY = previousPortraitFocusY;
+    }
+    if (
+      typeof character.portraitZoom !== "number" &&
+      typeof previousPortraitZoom === "number" &&
+      Number.isFinite(previousPortraitZoom)
+    ) {
+      character.portraitZoom = previousPortraitZoom;
     }
   }
 }
