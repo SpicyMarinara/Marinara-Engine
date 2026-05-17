@@ -109,6 +109,14 @@ export const memoryChunks = sqliteTable("memory_chunks", {
   content: text("content").notNull(),
   /** JSON-serialized float[] embedding (null until vectorized) */
   embedding: text("embedding"),
+  /** Type of content represented by this recall chunk. */
+  sourceKind: text("source_kind", { enum: ["message", "rolling_summary"] })
+    .notNull()
+    .default("message"),
+  /** Source object ID when the chunk is derived from a non-message entity. */
+  sourceId: text("source_id"),
+  /** Source updatedAt value used to skip unchanged re-embedding. */
+  sourceUpdatedAt: text("source_updated_at"),
   /** How many messages were grouped into this chunk */
   messageCount: integer("message_count").notNull(),
   /** ISO timestamp of the first message in this chunk */

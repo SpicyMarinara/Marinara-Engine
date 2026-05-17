@@ -138,6 +138,7 @@ import { eq } from "drizzle-orm";
 import { PROFESSOR_MARI_ID } from "@marinara-engine/shared";
 import { chunkAndEmbedMessages, embedMemoryRecallTexts, recallMemories } from "../services/memory-recall.js";
 import { resolveMemoryRecallEmbeddingSource } from "../services/memory-recall-embedding.js";
+import { recallRollingSummaries, syncRollingSummaryRecallChunks } from "../services/summary-recall.js";
 import { warmLorebookEntryEmbeddings } from "../services/lorebook/embeddings.js";
 import { postToDiscordWebhook } from "../services/discord-webhook.js";
 import {
@@ -645,6 +646,29 @@ function packRecalledMemories(
   return { lines, estimatedTokens, budgetTokens, trimmed };
 }
 
+function normalizeSummaryInjectionMode(value: unknown): "full" | "semantic" | "full_and_semantic" {
+  return value === "semantic" || value === "full_and_semantic" ? value : "full";
+}
+
+function normalizeSummaryRecallCount(value: unknown): number {
+  const numeric = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  if (!Number.isFinite(numeric)) return 3;
+  return Math.max(1, Math.min(5, Math.trunc(numeric)));
+}
+
+function normalizeSummaryRecallStrictness(value: unknown): "conservative" | "balanced" | "broad" {
+  return value === "conservative" || value === "broad" ? value : "balanced";
+}
+
+function formatRecalledSummariesBlock(lines: string[]): string {
+  return [
+    `<recalled_summaries>`,
+    `Relevant long-term roleplay summary notes. Use them for continuity and characterization. Do not mention this recall system.`,
+    ...lines.map((line, index) => `--- Summary ${index + 1} ---\n${line}`),
+    `</recalled_summaries>`,
+  ].join("\n");
+}
+
 /**
  * Format agent injection results into a wrapped block for prompt injection.
  * Each agent gets its own XML/markdown section with its current display name
@@ -1031,6 +1055,12 @@ export async function generateRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "No base URL configured for this connection" });
     }
     let chatMeta = parseExtra(chat.metadata) as Record<string, unknown>;
+    const summaryInjectionMode = normalizeSummaryInjectionMode(chatMeta.summaryInjectionMode);
+    const enableSummaryRecall =
+      requestChatMode === "roleplay" &&
+      (summaryInjectionMode === "semantic" || summaryInjectionMode === "full_and_semantic");
+    const summaryRecallCount = normalizeSummaryRecallCount(chatMeta.summaryRecallCount);
+    const summaryRecallStrictness = normalizeSummaryRecallStrictness(chatMeta.summaryRecallStrictness);
     let memoryRecallEmbeddingSource: Awaited<ReturnType<typeof resolveMemoryRecallEmbeddingSource>> | null = null;
     try {
       memoryRecallEmbeddingSource = await resolveMemoryRecallEmbeddingSource(app.db, {
@@ -1093,6 +1123,9 @@ export async function generateRoutes(app: FastifyInstance) {
       // Get chat messages
       const allChatMessages = await chats.listMessages(input.chatId);
       const chatMode = requestChatMode;
+      const compiledChatSummary = ((chatMeta.summary as string) ?? "").trim() || null;
+      const promptChatSummary =
+        chatMode === "roleplay" && summaryInjectionMode === "semantic" ? null : compiledChatSummary;
       const lorebookGenerationTriggers = resolveLorebookGenerationTriggers(input, chatMode);
       const supportsHiddenFromAI = chatMode === "conversation" || chatMode === "roleplay" || chatMode === "visual_novel";
       const preferLatestVisibleGameState = shouldPreferLatestVisibleGameState(input);
@@ -1565,7 +1598,7 @@ export async function generateRoutes(app: FastifyInstance) {
           })(),
           chatMessages: mappedMessages,
           lorebookScanMessages: toLorebookScanMessages(),
-          chatSummary: ((chatMeta.summary as string) ?? "").trim() || null,
+          chatSummary: promptChatSummary,
           enableAgents: chatEnableAgents,
           activeAgentIds: chatActiveAgentIds,
           activeLorebookIds: chatActiveLorebookIds,
@@ -4080,6 +4113,46 @@ export async function generateRoutes(app: FastifyInstance) {
         finalMessages.splice(insertAt, 0, { role: "system", content: convoAwarenessBlock });
       }
 
+      let recalledSummaryText: string | null = null;
+      if (enableSummaryRecall) {
+        sendProgress("summary_recall");
+        const _tSummaryRecall = Date.now();
+        try {
+          await syncRollingSummaryRecallChunks(app.db, input.chatId, chatMeta as any, {
+            embeddingSource: memoryRecallEmbeddingSource,
+          });
+          const lastUserMsg = [...mappedMessages].reverse().find((m) => m.role === "user");
+          if (lastUserMsg?.content?.trim()) {
+            const recalledSummaries = await recallRollingSummaries(app.db, input.chatId, lastUserMsg.content, {
+              embeddingSource: memoryRecallEmbeddingSource,
+              topK: summaryRecallCount,
+              strictness: summaryRecallStrictness,
+            });
+            if (recalledSummaries.length > 0) {
+              const packedRecall = packRecalledMemories(recalledSummaries, effectiveMaxContext ?? connectionMaxContext);
+              if (packedRecall.lines.length > 0) {
+                recalledSummaryText = packedRecall.lines.join("\n\n");
+                const summariesBlock = formatRecalledSummariesBlock(packedRecall.lines);
+                const firstUserIdx = finalMessages.findIndex((m) => m.role === "user" || m.role === "assistant");
+                const insertAt = firstUserIdx >= 0 ? firstUserIdx : finalMessages.length;
+                finalMessages.splice(insertAt, 0, { role: "system" as const, content: summariesBlock });
+                logger.debug(
+                  "[summary-recall] Injecting %d/%d recalled summaries (~%d/%d tokens)%s",
+                  packedRecall.lines.length,
+                  recalledSummaries.length,
+                  packedRecall.estimatedTokens,
+                  packedRecall.budgetTokens,
+                  packedRecall.trimmed ? " after trimming" : "",
+                );
+              }
+            }
+          }
+        } catch (err) {
+          logger.warn(err, "[summary-recall] Recall failed, skipping");
+        }
+        logger.debug(`[timing] Summary recall: ${Date.now() - _tSummaryRecall}ms`);
+      }
+
       // ── Memory recall: semantic retrieval of relevant past conversation fragments ──
       // Default: on for conversation mode and scene chats, off for roleplay (opt-in via chat settings)
       const memoryRecallDefault = chatMode === "conversation" || isSceneChat;
@@ -4096,6 +4169,9 @@ export async function generateRoutes(app: FastifyInstance) {
             // the exact conversation/roleplay/game where they were created.
             const recalled = await recallMemories(app.db, lastUserMsg.content, [input.chatId], {
               embeddingSource: memoryRecallEmbeddingSource,
+              sourceKinds: ["message"],
+              threshold: 0.25,
+              topK: 8,
             });
             if (recalled.length > 0) {
               const packedRecall = packRecalledMemories(recalled, effectiveMaxContext ?? connectionMaxContext);
@@ -4321,7 +4397,8 @@ export async function generateRoutes(app: FastifyInstance) {
         memory: {},
         activatedLorebookEntries: null,
         writableLorebookIds: null,
-        chatSummary: ((chatMeta.summary as string) ?? "").trim() || null,
+        chatSummary: promptChatSummary,
+        recalledSummaries: recalledSummaryText,
         streaming: input.streaming,
         signal: abortController.signal,
       };
@@ -5119,7 +5196,20 @@ export async function generateRoutes(app: FastifyInstance) {
         }
         Object.assign(chatMeta, updatedMeta);
         agentContext.chatSummary =
-          typeof chatMeta.summary === "string" && chatMeta.summary.trim() ? chatMeta.summary.trim() : null;
+          chatMode === "roleplay" && summaryInjectionMode === "semantic"
+            ? null
+            : typeof chatMeta.summary === "string" && chatMeta.summary.trim()
+              ? chatMeta.summary.trim()
+              : null;
+        if ("summaryEntries" in emittedPatch || "summary" in emittedPatch) {
+          try {
+            await syncRollingSummaryRecallChunks(app.db, input.chatId, chatMeta as any, {
+              embeddingSource: memoryRecallEmbeddingSource,
+            });
+          } catch (err) {
+            logger.warn(err, "[summary-recall] Failed to sync rolling summary recall chunks after metadata update");
+          }
+        }
         trySendSseEvent(reply, { type: "metadata_patch", data: emittedPatch });
         return updatedMeta;
       };

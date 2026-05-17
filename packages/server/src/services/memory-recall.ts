@@ -5,6 +5,7 @@
 // semantic recall: given a query, find the most relevant past
 // conversation fragments from specified chats.
 import { eq, desc, and, gt, inArray, isNotNull } from "drizzle-orm";
+import type { ChatSummaryRecallStrictness, MemoryChunkSourceKind } from "@marinara-engine/shared";
 import type { DB } from "../db/connection.js";
 import { messages, memoryChunks } from "../db/schema/index.js";
 import { newId, now } from "../utils/id-generator.js";
@@ -43,6 +44,9 @@ export interface RecalledMemory {
   chatId: string;
   content: string;
   similarity: number;
+  sourceKind: MemoryChunkSourceKind;
+  sourceId: string | null;
+  sourceUpdatedAt: string | null;
   firstMessageAt: string;
   lastMessageAt: string;
 }
@@ -95,7 +99,7 @@ export async function chunkAndEmbedMessages(
   const lastChunk = await db
     .select({ lastMessageAt: memoryChunks.lastMessageAt })
     .from(memoryChunks)
-    .where(eq(memoryChunks.chatId, chatId))
+    .where(and(eq(memoryChunks.chatId, chatId), eq(memoryChunks.sourceKind, "message")))
     .orderBy(desc(memoryChunks.lastMessageAt))
     .limit(1);
 
@@ -164,6 +168,9 @@ export async function chunkAndEmbedMessages(
       chatId,
       content: chunk.content,
       embedding: embeddings[i] ? JSON.stringify(embeddings[i]) : null,
+      sourceKind: "message",
+      sourceId: null,
+      sourceUpdatedAt: null,
       messageCount: chunk.messageCount,
       firstMessageAt: chunk.firstMessageAt,
       lastMessageAt: chunk.lastMessageAt,
@@ -185,11 +192,26 @@ export async function rebuildMemoryChunks(
 ): Promise<number> {
   if (isLite) return 0;
 
-  await db.delete(memoryChunks).where(eq(memoryChunks.chatId, chatId));
+  await db.delete(memoryChunks).where(and(eq(memoryChunks.chatId, chatId), eq(memoryChunks.sourceKind, "message")));
   await chunkAndEmbedMessages(db, chatId, nameMap, options);
 
-  const rebuilt = await db.select({ id: memoryChunks.id }).from(memoryChunks).where(eq(memoryChunks.chatId, chatId));
+  const rebuilt = await db
+    .select({ id: memoryChunks.id })
+    .from(memoryChunks)
+    .where(and(eq(memoryChunks.chatId, chatId), eq(memoryChunks.sourceKind, "message")));
   return rebuilt.length;
+}
+
+export function recallThresholdForStrictness(strictness: ChatSummaryRecallStrictness | undefined): number {
+  switch (strictness) {
+    case "conservative":
+      return 0.35;
+    case "broad":
+      return 0.2;
+    case "balanced":
+    default:
+      return 0.27;
+  }
 }
 
 /**
@@ -200,7 +222,11 @@ export async function recallMemories(
   db: DB,
   query: string,
   chatIds: string[],
-  options: MemoryRecallEmbeddingOptions & { topK?: number } = {},
+  options: MemoryRecallEmbeddingOptions & {
+    sourceKinds?: MemoryChunkSourceKind[];
+    threshold?: number;
+    topK?: number;
+  } = {},
 ): Promise<RecalledMemory[]> {
   if (isLite) return [];
   if (chatIds.length === 0) return [];
@@ -212,6 +238,8 @@ export async function recallMemories(
   if (queryEmbedding.length === 0) return [];
 
   const matchingChatIds = chatIds.slice(0, 50);
+  const sourceKinds: MemoryChunkSourceKind[] = options.sourceKinds?.length ? options.sourceKinds : ["message"];
+  const threshold = options.threshold ?? SIMILARITY_THRESHOLD;
 
   // Load embedded chunks from matching chats (capped to prevent memory blowup)
   const MAX_CHUNKS = 500;
@@ -221,11 +249,20 @@ export async function recallMemories(
       chatId: memoryChunks.chatId,
       content: memoryChunks.content,
       embedding: memoryChunks.embedding,
+      sourceKind: memoryChunks.sourceKind,
+      sourceId: memoryChunks.sourceId,
+      sourceUpdatedAt: memoryChunks.sourceUpdatedAt,
       firstMessageAt: memoryChunks.firstMessageAt,
       lastMessageAt: memoryChunks.lastMessageAt,
     })
     .from(memoryChunks)
-    .where(and(inArray(memoryChunks.chatId, matchingChatIds), isNotNull(memoryChunks.embedding)))
+    .where(
+      and(
+        inArray(memoryChunks.chatId, matchingChatIds),
+        inArray(memoryChunks.sourceKind, sourceKinds),
+        isNotNull(memoryChunks.embedding),
+      ),
+    )
     .orderBy(desc(memoryChunks.lastMessageAt))
     .limit(MAX_CHUNKS);
 
@@ -249,11 +286,14 @@ export async function recallMemories(
         chatId: chunk.chatId,
         content: chunk.content,
         similarity: cosineSimilarity(queryEmbedding, embedding),
+        sourceKind: chunk.sourceKind as MemoryChunkSourceKind,
+        sourceId: chunk.sourceId,
+        sourceUpdatedAt: chunk.sourceUpdatedAt,
         firstMessageAt: chunk.firstMessageAt,
         lastMessageAt: chunk.lastMessageAt,
       };
     })
-    .filter((s) => s.similarity >= SIMILARITY_THRESHOLD)
+    .filter((s) => s.similarity >= threshold)
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, options.topK ?? DEFAULT_TOP_K);
 

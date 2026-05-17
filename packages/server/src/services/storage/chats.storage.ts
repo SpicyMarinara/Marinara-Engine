@@ -83,9 +83,7 @@ function readUnreadCount(value: unknown): number {
 }
 
 function readCharacterIds(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((id): id is string => typeof id === "string" && id.trim().length > 0)
-    : [];
+  return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string" && id.trim().length > 0) : [];
 }
 
 function hasConversationSchedules(value: unknown): value is CharacterSchedules {
@@ -140,8 +138,24 @@ function parseMessageCursor(before?: string): { createdAt: string; rowid: number
 }
 
 async function invalidateMemoryChunksFrom(db: DB, chatId: string, createdAt: string) {
-  await db.delete(memoryChunks).where(and(eq(memoryChunks.chatId, chatId), gt(memoryChunks.lastMessageAt, createdAt)));
-  await db.delete(memoryChunks).where(and(eq(memoryChunks.chatId, chatId), eq(memoryChunks.lastMessageAt, createdAt)));
+  await db
+    .delete(memoryChunks)
+    .where(
+      and(
+        eq(memoryChunks.chatId, chatId),
+        eq(memoryChunks.sourceKind, "message"),
+        gt(memoryChunks.lastMessageAt, createdAt),
+      ),
+    );
+  await db
+    .delete(memoryChunks)
+    .where(
+      and(
+        eq(memoryChunks.chatId, chatId),
+        eq(memoryChunks.sourceKind, "message"),
+        eq(memoryChunks.lastMessageAt, createdAt),
+      ),
+    );
 }
 
 /** Create the chat storage facade used by routes and importers. */

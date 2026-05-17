@@ -161,6 +161,7 @@ function normalizePositiveInteger(value: unknown, fallback: number): number {
 export function buildKnowledgeRouterQuery(context: AgentContext): string {
   const parts = context.recentMessages.slice(-10).map((message) => message.content.trim()).filter(Boolean);
   if (context.chatSummary?.trim()) parts.unshift(context.chatSummary.trim());
+  if (context.recalledSummaries?.trim()) parts.unshift(context.recalledSummaries.trim());
   if (context.gameState) parts.push(JSON.stringify(context.gameState));
   return parts.join("\n\n");
 }

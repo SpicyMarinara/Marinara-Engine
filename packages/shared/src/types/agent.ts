@@ -140,6 +140,8 @@ export interface AgentContext {
   writableLorebookIds: string[] | null;
   /** Chat summary text (if any) — helps agents avoid duplicating summarized info */
   chatSummary: string | null;
+  /** Semantically recalled rolling-summary notes for the current turn. */
+  recalledSummaries?: string | null;
   /** Current-turn pre-generation injections, only present for agents that opt in */
   preGenInjections?: Array<{ agentType: string; agentName?: string; text: string }>;
   /** Current-turn parallel-phase results, only present for agents that opt in */

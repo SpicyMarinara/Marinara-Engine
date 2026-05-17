@@ -10,6 +10,7 @@ import { apiConnections, chats, memoryChunks, messages, messageSwipes } from "..
 import { chatsRoutes } from "../src/routes/chats.routes.js";
 import { chunkAndEmbedMessages, recallMemories } from "../src/services/memory-recall.js";
 import { resolveMemoryRecallEmbeddingSource } from "../src/services/memory-recall-embedding.js";
+import { syncRollingSummaryRecallChunks } from "../src/services/summary-recall.js";
 import { createChatsStorage } from "../src/services/storage/chats.storage.js";
 
 test("editing a message invalidates stale memory chunks and refresh rebuilds from current text", async () => {
@@ -156,6 +157,187 @@ test("memory recall uses configured embedding source when local embeddings are u
     assert.equal(fallbackCalls, 2);
     assert.equal(recalled.length, 1);
     assert.ok(recalled[0]!.content.includes("silverleaf"));
+  } finally {
+    client.close();
+  }
+});
+
+test("summary recall sync creates, updates, and removes rolling summary chunks", async () => {
+  const client = createClient({ url: "file::memory:" });
+  const db = drizzle(client) as unknown as DB;
+
+  try {
+    await runMigrations(db);
+
+    const now = "2026-05-10T00:00:00.000Z";
+    await db.insert(chats).values({
+      id: "chat-summary-sync",
+      name: "Summary sync",
+      mode: "roleplay",
+      characterIds: "[]",
+      metadata: "{}",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    let embeddedTexts: string[] = [];
+    const localEmbedder = async (texts: string[]) => {
+      embeddedTexts = [...embeddedTexts, ...texts];
+      return texts.map((text) => (text.includes("moonlit key") ? [1, 0, 0] : [0, 1, 0]));
+    };
+
+    const metadata = {
+      summary: null,
+      summaryEntries: [
+        {
+          id: "entry-1",
+          kind: "rolling",
+          origin: "manual",
+          title: "Key reveal",
+          content: "The moonlit key opens the west tower.",
+          enabled: true,
+          sourceMode: "range",
+          tokenEstimate: 9,
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          id: "entry-disabled",
+          kind: "rolling",
+          origin: "manual",
+          title: "Disabled",
+          content: "This should not be indexed.",
+          enabled: false,
+          sourceMode: "last",
+          tokenEstimate: 6,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    } as const;
+
+    const created = await syncRollingSummaryRecallChunks(db, "chat-summary-sync", metadata, { localEmbedder });
+    assert.equal(created, 1);
+    assert.equal(embeddedTexts.length, 1);
+
+    let chunks = await db.select().from(memoryChunks).where(eq(memoryChunks.chatId, "chat-summary-sync"));
+    assert.equal(chunks.length, 1);
+    assert.equal(chunks[0]!.sourceKind, "rolling_summary");
+    assert.equal(chunks[0]!.sourceId, "entry-1");
+    assert.equal(chunks[0]!.sourceUpdatedAt, now);
+    assert.ok(chunks[0]!.content.includes("Title: Key reveal"));
+    assert.ok(chunks[0]!.content.includes("Summary:\nThe moonlit key opens the west tower."));
+
+    embeddedTexts = [];
+    const unchanged = await syncRollingSummaryRecallChunks(db, "chat-summary-sync", metadata, { localEmbedder });
+    assert.equal(unchanged, 1);
+    assert.equal(embeddedTexts.length, 0);
+
+    const editedAt = "2026-05-10T00:05:00.000Z";
+    const edited = await syncRollingSummaryRecallChunks(
+      db,
+      "chat-summary-sync",
+      {
+        ...metadata,
+        summaryEntries: [
+          {
+            ...metadata.summaryEntries[0]!,
+            content: "The moonlit key opens the east tower.",
+            updatedAt: editedAt,
+          },
+        ],
+      },
+      { localEmbedder },
+    );
+    assert.equal(edited, 1);
+    chunks = await db.select().from(memoryChunks).where(eq(memoryChunks.chatId, "chat-summary-sync"));
+    assert.equal(chunks.length, 1);
+    assert.equal(chunks[0]!.sourceUpdatedAt, editedAt);
+    assert.ok(chunks[0]!.content.includes("east tower"));
+
+    const removed = await syncRollingSummaryRecallChunks(
+      db,
+      "chat-summary-sync",
+      { summary: null, summaryEntries: [{ ...metadata.summaryEntries[0]!, enabled: false }] },
+      { localEmbedder },
+    );
+    assert.equal(removed, 0);
+    chunks = await db.select().from(memoryChunks).where(eq(memoryChunks.chatId, "chat-summary-sync"));
+    assert.equal(chunks.length, 0);
+  } finally {
+    client.close();
+  }
+});
+
+test("memory recall source filtering keeps message and summary chunks separate", async () => {
+  const client = createClient({ url: "file::memory:" });
+  const db = drizzle(client) as unknown as DB;
+
+  try {
+    await runMigrations(db);
+
+    const now = "2026-05-10T01:00:00.000Z";
+    await db.insert(chats).values({
+      id: "chat-source-filter",
+      name: "Source filter",
+      mode: "roleplay",
+      characterIds: "[]",
+      metadata: "{}",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await db.insert(memoryChunks).values([
+      {
+        id: "message-chunk",
+        chatId: "chat-source-filter",
+        content: "User: The silverleaf password was spoken in chat.",
+        embedding: "[1,0,0]",
+        sourceKind: "message",
+        sourceId: null,
+        sourceUpdatedAt: null,
+        messageCount: 5,
+        firstMessageAt: now,
+        lastMessageAt: now,
+        createdAt: now,
+      },
+      {
+        id: "summary-chunk",
+        chatId: "chat-source-filter",
+        content: "Summary:\nThe moonlit key opens the tower.",
+        embedding: "[1,0,0]",
+        sourceKind: "rolling_summary",
+        sourceId: "entry-1",
+        sourceUpdatedAt: now,
+        messageCount: 0,
+        firstMessageAt: now,
+        lastMessageAt: now,
+        createdAt: now,
+      },
+    ]);
+
+    const localEmbedder = async () => [[1, 0, 0]];
+    const messageRecall = await recallMemories(db, "tower password", ["chat-source-filter"], {
+      localEmbedder,
+      threshold: 0,
+      sourceKinds: ["message"],
+      topK: 5,
+    });
+    assert.deepEqual(
+      messageRecall.map((memory) => memory.sourceKind),
+      ["message"],
+    );
+
+    const summaryRecall = await recallMemories(db, "tower password", ["chat-source-filter"], {
+      localEmbedder,
+      threshold: 0,
+      sourceKinds: ["rolling_summary"],
+      topK: 5,
+    });
+    assert.deepEqual(
+      summaryRecall.map((memory) => memory.sourceKind),
+      ["rolling_summary"],
+    );
   } finally {
     client.close();
   }

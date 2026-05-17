@@ -93,6 +93,15 @@ export type ChatSummaryEntryOrigin = "manual" | "automated" | "legacy";
 /** Source selector used to create a rolling summary entry. */
 export type ChatSummaryEntrySource = "last" | "range" | "agent";
 
+/** How rolling summaries are injected for roleplay chats. */
+export type ChatSummaryInjectionMode = "full" | "semantic" | "full_and_semantic";
+
+/** How selective semantic rolling-summary recall should be. */
+export type ChatSummaryRecallStrictness = "conservative" | "balanced" | "broad";
+
+/** Source type for a vectorized memory-recall chunk. */
+export type MemoryChunkSourceKind = "message" | "rolling_summary";
+
 /** A single structured rolling chat summary entry. */
 export interface ChatSummaryEntry {
   id: string;
@@ -117,6 +126,9 @@ export interface ChatMemoryChunk {
   id: string;
   chatId: string;
   content: string;
+  sourceKind?: MemoryChunkSourceKind;
+  sourceId?: string | null;
+  sourceUpdatedAt?: string | null;
   messageCount: number;
   firstMessageAt: string;
   lastMessageAt: string;
@@ -133,6 +145,12 @@ export interface ChatMetadata {
   summary: string | null;
   /** Structured rolling summary entries. Missing means legacy summary-only metadata. */
   summaryEntries?: ChatSummaryEntry[];
+  /** Roleplay rolling-summary injection behavior. Missing preserves legacy full-summary injection. */
+  summaryInjectionMode?: ChatSummaryInjectionMode;
+  /** Number of semantic rolling-summary entries to recall in roleplay semantic mode. */
+  summaryRecallCount?: number;
+  /** Selectivity for semantic rolling-summary recall. */
+  summaryRecallStrictness?: ChatSummaryRecallStrictness;
   /** Recent message count used by manual rolling summary generation and the automated summary agent. */
   summaryContextSize?: number;
   /** Chat-scoped manual summary prompt templates. Missing or empty uses the built-in default. */

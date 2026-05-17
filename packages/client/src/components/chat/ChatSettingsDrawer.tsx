@@ -82,6 +82,7 @@ import {
   useDeleteChatMemory,
   useClearChatMemories,
   useRefreshChatMemories,
+  useRefreshSummaryRecall,
   useChatNotes,
   useDeleteChatNote,
   useClearChatNotes,
@@ -1521,6 +1522,83 @@ export function ChatSettingsDrawer({
           <Brain size="0.75rem" />
           Access memories for this chat
         </button>
+      </div>
+    );
+  };
+
+  const renderSummaryContextControls = () => {
+    const mode =
+      metadata.summaryInjectionMode === "semantic" || metadata.summaryInjectionMode === "full_and_semantic"
+        ? metadata.summaryInjectionMode
+        : "full";
+    const strictness =
+      metadata.summaryRecallStrictness === "conservative" || metadata.summaryRecallStrictness === "broad"
+        ? metadata.summaryRecallStrictness
+        : "balanced";
+    const recallCount =
+      typeof metadata.summaryRecallCount === "number" && Number.isFinite(metadata.summaryRecallCount)
+        ? Math.max(1, Math.min(5, Math.trunc(metadata.summaryRecallCount)))
+        : 3;
+    const semanticEnabled = mode === "semantic" || mode === "full_and_semantic";
+    return (
+      <div className="space-y-3">
+        <div className="grid grid-cols-1 gap-1.5">
+          {[
+            { value: "full", label: "Full summary" },
+            { value: "semantic", label: "Semantic recall" },
+            { value: "full_and_semantic", label: "Full summary + semantic recall" },
+          ].map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => updateMeta.mutate({ id: chat.id, summaryInjectionMode: option.value })}
+              className={cn(
+                "rounded-lg px-3 py-2 text-left text-[0.6875rem] font-medium transition-colors",
+                mode === option.value
+                  ? "bg-[var(--primary)]/10 text-[var(--foreground)] ring-1 ring-[var(--primary)]/30"
+                  : "bg-[var(--secondary)] text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        {semanticEnabled && (
+          <div className="space-y-2 rounded-lg bg-[var(--secondary)]/60 p-2.5 ring-1 ring-[var(--border)]">
+            <label className="block text-[0.6875rem] font-medium text-[var(--muted-foreground)]">
+              Recall strictness
+            </label>
+            <div className="grid grid-cols-3 gap-1">
+              {["conservative", "balanced", "broad"].map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => updateMeta.mutate({ id: chat.id, summaryRecallStrictness: option })}
+                  className={cn(
+                    "rounded-md px-2 py-1.5 text-[0.625rem] font-medium capitalize transition-colors",
+                    strictness === option
+                      ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                      : "bg-[var(--background)] text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
+                  )}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+            <label className="block text-[0.6875rem] font-medium text-[var(--muted-foreground)]">
+              Recalled summaries
+            </label>
+            <input
+              type="range"
+              min={1}
+              max={5}
+              value={recallCount}
+              onChange={(e) => updateMeta.mutate({ id: chat.id, summaryRecallCount: Number(e.target.value) })}
+              className="w-full accent-[var(--primary)]"
+            />
+            <div className="text-right text-[0.625rem] text-[var(--muted-foreground)]">{recallCount}</div>
+          </div>
+        )}
       </div>
     );
   };
@@ -4950,7 +5028,10 @@ export function ChatSettingsDrawer({
               icon={<Brain size="0.875rem" />}
               help="When enabled, relevant fragments from this chat are automatically recalled and injected into the prompt as memories. Uses the local embedding model when available, or the configured embedding connection."
             >
-              {renderMemoryRecallControls(metadata.sceneStatus === "active")}
+              <div className="space-y-3">
+                {renderMemoryRecallControls(metadata.sceneStatus === "active")}
+                {chat.mode === "roleplay" && renderSummaryContextControls()}
+              </div>
             </Section>
           )}
 
@@ -5588,6 +5669,7 @@ function MemoryRecallMemoriesModal({ chatId, open, onClose }: { chatId: string; 
   const deleteMemory = useDeleteChatMemory(chatId);
   const clearMemories = useClearChatMemories(chatId);
   const refreshMemories = useRefreshChatMemories(chatId);
+  const refreshSummaryRecall = useRefreshSummaryRecall(chatId);
   const memories = useMemo(() => memoriesQuery.data ?? [], [memoriesQuery.data]);
   const totalTokens = useMemo(() => estimateMemoryTokens(memories), [memories]);
 
@@ -5610,6 +5692,10 @@ function MemoryRecallMemoriesModal({ chatId, open, onClose }: { chatId: string; 
       tone: "destructive",
     });
     if (ok) clearMemories.mutate();
+  };
+
+  const handleRefreshSummaryRecall = async () => {
+    refreshSummaryRecall.mutate();
   };
 
   return (
@@ -5648,6 +5734,15 @@ function MemoryRecallMemoriesModal({ chatId, open, onClose }: { chatId: string; 
             >
               <Trash2 size="0.8125rem" />
             </button>
+            <button
+              type="button"
+              onClick={handleRefreshSummaryRecall}
+              disabled={refreshSummaryRecall.isPending}
+              className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] disabled:opacity-50"
+              title="Refresh summary recall chunks"
+            >
+              <RotateCcw size="0.8125rem" className={cn(refreshSummaryRecall.isPending && "animate-spin")} />
+            </button>
           </div>
         </div>
 
@@ -5680,6 +5775,7 @@ function MemoryRecallMemoriesModal({ chatId, open, onClose }: { chatId: string; 
                       {formatMemoryDate(memory.firstMessageAt)} - {formatMemoryDate(memory.lastMessageAt)}
                     </div>
                     <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
+                      <span>{memory.sourceKind === "rolling_summary" ? "Summary memory" : "Message memory"}</span>
                       <span>{memory.messageCount} messages</span>
                       <span>
                         {memory.hasEmbedding

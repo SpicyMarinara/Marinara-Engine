@@ -411,6 +411,9 @@ const CREATE_TABLES: string[] = [
     chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
     embedding TEXT,
+    source_kind TEXT NOT NULL DEFAULT 'message',
+    source_id TEXT,
+    source_updated_at TEXT,
     message_count INTEGER NOT NULL,
     first_message_at TEXT NOT NULL,
     last_message_at TEXT NOT NULL,
@@ -741,6 +744,21 @@ const COLUMN_MIGRATIONS: ColumnMigration[] = [
     column: "image_endpoint_id",
     definition: "TEXT",
   },
+  {
+    table: "memory_chunks",
+    column: "source_kind",
+    definition: "TEXT NOT NULL DEFAULT 'message'",
+  },
+  {
+    table: "memory_chunks",
+    column: "source_id",
+    definition: "TEXT",
+  },
+  {
+    table: "memory_chunks",
+    column: "source_updated_at",
+    definition: "TEXT",
+  },
 ];
 
 /**
@@ -855,6 +873,11 @@ export async function runMigrations(db: DB) {
   );
   await db.run(
     sql.raw(`CREATE INDEX IF NOT EXISTS idx_memory_chunks_chat ON memory_chunks(chat_id, last_message_at DESC)`),
+  );
+  await db.run(
+    sql.raw(
+      `CREATE INDEX IF NOT EXISTS idx_memory_chunks_chat_source ON memory_chunks(chat_id, source_kind, source_id)`,
+    ),
   );
   await db.run(
     sql.raw(

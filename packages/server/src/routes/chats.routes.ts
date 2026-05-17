@@ -35,6 +35,7 @@ import { getLocalSidecarProvider, LOCAL_SIDECAR_MODEL } from "../services/llm/lo
 import { createLLMProvider } from "../services/llm/provider-registry.js";
 import { generateMissingConversationSummaries } from "../services/conversation/auto-summary.service.js";
 import { rebuildMemoryChunks } from "../services/memory-recall.js";
+import { deleteRollingSummaryRecallChunks, syncRollingSummaryRecallChunks } from "../services/summary-recall.js";
 import { wrapContent } from "../services/prompt/format-engine.js";
 import { getCharacterDescriptionWithExtensions } from "../services/prompt/index.js";
 import { newId } from "../utils/id-generator.js";
@@ -84,6 +85,22 @@ type SummaryEntriesPatchBody =
   | { operation: "replace"; entry: Partial<ChatSummaryEntry> & { id: string; content: string } }
   | { operation: "delete"; entryId: string }
   | { operation: "toggle"; entryId: string; enabled: boolean };
+
+async function bestEffortSyncRollingSummaryRecall(
+  app: FastifyInstance,
+  chat: { id: string; metadata: unknown; connectionId: string | null },
+) {
+  try {
+    const metadata = typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : (chat.metadata ?? {});
+    const embeddingSource = await resolveMemoryRecallEmbeddingSource(app.db, {
+      chatMetadata: metadata,
+      connectionId: chat.connectionId,
+    });
+    await syncRollingSummaryRecallChunks(app.db, chat.id, metadata, { embeddingSource });
+  } catch (err) {
+    logger.warn(err, "[summary-recall] Failed to sync rolling summary recall chunks");
+  }
+}
 
 async function loadLatestChatGameSnapshot(
   app: FastifyInstance,
@@ -493,6 +510,7 @@ export async function chatsRoutes(app: FastifyInstance) {
     });
 
     if (!updated) return reply.status(404).send({ error: "Chat not found" });
+    await bestEffortSyncRollingSummaryRecall(app, updated);
     return updated;
   });
 
@@ -732,6 +750,9 @@ export async function chatsRoutes(app: FastifyInstance) {
         chatId: memoryChunks.chatId,
         content: memoryChunks.content,
         embedding: memoryChunks.embedding,
+        sourceKind: memoryChunks.sourceKind,
+        sourceId: memoryChunks.sourceId,
+        sourceUpdatedAt: memoryChunks.sourceUpdatedAt,
         messageCount: memoryChunks.messageCount,
         firstMessageAt: memoryChunks.firstMessageAt,
         lastMessageAt: memoryChunks.lastMessageAt,
@@ -745,6 +766,9 @@ export async function chatsRoutes(app: FastifyInstance) {
       ({ embedding, ...chunk }) =>
         ({
           ...chunk,
+          sourceKind: chunk.sourceKind,
+          sourceId: chunk.sourceId,
+          sourceUpdatedAt: chunk.sourceUpdatedAt,
           hasEmbedding: !!embedding,
           embeddingStatus: embedding ? "vectorized" : vectorizerAvailable ? "pending" : "unavailable",
         }) satisfies ChatMemoryChunk,
@@ -788,11 +812,27 @@ export async function chatsRoutes(app: FastifyInstance) {
     return { rebuilt };
   });
 
+  // Rebuild semantic rolling-summary recall chunks for this chat.
+  app.post<{ Params: { id: string } }>("/:id/summary-recall/refresh", async (req, reply) => {
+    const chat = await storage.getById(req.params.id);
+    if (!chat) return reply.status(404).send({ error: "Chat not found" });
+    const metadata = typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : (chat.metadata ?? {});
+    const embeddingSource = await resolveMemoryRecallEmbeddingSource(app.db, {
+      chatMetadata: metadata,
+      connectionId: chat.connectionId,
+    });
+    await deleteRollingSummaryRecallChunks(app.db, req.params.id);
+    const rebuilt = await syncRollingSummaryRecallChunks(app.db, req.params.id, metadata, { embeddingSource });
+    return { rebuilt };
+  });
+
   // Clear all memory-recall chunks for this chat.
   app.delete<{ Params: { id: string } }>("/:id/memories", async (req, reply) => {
     const chat = await storage.getById(req.params.id);
     if (!chat) return reply.status(404).send({ error: "Chat not found" });
-    await app.db.delete(memoryChunks).where(eq(memoryChunks.chatId, req.params.id));
+    await app.db
+      .delete(memoryChunks)
+      .where(and(eq(memoryChunks.chatId, req.params.id), eq(memoryChunks.sourceKind, "message")));
     return reply.status(204).send();
   });
 
@@ -2270,6 +2310,7 @@ export async function chatsRoutes(app: FastifyInstance) {
       };
     });
     if (!updatedChat) return reply.status(404).send({ error: "Chat not found" });
+    await bestEffortSyncRollingSummaryRecall(app, updatedChat);
 
     return {
       summary: combined,

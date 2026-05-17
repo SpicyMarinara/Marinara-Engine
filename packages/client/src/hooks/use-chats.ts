@@ -243,6 +243,16 @@ export function useRefreshChatMemories(chatId: string | null) {
   });
 }
 
+export function useRefreshSummaryRecall(chatId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<{ rebuilt: number }>(`/chats/${chatId}/summary-recall/refresh`),
+    onSuccess: () => {
+      if (chatId) qc.invalidateQueries({ queryKey: chatKeys.memories(chatId) });
+    },
+  });
+}
+
 export function useChatNotes(chatId: string | null) {
   return useQuery({
     queryKey: chatKeys.notes(chatId ?? ""),
