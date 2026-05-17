@@ -297,9 +297,7 @@ export function SummaryPopover({
       : totalMessageCount > 0
         ? `Using ${Math.min(normalizedLastSize, totalMessageCount)} of ${totalMessageCount} messages`
         : "No messages yet";
-  const rangeStatusText = rangeTooLarge
-    ? `Choose ${MAX_SUMMARY_MESSAGES} messages or fewer.`
-    : `${selectedRangeCount} ${selectedRangeCount === 1 ? "message" : "messages"} selected.`;
+  const rangeErrorText = `Choose ${MAX_SUMMARY_MESSAGES} messages or fewer.`;
   const cleanedPromptTemplates = promptTemplates.filter(
     (template) =>
       typeof template.id === "string" &&
@@ -653,8 +651,8 @@ export function SummaryPopover({
       {isMobile && <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />}
       <div
         className={cn(
-          "relative overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--background)] shadow-2xl shadow-black/50 backdrop-blur-xl",
-          isMobile ? "relative w-full max-w-md max-h-[calc(100dvh-4rem)] overflow-y-auto" : "w-[28rem]",
+          "relative rounded-xl border border-[var(--border)] bg-[var(--background)] shadow-2xl shadow-black/50 backdrop-blur-xl",
+          isMobile ? "relative w-full max-w-md max-h-[calc(100dvh-4rem)] overflow-y-auto" : "w-[28rem] overflow-visible",
         )}
       >
         {/* Header */}
@@ -1080,14 +1078,9 @@ export function SummaryPopover({
                     />
                   </label>
                 </div>
-                <p
-                  className={cn(
-                    "px-0.5 text-[0.625rem] leading-snug",
-                    rangeTooLarge ? "text-[var(--destructive)]" : "text-[var(--muted-foreground)]",
-                  )}
-                >
-                  {rangeStatusText}
-                </p>
+                {rangeTooLarge && (
+                  <p className="px-0.5 text-[0.625rem] leading-snug text-[var(--destructive)]">{rangeErrorText}</p>
+                )}
               </div>
             )}
           </div>
