@@ -22,6 +22,7 @@ import type {
   CharacterData,
   ChatMemoryChunk,
   ChatSummaryEntry,
+  GameNpc,
   LorebookEntryTimingState,
 } from "@marinara-engine/shared";
 import { createChatsStorage } from "../services/storage/chats.storage.js";
