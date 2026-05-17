@@ -2,7 +2,7 @@
 // Summary Popover — View / edit / generate chat summary
 // Shown via the scroll icon in the chat header bar.
 // ──────────────────────────────────────────────
-import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode, type RefObject } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type MouseEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
   useBulkSetMessagesHiddenFromAI,
@@ -14,10 +14,8 @@ import {
 } from "../../hooks/use-chats";
 import {
   Check,
-  ChevronDown,
   ChevronRight,
   Copy,
-  Info,
   Loader2,
   PenLine,
   Plus,
@@ -128,6 +126,10 @@ function getSummaryEntrySourceLabel(entry: ChatSummaryEntry): string | null {
   return null;
 }
 
+function getSummaryEntryMetaLine(entry: ChatSummaryEntry): string {
+  return [getSummaryEntrySourceLabel(entry), `~${formatTokenCount(entry.tokenEstimate)} tokens`].filter(Boolean).join(" · ");
+}
+
 function createBlankManualSummaryEntry(): ChatSummaryEntry {
   const now = new Date().toISOString();
   return {
@@ -159,6 +161,7 @@ export function SummaryPopover({
   const [draftEntry, setDraftEntry] = useState<ChatSummaryEntry | null>(null);
   const [templateEditorOpen, setTemplateEditorOpen] = useState(false);
   const [templateSelectOpen, setTemplateSelectOpen] = useState(false);
+  const [showInactiveSummaries, setShowInactiveSummaries] = useState(false);
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [templateNameDraft, setTemplateNameDraft] = useState("");
   const [templatePromptDraft, setTemplatePromptDraft] = useState("");
@@ -184,6 +187,8 @@ export function SummaryPopover({
   const toggleSummaryEntry = useToggleSummaryEntry();
   const entryTextareaRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const scopeSettingsButtonRef = useRef<HTMLButtonElement>(null);
+  const scopeSettingsRef = useRef<HTMLDivElement>(null);
 
   // Close on click outside — defer by one frame so the synthesised
   // mousedown from the tap that *opened* the popover doesn't
@@ -211,6 +216,19 @@ export function SummaryPopover({
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
+
+  // Close the settings flyout when clicking elsewhere in the summary popover.
+  useEffect(() => {
+    if (!scopeSettingsOpen) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (scopeSettingsRef.current?.contains(target) || scopeSettingsButtonRef.current?.contains(target)) return;
+      setScopeSettingsOpen(false);
+      setTemplateSelectOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [scopeSettingsOpen]);
 
   // Sync local size when the persisted/default context size changes externally.
   useEffect(() => {
@@ -279,17 +297,20 @@ export function SummaryPopover({
       }),
     [summary, summaryEntries],
   );
-  const visibleEntries = useMemo(() => {
-    if (!draftEntry || displayEntries.some((entry) => entry.id === draftEntry.id)) return displayEntries;
-    return [...displayEntries, draftEntry];
-  }, [displayEntries, draftEntry]);
   const enabledEntryCount = displayEntries.filter((entry) => entry.enabled).length;
+  const inactiveEntryCount = displayEntries.length - enabledEntryCount;
+  const visibleEntries = useMemo(() => {
+    const filteredEntries = showInactiveSummaries ? displayEntries : displayEntries.filter((entry) => entry.enabled);
+    if (!draftEntry || filteredEntries.some((entry) => entry.id === draftEntry.id)) return filteredEntries;
+    return [...filteredEntries, draftEntry];
+  }, [displayEntries, draftEntry, showInactiveSummaries]);
   const enabledTokenEstimate = displayEntries.reduce(
     (total, entry) => (entry.enabled ? total + entry.tokenEstimate : total),
     0,
   );
   const hasPersistedEntries = displayEntries.length > 0;
   const hasEntries = visibleEntries.length > 0;
+  const allVisibleEntriesHidden = hasPersistedEntries && !hasEntries;
   const allEntriesDisabled = hasPersistedEntries && enabledEntryCount === 0;
   const tokenWarning = enabledTokenEstimate > SUMMARY_TOKEN_WARNING_THRESHOLD;
   const entryMutationPending =
@@ -438,6 +459,21 @@ export function SummaryPopover({
     [chatId, toggleSummaryEntry],
   );
 
+  const handleToggleAllEntries = useCallback(async () => {
+    const nextEnabled = enabledEntryCount === 0;
+    const entriesToUpdate = displayEntries.filter((entry) => entry.enabled !== nextEnabled);
+    if (entriesToUpdate.length === 0) return;
+
+    try {
+      await Promise.all(
+        entriesToUpdate.map((entry) => toggleSummaryEntry.mutateAsync({ chatId, entryId: entry.id, enabled: nextEnabled })),
+      );
+      if (nextEnabled) setShowInactiveSummaries(false);
+    } catch {
+      toast.error("Could not update summary entries.");
+    }
+  }, [chatId, displayEntries, enabledEntryCount, toggleSummaryEntry]);
+
   const handleDeleteEntry = useCallback(
     async (entry: ChatSummaryEntry) => {
       const confirmed = await showConfirmDialog({
@@ -572,10 +608,24 @@ export function SummaryPopover({
 
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
+  const handlePanelMouseDown = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      if (scopeSettingsOpen) {
+        const target = event.target as Node;
+        if (!scopeSettingsRef.current?.contains(target) && !scopeSettingsButtonRef.current?.contains(target)) {
+          setScopeSettingsOpen(false);
+          setTemplateSelectOpen(false);
+        }
+      }
+      event.stopPropagation();
+    },
+    [scopeSettingsOpen],
+  );
+
   const content = (
     <div
       ref={panelRef}
-      onMouseDown={(e) => e.stopPropagation()}
+      onMouseDown={handlePanelMouseDown}
       className={cn(
         isMobile
           ? "fixed inset-0 z-[9999] flex items-center justify-center p-4 max-md:pt-[max(1rem,env(safe-area-inset-top))]"
@@ -583,28 +633,29 @@ export function SummaryPopover({
       )}
     >
       {/* Mobile backdrop */}
-      {isMobile && <div className="absolute inset-0 bg-black/30" onClick={onClose} />}
+      {isMobile && <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />}
       <div
         className={cn(
-          "relative rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl shadow-black/40",
+          "relative overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--background)] shadow-2xl shadow-black/50 backdrop-blur-xl",
           isMobile ? "relative w-full max-w-md max-h-[calc(100dvh-4rem)] overflow-y-auto" : "w-[28rem]",
         )}
       >
         {/* Header */}
-        <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-3 py-2.5">
-          <div className="min-w-0 space-y-0.5">
-            <div className="flex min-w-0 items-center gap-1.5 text-xs font-semibold">
+        <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--card)]/80 px-3 py-2.5 backdrop-blur-sm">
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-1.5 text-sm font-semibold">
               <ScrollText size="0.8125rem" className="shrink-0 text-[var(--muted-foreground)]" />
               <span className="truncate">Chat Summary</span>
             </div>
             <p className="truncate text-[0.625rem] text-[var(--muted-foreground)]">
               {hasEntries
-                ? `${enabledEntryCount} enabled · ~${formatTokenCount(enabledTokenEstimate)} tokens`
+                ? `${enabledEntryCount} active · ~${formatTokenCount(enabledTokenEstimate)} tokens`
                 : "No summaries yet"}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <button
+              ref={scopeSettingsButtonRef}
               type="button"
               onClick={() => setScopeSettingsOpen((open) => !open)}
               className={cn(
@@ -629,144 +680,44 @@ export function SummaryPopover({
         </div>
 
         {scopeSettingsOpen && (
-          <div className="absolute right-2 top-12 z-10 max-h-[min(34rem,calc(100vh-7rem))] w-[calc(100%-1rem)] max-w-80 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--popover)] p-2.5 text-[var(--popover-foreground)] shadow-xl shadow-black/30 ring-1 ring-white/5">
-            <div className="mb-2.5 flex items-start justify-between gap-3 px-1">
+          <div
+            ref={scopeSettingsRef}
+            className="absolute right-2 top-12 z-10 max-h-[min(34rem,calc(100vh-7rem))] w-[calc(100%-1rem)] max-w-80 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--background)] text-[var(--popover-foreground)] shadow-2xl shadow-black/50 ring-1 ring-white/5 backdrop-blur-xl"
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--card)]/80 px-3 py-2.5 backdrop-blur-sm">
               <div className="min-w-0">
-                <p className="text-[0.625rem] font-semibold uppercase text-[var(--muted-foreground)]">
-                  Summary Scope
-                </p>
-                <p className="truncate text-xs font-semibold text-[var(--popover-foreground)]">{sourceSummary}</p>
+                <p className="text-xs font-semibold text-[var(--popover-foreground)]">Summary settings</p>
               </div>
-              <span className="shrink-0 pt-0.5 text-right text-[0.625rem] text-[var(--muted-foreground)]">
-                {sourceDetail}
-              </span>
             </div>
 
-            <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--secondary)]/40 p-2.5">
-              <div className="grid grid-cols-2 gap-1 rounded-lg bg-[var(--background)]/30 p-1">
-                {(["last", "range"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => handleSourceModeChange(mode)}
-                    className={cn(
-                      "rounded-md px-2 py-1 text-[0.625rem] font-semibold transition-colors",
-                      sourceMode === mode
-                        ? "bg-[var(--accent)] text-[var(--foreground)] ring-1 ring-[var(--border)]"
-                        : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
-                    )}
-                  >
-                    {mode === "last" ? "Last" : "Range"}
-                  </button>
-                ))}
-              </div>
-
-              {sourceMode === "last" ? (
-                <label className="flex items-center justify-between gap-2 text-[0.6875rem] text-[var(--muted-foreground)]">
-                  <span>Messages</span>
-                  <input
-                    type="number"
-                    min={MIN_SUMMARY_MESSAGES}
-                    max={MAX_SUMMARY_MESSAGES}
-                    value={localSize}
-                    onFocus={() => {
-                      sizeInputFocused.current = true;
-                    }}
-                    onChange={(e) => {
-                      setLocalSize(e.target.value);
-                      const next = parsePositiveInteger(e.target.value);
-                      if (next !== null) {
-                        setSummaryPopoverSettings({ contextSize: clampSummaryCount(next) });
-                      }
-                    }}
-                    onBlur={() => {
-                      sizeInputFocused.current = false;
-                      const clamped = clampSummaryCount(parsePositiveInteger(localSize) ?? 50);
-                      setLocalSize(String(clamped));
-                      setSummaryPopoverSettings({ contextSize: clamped });
-                    }}
-                    className="w-16 rounded-md bg-[var(--card)] px-2 py-1 text-center text-xs tabular-nums text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-                  />
-                </label>
-              ) : (
-                <div className="space-y-1.5">
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="space-y-1 text-[0.625rem] font-medium text-[var(--muted-foreground)]">
-                      From
-                      <input
-                        type="number"
-                        min={1}
-                        max={Math.max(1, totalMessageCount)}
-                        value={rangeStart}
-                        onFocus={() => {
-                          rangeInputFocused.current = true;
-                        }}
-                        onChange={(e) => {
-                          setRangeStart(e.target.value);
-                          const next = parsePositiveInteger(e.target.value);
-                          if (next !== null) {
-                            setSummaryPopoverSettings({
-                              rangeStart: Math.max(1, Math.min(totalMessageCount || 1, next)),
-                            });
-                          }
-                        }}
-                        onBlur={() => {
-                          rangeInputFocused.current = false;
-                          setRangeStart(String(normalizedRangeStart));
-                          setSummaryPopoverSettings({ rangeStart: normalizedRangeStart });
-                        }}
-                        className="w-full rounded-md bg-[var(--card)] px-2 py-1 text-center text-xs tabular-nums text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-                      />
-                    </label>
-                    <label className="space-y-1 text-[0.625rem] font-medium text-[var(--muted-foreground)]">
-                      To
-                      <input
-                        type="number"
-                        min={1}
-                        max={Math.max(1, totalMessageCount)}
-                        value={rangeEnd}
-                        onFocus={() => {
-                          rangeInputFocused.current = true;
-                        }}
-                        onChange={(e) => {
-                          setRangeEnd(e.target.value);
-                          const next = parsePositiveInteger(e.target.value);
-                          if (next !== null) {
-                            setSummaryPopoverSettings({
-                              rangeEnd: Math.max(1, Math.min(totalMessageCount || 1, next)),
-                            });
-                          }
-                        }}
-                        onBlur={() => {
-                          rangeInputFocused.current = false;
-                          setRangeEnd(String(normalizedRangeEnd));
-                          setSummaryPopoverSettings({ rangeEnd: normalizedRangeEnd });
-                        }}
-                        className="w-full rounded-md bg-[var(--card)] px-2 py-1 text-center text-xs tabular-nums text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-                      />
-                    </label>
-                  </div>
-                  <p
-                    className={cn(
-                      "text-[0.625rem]",
-                      rangeTooLarge ? "text-red-300" : "text-[var(--muted-foreground)]",
-                    )}
-                  >
-                    {rangeStatusText}
-                  </p>
+            <div className="max-h-[min(31rem,calc(100vh-10rem))] overflow-y-auto p-2.5">
+              <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--secondary)]/40 p-2.5">
+                <p className="px-1 text-xs font-semibold text-[var(--popover-foreground)]">Summary Scope</p>
+                <div className="grid grid-cols-2 gap-1 rounded-lg bg-[var(--background)]/30 p-1">
+                  {(["last", "range"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => handleSourceModeChange(mode)}
+                      className={cn(
+                        "rounded-md px-2 py-1 text-xs font-semibold transition-colors",
+                        sourceMode === mode
+                          ? "bg-[var(--accent)] text-[var(--foreground)] ring-1 ring-[var(--border)]"
+                          : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
+                      )}
+                    >
+                      {mode === "last" ? "Last" : "Range"}
+                    </button>
+                  ))}
                 </div>
-              )}
-            </div>
+              </div>
 
-            <div className="space-y-2 pt-2">
-              <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--secondary)]/35 p-2.5">
-                <div className="flex items-start justify-between gap-2">
+              <div className="space-y-2 pt-2">
+                <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--secondary)]/35 p-2.5">
+                <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-[0.625rem] font-semibold uppercase text-[var(--muted-foreground)]">
+                    <p className="text-xs font-semibold text-[var(--popover-foreground)]">
                       Summary Prompt
-                    </p>
-                    <p className="truncate text-xs font-semibold text-[var(--popover-foreground)]">
-                      {promptTemplateSummary}
                     </p>
                   </div>
                   <button
@@ -776,7 +727,7 @@ export function SummaryPopover({
                       if (templateEditorOpen) resetTemplateDraft();
                     }}
                     className={cn(
-                      "shrink-0 rounded-md px-2 py-1 text-[0.625rem] font-semibold transition-colors",
+                      "shrink-0 rounded-md px-2 py-1 text-xs transition-colors",
                       templateEditorOpen
                         ? "bg-[var(--accent)] text-[var(--foreground)] ring-1 ring-[var(--border)]"
                         : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
@@ -791,17 +742,17 @@ export function SummaryPopover({
                     <button
                       type="button"
                       onClick={() => setTemplateSelectOpen((open) => !open)}
-                      className="flex w-full min-w-0 items-center justify-between gap-2 rounded-md bg-[var(--card)] py-1 pl-2 pr-2 text-left text-[0.6875rem] text-[var(--foreground)] ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                      className="flex w-full min-w-0 items-center justify-between gap-2 rounded-md bg-[var(--card)] py-1 pl-2 pr-2 text-left truncate text-xs font-semibold text-[var(--foreground)] ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
                       aria-haspopup="listbox"
                       aria-expanded={templateSelectOpen}
                       aria-label="Summary prompt template"
                     >
                       <span className="min-w-0 truncate">{promptTemplateSummary}</span>
-                      <ChevronDown
+                      <ChevronRight
                         size="0.75rem"
                         className={cn(
                           "shrink-0 text-[var(--muted-foreground)] transition-transform",
-                          templateSelectOpen && "rotate-180",
+                          templateSelectOpen && "rotate-90",
                         )}
                       />
                     </button>
@@ -908,30 +859,59 @@ export function SummaryPopover({
                     )}
                   </div>
                 )}
-              </div>
+                </div>
 
-              <div className="space-y-1 rounded-lg border border-[var(--border)] bg-[var(--secondary)]/25 p-2">
-                <p className="px-1 text-[0.625rem] font-semibold uppercase text-[var(--muted-foreground)]">
-                  Display
-                </p>
-                <SummarySettingsToggle
-                  label="Hide summarised messages"
-                  checked={summaryPopoverSettings.hideSummarisedMessages}
-                  onChange={(checked) => setSummaryPopoverSettings({ hideSummarisedMessages: checked })}
-                />
-                <SummarySettingsToggle
-                  label="Collapse hidden messages"
-                  checked={summaryPopoverSettings.collapseHiddenMessages}
-                  onChange={(checked) => setSummaryPopoverSettings({ collapseHiddenMessages: checked })}
-                />
+                <div className="space-y-1 rounded-lg border border-[var(--border)] bg-[var(--secondary)]/25 p-2">
+                  <p className="px-1 text-xs font-semibold text-[var(--popover-foreground)]">
+                    Display
+                  </p>
+                  <SummarySettingsToggle
+                    label="Hide summarised messages"
+                    checked={summaryPopoverSettings.hideSummarisedMessages}
+                    onChange={(checked) => setSummaryPopoverSettings({ hideSummarisedMessages: checked })}
+                  />
+                  <SummarySettingsToggle
+                    label="Collapse hidden messages"
+                    checked={summaryPopoverSettings.collapseHiddenMessages}
+                    onChange={(checked) => setSummaryPopoverSettings({ collapseHiddenMessages: checked })}
+                  />
+                </div>
               </div>
             </div>
           </div>
         )}
 
         {/* Body */}
-        <div className="max-h-[min(26rem,calc(100dvh-15rem))] overflow-y-auto p-3">
+        <div className="max-h-[min(26rem,calc(100dvh-15rem))] overflow-y-auto p-2.5">
           <div className="space-y-2">
+            {hasPersistedEntries && (
+              <div className="flex items-center justify-end gap-1.5 px-0.5">
+                  {inactiveEntryCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowInactiveSummaries((show) => !show)}
+                      className={cn(
+                        "rounded-md px-1 py-0.5 text-[0.625rem] font-semibold transition-colors hover:text-[var(--foreground)]",
+                        showInactiveSummaries
+                          ? "text-[var(--foreground)]"
+                          : "text-[var(--muted-foreground)]",
+                      )}
+                    >
+                      {showInactiveSummaries ? "Hide Inactive" : "Show Inactive"}
+                    </button>
+                  )}
+                  {inactiveEntryCount === 0 && <span aria-hidden="true" />}
+                  <button
+                    type="button"
+                    onClick={() => void handleToggleAllEntries()}
+                    disabled={entryMutationPending}
+                    className="rounded-md px-1 py-0.5 text-[0.625rem] font-semibold text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {enabledEntryCount === 0 ? "Activate All" : "Deactivate All"}
+                  </button>
+              </div>
+            )}
+
             {tokenWarning && (
               <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-2.5 py-2 text-[0.6875rem] leading-relaxed text-amber-200">
                 Enabled summaries are around {formatTokenCount(enabledTokenEstimate)} tokens. Consider disabling older
@@ -970,6 +950,14 @@ export function SummaryPopover({
                   onDelete={() => void handleDeleteEntry(entry)}
                 />
               ))
+            ) : allVisibleEntriesHidden ? (
+              <button
+                type="button"
+                onClick={() => setShowInactiveSummaries(true)}
+                className="w-full rounded-lg border border-dashed border-[var(--border)] bg-[var(--secondary)]/20 p-5 text-center text-xs italic text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]/35"
+              >
+                Inactive summaries are hidden. Show inactive summaries to view them.
+              </button>
             ) : (
               <button
                 type="button"
@@ -983,17 +971,113 @@ export function SummaryPopover({
         </div>
 
         {/* Source controls */}
-        <div className="border-t border-[var(--border)] px-3 py-2.5">
-          <div className="mb-2 grid grid-cols-[1fr_auto] items-center gap-2 rounded-lg bg-[var(--secondary)]/25 px-2.5 py-1.5 text-[0.625rem] text-[var(--muted-foreground)]">
-            <span className="min-w-0 truncate">Source: {sourceSummary}</span>
-            <span className="shrink-0 text-right">{sourceDetail}</span>
+        <div className="border-t border-[var(--border)] bg-[var(--card)]/45 px-3 py-2.5">
+          <div className="mb-2.5 space-y-2">
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-start gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold text-[var(--foreground)]">{sourceSummary}</p>
+                <p className="truncate text-[0.625rem] text-[var(--muted-foreground)]">{sourceDetail}</p>
+              </div>
+              <div className="min-w-0 text-right">
+                <p className="truncate text-xs font-semibold text-[var(--foreground)]">Active Prompt</p>
+                <p className="truncate text-[0.625rem] text-[var(--muted-foreground)]">{promptTemplateSummary}</p>
+              </div>
+            </div>
+
+            {sourceMode === "last" ? (
+              <label className="flex items-center justify-between gap-2 text-[0.6875rem] text-[var(--muted-foreground)]">
+                <span>Messages</span>
+                <input
+                  type="number"
+                  min={MIN_SUMMARY_MESSAGES}
+                  max={MAX_SUMMARY_MESSAGES}
+                  value={localSize}
+                  onFocus={() => {
+                    sizeInputFocused.current = true;
+                  }}
+                  onChange={(e) => {
+                    setLocalSize(e.target.value);
+                    const next = parsePositiveInteger(e.target.value);
+                    if (next !== null) {
+                      setSummaryPopoverSettings({ contextSize: clampSummaryCount(next) });
+                    }
+                  }}
+                  onBlur={() => {
+                    sizeInputFocused.current = false;
+                    const clamped = clampSummaryCount(parsePositiveInteger(localSize) ?? 50);
+                    setLocalSize(String(clamped));
+                    setSummaryPopoverSettings({ contextSize: clamped });
+                  }}
+                  className="w-16 rounded-md bg-[var(--card)] px-2 py-1 text-center text-xs tabular-nums text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                />
+              </label>
+            ) : (
+              <div className="space-y-1.5">
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="space-y-1 text-[0.625rem] font-medium text-[var(--muted-foreground)]">
+                    From
+                    <input
+                      type="number"
+                      min={1}
+                      max={Math.max(1, totalMessageCount)}
+                      value={rangeStart}
+                      onFocus={() => {
+                        rangeInputFocused.current = true;
+                      }}
+                      onChange={(e) => {
+                        setRangeStart(e.target.value);
+                        const next = parsePositiveInteger(e.target.value);
+                        if (next !== null) {
+                          setSummaryPopoverSettings({
+                            rangeStart: Math.max(1, Math.min(totalMessageCount || 1, next)),
+                          });
+                        }
+                      }}
+                      onBlur={() => {
+                        rangeInputFocused.current = false;
+                        setRangeStart(String(normalizedRangeStart));
+                        setSummaryPopoverSettings({ rangeStart: normalizedRangeStart });
+                      }}
+                      className="w-full rounded-md bg-[var(--card)] px-2 py-1 text-center text-xs tabular-nums text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                    />
+                  </label>
+                  <label className="space-y-1 text-[0.625rem] font-medium text-[var(--muted-foreground)]">
+                    To
+                    <input
+                      type="number"
+                      min={1}
+                      max={Math.max(1, totalMessageCount)}
+                      value={rangeEnd}
+                      onFocus={() => {
+                        rangeInputFocused.current = true;
+                      }}
+                      onChange={(e) => {
+                        setRangeEnd(e.target.value);
+                        const next = parsePositiveInteger(e.target.value);
+                        if (next !== null) {
+                          setSummaryPopoverSettings({
+                            rangeEnd: Math.max(1, Math.min(totalMessageCount || 1, next)),
+                          });
+                        }
+                      }}
+                      onBlur={() => {
+                        rangeInputFocused.current = false;
+                        setRangeEnd(String(normalizedRangeEnd));
+                        setSummaryPopoverSettings({ rangeEnd: normalizedRangeEnd });
+                      }}
+                      className="w-full rounded-md bg-[var(--card)] px-2 py-1 text-center text-xs tabular-nums text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                    />
+                  </label>
+                </div>                
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-[auto_1fr] gap-1.5">
             <button
               type="button"
               onClick={handleCreateManualEntry}
-              className="flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-[var(--foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98]"
+              className="flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-[var(--muted-foreground)] transition-all hover:bg-[var(--accent)] hover:text-[var(--foreground)] active:scale-[0.98]"
               title="Write summary entry"
             >
               <PenLine size="0.8125rem" />
@@ -1017,17 +1101,6 @@ export function SummaryPopover({
           </div>
         </div>
 
-        {/* Info tip */}
-        <div className="border-t border-[var(--border)] bg-[var(--secondary)]/15 px-3 py-2">
-          <p className="flex items-start gap-1.5 text-[0.625rem] leading-relaxed text-[var(--muted-foreground)]">
-            <Info size="0.6875rem" className="mt-0.5 shrink-0 text-[var(--muted-foreground)]" />
-            <span>
-              Use the Generate button above to update the summary manually. Add an{" "}
-              <strong className="font-medium text-[var(--foreground)]/70">Automated Chat Summary</strong> agent to the
-              chat if you&apos;d like it to be updated automatically every X messages.
-            </span>
-          </p>
-        </div>
       </div>
     </div>
   );
@@ -1086,37 +1159,59 @@ function SummaryEntryRow({
   onSaveEdit,
   onDelete,
 }: SummaryEntryRowProps) {
+  const metaLine = getSummaryEntryMetaLine(entry);
   return (
     <div
       className={cn(
-        "rounded-lg border border-[var(--border)] bg-[var(--secondary)]/20 transition-colors",
-        entry.enabled ? "text-[var(--foreground)]" : "text-[var(--muted-foreground)] opacity-75",
+        "group overflow-hidden rounded-lg border shadow-sm shadow-black/10 ring-1 ring-[var(--border)]/25 transition-colors",
+        expanded
+          ? "border-[var(--primary)]/45 bg-[var(--accent)]/22 ring-[var(--primary)]/20"
+          : "border-[var(--border)]/80 bg-[var(--secondary)]/28 hover:border-[var(--primary)]/30 hover:bg-[var(--accent)]/30",
+        entry.enabled
+          ? "text-[var(--foreground)]"
+          : "border-dashed bg-[var(--secondary)]/14 text-[var(--muted-foreground)] opacity-75 ring-[var(--border)]/35",
+        editing && "border-[var(--primary)]/60 bg-[var(--primary)]/10 ring-[var(--primary)]/30",
       )}
     >
-      <div className="grid grid-cols-[auto_1fr_auto] items-start gap-2 p-2.5">
-        <input
-          type="checkbox"
-          checked={entry.enabled}
+      <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2 px-2 py-1.5">
+        <button
+          type="button"
+          onClick={() => onToggleEnabled(!entry.enabled)}
           disabled={mutationPending}
-          onChange={(event) => onToggleEnabled(event.target.checked)}
-          className="mt-1 h-3.5 w-3.5 shrink-0 accent-[var(--muted-foreground)]"
+          className={cn(
+            "flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+            entry.enabled
+              ? "bg-[var(--primary)]/15 text-[var(--primary)] ring-1 ring-[var(--primary)]/30"
+              : "text-[var(--muted-foreground)] ring-1 ring-[var(--border)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
+          )}
           title={entry.enabled ? "Disable summary" : "Enable summary"}
           aria-label={entry.enabled ? "Disable summary" : "Enable summary"}
-        />
+          aria-pressed={entry.enabled}
+        >
+          <Check size="0.6875rem" className={cn(!entry.enabled && "opacity-0")} />
+        </button>
 
         <button type="button" onClick={onToggleExpanded} className="min-w-0 text-left">
           <div className="flex min-w-0 items-center gap-1.5">
             <SummaryEntryOriginIcon entry={entry} />
             <span className="min-w-0 truncate text-xs font-semibold">{entry.title}</span>
+            {editing && (
+              <span className="shrink-0 rounded bg-[var(--primary)]/15 px-1.5 py-0.5 text-[0.5625rem] font-semibold text-[var(--primary)]">
+                Editing
+              </span>
+            )}
           </div>
-          <SummaryEntryMetaChips entry={entry} />
+          <p className="mt-0.5 truncate text-[0.625rem] text-[var(--muted-foreground)]">{metaLine}</p>
         </button>
 
-        <div className="flex shrink-0 items-center gap-0.5 rounded-md bg-[var(--card)] px-0.5 py-0.5 ring-1 ring-[var(--border)] max-md:opacity-100 md:opacity-90">
+        <div className="flex shrink-0 items-center gap-0.5 rounded-md px-0.5 py-0.5 max-md:opacity-100 md:opacity-55 md:transition-opacity md:group-hover:opacity-100 md:group-focus-within:opacity-100">
           <button
             type="button"
             onClick={onToggleExpanded}
-            className="rounded p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] active:scale-90"
+            className={cn(
+              "rounded p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] active:scale-90",
+              expanded && "bg-[var(--accent)] text-[var(--foreground)]",
+            )}
             title={expanded ? "Collapse" : "Expand"}
             aria-label={expanded ? "Collapse summary entry" : "Expand summary entry"}
           >
@@ -1145,7 +1240,7 @@ function SummaryEntryRow({
       </div>
 
       {expanded && (
-        <div className="border-t border-[var(--border)] px-2.5 pb-2.5 pt-2">
+        <div className="border-t border-[var(--border)]/60 px-2.5 pb-2.5 pt-2">
           {editing && draftEntry ? (
             <SummaryEntryEditor
               entry={draftEntry}
@@ -1156,7 +1251,7 @@ function SummaryEntryRow({
               onSave={onSaveEdit}
             />
           ) : (
-            <div className="space-y-3 rounded-md bg-[var(--card)]/45 p-2.5 ring-1 ring-[var(--border)]">
+            <div className="space-y-3 px-0.5 py-0.5">
               {parseSummarySections(entry.content).map((section, sectionIndex) => (
                 <SummaryReadableSection
                   key={`${entry.id}-${section.title ?? "summary"}-${sectionIndex}`}
@@ -1182,8 +1277,13 @@ interface SummaryEntryEditorProps {
 }
 
 function SummaryEntryEditor({ entry, textareaRef, mutationPending, onChange, onCancel, onSave }: SummaryEntryEditorProps) {
+  const metaLine = getSummaryEntryMetaLine(entry);
   return (
     <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[0.625rem] text-[var(--muted-foreground)]">
+        <span className="min-w-0 truncate">{metaLine || "Manual summary"}</span>
+        <span>{entry.enabled ? "Active" : "Inactive"}</span>
+      </div>
       <input
         value={entry.title}
         onChange={(event) => onChange({ ...entry, title: event.target.value })}
@@ -1200,7 +1300,9 @@ function SummaryEntryEditor({ entry, textareaRef, mutationPending, onChange, onC
         className="max-h-64 min-h-36 w-full resize-y rounded-md bg-[var(--card)] p-2.5 text-xs leading-relaxed text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
       />
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <SummaryTokenBadge tokens={estimateChatSummaryTokens(entry.content)} />
+        <span className="text-[0.625rem] text-[var(--muted-foreground)]">
+          ~{formatTokenCount(estimateChatSummaryTokens(entry.content))} tokens
+        </span>
         <div className="flex justify-end gap-1.5">
           <button
             type="button"
@@ -1222,33 +1324,6 @@ function SummaryEntryEditor({ entry, textareaRef, mutationPending, onChange, onC
       </div>
     </div>
   );
-}
-
-function SummaryEntryMetaChips({ entry }: { entry: ChatSummaryEntry }) {
-  const sourceLabel = getSummaryEntrySourceLabel(entry);
-  return (
-    <div className="mt-1 flex flex-wrap gap-1">
-      {sourceLabel && <SummaryMetaChip>{sourceLabel}</SummaryMetaChip>}
-      {entry.messageCount && entry.sourceMode !== "last" && (
-        <SummaryMetaChip>
-          {entry.messageCount} {entry.messageCount === 1 ? "message" : "messages"}
-        </SummaryMetaChip>
-      )}
-      <SummaryTokenBadge tokens={entry.tokenEstimate} />
-    </div>
-  );
-}
-
-function SummaryMetaChip({ children }: { children: ReactNode }) {
-  return (
-    <span className="rounded-full bg-[var(--card)] px-1.5 py-0.5 text-[0.5625rem] font-medium text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
-      {children}
-    </span>
-  );
-}
-
-function SummaryTokenBadge({ tokens }: { tokens: number }) {
-  return <SummaryMetaChip>~{formatTokenCount(tokens)} tokens</SummaryMetaChip>;
 }
 
 function SummaryEntryOriginIcon({ entry }: { entry: ChatSummaryEntry }) {
