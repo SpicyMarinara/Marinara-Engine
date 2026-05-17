@@ -653,7 +653,7 @@ function normalizeSummaryInjectionMode(value: unknown): "full" | "semantic" | "f
 function normalizeSummaryRecallCount(value: unknown): number {
   const numeric = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
   if (!Number.isFinite(numeric)) return 3;
-  return Math.max(1, Math.min(5, Math.trunc(numeric)));
+  return Math.max(1, Math.min(10, Math.trunc(numeric)));
 }
 
 function normalizeSummaryRecallStrictness(value: unknown): "conservative" | "balanced" | "broad" {

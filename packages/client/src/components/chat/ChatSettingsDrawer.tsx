@@ -1537,9 +1537,10 @@ export function ChatSettingsDrawer({
         : "balanced";
     const recallCount =
       typeof metadata.summaryRecallCount === "number" && Number.isFinite(metadata.summaryRecallCount)
-        ? Math.max(1, Math.min(5, Math.trunc(metadata.summaryRecallCount)))
+        ? Math.max(1, Math.min(10, Math.trunc(metadata.summaryRecallCount)))
         : 3;
     const semanticEnabled = mode === "semantic" || mode === "full_and_semantic";
+    const showRecallCountWarning = recallCount > 5;
     return (
       <div className="space-y-3">
         <div className="grid grid-cols-1 gap-1.5">
@@ -1565,8 +1566,12 @@ export function ChatSettingsDrawer({
         </div>
         {semanticEnabled && (
           <div className="space-y-2 rounded-lg bg-[var(--secondary)]/60 p-2.5 ring-1 ring-[var(--border)]">
-            <label className="block text-[0.6875rem] font-medium text-[var(--muted-foreground)]">
-              Recall strictness
+            <label className="flex items-center gap-1.5 text-[0.6875rem] font-medium text-[var(--muted-foreground)]">
+              <span>Recall strictness</span>
+              <HelpTooltip
+                size="0.625rem"
+                text="Controls how loosely Marinara matches summary entries to the latest message. Conservative recalls only close matches. Balanced is the default. Broad can find more distant connections, but may pull in less relevant notes."
+              />
             </label>
             <div className="grid grid-cols-3 gap-1">
               {["conservative", "balanced", "broad"].map((option) => (
@@ -1591,12 +1596,20 @@ export function ChatSettingsDrawer({
             <input
               type="range"
               min={1}
-              max={5}
+              max={10}
               value={recallCount}
               onChange={(e) => updateMeta.mutate({ id: chat.id, summaryRecallCount: Number(e.target.value) })}
               className="w-full accent-[var(--primary)]"
             />
             <div className="text-right text-[0.625rem] text-[var(--muted-foreground)]">{recallCount}</div>
+            {showRecallCountWarning && (
+              <div className="flex items-start gap-1.5 rounded-md bg-amber-400/10 px-2 py-1.5 ring-1 ring-amber-400/20">
+                <AlertTriangle size="0.75rem" className="mt-[0.125rem] shrink-0 text-amber-400/80" />
+                <p className="text-[0.625rem] leading-snug text-amber-400/80">
+                  Recalling this many summaries can fill the prompt quickly and leave less room for recent chat.
+                </p>
+              </div>
+            )}
           </div>
         )}
       </div>
