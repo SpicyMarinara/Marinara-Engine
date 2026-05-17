@@ -14,6 +14,7 @@ import { lorebookKeys } from "./use-lorebooks";
 import type {
   Chat,
   ChatMemoryChunk,
+  ChatSummaryEntry,
   ConversationNote,
   Message,
   MessageSwipe,
@@ -482,6 +483,60 @@ export function useUpdateChatSummaries() {
   });
 }
 
+export type SummaryEntryOperation =
+  | { operation: "replace"; entry: Partial<ChatSummaryEntry> & { id: string; content: string } }
+  | { operation: "delete"; entryId: string }
+  | { operation: "toggle"; entryId: string; enabled: boolean };
+
+function useSummaryEntryMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ chatId, ...body }: { chatId: string } & SummaryEntryOperation) =>
+      api.patch<Chat>(`/chats/${chatId}/summary-entries`, body),
+    onSuccess: (data, vars) => {
+      if (data) {
+        qc.setQueryData(chatKeys.detail(vars.chatId), data);
+      } else {
+        qc.invalidateQueries({ queryKey: chatKeys.detail(vars.chatId) });
+      }
+      qc.invalidateQueries({ queryKey: chatKeys.list() });
+      qc.invalidateQueries({ queryKey: lorebookKeys.active(vars.chatId) });
+    },
+  });
+}
+
+export function useUpdateSummaryEntry() {
+  const mutation = useSummaryEntryMutation();
+  return {
+    ...mutation,
+    mutate: (input: { chatId: string; entry: Partial<ChatSummaryEntry> & { id: string; content: string } }) =>
+      mutation.mutate({ ...input, operation: "replace" }),
+    mutateAsync: (input: { chatId: string; entry: Partial<ChatSummaryEntry> & { id: string; content: string } }) =>
+      mutation.mutateAsync({ ...input, operation: "replace" }),
+  };
+}
+
+export function useDeleteSummaryEntry() {
+  const mutation = useSummaryEntryMutation();
+  return {
+    ...mutation,
+    mutate: (input: { chatId: string; entryId: string }) => mutation.mutate({ ...input, operation: "delete" }),
+    mutateAsync: (input: { chatId: string; entryId: string }) =>
+      mutation.mutateAsync({ ...input, operation: "delete" }),
+  };
+}
+
+export function useToggleSummaryEntry() {
+  const mutation = useSummaryEntryMutation();
+  return {
+    ...mutation,
+    mutate: (input: { chatId: string; entryId: string; enabled: boolean }) =>
+      mutation.mutate({ ...input, operation: "toggle" }),
+    mutateAsync: (input: { chatId: string; entryId: string; enabled: boolean }) =>
+      mutation.mutateAsync({ ...input, operation: "toggle" }),
+  };
+}
+
 /** Backfill missing conversation day/week summaries via the LLM. */
 export function useBackfillConversationSummaries() {
   const qc = useQueryClient();
@@ -806,7 +861,12 @@ export function useGenerateSummary() {
       rangeEndIndex,
       promptTemplateId,
     }: GenerateSummaryInput) =>
-      api.post<{ summary: string; messageIds: string[] }>(`/chats/${chatId}/generate-summary`, {
+      api.post<{
+        summary: string | null;
+        entry: ChatSummaryEntry | null;
+        entries: ChatSummaryEntry[];
+        messageIds: string[];
+      }>(`/chats/${chatId}/generate-summary`, {
         contextSize,
         rangeStartMessageId,
         rangeEndMessageId,

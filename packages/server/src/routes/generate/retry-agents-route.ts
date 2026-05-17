@@ -2004,7 +2004,8 @@ export async function registerRetryAgentsRoute(app: FastifyInstance) {
         };
       }
 
-      const supportsHiddenFromAI = chat.mode === "roleplay" || chat.mode === "visual_novel";
+      const supportsHiddenFromAI =
+        chat.mode === "conversation" || chat.mode === "roleplay" || chat.mode === "visual_novel";
       if (supportsHiddenFromAI) {
         recentMessages = recentMessages.filter((message: any) => !isMessageHiddenFromAI(message));
         if (preGenerationRecentMessages) {

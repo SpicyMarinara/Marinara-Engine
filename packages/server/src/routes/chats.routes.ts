@@ -8,14 +8,24 @@ import {
   LOCAL_SIDECAR_CONNECTION_ID,
   createChatSchema,
   createMessageSchema,
+  appendChatSummaryEntryToMetadata,
+  compileChatSummaryEntries,
+  createChatSummaryEntry,
   getDefaultAgentPrompt,
   markAutonomousUnreadSchema,
   nameToXmlTag,
+  normalizeChatSummaryEntries,
   resolveMacros,
   summariesPatchSchema,
   coerceGameStateTextValue,
 } from "@marinara-engine/shared";
-import type { CharacterData, ChatMemoryChunk, GameNpc, LorebookEntryTimingState } from "@marinara-engine/shared";
+import type {
+  CharacterData,
+  ChatMemoryChunk,
+  ChatSummaryEntry,
+  GameNpc,
+  LorebookEntryTimingState,
+} from "@marinara-engine/shared";
 import { createChatsStorage } from "../services/storage/chats.storage.js";
 import { createCharactersStorage } from "../services/storage/characters.storage.js";
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
@@ -70,6 +80,10 @@ function sanitizeChatGameNpcAvatars<T extends { metadata?: unknown }>(chat: T): 
     metadata: typeof chat.metadata === "string" ? JSON.stringify(sanitizedMetadata) : sanitizedMetadata,
   };
 }
+type SummaryEntriesPatchBody =
+  | { operation: "replace"; entry: Partial<ChatSummaryEntry> & { id: string; content: string } }
+  | { operation: "delete"; entryId: string }
+  | { operation: "toggle"; entryId: string; enabled: boolean };
 
 async function loadLatestChatGameSnapshot(
   app: FastifyInstance,
@@ -408,6 +422,78 @@ export async function chatsRoutes(app: FastifyInstance) {
       weekSummaries: { ...(existing.weekSummaries ?? {}), ...(parsed.data.weekSummaries ?? {}) },
     };
     return storage.updateMetadata(req.params.id, merged);
+  });
+
+  // Update rolling summary entries without replacing unrelated chat metadata.
+  app.patch<{ Params: { id: string }; Body: SummaryEntriesPatchBody }>("/:id/summary-entries", async (req, reply) => {
+    const body = req.body;
+    if (!body || typeof body !== "object" || !("operation" in body)) {
+      return reply.status(400).send({ error: "Invalid summary entry operation" });
+    }
+    if (body.operation === "replace") {
+      if (
+        !body.entry ||
+        typeof body.entry.id !== "string" ||
+        !body.entry.id.trim() ||
+        typeof body.entry.content !== "string" ||
+        !body.entry.content.trim()
+      ) {
+        return reply.status(400).send({ error: "replace requires entry.id and entry.content" });
+      }
+    } else if (body.operation === "delete") {
+      if (typeof body.entryId !== "string" || !body.entryId.trim()) {
+        return reply.status(400).send({ error: "delete requires entryId" });
+      }
+    } else if (body.operation === "toggle") {
+      if (typeof body.entryId !== "string" || !body.entryId.trim() || typeof body.enabled !== "boolean") {
+        return reply.status(400).send({ error: "toggle requires entryId and enabled" });
+      }
+    } else {
+      return reply.status(400).send({ error: "Unsupported summary entry operation" });
+    }
+
+    const updated = await storage.patchMetadata(req.params.id, (freshMeta) => {
+      const entries = normalizeChatSummaryEntries(freshMeta.summaryEntries, {
+        legacySummary: typeof freshMeta.summary === "string" ? freshMeta.summary : null,
+      });
+      let nextEntries: ChatSummaryEntry[];
+
+      if (body.operation === "replace") {
+        const now = new Date().toISOString();
+        const existing = entries.find((entry) => entry.id === body.entry.id);
+        const replacement = createChatSummaryEntry(
+          {
+            ...existing,
+            ...body.entry,
+            id: body.entry.id,
+            content: body.entry.content,
+            updatedAt: now,
+            createdAt: existing?.createdAt ?? body.entry.createdAt ?? now,
+          },
+          { createId: newId, now },
+        );
+        nextEntries = entries.some((entry) => entry.id === replacement.id)
+          ? entries.map((entry) => (entry.id === replacement.id ? replacement : entry))
+          : [...entries, replacement];
+      } else if (body.operation === "delete") {
+        nextEntries = entries.filter((entry) => entry.id !== body.entryId);
+      } else if (body.operation === "toggle") {
+        const now = new Date().toISOString();
+        nextEntries = entries.map((entry) =>
+          entry.id === body.entryId ? { ...entry, enabled: body.enabled, updatedAt: now } : entry,
+        );
+      } else {
+        nextEntries = entries;
+      }
+
+      return {
+        summaryEntries: nextEntries,
+        summary: compileChatSummaryEntries(nextEntries),
+      };
+    });
+
+    if (!updated) return reply.status(404).send({ error: "Chat not found" });
+    return updated;
   });
 
   // Generate any missing conversation day/week summaries on demand. This uses
@@ -2055,6 +2141,8 @@ export async function chatsRoutes(app: FastifyInstance) {
     // Hidden-from-AI messages are excluded from summary generation even when
     // they fall inside the selected range.
     const allMessages = await storage.listMessages(req.params.id);
+    let selectedRangeStartIndex: number | undefined;
+    let selectedRangeEndIndex: number | undefined;
     const selectedMessages = hasRange
       ? (() => {
           const startIndex = hasRangeByIndex
@@ -2075,6 +2163,8 @@ export async function chatsRoutes(app: FastifyInstance) {
           if (count > 200) {
             return { error: "Summary ranges cannot include more than 200 messages" as const };
           }
+          selectedRangeStartIndex = from + 1;
+          selectedRangeEndIndex = to + 1;
           return allMessages.slice(from, to + 1).filter((message) => !isMessageHiddenFromAI(message));
         })()
       : allMessages.slice(-contextSize).filter((message) => !isMessageHiddenFromAI(message));
@@ -2145,18 +2235,47 @@ export async function chatsRoutes(app: FastifyInstance) {
       summaryText = result.content.trim();
     }
 
-    // Append to the latest summary without replacing concurrent metadata changes.
-    let combined = summaryText;
+    // Append as a structured entry and recompile the prompt-facing summary
+    // without replacing concurrent metadata changes.
+    let combined: string | null = summaryText;
+    let createdEntry: ChatSummaryEntry | null = null;
+    let summaryEntries: ChatSummaryEntry[] = [];
     const updatedChat = await storage.patchMetadata(req.params.id, (freshMeta) => {
-      const existing = ((freshMeta.summary as string) ?? "").trim();
-      combined = existing ? `${existing}\n\n${summaryText}` : summaryText;
+      const now = new Date().toISOString();
+      const result = appendChatSummaryEntryToMetadata(
+        freshMeta,
+        {
+          kind: "rolling",
+          origin: "manual",
+          sourceMode: hasRange ? "range" : "last",
+          content: summaryText,
+          enabled: true,
+          messageCount: selectedMessages.length,
+          rangeStartIndex: selectedRangeStartIndex,
+          rangeEndIndex: selectedRangeEndIndex,
+          messageIds: selectedMessages.map((message) => message.id),
+          promptTemplateId: requestedPromptTemplateId,
+          createdAt: now,
+          updatedAt: now,
+        },
+        { createId: newId, now },
+      );
+      combined = result.summary;
+      createdEntry = result.entry;
+      summaryEntries = result.entries;
       return {
-        summary: combined,
+        summary: result.summary,
+        summaryEntries: result.entries,
         ...(!hasRange && typeof body.contextSize !== "undefined" ? { summaryContextSize: contextSize } : {}),
       };
     });
     if (!updatedChat) return reply.status(404).send({ error: "Chat not found" });
 
-    return { summary: combined, messageIds: selectedMessages.map((message) => message.id) };
+    return {
+      summary: combined,
+      entry: createdEntry,
+      entries: summaryEntries,
+      messageIds: selectedMessages.map((message) => message.id),
+    };
   });
 }
