@@ -1332,7 +1332,10 @@ export const ChatMessage = memo(function ChatMessage({
     />
   ) : (
     <>
-      <div className={cn("mari-message-content break-words", !isHtmlContent && "whitespace-pre-wrap")}>
+      <div
+        className={cn("mari-message-content break-words", !isHtmlContent && "whitespace-pre-wrap")}
+        style={messageTextStyle}
+      >
         {isStreaming && !message.content ? (
           <div className="mari-message-typing flex items-center gap-1 py-0.5">
             <span className="h-2 w-2 animate-bounce rounded-full bg-blue-400/60 [animation-delay:0ms]" />
@@ -2134,7 +2137,10 @@ export const ChatMessage = memo(function ChatMessage({
               />
             ) : (
               <>
-                <div className={cn("mari-message-content break-words", !isHtmlContent && "whitespace-pre-wrap")}>
+                <div
+                  className={cn("mari-message-content break-words", !isHtmlContent && "whitespace-pre-wrap")}
+                  style={messageTextStyle}
+                >
                   {isStreaming && !message.content ? (
                     <div className="mari-message-typing flex items-center gap-1 py-0.5">
                       <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--muted-foreground)]/60 [animation-delay:0ms]" />
