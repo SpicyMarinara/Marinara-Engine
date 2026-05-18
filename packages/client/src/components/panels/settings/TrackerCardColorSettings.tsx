@@ -481,7 +481,8 @@ export function TrackerCardColorSettings() {
       draftChangedRef.current = false;
       setDraftConfig(cleanConfig);
       setSaveState("saved");
-    } catch {
+    } catch (error) {
+      console.error("[TrackerCardColorSettings] Save failed:", error);
       draftChangedRef.current = true;
       setSaveState("error");
     }

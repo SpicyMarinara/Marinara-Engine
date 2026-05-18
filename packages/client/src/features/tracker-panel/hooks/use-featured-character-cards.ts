@@ -10,7 +10,9 @@ export function useFeaturedCharacterCards({
   featuredCharacterCardKeys: Set<string>;
 }) {
   const updateChatMetadata = useUpdateChatMetadata();
-  const [featuredCharacterCards, setFeaturedCharacterCards] = useState<Set<string>>(() => new Set());
+  const [featuredCharacterCards, setFeaturedCharacterCards] = useState<Set<string>>(
+    () => new Set(featuredCharacterCardKeys),
+  );
 
   useEffect(() => {
     setFeaturedCharacterCards(new Set(featuredCharacterCardKeys));
