@@ -429,8 +429,13 @@ export function isProviderLocalUrlsEnabled() {
 }
 
 export function getEmbeddingRequestTimeoutMs() {
-  const parsed = Number.parseInt(process.env.EMBEDDING_TIMEOUT_MS ?? "", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 300_000;
+  const defaultTimeoutMs = 300_000;
+  const maxTimeoutMs = 2_147_483_647;
+  const raw = normalizeEnvValue(process.env.EMBEDDING_TIMEOUT_MS);
+  if (!raw || !/^\d+$/.test(raw)) return defaultTimeoutMs;
+
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? Math.min(parsed, maxTimeoutMs) : defaultTimeoutMs;
 }
 
 export function isImageLocalUrlsEnabled() {
