@@ -237,6 +237,21 @@ if defined RELEASE_COMMIT if /I not "!TARGET_HEAD!"=="%RELEASE_COMMIT%" (
     echo  [WARN] Release %RELEASE_TAG% resolved to !TARGET_HEAD!, not the installer-expected %RELEASE_COMMIT%.
     echo         Continuing with the fetched release tag because hotfix tags may move.
 )
+git cat-file -e "!TARGET_HEAD!" >nul 2>&1
+if errorlevel 1 (
+    echo  [..] Release commit is missing locally, fetching main history...
+    git fetch --quiet --force origin "+refs/heads/main:refs/remotes/origin/main"
+    git cat-file -e "!TARGET_HEAD!" >nul 2>&1
+    if errorlevel 1 (
+        echo  [..] Fetching the release commit directly...
+        git fetch --quiet --force origin "!TARGET_HEAD!"
+    )
+    git cat-file -e "!TARGET_HEAD!" >nul 2>&1
+    if errorlevel 1 (
+        set "INSTALL_ERROR=Fetched release %RELEASE_TAG%, but the target commit was not available locally."
+        goto :fatal
+    )
+)
 if /I "!OLD_HEAD!"=="!TARGET_HEAD!" (
     echo  [OK] Repository already up to date
     goto :deps
@@ -254,7 +269,7 @@ if "!DIRTY!"=="1" (
     if "!STASHED!"=="1" for /f "tokens=*" %%i in ('git stash list -1 --format^=%%gd 2^>nul') do set "STASH_REF=%%i"
 )
 
-git checkout --detach "!TARGET_HEAD!"
+git checkout "!TARGET_HEAD!"
 if errorlevel 1 (
     if "!STASHED!"=="1" call :restore_stashed_changes
     set "INSTALL_ERROR=Failed to check out release %RELEASE_TAG%."

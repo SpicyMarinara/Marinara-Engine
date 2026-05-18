@@ -380,7 +380,32 @@ Please restart your computer and run this installer again."
       DetailPrint "Warning: ${RELEASE_TAG} resolved to $3, not the installer-expected ${RELEASE_COMMIT}. Continuing with fetched tag."
     ${EndIf}
 
-    nsExec::ExecToLog 'git checkout --detach $3'
+    nsExec::ExecToLog 'cmd /c git cat-file -e $3 >nul 2>&1'
+    Pop $0
+    ${If} $0 != 0
+      DetailPrint "Release commit is missing locally — fetching main history..."
+      nsExec::ExecToLog 'git fetch --quiet --force origin +refs/heads/main:refs/remotes/origin/main'
+      Pop $0
+      nsExec::ExecToLog 'cmd /c git cat-file -e $3 >nul 2>&1'
+      Pop $0
+      ${If} $0 != 0
+        DetailPrint "Fetching the release commit directly..."
+        nsExec::ExecToLog 'git fetch --quiet --force origin $3'
+        Pop $0
+      ${EndIf}
+      nsExec::ExecToLog 'cmd /c git cat-file -e $3 >nul 2>&1'
+      Pop $0
+      ${If} $0 != 0
+        ${If} $5 == "1"
+          nsExec::ExecToLog 'git stash apply -q'
+          Pop $1
+        ${EndIf}
+        MessageBox MB_OK|MB_ICONSTOP "Fetched release ${RELEASE_TAG}, but the target commit was not available locally.$\r$\n$\r$\nPlease check your internet connection and run the installer again."
+        Abort
+      ${EndIf}
+    ${EndIf}
+
+    nsExec::ExecToLog 'git checkout $3'
     Pop $0
     ${If} $0 != 0
       ${If} $5 == "1"

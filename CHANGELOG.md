@@ -15,6 +15,7 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 
 ### Fixed
 
+- Fixed Windows installer updates for existing shallow release checkouts by fetching the resolved release commit before checkout.
 - Fixed mobile Game Mode character and party controls so sheet actions stay compact, long character names can remain accessible, and crowded party rosters collapse into a scrollable mobile party picker.
 - Fixed mobile Game Mode choice prompts so large choice sets stay readable and scroll inside the available play area instead of squishing buttons or pushing custom input off-screen.
 - Fixed mobile Game Mode side dialogue voice playback so voiced dialogue cues can play when the side line first appears.
