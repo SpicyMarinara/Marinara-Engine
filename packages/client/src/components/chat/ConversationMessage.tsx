@@ -364,8 +364,15 @@ export const ConversationMessage = memo(function ConversationMessage({
   const hasInput = useChatStore((s) => s.currentInput.trim().length > 0);
   const guideGenerations = useUIStore((s) => s.guideGenerations);
   const chatFontSize = useUIStore((s) => s.chatFontSize);
+  const chatFontColor = useUIStore((s) => s.chatFontColor);
   const showMessageNumbers = useUIStore((s) => s.showMessageNumbers);
-  const messageTextStyle = useMemo<CSSProperties>(() => ({ fontSize: `${chatFontSize}px` }), [chatFontSize]);
+  const messageTextStyle = useMemo<CSSProperties>(
+    () => ({
+      fontSize: `${chatFontSize}px`,
+      ...(chatFontColor ? { color: chatFontColor } : {}),
+    }),
+    [chatFontSize, chatFontColor],
+  );
   const isGuided = guideGenerations && hasInput;
   const regenerateButtonTitle = isGuided ? "Regenerate (guided)" : "Regenerate";
   const regenerateGuidedClass = isGuided
