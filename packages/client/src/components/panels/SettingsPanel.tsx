@@ -80,6 +80,7 @@ import { TrackerCardColorSettings } from "./settings/TrackerCardColorSettings";
 import { DraftNumberInput } from "../ui/DraftNumberInput";
 import { ExportFormatDialog, type ExportFormatChoice } from "../ui/ExportFormatDialog";
 import { inspectCharacterFilesForEmbeddedLorebooks } from "../../lib/character-import";
+import { showConfirmDialog } from "../../lib/app-dialogs";
 
 type CustomFontFace = {
   filename: string;
@@ -2895,6 +2896,12 @@ type ProfileImportStats = {
   files?: number;
 };
 
+type ProfileImportWarning = {
+  type?: string;
+  path?: string;
+  message?: string;
+};
+
 type ProfileImportProgressData = {
   phase: string;
   label: string;
@@ -2911,13 +2918,23 @@ type ProfileImportProgressState = {
   startedAt: number;
   elapsedSeconds: number;
   imported?: ProfileImportStats;
+  warnings?: ProfileImportWarning[];
   error?: string;
 };
 
 type ProfileImportStreamEvent =
   | { type: "started"; data?: { label?: string; totalItems?: number } }
   | { type: "progress"; data?: ProfileImportProgressData }
-  | { type: "done"; data?: { success?: boolean; imported?: ProfileImportStats; error?: string; message?: string } }
+  | {
+      type: "done";
+      data?: {
+        success?: boolean;
+        imported?: ProfileImportStats;
+        warnings?: ProfileImportWarning[];
+        error?: string;
+        message?: string;
+      };
+    }
   | { type: "error"; data?: string | { error?: string; message?: string } };
 
 function formatProfileImportDuration(seconds: number) {
@@ -2971,6 +2988,79 @@ function getProfileImportErrorMessage(data: unknown) {
     if (typeof record.error === "string") return record.error;
   }
   return "Unknown error";
+}
+
+function normalizeProfileImportWarnings(warnings: unknown): ProfileImportWarning[] {
+  if (!Array.isArray(warnings)) return [];
+  return warnings.flatMap((warning) => {
+    if (!warning || typeof warning !== "object") return [];
+    const record = warning as { type?: unknown; path?: unknown; message?: unknown };
+    const path = typeof record.path === "string" ? record.path : undefined;
+    const message = typeof record.message === "string" ? record.message : undefined;
+    const type = typeof record.type === "string" ? record.type : undefined;
+    if (!path && !message) return [];
+    return [{ type, path, message }];
+  });
+}
+
+function formatProfileImportWarningSummary(warnings: ProfileImportWarning[]) {
+  const missingAssets = warnings.filter((warning) => warning.type === "missing_asset" || warning.path);
+  if (missingAssets.length > 0) {
+    return `${missingAssets.length} asset file${missingAssets.length === 1 ? "" : "s"} missing from the ZIP. Imported the rest.`;
+  }
+  return `${warnings.length} import warning${warnings.length === 1 ? "" : "s"}.`;
+}
+
+function formatProfileImportWarningDetails(warnings: ProfileImportWarning[]) {
+  const paths = warnings.map((warning) => warning.path).filter((path): path is string => !!path);
+  if (paths.length === 0) return warnings[0]?.message ?? "";
+  const visible = paths.slice(0, 3).join(", ");
+  const extra = paths.length > 3 ? `, +${paths.length - 3} more` : "";
+  return `Missing: ${visible}${extra}`;
+}
+
+function getDownloadFilename(res: Response, fallback: string) {
+  const disposition = res.headers.get("Content-Disposition");
+  const match = disposition?.match(/filename="?([^";\n]+)"?/);
+  return match?.[1] ? decodeURIComponent(match[1]) : fallback;
+}
+
+type ProfileExportFailure = {
+  code?: string;
+  message: string;
+  fallbackFormat?: string;
+};
+
+async function readProfileExportFailure(res: Response, fallback: string): Promise<ProfileExportFailure> {
+  const contentType = res.headers.get("content-type") ?? "";
+
+  try {
+    if (contentType.includes("application/json")) {
+      const payload = (await res.json()) as {
+        code?: unknown;
+        error?: unknown;
+        message?: unknown;
+        fallbackFormat?: unknown;
+      };
+      const message = typeof payload.message === "string" ? payload.message : payload.error;
+      return {
+        code: typeof payload.code === "string" ? payload.code : undefined,
+        fallbackFormat: typeof payload.fallbackFormat === "string" ? payload.fallbackFormat : undefined,
+        message: typeof message === "string" && message.trim() ? message : fallback,
+      };
+    }
+
+    const text = (await res.text()).trim();
+    return { message: text ? text.slice(0, 500) : fallback };
+  } catch {
+    return { message: fallback };
+  }
+}
+
+async function isZipFile(file: File) {
+  if (file.size < 2) return false;
+  const head = new Uint8Array(await file.slice(0, 2).arrayBuffer());
+  return head[0] === 0x50 && head[1] === 0x4b;
 }
 
 async function* readProfileImportStream(res: Response): AsyncGenerator<ProfileImportStreamEvent> {
@@ -3078,39 +3168,46 @@ function ImportSettings() {
       elapsedSeconds: 0,
     });
     try {
-      const text = await file.text();
-      const envelope = JSON.parse(text) as { type?: string };
-      if (envelope.type !== "marinara_profile") {
-        setProfileImportProgress({
-          status: "error",
-          label: "Profile import failed",
-          completedItems: 0,
-          totalItems: 1,
-          startedAt,
-          elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000),
-          error: "Not a valid profile export file.",
-        });
-        toast.error("Not a valid profile export file.");
-        return;
+      const isZip = await isZipFile(file);
+      let body: BodyInit;
+      if (isZip) {
+        const form = new FormData();
+        form.append("file", file, file.name);
+        body = form;
+      } else {
+        const text = await file.text();
+        const envelope = JSON.parse(text) as { type?: string };
+        if (envelope.type !== "marinara_profile") {
+          setProfileImportProgress({
+            status: "error",
+            label: "Profile import failed",
+            completedItems: 0,
+            totalItems: 1,
+            startedAt,
+            elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000),
+            error: "Not a valid profile export file.",
+          });
+          toast.error("Not a valid profile export file.");
+          return;
+        }
+        body = text;
       }
       setProfileImportProgress((current) =>
         current
           ? {
               ...current,
               status: "starting",
-              label: "Starting profile import",
+              label: isZip ? "Uploading profile archive" : "Starting profile import",
               elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000),
             }
           : current,
       );
-      const res = await fetch("/api/backup/import-profile", {
+      const res = await api.raw("/backup/import-profile", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
           Accept: "text/event-stream",
-          ...getAdminSecretHeader(),
         },
-        body: text,
+        body,
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
@@ -3147,26 +3244,33 @@ function ImportSettings() {
           if (event.data?.success === false) throw new Error(event.data.error ?? event.data.message ?? "Unknown error");
           qc.invalidateQueries();
           const imported = event.data?.imported;
+          const warnings = normalizeProfileImportWarnings(event.data?.warnings);
           const summary = formatProfileImportStats(imported);
           setProfileImportProgress((current) => {
             const totalItems = Math.max(1, current?.totalItems ?? 1);
             return {
               status: "success",
-              label: "Profile import complete",
+              label: warnings.length > 0 ? "Profile import complete with missing assets" : "Profile import complete",
               completedItems: totalItems,
               totalItems,
               startedAt,
               elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000),
               imported,
+              warnings,
             };
           });
-          toast.success(summary ? `Imported: ${summary}` : "Profile imported.");
+          if (warnings.length > 0) {
+            const warningSummary = formatProfileImportWarningSummary(warnings);
+            toast.warning(summary ? `Imported: ${summary}. ${warningSummary}` : warningSummary);
+          } else {
+            toast.success(summary ? `Imported: ${summary}` : "Profile imported.");
+          }
         }
       }
     } catch (err) {
       const message =
         err instanceof SyntaxError
-          ? "Import failed. Make sure this is a valid profile JSON file."
+          ? "Import failed. Make sure this is a valid profile JSON or ZIP file."
           : `Import failed: ${err instanceof Error ? err.message : "network/server error"}`;
       setProfileImportProgress({
         status: "error",
@@ -3186,7 +3290,7 @@ function ImportSettings() {
     <div className="flex flex-col gap-3">
       <div className="text-xs text-[var(--muted-foreground)]">
         Import data from Marinara exports, SillyTavern, or other tools. Full profile imports also restore synced custom
-        themes.
+        themes and profile archive assets.
       </div>
 
       {/* Profile import */}
@@ -3197,10 +3301,10 @@ function ImportSettings() {
         )}
       >
         {profileImportBusy ? <Loader2 size="1rem" className="animate-spin" /> : <Download size="1rem" />}
-        {profileImportBusy ? "Importing Profile..." : "Import Profile (JSON)"}
+        {profileImportBusy ? "Importing Profile..." : "Import Profile (JSON/ZIP)"}
         <input
           type="file"
-          accept=".json"
+          accept=".json,.zip,application/json,application/zip"
           onChange={handleProfileImport}
           disabled={profileImportBusy}
           className="hidden"
@@ -3215,14 +3319,18 @@ function ImportSettings() {
             "flex flex-col gap-2 rounded-lg border px-3 py-2 text-xs",
             profileImportProgress.status === "error"
               ? "border-[var(--destructive)]/40 bg-[var(--destructive)]/10 text-[var(--destructive)]"
-              : profileImportProgress.status === "success"
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
-                : "border-emerald-500/30 bg-emerald-500/10 text-[var(--foreground)]",
+              : profileImportProgress.status === "success" && profileImportProgress.warnings?.length
+                ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200"
+                : profileImportProgress.status === "success"
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
+                  : "border-emerald-500/30 bg-emerald-500/10 text-[var(--foreground)]",
           )}
         >
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2">
-              {profileImportProgress.status === "success" ? (
+              {profileImportProgress.status === "success" && profileImportProgress.warnings?.length ? (
+                <AlertTriangle size="0.875rem" className="shrink-0" />
+              ) : profileImportProgress.status === "success" ? (
                 <Check size="0.875rem" className="shrink-0" />
               ) : profileImportProgress.status === "error" ? (
                 <AlertTriangle size="0.875rem" className="shrink-0" />
@@ -3242,7 +3350,11 @@ function ImportSettings() {
                 <div
                   className={cn(
                     "h-full rounded-full transition-all duration-300",
-                    profileImportProgress.status === "success" ? "bg-emerald-500" : "bg-emerald-400",
+                    profileImportProgress.status === "success" && profileImportProgress.warnings?.length
+                      ? "bg-amber-500"
+                      : profileImportProgress.status === "success"
+                        ? "bg-emerald-500"
+                        : "bg-emerald-400",
                   )}
                   style={{ width: `${getProfileImportPercent(profileImportProgress)}%` }}
                 />
@@ -3262,6 +3374,16 @@ function ImportSettings() {
                   Imported so far: {formatProfileImportStats(profileImportProgress.imported)}
                 </div>
               )}
+              {profileImportProgress.warnings?.length ? (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[0.6875rem] text-amber-700 dark:text-amber-200">
+                  <div className="font-medium">{formatProfileImportWarningSummary(profileImportProgress.warnings)}</div>
+                  {formatProfileImportWarningDetails(profileImportProgress.warnings) && (
+                    <div className="mt-0.5 break-words text-amber-700/80 dark:text-amber-100/80">
+                      {formatProfileImportWarningDetails(profileImportProgress.warnings)}
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </>
           )}
 
@@ -3452,27 +3574,61 @@ function AdvancedSettings() {
     if (enabled) setQuickRepliesDrawerOpen(true);
   };
 
-  const handleExportProfile = async (format: ExportFormatChoice) => {
+  type ProfileExportFormat = "native" | "compatible" | "zip";
+  const profileExportFallbackNames: Record<ProfileExportFormat, string> = {
+    native: "marinara-profile.json",
+    compatible: "marinara-compatible-export.zip",
+    zip: "marinara-profile.zip",
+  };
+  const profileExportSuccessMessages: Record<ProfileExportFormat, string> = {
+    native: "Profile exported!",
+    compatible: "Compatible export created!",
+    zip: "Profile ZIP exported!",
+  };
+
+  const handleExportProfile = async (format: ProfileExportFormat) => {
     setExportingProfile(true);
     setExportProfileDialogOpen(false);
     try {
-      const res = await fetch(`/api/backup/export-profile?format=${format}`, {
-        headers: getAdminSecretHeader(),
-      });
-      if (!res.ok) throw new Error(await readSettingsResponseError(res, "Export failed"));
+      const res = await api.raw(`/backup/export-profile?format=${format}`);
+      if (!res.ok) {
+        const failure = await readProfileExportFailure(res, "Export failed");
+        if (
+          format === "native" &&
+          failure.code === "PROFILE_EXPORT_JSON_TOO_LARGE" &&
+          failure.fallbackFormat === "zip"
+        ) {
+          const confirmed = await showConfirmDialog({
+            title: "Export profile as ZIP?",
+            message: failure.message,
+            confirmLabel: "Export ZIP",
+            cancelLabel: "Cancel",
+          });
+          if (confirmed) {
+            await handleExportProfile("zip");
+          }
+          return;
+        }
+        throw new Error(failure.message);
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = format === "compatible" ? "marinara-compatible-export.zip" : "marinara-profile.json";
+      a.download = getDownloadFilename(res, profileExportFallbackNames[format]);
       a.click();
       URL.revokeObjectURL(url);
-      toast.success(format === "compatible" ? "Compatible export created!" : "Profile exported!");
+      toast.success(profileExportSuccessMessages[format]);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to export profile");
     } finally {
       setExportingProfile(false);
     }
+  };
+
+  const handleExportProfileChoice = (format: ExportFormatChoice) => {
+    if (format === "compatible-png") return;
+    void handleExportProfile(format);
   };
 
   const handleForceRefreshSpa = async () => {
@@ -3705,11 +3861,11 @@ function AdvancedSettings() {
       <ExportFormatDialog
         open={exportProfileDialogOpen}
         title="Export Profile"
-        description="Native creates a Marinara profile JSON for restoring your data in Marinara. Compatible creates a ZIP of folderless JSON files for other platforms."
-        nativeDescription="Keeps Marinara fields, lorebook folders, character/persona metadata, presets, agents, and themes for re-import."
+        description="Native creates a Marinara profile JSON for restoring your data in Marinara. If the JSON would be too large, Marinara will offer a profile ZIP instead."
+        nativeDescription="Keeps Marinara fields, lorebook folders, character/persona metadata, presets, agents, themes, and inline assets for re-import."
         compatibleDescription="Exports direct character JSON, simple persona JSON, and folderless lorebooks for other roleplay tools."
         onClose={() => setExportProfileDialogOpen(false)}
-        onSelect={handleExportProfile}
+        onSelect={handleExportProfileChoice}
       />
 
       <div className="text-xs text-[var(--muted-foreground)]">Advanced settings for power users.</div>
@@ -4086,7 +4242,7 @@ function AdvancedSettings() {
         <div className="flex items-center gap-1.5">
           <Download size="0.75rem" className="text-[var(--muted-foreground)]" />
           <span className="text-xs font-medium">Backup & Export</span>
-          <HelpTooltip text="Download a full backup as a .zip archive (storage snapshots + avatars, sprites, backgrounds, gallery, fonts, knowledge sources). The zip also includes marinara-profile.json for one-click restore through Import Profile (JSON). The raw folders are for manual recovery." />
+          <HelpTooltip text="Download a full backup as a .zip archive (storage snapshots + avatars, sprites, backgrounds, gallery, fonts, knowledge sources). Import Profile can restore the zip directly. The raw folders are for manual recovery." />
         </div>
         <button
           onClick={handleCreateBackup}
@@ -4118,7 +4274,7 @@ function AdvancedSettings() {
           ) : (
             <>
               <Download size="0.8125rem" />
-              Export Profile (JSON)
+              Export Profile
             </>
           )}
         </button>

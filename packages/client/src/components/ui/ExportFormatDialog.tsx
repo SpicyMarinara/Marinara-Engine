@@ -39,12 +39,13 @@ export function ExportFormatDialog({
       ? [{ id: "compatible-png" as const, label: "Compatible PNG Card", icon: ImageDown, description: pngDescription }]
       : []),
   ];
+  const gridColumns = options.length === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2";
 
   return (
     <Modal open={open} onClose={onClose} title={title} width="max-w-lg">
       <div className="space-y-4">
         <p className="text-xs leading-relaxed text-[var(--muted-foreground)]">{description}</p>
-        <div className={cn("grid gap-2", showPngOption ? "sm:grid-cols-3" : "sm:grid-cols-2")}>
+        <div className={cn("grid gap-2", gridColumns)}>
           {options.map((option) => {
             const Icon = option.icon;
             return (
