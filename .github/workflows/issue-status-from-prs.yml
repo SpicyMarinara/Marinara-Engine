@@ -3,6 +3,7 @@ name: Issue Status From Pull Requests
 on:
   pull_request_target:
     types: [opened, reopened, edited, synchronize, closed]
+    branches: [staging]
 
 concurrency:
   group: issue-status-from-pr-${{ github.event.pull_request.number }}
@@ -25,7 +26,7 @@ jobs:
                 color: '1d76db',
                 description: 'Has an open pull request targeting staging',
               },
-              staging: {
+              'fixed-in-staging': {
                 color: '0e8a16',
                 description: 'Already fixed in staging and is pending closure when staging is merged to main',
               },
@@ -172,7 +173,7 @@ jobs:
 
                 if (pr.state === 'closed') {
                   if (pr.merged) {
-                    await addLabel(issueNumber, 'staging');
+                    await addLabel(issueNumber, 'fixed-in-staging');
                   }
 
                   if (!(await hasOtherOpenStagingPr(issueNumber))) {
