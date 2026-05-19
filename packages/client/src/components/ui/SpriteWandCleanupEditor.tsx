@@ -17,6 +17,7 @@ import {
   Hand,
   Loader2,
   Minus,
+  Pipette,
   Plus,
   RotateCcw,
   Undo2,
@@ -33,8 +34,9 @@ import {
   removeWandSelection,
   rgbaAt,
   type BrushMode,
+  type BrushStrokeOptions,
   type CanvasPoint,
-  type TargetCleanBrushOptions,
+  type Rgba,
   type WandResult,
 } from "../../lib/sprite-cleanup-tools";
 import { Modal } from "./Modal";
@@ -48,19 +50,19 @@ interface SpriteWandCleanupEditorProps {
 }
 
 interface HoverPoint extends CanvasPoint {
-  color: [number, number, number, number];
+  color: Rgba;
 }
 
-type CleanupTool = "wand" | "clean" | "erase" | "restore" | "blur" | "pan";
+type CleanupTool = "wand" | "clean" | "erase" | "brush" | "blur" | "pan";
+type BrushToolMode = "paint" | "restore";
 type PreviewBackground = "checker" | "dark" | "light" | "pink";
 
-interface PaintGesture {
+interface BrushGesture {
   pointerId: number;
   before: ImageData;
   lastPoint: CanvasPoint;
   changedPixels: number;
-  mode: BrushMode;
-  targetCleanOptions?: TargetCleanBrushOptions;
+  options: BrushStrokeOptions;
 }
 
 interface PanGesture {
@@ -94,10 +96,24 @@ interface ToggleControlProps {
   title?: string;
 }
 
+interface BrushStrokeBuildInput {
+  mode: BrushMode;
+  radius: number;
+  brushHardness: number;
+  brushOpacity: number;
+  blurStrength: number;
+  cleanTarget: Rgba;
+  cleanTolerance: number;
+  cleanEdgeGuard: number;
+  cleanFeather: number;
+  brushColor: string;
+}
+
 const DEFAULT_TOLERANCE = 36;
 const DEFAULT_BRUSH_SIZE = 18;
-const DEFAULT_ERASER_HARDNESS = 100;
-const DEFAULT_ERASER_OPACITY = 100;
+const DEFAULT_BRUSH_HARDNESS = 100;
+const DEFAULT_BRUSH_OPACITY = 100;
+const DEFAULT_BRUSH_COLOR = "#ffffff";
 const DEFAULT_BLUR_STRENGTH = 65;
 const DEFAULT_CLEAN_TOLERANCE = 36;
 const DEFAULT_CLEAN_EDGE_GUARD = 45;
@@ -144,12 +160,117 @@ const cleanupToolOptions: Array<{
   { tool: "wand", label: "Wand", title: "Select connected pixels", Icon: Wand2 },
   { tool: "clean", label: "Clean", title: "Brush away pixels matching the sampled color", Icon: Crosshair },
   { tool: "erase", label: "Erase", title: "Paint pixels transparent", Icon: Eraser },
-  { tool: "restore", label: "Restore", title: "Paint original pixels back in", Icon: Brush },
+  { tool: "brush", label: "Brush", title: "Paint color or restore original pixels", Icon: Brush },
   { tool: "blur", label: "Blur", title: "Paint alpha smoothing over jagged edges", Icon: Blend },
 ];
 
+const brushActionLabels: Record<BrushMode, string> = {
+  clean: "target-cleaned",
+  erase: "erased",
+  paint: "painted",
+  restore: "restored",
+  blur: "edge-blurred",
+};
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
+}
+
+function cleanupToolToBrushMode(tool: CleanupTool, brushToolMode: BrushToolMode): BrushMode | null {
+  switch (tool) {
+    case "clean":
+    case "erase":
+    case "blur":
+      return tool;
+    case "brush":
+      return brushToolMode;
+    default:
+      return null;
+  }
+}
+
+function usesOpacityHardnessControls(tool: CleanupTool): boolean {
+  return tool === "erase" || tool === "brush";
+}
+
+function brushOpacityTitle(mode: BrushMode | null): string {
+  switch (mode) {
+    case "paint":
+      return "How much color each brush stroke applies";
+    case "restore":
+      return "How strongly each stroke restores the original sprite";
+    default:
+      return "How much alpha each eraser stroke removes";
+  }
+}
+
+function brushHardnessTitle(mode: BrushMode | null): string {
+  switch (mode) {
+    case "paint":
+      return "How crisp the brush edge should be";
+    case "restore":
+      return "How crisp the restore brush edge should be";
+    default:
+      return "How crisp the eraser edge should be";
+  }
+}
+
+function colorComponentToHex(value: number): string {
+  return clamp(Math.round(value), 0, 255).toString(16).padStart(2, "0");
+}
+
+function rgbaToHex(color: Rgba): string {
+  return `#${colorComponentToHex(color[0])}${colorComponentToHex(color[1])}${colorComponentToHex(color[2])}`;
+}
+
+function hexToRgba(hex: string): Rgba {
+  const normalized = /^#[0-9a-f]{6}$/i.test(hex) ? hex : DEFAULT_BRUSH_COLOR;
+  return [
+    Number.parseInt(normalized.slice(1, 3), 16),
+    Number.parseInt(normalized.slice(3, 5), 16),
+    Number.parseInt(normalized.slice(5, 7), 16),
+    255,
+  ];
+}
+
+function createBrushStrokeOptions({
+  mode,
+  radius,
+  brushHardness,
+  brushOpacity,
+  blurStrength,
+  cleanTarget,
+  cleanTolerance,
+  cleanEdgeGuard,
+  cleanFeather,
+  brushColor,
+}: BrushStrokeBuildInput): BrushStrokeOptions {
+  switch (mode) {
+    case "clean":
+      return {
+        mode,
+        radius,
+        clean: {
+          target: cleanTarget,
+          tolerance: cleanTolerance,
+          edgeGuard: cleanEdgeGuard,
+          feather: cleanFeather,
+        },
+      };
+    case "paint":
+      return {
+        mode,
+        radius,
+        hardness: brushHardness,
+        opacity: brushOpacity,
+        paint: { color: hexToRgba(brushColor) },
+      };
+    case "blur":
+      return { mode, radius, blurStrength };
+    case "erase":
+    case "restore":
+      return { mode, radius, hardness: brushHardness, opacity: brushOpacity };
+  }
 }
 
 function clampZoom(value: number): number {
@@ -252,7 +373,7 @@ export function SpriteWandCleanupEditor({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const originalImageRef = useRef<ImageData | null>(null);
   const currentImageRef = useRef<ImageData | null>(null);
-  const paintGestureRef = useRef<PaintGesture | null>(null);
+  const brushGestureRef = useRef<BrushGesture | null>(null);
   const panGestureRef = useRef<PanGesture | null>(null);
 
   const [tool, setTool] = useState<CleanupTool>("wand");
@@ -265,8 +386,11 @@ export function SpriteWandCleanupEditor({
   const [cleanEdgeGuard, setCleanEdgeGuard] = useState(DEFAULT_CLEAN_EDGE_GUARD);
   const [cleanFeather, setCleanFeather] = useState(DEFAULT_CLEAN_FEATHER);
   const [brushSize, setBrushSize] = useState(DEFAULT_BRUSH_SIZE);
-  const [eraserHardness, setEraserHardness] = useState(DEFAULT_ERASER_HARDNESS);
-  const [eraserOpacity, setEraserOpacity] = useState(DEFAULT_ERASER_OPACITY);
+  const [brushHardness, setBrushHardness] = useState(DEFAULT_BRUSH_HARDNESS);
+  const [brushOpacity, setBrushOpacity] = useState(DEFAULT_BRUSH_OPACITY);
+  const [brushToolMode, setBrushToolMode] = useState<BrushToolMode>("paint");
+  const [brushColor, setBrushColor] = useState(DEFAULT_BRUSH_COLOR);
+  const [pickingBrushColor, setPickingBrushColor] = useState(false);
   const [blurStrength, setBlurStrength] = useState(DEFAULT_BLUR_STRENGTH);
   const [zoom, setZoom] = useState(1);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -324,6 +448,7 @@ export function SpriteWandCleanupEditor({
     setHasChanges(false);
     setHistory([]);
     setHoverPoint(null);
+    setPickingBrushColor(false);
     setZoom(1);
     originalImageRef.current = null;
     currentImageRef.current = null;
@@ -435,12 +560,12 @@ export function SpriteWandCleanupEditor({
     ],
   );
 
-  const commitPaintGesture = useCallback(
+  const commitBrushGesture = useCallback(
     (canvas: HTMLCanvasElement | null) => {
-      const gesture = paintGestureRef.current;
+      const gesture = brushGestureRef.current;
       if (!gesture) return;
 
-      paintGestureRef.current = null;
+      brushGestureRef.current = null;
       if (canvas?.hasPointerCapture(gesture.pointerId)) {
         canvas.releasePointerCapture(gesture.pointerId);
       }
@@ -452,14 +577,7 @@ export function SpriteWandCleanupEditor({
 
       pushHistory(gesture.before);
       setHasChanges(true);
-      const actionLabel =
-        gesture.mode === "erase"
-          ? "erased"
-          : gesture.mode === "restore"
-            ? "restored"
-            : gesture.mode === "clean"
-              ? "target-cleaned"
-              : "edge-blurred";
+      const actionLabel = brushActionLabels[gesture.options.mode];
       setStatus(`${gesture.changedPixels.toLocaleString()} px ${actionLabel}`);
       setError(null);
     },
@@ -503,48 +621,57 @@ export function SpriteWandCleanupEditor({
       const point = updateHoverPoint(event);
       if (!point) return;
 
+      const current = currentImageRef.current;
+      if (tool === "brush" && brushToolMode === "paint" && pickingBrushColor) {
+        if (!current) return;
+
+        const sampledColor = rgbaAt(current, point);
+        setBrushColor(rgbaToHex(sampledColor));
+        setPickingBrushColor(false);
+        setStatus(`Brush color picked: ${formatRgba(sampledColor)}`);
+        setError(null);
+        return;
+      }
+
       if (tool === "wand") {
         applyWandAtPoint(point);
         return;
       }
 
-      const current = currentImageRef.current;
       if (!current) return;
 
-      const mode: BrushMode =
-        tool === "erase" ? "erase" : tool === "restore" ? "restore" : tool === "blur" ? "blur" : "clean";
-      const targetCleanOptions =
-        mode === "clean"
-          ? {
-              target: rgbaAt(current, point),
-              tolerance: cleanTolerance,
-              edgeGuard: cleanEdgeGuard,
-              feather: cleanFeather,
-            }
-          : undefined;
+      const mode = cleanupToolToBrushMode(tool, brushToolMode);
+      if (!mode) return;
+
       const radius = Math.max(1, brushSize / 2);
+      const brushOptions = createBrushStrokeOptions({
+        mode,
+        radius,
+        brushHardness,
+        brushOpacity,
+        blurStrength,
+        cleanTarget: rgbaAt(current, point),
+        cleanTolerance,
+        cleanEdgeGuard,
+        cleanFeather,
+        brushColor,
+      });
       const before = cloneImageData(current);
       const changedPixels = applyBrushStamp(
         current,
         originalImageRef.current,
         point.x,
         point.y,
-        radius,
-        mode,
-        eraserHardness,
-        eraserOpacity,
-        blurStrength,
-        targetCleanOptions,
+        brushOptions,
       );
       putCurrentImage();
 
-      paintGestureRef.current = {
+      brushGestureRef.current = {
         pointerId: event.pointerId,
         before,
         lastPoint: point,
         changedPixels,
-        mode,
-        targetCleanOptions,
+        options: brushOptions,
       };
       canvas.setPointerCapture(event.pointerId);
     },
@@ -552,13 +679,16 @@ export function SpriteWandCleanupEditor({
       applyWandAtPoint,
       applying,
       blurStrength,
+      brushColor,
       brushSize,
+      brushToolMode,
       cleanEdgeGuard,
       cleanFeather,
       cleanTolerance,
-      eraserHardness,
-      eraserOpacity,
+      brushHardness,
+      brushOpacity,
       loading,
+      pickingBrushColor,
       putCurrentImage,
       tool,
       updateHoverPoint,
@@ -578,38 +708,32 @@ export function SpriteWandCleanupEditor({
       }
 
       const point = updateHoverPoint(event);
-      const paintGesture = paintGestureRef.current;
+      const brushGesture = brushGestureRef.current;
       const current = currentImageRef.current;
-      if (!point || !paintGesture || paintGesture.pointerId !== event.pointerId || !current) return;
+      if (!point || !brushGesture || brushGesture.pointerId !== event.pointerId || !current) return;
 
-      const radius = Math.max(1, brushSize / 2);
-      paintGesture.changedPixels += applyBrushLine(
+      brushGesture.changedPixels += applyBrushLine(
         current,
         originalImageRef.current,
-        paintGesture.lastPoint,
+        brushGesture.lastPoint,
         point,
-        radius,
-        paintGesture.mode,
-        eraserHardness,
-        eraserOpacity,
-        blurStrength,
-        paintGesture.targetCleanOptions,
+        brushGesture.options,
       );
-      paintGesture.lastPoint = point;
+      brushGesture.lastPoint = point;
       putCurrentImage();
     },
-    [blurStrength, brushSize, eraserHardness, eraserOpacity, putCurrentImage, updateHoverPoint],
+    [putCurrentImage, updateHoverPoint],
   );
 
   const handleCanvasPointerUp = useCallback((event: PointerEvent<HTMLCanvasElement>) => {
-    commitPaintGesture(event.currentTarget);
+    commitBrushGesture(event.currentTarget);
     commitPanGesture(event.currentTarget);
-  }, [commitPaintGesture, commitPanGesture]);
+  }, [commitBrushGesture, commitPanGesture]);
 
   const handleCanvasPointerCancel = useCallback((event: PointerEvent<HTMLCanvasElement>) => {
-    commitPaintGesture(event.currentTarget);
+    commitBrushGesture(event.currentTarget);
     commitPanGesture(event.currentTarget);
-  }, [commitPaintGesture, commitPanGesture]);
+  }, [commitBrushGesture, commitPanGesture]);
 
   const handleUndo = useCallback(() => {
     setHistory((prev) => {
@@ -643,6 +767,29 @@ export function SpriteWandCleanupEditor({
     setError(null);
   }, []);
 
+  const handleSelectTool = useCallback((nextTool: CleanupTool) => {
+    setTool(nextTool);
+    if (nextTool !== "brush") {
+      setPickingBrushColor(false);
+    }
+  }, []);
+
+  const handleSelectBrushToolMode = useCallback((nextMode: BrushToolMode) => {
+    setBrushToolMode(nextMode);
+    if (nextMode !== "paint") {
+      setPickingBrushColor(false);
+    }
+  }, []);
+
+  const handleToggleBrushColorPicker = useCallback(() => {
+    setPickingBrushColor((value) => {
+      const next = !value;
+      setStatus(next ? "Click the sprite to pick a brush color" : "Brush color picker canceled");
+      setError(null);
+      return next;
+    });
+  }, []);
+
   const handleApply = useCallback(async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -673,13 +820,12 @@ export function SpriteWandCleanupEditor({
     }),
     [canvasSize.height, canvasSize.width, zoom],
   );
+  const activeBrushMode = cleanupToolToBrushMode(tool, brushToolMode);
 
   const reticleStyle = useMemo<CSSProperties | null>(() => {
     if (!hoverPoint) return null;
     const diameter =
-      tool === "erase" || tool === "restore" || tool === "blur" || tool === "clean"
-        ? Math.max(8, brushSize * zoom)
-        : Math.max(12, 12 * zoom);
+      activeBrushMode && !pickingBrushColor ? Math.max(8, brushSize * zoom) : Math.max(12, 12 * zoom);
     return {
       width: `${diameter}px`,
       height: `${diameter}px`,
@@ -687,12 +833,12 @@ export function SpriteWandCleanupEditor({
       top: `${(hoverPoint.y + 0.5) * zoom}px`,
       transform: "translate(-50%, -50%)",
     };
-  }, [brushSize, hoverPoint, tool, zoom]);
+  }, [activeBrushMode, brushSize, hoverPoint, pickingBrushColor, zoom]);
 
   const cursorClass =
     tool === "pan"
       ? "cursor-grab active:cursor-grabbing"
-      : tool === "wand"
+      : tool === "wand" || pickingBrushColor
         ? "cursor-crosshair"
         : "cursor-none";
 
@@ -724,7 +870,7 @@ export function SpriteWandCleanupEditor({
             <button
               key={optionTool}
               type="button"
-              onClick={() => setTool(optionTool)}
+              onClick={() => handleSelectTool(optionTool)}
               disabled={loading || applying}
               className={toolButtonClass(tool === optionTool)}
               title={title}
@@ -736,7 +882,7 @@ export function SpriteWandCleanupEditor({
           <div className="ml-auto flex flex-wrap items-center gap-1 rounded-lg bg-[var(--secondary)] px-1.5 py-1">
             <button
               type="button"
-              onClick={() => setTool("pan")}
+              onClick={() => handleSelectTool("pan")}
               disabled={loading || applying}
               className={navigationButtonClass(tool === "pan")}
               aria-label="Pan"
@@ -831,7 +977,7 @@ export function SpriteWandCleanupEditor({
               </>
             )}
 
-            {(tool === "clean" || tool === "erase" || tool === "restore" || tool === "blur") && (
+            {activeBrushMode && (
               <>
                 <RangeControl
                   label="Brush"
@@ -844,6 +990,42 @@ export function SpriteWandCleanupEditor({
                   before={<Minus size="0.75rem" className="text-[var(--muted-foreground)]" />}
                   after={<Plus size="0.75rem" className="text-[var(--muted-foreground)]" />}
                 />
+                {tool === "brush" && (
+                  <div className="flex min-w-fit items-center gap-1 rounded-lg bg-[var(--secondary)] p-1 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => handleSelectBrushToolMode("paint")}
+                      disabled={loading || applying}
+                      className={[
+                        "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 font-medium transition-colors disabled:opacity-45",
+                        brushToolMode === "paint"
+                          ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                          : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
+                      ].join(" ")}
+                      aria-pressed={brushToolMode === "paint"}
+                      title="Paint with the selected color"
+                    >
+                      <Brush size="0.75rem" />
+                      Color
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectBrushToolMode("restore")}
+                      disabled={loading || applying}
+                      className={[
+                        "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 font-medium transition-colors disabled:opacity-45",
+                        brushToolMode === "restore"
+                          ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                          : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
+                      ].join(" ")}
+                      aria-pressed={brushToolMode === "restore"}
+                      title="Paint original pixels back in"
+                    >
+                      <Undo2 size="0.75rem" />
+                      Restore
+                    </button>
+                  </div>
+                )}
                 {tool === "clean" && (
                   <>
                     <RangeControl
@@ -878,26 +1060,64 @@ export function SpriteWandCleanupEditor({
                     />
                   </>
                 )}
-                {tool === "erase" && (
+                {tool === "brush" && brushToolMode === "paint" && (
+                  <div
+                    className="flex min-w-fit items-center gap-2 rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs"
+                    title="Brush color"
+                  >
+                    <span className="shrink-0 whitespace-nowrap font-medium text-[var(--foreground)]">Color</span>
+                    <input
+                      type="color"
+                      value={brushColor}
+                      onChange={(event) => {
+                        setBrushColor(event.target.value);
+                        setPickingBrushColor(false);
+                      }}
+                      disabled={loading || applying}
+                      className="h-7 w-9 cursor-pointer rounded-md border border-[var(--border)] bg-transparent p-0.5 disabled:opacity-45"
+                      aria-label="Brush color"
+                    />
+                    <span className="font-mono text-[0.6875rem] uppercase text-[var(--muted-foreground)]">
+                      {brushColor}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleToggleBrushColorPicker}
+                      disabled={loading || applying}
+                      className={[
+                        "inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-medium ring-1 transition-colors disabled:opacity-45",
+                        pickingBrushColor
+                          ? "bg-[var(--primary)] text-[var(--primary-foreground)] ring-transparent"
+                          : "text-[var(--muted-foreground)] ring-[var(--border)] hover:text-[var(--foreground)]",
+                      ].join(" ")}
+                      aria-pressed={pickingBrushColor}
+                      title="Pick brush color from the sprite"
+                    >
+                      <Pipette size="0.75rem" />
+                      Pick
+                    </button>
+                  </div>
+                )}
+                {usesOpacityHardnessControls(tool) && (
                   <>
                     <RangeControl
                       label="Opacity"
                       min={0}
                       max={100}
-                      value={eraserOpacity}
-                      onChange={setEraserOpacity}
+                      value={brushOpacity}
+                      onChange={setBrushOpacity}
                       disabled={loading || applying}
-                      title="How much alpha each eraser stroke removes"
+                      title={brushOpacityTitle(activeBrushMode)}
                       className="min-w-48 flex-1"
                     />
                     <RangeControl
                       label="Hardness"
                       min={0}
                       max={100}
-                      value={eraserHardness}
-                      onChange={setEraserHardness}
+                      value={brushHardness}
+                      onChange={setBrushHardness}
                       disabled={loading || applying}
-                      title="How crisp the eraser edge should be"
+                      title={brushHardnessTitle(activeBrushMode)}
                       className="min-w-48 flex-1"
                     />
                   </>
@@ -966,7 +1186,7 @@ export function SpriteWandCleanupEditor({
                 className={`block rounded-lg [touch-action:none] ${cursorClass}`}
                 style={canvasDisplayStyle}
                 aria-label={`Wand cleanup canvas for ${label}`}
-                title="Edit sprite transparency"
+                title={pickingBrushColor ? "Pick brush color" : "Edit sprite transparency"}
               />
               {reticleStyle && !loading && (
                 <span

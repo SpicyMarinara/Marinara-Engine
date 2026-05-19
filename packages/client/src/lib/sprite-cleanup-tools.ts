@@ -8,7 +8,7 @@ export interface CanvasPoint {
   y: number;
 }
 
-export type BrushMode = "erase" | "restore" | "blur" | "clean";
+export type BrushMode = "erase" | "restore" | "blur" | "clean" | "paint";
 
 type Rgb = [number, number, number];
 export type Rgba = [number, number, number, number];
@@ -31,6 +31,36 @@ export interface TargetCleanBrushOptions {
   feather: number;
 }
 
+export interface PaintBrushOptions {
+  color: Rgba;
+}
+
+export interface BrushStrokeBaseOptions {
+  radius: number;
+}
+
+export interface SoftBrushStrokeOptions extends BrushStrokeBaseOptions {
+  hardness: number;
+  opacity: number;
+}
+
+export type BrushStrokeOptions =
+  | (BrushStrokeBaseOptions & {
+      mode: "clean";
+      clean: TargetCleanBrushOptions;
+    })
+  | (SoftBrushStrokeOptions & {
+      mode: "paint";
+      paint: PaintBrushOptions;
+    })
+  | (SoftBrushStrokeOptions & {
+      mode: "erase" | "restore";
+    })
+  | (BrushStrokeBaseOptions & {
+      mode: "blur";
+      blurStrength: number;
+    });
+
 interface ConnectedSelection {
   selected: Uint8Array;
   target: Rgb;
@@ -52,11 +82,71 @@ function clampUnit(value: number): number {
   return clamp(value, 0, 1);
 }
 
+function brushFalloff(dx: number, dy: number, radius: number, hardnessAmount: number): number {
+  const normalizedDistance = Math.sqrt(dx * dx + dy * dy) / Math.max(1, radius);
+  const hardCore = hardnessAmount >= 0.99 ? 1 : Math.pow(hardnessAmount, 1.35);
+  const featherCurve = 1 + (1 - hardnessAmount) * 1.8;
+  return normalizedDistance <= hardCore
+    ? 1
+    : Math.pow(clampUnit((1 - normalizedDistance) / Math.max(0.001, 1 - hardCore)), featherCurve);
+}
+
 function colorDistanceSquared(data: Uint8ClampedArray, offset: number, target: Rgb): number {
   const red = data[offset] - target[0];
   const green = data[offset + 1] - target[1];
   const blue = data[offset + 2] - target[2];
   return red * red + green * green + blue * blue;
+}
+
+function writeRgbaIfChanged(data: Uint8ClampedArray, offset: number, next: Rgba): boolean {
+  if (
+    data[offset] === next[0] &&
+    data[offset + 1] === next[1] &&
+    data[offset + 2] === next[2] &&
+    data[offset + 3] === next[3]
+  ) {
+    return false;
+  }
+
+  data[offset] = next[0];
+  data[offset + 1] = next[1];
+  data[offset + 2] = next[2];
+  data[offset + 3] = next[3];
+  return true;
+}
+
+function compositeSourceOver(data: Uint8ClampedArray, offset: number, source: Rgba, sourceAlpha: number): Rgba {
+  const alpha = clampUnit(sourceAlpha);
+  const currentAlpha = clampUnit((data[offset + 3] ?? 0) / 255);
+  const retainedAlpha = currentAlpha * (1 - alpha);
+  const nextAlphaAmount = alpha + retainedAlpha;
+
+  if (nextAlphaAmount <= 0) return [0, 0, 0, 0];
+
+  return [
+    Math.round((source[0] * alpha + (data[offset] ?? 0) * retainedAlpha) / nextAlphaAmount),
+    Math.round((source[1] * alpha + (data[offset + 1] ?? 0) * retainedAlpha) / nextAlphaAmount),
+    Math.round((source[2] * alpha + (data[offset + 2] ?? 0) * retainedAlpha) / nextAlphaAmount),
+    Math.round(nextAlphaAmount * 255),
+  ];
+}
+
+function blendPixelToward(data: Uint8ClampedArray, offset: number, target: Rgba, amount: number): Rgba {
+  const mix = clampUnit(amount);
+  const currentAlpha = clampUnit((data[offset + 3] ?? 0) / 255);
+  const targetAlpha = clampUnit(target[3] / 255);
+  const currentAlphaWeight = currentAlpha * (1 - mix);
+  const targetAlphaWeight = targetAlpha * mix;
+  const nextAlphaAmount = currentAlphaWeight + targetAlphaWeight;
+
+  if (nextAlphaAmount <= 0) return [0, 0, 0, 0];
+
+  return [
+    Math.round(((data[offset] ?? 0) * currentAlphaWeight + target[0] * targetAlphaWeight) / nextAlphaAmount),
+    Math.round(((data[offset + 1] ?? 0) * currentAlphaWeight + target[1] * targetAlphaWeight) / nextAlphaAmount),
+    Math.round(((data[offset + 2] ?? 0) * currentAlphaWeight + target[2] * targetAlphaWeight) / nextAlphaAmount),
+    Math.round(nextAlphaAmount * 255),
+  ];
 }
 
 export function cloneImageData(imageData: ImageData): ImageData {
@@ -606,6 +696,64 @@ function softenKeptCutEdge(
   const { edgeDistance } = buildEdgeBand(selected, width, totalPixels, edgeRadius, "all");
   const softened = new Uint8ClampedArray(data);
   const matteTolerance = Math.max(1, tolerance * (1.14 + transitionAmount * 0.82));
+  const decontaminateAmount = clampUnit((softnessAmount * 0.65 + featherAmount * 0.55 - 0.3) / 0.7);
+  const sampleRadius = 2 + edgeRadius;
+  const targetLuma = target[0] * 0.2126 + target[1] * 0.7152 + target[2] * 0.0722;
+
+  const findForegroundColor = (index: number): { color: Rgb; luma: number; weight: number } | null => {
+    const x = index % width;
+    const y = Math.floor(index / width);
+    let redTotal = 0;
+    let greenTotal = 0;
+    let blueTotal = 0;
+    let weightTotal = 0;
+
+    for (let yOffset = -sampleRadius; yOffset <= sampleRadius; yOffset += 1) {
+      const sampleY = y + yOffset;
+      if (sampleY < 0 || sampleY >= height) continue;
+
+      for (let xOffset = -sampleRadius; xOffset <= sampleRadius; xOffset += 1) {
+        if (xOffset === 0 && yOffset === 0) continue;
+
+        const sampleDistance = Math.hypot(xOffset, yOffset);
+        if (sampleDistance > sampleRadius) continue;
+
+        const sampleX = x + xOffset;
+        if (sampleX < 0 || sampleX >= width) continue;
+
+        const sampleIndex = sampleY * width + sampleX;
+        if (selected[sampleIndex]) continue;
+
+        const sampleOffset = sampleIndex * 4;
+        const sampleAlpha = sourceData[sampleOffset + 3] ?? 0;
+        if (sampleAlpha <= 48) continue;
+
+        const targetDistance = Math.sqrt(colorDistanceSquared(sourceData, sampleOffset, target));
+        const matteSeparation = clampUnit((targetDistance - matteTolerance * 0.72) / Math.max(1, matteTolerance * 1.55));
+        if (matteSeparation <= 0) continue;
+
+        const distanceWeight = Math.pow(1 - sampleDistance / Math.max(1, sampleRadius + 0.001), 1.35);
+        const alphaWeight = Math.pow(sampleAlpha / 255, 1.1);
+        const weight = distanceWeight * alphaWeight * Math.pow(matteSeparation, 1.25);
+        if (weight <= 0) continue;
+
+        redTotal += (sourceData[sampleOffset] ?? 0) * weight;
+        greenTotal += (sourceData[sampleOffset + 1] ?? 0) * weight;
+        blueTotal += (sourceData[sampleOffset + 2] ?? 0) * weight;
+        weightTotal += weight;
+      }
+    }
+
+    if (weightTotal <= 0) return null;
+
+    const color: Rgb = [
+      Math.round(redTotal / weightTotal),
+      Math.round(greenTotal / weightTotal),
+      Math.round(blueTotal / weightTotal),
+    ];
+    const luma = color[0] * 0.2126 + color[1] * 0.7152 + color[2] * 0.0722;
+    return { color, luma, weight: weightTotal };
+  };
 
   for (let index = 0; index < totalPixels; index += 1) {
     const distanceFromCut = edgeDistance[index] ?? 0;
@@ -620,6 +768,39 @@ function softenKeptCutEdge(
     const targetDistance = Math.sqrt(colorDistanceSquared(sourceData, offset, target));
     const matteSimilarity = targetDistance <= matteTolerance ? 1 - targetDistance / matteTolerance : 0;
     const alphaVulnerability = clampUnit((248 - originalAlpha) / (218 - transitionAmount * 82));
+
+    if (decontaminateAmount > 0 && matteSimilarity > 0.05) {
+      const foreground = findForegroundColor(index);
+      if (foreground) {
+        const currentRed = sourceData[offset] ?? 0;
+        const currentGreen = sourceData[offset + 1] ?? 0;
+        const currentBlue = sourceData[offset + 2] ?? 0;
+        const currentLuma = currentRed * 0.2126 + currentGreen * 0.7152 + currentBlue * 0.0722;
+        const lightResidueBias =
+          targetLuma > foreground.luma
+            ? clampUnit((currentLuma - foreground.luma - 4) / Math.max(28, targetLuma - foreground.luma))
+            : 0;
+        const darkResidueBias =
+          targetLuma < foreground.luma
+            ? clampUnit((foreground.luma - currentLuma - 4) / Math.max(28, foreground.luma - targetLuma))
+            : 0;
+        const residueBias = Math.max(matteSimilarity, lightResidueBias, darkResidueBias);
+        const confidence = clampUnit(foreground.weight / (1.4 + sampleRadius * 0.42));
+        const colorPull = clampUnit(
+          decontaminateAmount *
+            Math.pow(edgePosition, 0.88) *
+            residueBias *
+            (0.42 + alphaVulnerability * 0.28 + confidence * 0.3),
+        );
+
+        if (colorPull > 0) {
+          softened[offset] = Math.round(currentRed * (1 - colorPull) + foreground.color[0] * colorPull);
+          softened[offset + 1] = Math.round(currentGreen * (1 - colorPull) + foreground.color[1] * colorPull);
+          softened[offset + 2] = Math.round(currentBlue * (1 - colorPull) + foreground.color[2] * colorPull);
+        }
+      }
+    }
+
     const softenStrength =
       transitionAmount *
       Math.pow(edgePosition, 0.92 + (1 - featherAmount) * 0.28) *
@@ -677,9 +858,22 @@ function softenKeptCutEdge(
     if (distanceFromCut === 0) continue;
 
     const offset = index * 4;
+    const nextRed = blurred[offset] ?? 0;
+    const nextGreen = blurred[offset + 1] ?? 0;
+    const nextBlue = blurred[offset + 2] ?? 0;
     const nextAlpha = blurred[offset + 3] ?? 0;
-    if (nextAlpha === data[offset + 3]) continue;
+    if (
+      nextRed === data[offset] &&
+      nextGreen === data[offset + 1] &&
+      nextBlue === data[offset + 2] &&
+      nextAlpha === data[offset + 3]
+    ) {
+      continue;
+    }
 
+    data[offset] = nextRed;
+    data[offset + 1] = nextGreen;
+    data[offset + 2] = nextBlue;
     data[offset + 3] = nextAlpha;
     changed += 1;
   }
@@ -1236,25 +1430,27 @@ export function applyBrushStamp(
   originalImage: ImageData | null,
   centerX: number,
   centerY: number,
-  radius: number,
-  mode: BrushMode,
-  eraserHardness: number,
-  eraserOpacity: number,
-  blurStrength: number,
-  targetCleanOptions?: TargetCleanBrushOptions,
+  options: BrushStrokeOptions,
 ): number {
   const { data, width, height } = imageData;
+  const { mode, radius } = options;
   const restoreSource = originalImage?.data ?? null;
   const blurSource = mode === "blur" ? new Uint8ClampedArray(data) : null;
   const cleanSource = mode === "clean" ? new Uint8ClampedArray(data) : null;
-  const eraserHardnessAmount = clampUnit(eraserHardness / 100);
-  const eraserOpacityAmount = clampUnit(eraserOpacity / 100);
-  const blurAmount = clampUnit(blurStrength / 100);
-  const cleanTarget = targetCleanOptions?.target ?? null;
+  const cleanOptions = options.mode === "clean" ? options.clean : null;
+  const paintOptions = options.mode === "paint" ? options.paint : null;
+  const cleanTarget = cleanOptions?.target ?? null;
   const cleanTargetRgb: Rgb | null = cleanTarget ? [cleanTarget[0], cleanTarget[1], cleanTarget[2]] : null;
-  const cleanTolerance = Math.max(1, targetCleanOptions?.tolerance ?? 1);
-  const cleanEdgeGuardAmount = clampUnit((targetCleanOptions?.edgeGuard ?? 0) / 100);
-  const cleanFeatherAmount = clampUnit((targetCleanOptions?.feather ?? 0) / 100);
+  const cleanTolerance = Math.max(1, cleanOptions?.tolerance ?? 1);
+  const cleanEdgeGuardAmount = clampUnit((cleanOptions?.edgeGuard ?? 0) / 100);
+  const cleanFeatherAmount = clampUnit((cleanOptions?.feather ?? 0) / 100);
+  const paintColor = paintOptions?.color ?? null;
+  const paintColorAlpha = clampUnit((paintColor?.[3] ?? 0) / 255);
+  const softBrushOptions =
+    options.mode === "paint" || options.mode === "erase" || options.mode === "restore" ? options : null;
+  const brushHardnessAmount = softBrushOptions ? clampUnit(softBrushOptions.hardness / 100) : 0;
+  const brushOpacityAmount = softBrushOptions ? clampUnit(softBrushOptions.opacity / 100) : 0;
+  const blurAmount = options.mode === "blur" ? clampUnit(options.blurStrength / 100) : 0;
   const minX = Math.max(0, Math.floor(centerX - radius));
   const maxX = Math.min(width - 1, Math.ceil(centerX + radius));
   const minY = Math.max(0, Math.floor(centerY - radius));
@@ -1357,18 +1553,25 @@ export function applyBrushStamp(
         continue;
       }
 
+      if (mode === "paint") {
+        if (!paintColor || brushOpacityAmount <= 0 || paintColorAlpha <= 0) continue;
+
+        const paintAmount = brushFalloff(dx, dy, radius, brushHardnessAmount);
+        const sourceAlpha = paintAmount * brushOpacityAmount * paintColorAlpha;
+        if (sourceAlpha <= 0.001) continue;
+
+        if (writeRgbaIfChanged(data, offset, compositeSourceOver(data, offset, paintColor, sourceAlpha))) {
+          changed += 1;
+        }
+        continue;
+      }
+
       if (mode === "erase") {
         const originalAlpha = data[offset + 3] ?? 0;
         if (originalAlpha <= 0) continue;
 
-        const normalizedDistance = Math.sqrt(dx * dx + dy * dy) / Math.max(1, radius);
-        const hardCore = eraserHardnessAmount >= 0.99 ? 1 : Math.pow(eraserHardnessAmount, 1.35);
-        const featherCurve = 1 + (1 - eraserHardnessAmount) * 1.8;
-        const eraseAmount =
-          normalizedDistance <= hardCore
-            ? 1
-            : Math.pow(clampUnit((1 - normalizedDistance) / Math.max(0.001, 1 - hardCore)), featherCurve);
-        const nextAlpha = Math.round(originalAlpha * (1 - eraseAmount * eraserOpacityAmount));
+        const eraseAmount = brushFalloff(dx, dy, radius, brushHardnessAmount);
+        const nextAlpha = Math.round(originalAlpha * (1 - eraseAmount * brushOpacityAmount));
         if (nextAlpha === originalAlpha) continue;
 
         data[offset + 3] = nextAlpha;
@@ -1376,19 +1579,30 @@ export function applyBrushStamp(
         continue;
       }
 
-      if (!restoreSource) continue;
-      const red = restoreSource[offset] ?? 0;
-      const green = restoreSource[offset + 1] ?? 0;
-      const blue = restoreSource[offset + 2] ?? 0;
-      const alpha = restoreSource[offset + 3] ?? 0;
-      if (data[offset] === red && data[offset + 1] === green && data[offset + 2] === blue && data[offset + 3] === alpha) {
-        continue;
+      if (mode === "restore") {
+        if (!restoreSource) continue;
+
+        const restoreAmount = brushFalloff(dx, dy, radius, brushHardnessAmount) * brushOpacityAmount;
+        if (restoreAmount <= 0) continue;
+
+        const restoredColor: Rgba = [
+          restoreSource[offset] ?? 0,
+          restoreSource[offset + 1] ?? 0,
+          restoreSource[offset + 2] ?? 0,
+          restoreSource[offset + 3] ?? 0,
+        ];
+
+        if (restoreAmount < 0.999) {
+          if (writeRgbaIfChanged(data, offset, blendPixelToward(data, offset, restoredColor, restoreAmount))) {
+            changed += 1;
+          }
+          continue;
+        }
+
+        if (writeRgbaIfChanged(data, offset, restoredColor)) {
+          changed += 1;
+        }
       }
-      data[offset] = red;
-      data[offset + 1] = green;
-      data[offset + 2] = blue;
-      data[offset + 3] = alpha;
-      changed += 1;
     }
   }
 
@@ -1400,15 +1614,10 @@ export function applyBrushLine(
   originalImage: ImageData | null,
   from: CanvasPoint,
   to: CanvasPoint,
-  radius: number,
-  mode: BrushMode,
-  eraserHardness: number,
-  eraserOpacity: number,
-  blurStrength: number,
-  targetCleanOptions?: TargetCleanBrushOptions,
+  options: BrushStrokeOptions,
 ): number {
   const distance = Math.hypot(to.x - from.x, to.y - from.y);
-  const steps = Math.max(1, Math.ceil(distance / Math.max(1, radius * 0.45)));
+  const steps = Math.max(1, Math.ceil(distance / Math.max(1, options.radius * 0.45)));
   let changed = 0;
 
   for (let step = 1; step <= steps; step += 1) {
@@ -1418,12 +1627,7 @@ export function applyBrushLine(
       originalImage,
       from.x + (to.x - from.x) * amount,
       from.y + (to.y - from.y) * amount,
-      radius,
-      mode,
-      eraserHardness,
-      eraserOpacity,
-      blurStrength,
-      targetCleanOptions,
+      options,
     );
   }
 
