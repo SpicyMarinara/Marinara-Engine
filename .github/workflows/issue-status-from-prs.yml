@@ -120,12 +120,6 @@ jobs:
               }
             }
 
-            async function hasOtherOpenStagingPr(issueNumber) {
-              const linkedIssues = await openStagingPrIssueNumbers();
-
-              return linkedIssues.has(issueNumber);
-            }
-
             async function openStagingPrIssueNumbers() {
               const openPulls = await github.paginate(github.rest.pulls.list, {
                 owner,
@@ -165,6 +159,8 @@ jobs:
             } else if (!targetsStaging) {
               core.info('Pull request does not target staging; only reconciling existing in-pr labels.');
             } else {
+              const openStagingPrIssues = pr.state === 'closed' ? await openStagingPrIssueNumbers() : new Set();
+
               for (const issueNumber of issues) {
                 if (!(await isOpenIssue(issueNumber))) {
                   core.info(`Skipping #${issueNumber}: not an open issue.`);
@@ -176,7 +172,7 @@ jobs:
                     await addLabel(issueNumber, 'fixed-in-staging');
                   }
 
-                  if (!(await hasOtherOpenStagingPr(issueNumber))) {
+                  if (!openStagingPrIssues.has(issueNumber)) {
                     await removeLabel(issueNumber, 'in-pr');
                   }
 
