@@ -12,6 +12,7 @@ import {
 import {
   Blend,
   Brush,
+  Crosshair,
   Eraser,
   Hand,
   Loader2,
@@ -29,12 +30,11 @@ import {
   applyBrushStamp,
   cloneImageData,
   formatRgba,
-  removeConnectedColor,
-  removeConnectedColorDecontaminate,
-  removeConnectedColorSoftEdge,
+  removeWandSelection,
   rgbaAt,
   type BrushMode,
   type CanvasPoint,
+  type TargetCleanBrushOptions,
   type WandResult,
 } from "../../lib/sprite-cleanup-tools";
 import { Modal } from "./Modal";
@@ -51,7 +51,7 @@ interface HoverPoint extends CanvasPoint {
   color: [number, number, number, number];
 }
 
-type CleanupTool = "wand" | "erase" | "restore" | "blur" | "pan";
+type CleanupTool = "wand" | "clean" | "erase" | "restore" | "blur" | "pan";
 type PreviewBackground = "checker" | "dark" | "light" | "pink";
 
 interface PaintGesture {
@@ -60,6 +60,7 @@ interface PaintGesture {
   lastPoint: CanvasPoint;
   changedPixels: number;
   mode: BrushMode;
+  targetCleanOptions?: TargetCleanBrushOptions;
 }
 
 interface PanGesture {
@@ -96,9 +97,18 @@ interface ToggleControlProps {
 const DEFAULT_TOLERANCE = 36;
 const DEFAULT_BRUSH_SIZE = 18;
 const DEFAULT_ERASER_HARDNESS = 100;
+const DEFAULT_ERASER_OPACITY = 100;
 const DEFAULT_BLUR_STRENGTH = 65;
-const DEFAULT_EDGE_SOFTNESS = 60;
-const DEFAULT_EDGE_DECONTAMINATE = 0;
+const DEFAULT_CLEAN_TOLERANCE = 36;
+const DEFAULT_CLEAN_EDGE_GUARD = 45;
+const DEFAULT_CLEAN_FEATHER = 8;
+const DEFAULT_WAND_STRONG = false;
+const DEFAULT_WAND_SOFTNESS = 55;
+const DEFAULT_WAND_FEATHER = 12;
+const WAND_EDGE_GUARD = 55;
+const STRONG_WAND_EDGE_GUARD = 28;
+const WAND_EXPAND = 1;
+const STRONG_WAND_EXPAND = 2;
 const MAX_HISTORY = 12;
 const MIN_ZOOM = 0.125;
 const MAX_ZOOM = 8;
@@ -119,8 +129,8 @@ const previewBackgroundStyles: Record<PreviewBackground, CSSProperties> = {
 };
 
 const previewBackgroundOptions: Array<{ key: PreviewBackground; label: string }> = [
-  { key: "checker", label: "Grid" },
   { key: "dark", label: "Dark" },
+  { key: "checker", label: "Grid" },
   { key: "light", label: "Light" },
   { key: "pink", label: "Pink" },
 ];
@@ -132,6 +142,7 @@ const cleanupToolOptions: Array<{
   Icon: LucideIcon;
 }> = [
   { tool: "wand", label: "Wand", title: "Select connected pixels", Icon: Wand2 },
+  { tool: "clean", label: "Clean", title: "Brush away pixels matching the sampled color", Icon: Crosshair },
   { tool: "erase", label: "Erase", title: "Paint pixels transparent", Icon: Eraser },
   { tool: "restore", label: "Restore", title: "Paint original pixels back in", Icon: Brush },
   { tool: "blur", label: "Blur", title: "Paint alpha smoothing over jagged edges", Icon: Blend },
@@ -154,14 +165,17 @@ function RangeControl({
   onChange,
   step = 1,
   title,
-  className = "min-w-0 flex-1",
-  inputClassName = "min-w-24",
+  className = "min-w-[12rem] flex-[1_1_12rem]",
+  inputClassName = "min-w-0",
   before,
   after,
 }: RangeControlProps) {
   return (
-    <label className={`flex items-center gap-2 rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs ${className}`} title={title}>
-      <span className="shrink-0 font-medium text-[var(--foreground)]">{label}</span>
+    <label
+      className={`flex min-w-0 items-center gap-2 rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs ${className}`}
+      title={title}
+    >
+      <span className="shrink-0 whitespace-nowrap font-medium text-[var(--foreground)]">{label}</span>
       {before}
       <input
         type="range"
@@ -171,7 +185,7 @@ function RangeControl({
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
         disabled={disabled}
-        className={`${inputClassName} flex-1 accent-[var(--primary)] disabled:opacity-50`}
+        className={`${inputClassName} min-w-0 flex-1 accent-[var(--primary)] disabled:opacity-50`}
       />
       {after}
       <span className="w-8 shrink-0 text-right tabular-nums text-[var(--muted-foreground)]">{value}</span>
@@ -182,7 +196,7 @@ function RangeControl({
 function ToggleControl({ label, checked, disabled, onChange, title }: ToggleControlProps) {
   return (
     <label
-      className="flex items-center gap-2 rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs font-medium text-[var(--foreground)]"
+      className="flex min-w-fit items-center gap-2 whitespace-nowrap rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs font-medium text-[var(--foreground)]"
       title={title}
     >
       <input
@@ -242,14 +256,17 @@ export function SpriteWandCleanupEditor({
   const panGestureRef = useRef<PanGesture | null>(null);
 
   const [tool, setTool] = useState<CleanupTool>("wand");
-  const [classicStrong, setClassicStrong] = useState(false);
-  const [cleanEdge, setCleanEdge] = useState(false);
-  const [previewBackground, setPreviewBackground] = useState<PreviewBackground>("checker");
+  const [previewBackground, setPreviewBackground] = useState<PreviewBackground>("dark");
   const [tolerance, setTolerance] = useState(DEFAULT_TOLERANCE);
-  const [edgeSoftness, setEdgeSoftness] = useState(DEFAULT_EDGE_SOFTNESS);
-  const [edgeDecontaminate, setEdgeDecontaminate] = useState(DEFAULT_EDGE_DECONTAMINATE);
+  const [wandStrong, setWandStrong] = useState(DEFAULT_WAND_STRONG);
+  const [wandSoftness, setWandSoftness] = useState(DEFAULT_WAND_SOFTNESS);
+  const [wandFeather, setWandFeather] = useState(DEFAULT_WAND_FEATHER);
+  const [cleanTolerance, setCleanTolerance] = useState(DEFAULT_CLEAN_TOLERANCE);
+  const [cleanEdgeGuard, setCleanEdgeGuard] = useState(DEFAULT_CLEAN_EDGE_GUARD);
+  const [cleanFeather, setCleanFeather] = useState(DEFAULT_CLEAN_FEATHER);
   const [brushSize, setBrushSize] = useState(DEFAULT_BRUSH_SIZE);
   const [eraserHardness, setEraserHardness] = useState(DEFAULT_ERASER_HARDNESS);
+  const [eraserOpacity, setEraserOpacity] = useState(DEFAULT_ERASER_OPACITY);
   const [blurStrength, setBlurStrength] = useState(DEFAULT_BLUR_STRENGTH);
   const [zoom, setZoom] = useState(1);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -385,24 +402,15 @@ export function SpriteWandCleanupEditor({
 
       const before = cloneImageData(current);
       const next = cloneImageData(current);
-      let result: WandResult;
-      if (cleanEdge) {
-        const cleanupTolerance = classicStrong ? Math.min(224, Math.round(tolerance * 1.65)) : tolerance;
-        result =
-          edgeDecontaminate > 0
-            ? removeConnectedColorDecontaminate(
-                next,
-                point.x,
-                point.y,
-                cleanupTolerance,
-                edgeDecontaminate,
-                edgeSoftness,
-              )
-            : removeConnectedColorSoftEdge(next, point.x, point.y, cleanupTolerance, edgeSoftness, edgeSoftness);
-      } else {
-        const selectionTolerance = classicStrong ? Math.min(224, Math.round(tolerance * 1.65)) : tolerance;
-        result = removeConnectedColor(next, point.x, point.y, selectionTolerance, classicStrong ? "all" : "cardinal");
-      }
+      const selectionTolerance = wandStrong ? Math.min(224, Math.round(tolerance * 1.55)) : tolerance;
+      const result: WandResult = removeWandSelection(next, point.x, point.y, selectionTolerance, {
+        mode: "connected",
+        radius: 0,
+        edgeGuard: wandStrong ? STRONG_WAND_EDGE_GUARD : WAND_EDGE_GUARD,
+        expand: wandStrong ? STRONG_WAND_EXPAND : WAND_EXPAND,
+        softness: wandSoftness,
+        feather: wandFeather,
+      });
 
       if (result.removed === 0) {
         setStatus("No opaque pixels selected");
@@ -413,26 +421,17 @@ export function SpriteWandCleanupEditor({
       currentImageRef.current = next;
       putCurrentImage();
       setHasChanges(true);
-      const optionLabel = [
-        classicStrong ? "strong" : null,
-        cleanEdge
-          ? `clean edge (${edgeSoftness}% softness${edgeDecontaminate > 0 ? `, ${edgeDecontaminate}% decontaminate` : ""})`
-          : null,
-      ]
-        .filter(Boolean)
-        .join(", ");
-      const modeLabel = optionLabel ? `wand (${optionLabel})` : "wand";
+      const modeLabel = `${wandStrong ? "strong " : ""}wand (${wandSoftness}% softness, ${wandFeather}% feather)`;
       setStatus(`${result.removed.toLocaleString()} px removed with ${modeLabel} from ${formatRgba(result.target)}`);
       setError(null);
     },
     [
-      classicStrong,
-      cleanEdge,
-      edgeDecontaminate,
-      edgeSoftness,
       pushHistory,
       putCurrentImage,
       tolerance,
+      wandFeather,
+      wandSoftness,
+      wandStrong,
     ],
   );
 
@@ -454,7 +453,13 @@ export function SpriteWandCleanupEditor({
       pushHistory(gesture.before);
       setHasChanges(true);
       const actionLabel =
-        gesture.mode === "erase" ? "erased" : gesture.mode === "restore" ? "restored" : "edge-blurred";
+        gesture.mode === "erase"
+          ? "erased"
+          : gesture.mode === "restore"
+            ? "restored"
+            : gesture.mode === "clean"
+              ? "target-cleaned"
+              : "edge-blurred";
       setStatus(`${gesture.changedPixels.toLocaleString()} px ${actionLabel}`);
       setError(null);
     },
@@ -506,7 +511,17 @@ export function SpriteWandCleanupEditor({
       const current = currentImageRef.current;
       if (!current) return;
 
-      const mode: BrushMode = tool === "erase" ? "erase" : tool === "restore" ? "restore" : "blur";
+      const mode: BrushMode =
+        tool === "erase" ? "erase" : tool === "restore" ? "restore" : tool === "blur" ? "blur" : "clean";
+      const targetCleanOptions =
+        mode === "clean"
+          ? {
+              target: rgbaAt(current, point),
+              tolerance: cleanTolerance,
+              edgeGuard: cleanEdgeGuard,
+              feather: cleanFeather,
+            }
+          : undefined;
       const radius = Math.max(1, brushSize / 2);
       const before = cloneImageData(current);
       const changedPixels = applyBrushStamp(
@@ -517,7 +532,9 @@ export function SpriteWandCleanupEditor({
         radius,
         mode,
         eraserHardness,
+        eraserOpacity,
         blurStrength,
+        targetCleanOptions,
       );
       putCurrentImage();
 
@@ -527,10 +544,25 @@ export function SpriteWandCleanupEditor({
         lastPoint: point,
         changedPixels,
         mode,
+        targetCleanOptions,
       };
       canvas.setPointerCapture(event.pointerId);
     },
-    [applyWandAtPoint, applying, blurStrength, brushSize, eraserHardness, loading, putCurrentImage, tool, updateHoverPoint],
+    [
+      applyWandAtPoint,
+      applying,
+      blurStrength,
+      brushSize,
+      cleanEdgeGuard,
+      cleanFeather,
+      cleanTolerance,
+      eraserHardness,
+      eraserOpacity,
+      loading,
+      putCurrentImage,
+      tool,
+      updateHoverPoint,
+    ],
   );
 
   const handleCanvasPointerMove = useCallback(
@@ -559,12 +591,14 @@ export function SpriteWandCleanupEditor({
         radius,
         paintGesture.mode,
         eraserHardness,
+        eraserOpacity,
         blurStrength,
+        paintGesture.targetCleanOptions,
       );
       paintGesture.lastPoint = point;
       putCurrentImage();
     },
-    [blurStrength, brushSize, eraserHardness, putCurrentImage, updateHoverPoint],
+    [blurStrength, brushSize, eraserHardness, eraserOpacity, putCurrentImage, updateHoverPoint],
   );
 
   const handleCanvasPointerUp = useCallback((event: PointerEvent<HTMLCanvasElement>) => {
@@ -600,6 +634,15 @@ export function SpriteWandCleanupEditor({
     setError(null);
   }, [restoreImageData]);
 
+  const handleResetWandDefaults = useCallback(() => {
+    setTolerance(DEFAULT_TOLERANCE);
+    setWandStrong(DEFAULT_WAND_STRONG);
+    setWandSoftness(DEFAULT_WAND_SOFTNESS);
+    setWandFeather(DEFAULT_WAND_FEATHER);
+    setStatus("Wand settings reset");
+    setError(null);
+  }, []);
+
   const handleApply = useCallback(async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -634,7 +677,7 @@ export function SpriteWandCleanupEditor({
   const reticleStyle = useMemo<CSSProperties | null>(() => {
     if (!hoverPoint) return null;
     const diameter =
-      tool === "erase" || tool === "restore" || tool === "blur"
+      tool === "erase" || tool === "restore" || tool === "blur" || tool === "clean"
         ? Math.max(8, brushSize * zoom)
         : Math.max(12, 12 * zoom);
     return {
@@ -739,6 +782,16 @@ export function SpriteWandCleanupEditor({
           <div className="flex flex-wrap items-center gap-2">
             {tool === "wand" && (
               <>
+                <button
+                  type="button"
+                  onClick={handleResetWandDefaults}
+                  disabled={loading || applying}
+                  className="inline-flex min-w-fit items-center gap-1.5 whitespace-nowrap rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs font-medium text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-colors hover:text-[var(--foreground)] disabled:opacity-45"
+                  title="Reset wand controls to their defaults"
+                >
+                  <RotateCcw size="0.875rem" />
+                  Defaults
+                </button>
                 <RangeControl
                   label="Tolerance"
                   min={4}
@@ -746,50 +799,39 @@ export function SpriteWandCleanupEditor({
                   value={tolerance}
                   onChange={setTolerance}
                   disabled={loading || applying}
-                  inputClassName="min-w-28"
+                  className="min-w-[12rem] flex-[1_1_12rem]"
                 />
                 <ToggleControl
                   label="Strong"
-                  checked={classicStrong}
-                  onChange={setClassicStrong}
+                  checked={wandStrong}
+                  onChange={setWandStrong}
                   disabled={loading || applying}
-                  title="Use diagonal fill with boosted tolerance"
+                  title="Reach farther into matching debris"
                 />
-                <ToggleControl
-                  label="Clean Edge"
-                  checked={cleanEdge}
-                  onChange={setCleanEdge}
+                <RangeControl
+                  label="Softness"
+                  min={0}
+                  max={100}
+                  value={wandSoftness}
+                  onChange={setWandSoftness}
                   disabled={loading || applying}
-                  title="Run edge cleanup after clearing the wand selection"
+                  title="0 is a hard cut; higher values leave a softer low-alpha edge"
+                  className="min-w-[14rem] flex-[1_1_14rem]"
                 />
-                {cleanEdge && (
-                  <>
-                    <RangeControl
-                      label="Softness"
-                      min={0}
-                      max={100}
-                      value={edgeSoftness}
-                      onChange={setEdgeSoftness}
-                      disabled={loading || applying}
-                      title="How much soft foreground-colored edge halo to add around the cut"
-                      className="min-w-48 flex-1"
-                    />
-                    <RangeControl
-                      label="Decontaminate"
-                      min={0}
-                      max={100}
-                      value={edgeDecontaminate}
-                      onChange={setEdgeDecontaminate}
-                      disabled={loading || applying}
-                      title="How much dirty matte color to pull out of anti-aliased edge pixels"
-                      className="min-w-48 flex-1"
-                    />
-                  </>
-                )}
+                <RangeControl
+                  label="Feather"
+                  min={0}
+                  max={100}
+                  value={wandFeather}
+                  onChange={setWandFeather}
+                  disabled={loading || applying}
+                  title="How much soft border the wand leaves behind, and how gradually it fades"
+                  className="min-w-[14rem] flex-[1_1_14rem]"
+                />
               </>
             )}
 
-            {(tool === "erase" || tool === "restore" || tool === "blur") && (
+            {(tool === "clean" || tool === "erase" || tool === "restore" || tool === "blur") && (
               <>
                 <RangeControl
                   label="Brush"
@@ -798,21 +840,67 @@ export function SpriteWandCleanupEditor({
                   value={brushSize}
                   onChange={setBrushSize}
                   disabled={loading || applying}
-                  inputClassName="min-w-28"
+                  inputClassName="min-w-20"
                   before={<Minus size="0.75rem" className="text-[var(--muted-foreground)]" />}
                   after={<Plus size="0.75rem" className="text-[var(--muted-foreground)]" />}
                 />
+                {tool === "clean" && (
+                  <>
+                    <RangeControl
+                      label="Tolerance"
+                      min={4}
+                      max={128}
+                      value={cleanTolerance}
+                      onChange={setCleanTolerance}
+                      disabled={loading || applying}
+                      title="How closely pixels must match the sampled cleanup color"
+                      className="min-w-[12rem] flex-[1_1_12rem]"
+                    />
+                    <RangeControl
+                      label="Edge Guard"
+                      min={0}
+                      max={100}
+                      value={cleanEdgeGuard}
+                      onChange={setCleanEdgeGuard}
+                      disabled={loading || applying}
+                      title="How strongly the brush avoids character-like edge pixels"
+                      className="min-w-[16rem] flex-[1_1_16rem]"
+                    />
+                    <RangeControl
+                      label="Feather"
+                      min={0}
+                      max={100}
+                      value={cleanFeather}
+                      onChange={setCleanFeather}
+                      disabled={loading || applying}
+                      title="Soften the edge of the cleaned brush stroke"
+                      className="min-w-[14rem] flex-[1_1_14rem]"
+                    />
+                  </>
+                )}
                 {tool === "erase" && (
-                  <RangeControl
-                    label="Hardness"
-                    min={0}
-                    max={100}
-                    value={eraserHardness}
-                    onChange={setEraserHardness}
-                    disabled={loading || applying}
-                    title="How crisp the eraser edge should be"
-                    className="min-w-48 flex-1"
-                  />
+                  <>
+                    <RangeControl
+                      label="Opacity"
+                      min={0}
+                      max={100}
+                      value={eraserOpacity}
+                      onChange={setEraserOpacity}
+                      disabled={loading || applying}
+                      title="How much alpha each eraser stroke removes"
+                      className="min-w-48 flex-1"
+                    />
+                    <RangeControl
+                      label="Hardness"
+                      min={0}
+                      max={100}
+                      value={eraserHardness}
+                      onChange={setEraserHardness}
+                      disabled={loading || applying}
+                      title="How crisp the eraser edge should be"
+                      className="min-w-48 flex-1"
+                    />
+                  </>
                 )}
                 {tool === "blur" && (
                   <RangeControl
