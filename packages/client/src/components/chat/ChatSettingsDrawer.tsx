@@ -504,6 +504,7 @@ export function ChatSettingsDrawer({
     for (const a of BUILT_IN_AGENTS) {
       if (HIDDEN_ROLEPLAY_AGENTS.has(a.id)) continue;
       const existing = agentConfigsByType.get(a.id);
+      if (existing?.enabled === "false") continue;
       agents.push({
         id: a.id,
         name: existing?.name ?? a.name,
@@ -517,6 +518,7 @@ export function ChatSettingsDrawer({
     if (agentConfigs) {
       for (const c of agentConfigs as AgentConfigRow[]) {
         if (!BUILT_IN_AGENTS.some((b) => b.id === c.type)) {
+          if (c.enabled === "false") continue;
           agents.push({
             id: c.type,
             name: c.name,
@@ -566,6 +568,10 @@ export function ChatSettingsDrawer({
   const expressionEnabledByDefault = isEnabledFlag(expressionConfig?.enabled);
   const expressionActive =
     activeAgentIds.includes("expression") || (activeAgentIds.length === 0 && expressionEnabledByDefault);
+  const hapticConfig = agentConfigsByType.get("haptic") ?? null;
+  const hapticEnabledByDefault = isEnabledFlag(hapticConfig?.enabled);
+  const hapticActive =
+    activeAgentIds.includes("haptic") || (activeAgentIds.length === 0 && hapticEnabledByDefault);
   const lorebookKeeperTargetLorebookId =
     typeof metadata.lorebookKeeperTargetLorebookId === "string" ? metadata.lorebookKeeperTargetLorebookId : "";
   const lorebookKeeperReadBehindMessages = normalizeNonNegativeInteger(
@@ -3878,7 +3884,7 @@ export function ChatSettingsDrawer({
                   </div>
                 )}
 
-                {metadata.enableAgents && !isGame && (
+                {metadata.enableAgents && !isGame && lorebookKeeperActive && (
                   <div className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--secondary)]/70 p-3">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                       <div className="min-w-0">
@@ -3960,7 +3966,7 @@ export function ChatSettingsDrawer({
                   </div>
                 )}
 
-                {metadata.enableAgents && !isGame && (
+                {metadata.enableAgents && !isGame && expressionActive && (
                   <div className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--secondary)]/70 p-3">
                     <div className="flex items-start gap-2">
                       <Image size="0.75rem" className="mt-0.5 text-[var(--primary)]" />
@@ -4196,7 +4202,7 @@ export function ChatSettingsDrawer({
                 )}
 
                 {/* Love Toys Control — not for game mode */}
-                {metadata.enableAgents && !isGame && (
+                {metadata.enableAgents && !isGame && hapticActive && (
                   <div className="space-y-1.5">
                     <button
                       onClick={() => {

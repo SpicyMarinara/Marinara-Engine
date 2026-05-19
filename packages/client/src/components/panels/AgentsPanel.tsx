@@ -18,7 +18,7 @@ import {
   ToggleRight,
 } from "lucide-react";
 import { useUIStore } from "../../stores/ui.store";
-import { useAgentConfigs, useDeleteAgent, type AgentConfigRow } from "../../hooks/use-agents";
+import { useAgentConfigs, useDeleteAgent, useToggleAgent, type AgentConfigRow } from "../../hooks/use-agents";
 import { useCustomTools, useDeleteCustomTool, type CustomToolRow } from "../../hooks/use-custom-tools";
 import {
   useRegexScripts,
@@ -37,6 +37,7 @@ export function AgentsPanel() {
   const { data: customTools } = useCustomTools();
   const { data: regexScripts } = useRegexScripts();
   const deleteAgent = useDeleteAgent();
+  const toggleAgent = useToggleAgent();
   const deleteTool = useDeleteCustomTool();
   const deleteRegex = useDeleteRegexScript();
   const updateRegex = useUpdateRegexScript();
@@ -147,6 +148,10 @@ export function AgentsPanel() {
 
   const activeAgents = statusAgents.filter((agent) => agent.enabled);
   const inactiveAgents = statusAgents.filter((agent) => !agent.enabled);
+
+  const handleToggleAgent = (agentType: string) => {
+    toggleAgent.mutate(agentType);
+  };
 
   const handleCreateAgent = () => {
     // Create a new custom agent immediately in DB then open editor
@@ -388,7 +393,9 @@ export function AgentsPanel() {
               desc: "Utilities, combat, illustrations, and other helpers.",
             },
           ].map(({ category, title, icon, desc }) => {
-            const agents = BUILT_IN_AGENTS.filter((a) => a.category === category);
+            const agents = BUILT_IN_AGENTS.filter(
+              (a) => a.category === category && configByType.get(a.id)?.enabled !== "false",
+            );
             return (
               <PanelSection key={category} title={title} icon={icon}>
                 <div className="mb-1.5 text-[0.625rem] text-[var(--muted-foreground)]">{desc}</div>
@@ -404,15 +411,39 @@ export function AgentsPanel() {
                       name: agent.name,
                       description: agent.description,
                       category: agent.category,
-                      enabled: configByType.get(agent.id)?.enabled !== "false",
+                      enabled: true,
                       custom: false,
                       openAgentDetail,
+                      onToggleEnabled: handleToggleAgent,
                     }),
                   )
                 )}
               </PanelSection>
             );
           })}
+
+          {/* ── Disabled Built-in Agents ── */}
+          {(() => {
+            const disabled = BUILT_IN_AGENTS.filter((a) => configByType.get(a.id)?.enabled === "false");
+            if (!disabled.length) return null;
+            return (
+              <PanelSection title="Disabled Agents" icon={<Sparkles size="0.8125rem" />} defaultOpen={false}>
+                {disabled.map((agent) =>
+                  renderAgentCard({
+                    id: agent.id,
+                    type: agent.id,
+                    name: agent.name,
+                    description: agent.description,
+                    category: agent.category,
+                    enabled: false,
+                    custom: false,
+                    openAgentDetail,
+                    onToggleEnabled: handleToggleAgent,
+                  }),
+                )}
+              </PanelSection>
+            );
+          })()}
         </>
       ) : (
         <>
@@ -423,14 +454,14 @@ export function AgentsPanel() {
             {!activeAgents.length ? (
               <p className="px-1 py-2 text-[0.625rem] text-[var(--muted-foreground)]">No active agents.</p>
             ) : (
-              activeAgents.map((agent) => renderAgentCard({ ...agent, openAgentDetail }))
+              activeAgents.map((agent) => renderAgentCard({ ...agent, openAgentDetail, onToggleEnabled: handleToggleAgent }))
             )}
           </PanelSection>
           <PanelSection title="Disabled Agents" icon={<Sparkles size="0.8125rem" />}>
             {!inactiveAgents.length ? (
               <p className="px-1 py-2 text-[0.625rem] text-[var(--muted-foreground)]">No inactive agents.</p>
             ) : (
-              inactiveAgents.map((agent) => renderAgentCard({ ...agent, openAgentDetail }))
+              inactiveAgents.map((agent) => renderAgentCard({ ...agent, openAgentDetail, onToggleEnabled: handleToggleAgent }))
             )}
           </PanelSection>
         </>
@@ -581,6 +612,7 @@ function renderAgentCard({
   enabled,
   custom,
   openAgentDetail,
+  onToggleEnabled,
 }: {
   id: string;
   type: string;
@@ -590,13 +622,15 @@ function renderAgentCard({
   enabled: boolean;
   custom: boolean;
   openAgentDetail: (id: string) => void;
+  onToggleEnabled?: (agentType: string) => void;
 }) {
-  void enabled;
-
   return (
     <div
       key={id}
-      className="flex items-start gap-2.5 rounded-lg p-2 transition-colors hover:bg-[var(--sidebar-accent)]"
+      className={cn(
+        "flex items-start gap-2.5 rounded-lg p-2 transition-colors hover:bg-[var(--sidebar-accent)]",
+        !enabled && "opacity-55",
+      )}
     >
       <Sparkles size="0.875rem" className="mt-0.5 shrink-0 text-[var(--primary)]" />
       <button className="min-w-0 flex-1 text-left" onClick={() => openAgentDetail(custom ? id : type)}>
@@ -608,6 +642,15 @@ function renderAgentCard({
           {custom ? "custom" : category}
         </div>
       </button>
+      {onToggleEnabled && (
+        <button
+          className="mt-0.5 shrink-0 text-[var(--muted-foreground)] transition-colors hover:text-[var(--primary)]"
+          title={enabled ? "Disable agent" : "Enable agent"}
+          onClick={() => onToggleEnabled(type)}
+        >
+          {enabled ? <ToggleRight size="1rem" className="text-emerald-400" /> : <ToggleLeft size="1rem" />}
+        </button>
+      )}
       <button
         className="mt-0.5 shrink-0 text-[var(--muted-foreground)] transition-colors hover:text-[var(--primary)]"
         title="Edit agent"
