@@ -771,7 +771,7 @@ export function SpriteWandCleanupEditor({
                       value={edgeSoftness}
                       onChange={setEdgeSoftness}
                       disabled={loading || applying}
-                      title="How much alpha smoothing to apply near the kept edge"
+                      title="How much soft foreground-colored edge halo to add around the cut"
                       className="min-w-48 flex-1"
                     />
                     <RangeControl
