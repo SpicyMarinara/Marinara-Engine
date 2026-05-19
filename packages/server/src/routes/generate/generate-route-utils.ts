@@ -6,7 +6,7 @@ import {
 } from "@marinara-engine/shared";
 import { wrapContent } from "../../services/prompt/format-engine.js";
 
-export type SimpleMessage = { role: "system" | "user" | "assistant"; content: string };
+export type SimpleMessage = { role: "system" | "user" | "assistant"; content: string; images?: string[] };
 export type StoredGenerationParameters = Partial<GenerationParameters>;
 export type PromptAttachment = {
   type?: string | null;
@@ -79,6 +79,123 @@ export function parseExtra(extra: unknown): Record<string, unknown> {
 
 export function isMessageHiddenFromAI(message: { extra?: unknown }): boolean {
   return parseExtra(message.extra).hiddenFromAI === true;
+}
+
+export function canUseMessageForUserRegeneration(input: {
+  message: { role?: unknown; extra?: unknown };
+  supportsHiddenFromAI: boolean;
+}): boolean {
+  return !(input.message.role === "user" && input.supportsHiddenFromAI && isMessageHiddenFromAI(input.message));
+}
+
+function parsePromptAttachments(extra: unknown): PromptAttachment[] | undefined {
+  const rawAttachments = parseExtra(extra).attachments;
+  if (!Array.isArray(rawAttachments)) return undefined;
+  const attachments = rawAttachments.filter(isPromptAttachment);
+  return attachments.length ? attachments : undefined;
+}
+
+export function resolveUserRegenerationPersistentAttachments(message: {
+  role?: unknown;
+  extra?: unknown;
+}): PromptAttachment[] | undefined {
+  if (message.role !== "user") return undefined;
+  return parsePromptAttachments(message.extra);
+}
+
+function isPromptAttachment(value: unknown): value is PromptAttachment {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Build the instruction used when regenerating a user-authored message as a swipe.
+ * The original user text and readable attachments are wrapped in
+ * <original_user_message> tags so downstream generation can return only
+ * replacement user-message text.
+ */
+export function buildUserMessageRegenerationInstruction(message: { content?: unknown; extra?: unknown }): string {
+  const original = typeof message.content === "string" ? message.content.trim() : "";
+  const attachments = parsePromptAttachments(message.extra);
+  const originalWithAttachments = appendReadableAttachmentsToContent(original, attachments);
+  return [
+    "Regenerate the user's previous message as an alternate swipe.",
+    "Write only the replacement user message text.",
+    "Do not answer as the assistant, continue the assistant side, or describe what the assistant does next.",
+    "",
+    "<original_user_message>",
+    originalWithAttachments,
+    "</original_user_message>",
+  ].join("\n");
+}
+
+export function buildUserMessageRegenerationPrompt(message: { content?: unknown; extra?: unknown }): SimpleMessage {
+  const attachments = parsePromptAttachments(message.extra);
+  const images = extractImageAttachmentDataUrls(attachments);
+  return {
+    role: "user",
+    content: buildUserMessageRegenerationInstruction(message),
+    ...(images.length ? { images } : {}),
+  };
+}
+
+export function buildUserMessageRegenerationPromptFromSource(source: SimpleMessage): SimpleMessage {
+  return {
+    role: "user",
+    content: buildUserMessageRegenerationInstruction({ content: source.content }),
+    ...(source.images?.length ? { images: source.images } : {}),
+  };
+}
+
+/**
+ * Build the context-facing version of a user message being regenerated.
+ * This preserves the original user text and attachments for prompt shaping
+ * without adding the provider-facing rewrite instruction.
+ */
+export function buildUserMessageRegenerationSourceMessage(message: {
+  content?: unknown;
+  extra?: unknown;
+}): SimpleMessage {
+  const original = typeof message.content === "string" ? message.content : "";
+  const attachments = parsePromptAttachments(message.extra);
+  const content = appendReadableAttachmentsToContent(original, attachments);
+  const images = extractImageAttachmentDataUrls(attachments);
+  return {
+    role: "user",
+    content,
+    ...(images.length ? { images } : {}),
+  };
+}
+
+export function appendGenerationTailMessages(
+  messages: SimpleMessage[],
+  options: {
+    assistantPrefill: string;
+    followUpIteration: number;
+    impersonate: boolean;
+    isGoogleProvider: boolean;
+    regenerateUserMessage: SimpleMessage | null;
+  },
+): { assistantPrefillInjected: boolean; googleUserRegenerationInjected: boolean } {
+  if (options.followUpIteration !== 0) {
+    return { assistantPrefillInjected: false, googleUserRegenerationInjected: false };
+  }
+
+  const shouldAppendGoogleUserRegeneration =
+    !options.impersonate && options.isGoogleProvider && !!options.regenerateUserMessage;
+  const assistantPrefill = options.assistantPrefill.trim();
+
+  if (assistantPrefill) {
+    messages.push({ role: "assistant", content: options.assistantPrefill });
+  }
+
+  if (shouldAppendGoogleUserRegeneration) {
+    messages.push(options.regenerateUserMessage!);
+  }
+
+  return {
+    assistantPrefillInjected: !!assistantPrefill,
+    googleUserRegenerationInjected: shouldAppendGoogleUserRegeneration,
+  };
 }
 
 export function resolveActiveCharacterIds(
