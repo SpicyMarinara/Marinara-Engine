@@ -74,6 +74,7 @@ type ProfileZipEntry = {
   isDirectory: boolean;
   header: {
     method: number;
+    crc32: number;
     compressedSize: number;
     size: number;
     dataOffset: number;
@@ -134,6 +135,12 @@ class ProfileArchiveTooLargeError extends Error {}
 class ProfileImportRequestError extends Error {}
 
 class ProfileImportArchiveTooLargeError extends ProfileImportRequestError {}
+
+function sendProfileImportRequestError(reply: FastifyReply, err: ProfileImportRequestError) {
+  const message = err.message || "Profile import file could not be read.";
+  const statusCode = err instanceof ProfileImportArchiveTooLargeError ? 413 : 400;
+  return reply.status(statusCode).send({ error: "Invalid profile export", message });
+}
 
 function resolveBackupDir(dataDir: string, dirName: string) {
   return dirName === "storage" ? getFileStorageDir() : join(dataDir, dirName);
@@ -262,6 +269,17 @@ function resolveAvatarWritePath(dataDir: string, avatarPath: unknown) {
   const filename = avatarPath.split("?")[0]?.split("/").filter(Boolean).pop();
   if (!filename) return null;
   return assertInsideDir(join(dataDir, "avatars"), join(dataDir, "avatars", filename));
+}
+
+function resolveProfileExportFilePath(dataDir: string, filePath: unknown) {
+  if (typeof filePath !== "string" || !filePath.trim()) return null;
+  const cleanPath = filePath.split("?")[0];
+  if (!cleanPath) return null;
+  try {
+    return assertInsideDir(dataDir, join(dataDir, cleanPath));
+  } catch {
+    return null;
+  }
 }
 
 function redactAgentSecrets(agent: any) {
@@ -549,7 +567,7 @@ async function importProfileStorageSnapshot(
       restoredFileBytes += expectedSize;
       assertProfileArchiveTotalLimit(restoredFileBytes);
       if (buffer.length !== expectedSize) {
-        throw new Error(`Profile asset ${safePath} does not match its manifest size.`);
+        throw new ProfileImportRequestError(`Profile asset ${safePath} does not match its manifest size.`);
       }
       const outputPath = assertInsideDir(getDataDir(), join(getDataDir(), ...safePath.split("/")));
       await mkdir(dirname(outputPath), { recursive: true });
@@ -583,7 +601,7 @@ async function buildProfileExportEnvelope(
   const characterExports = await Promise.all(
     allChars.map(async (c: any) => {
       let avatarBase64: string | null = null;
-      const avatarPath = c.avatarPath ? join(dataDir, c.avatarPath) : null;
+      const avatarPath = resolveProfileExportFilePath(dataDir, c.avatarPath);
       if (includeLegacyAvatarBase64 && avatarPath && existsSync(avatarPath)) {
         avatarBase64 = await readInlineBase64File(avatarPath, inlineJsonBudget);
       }
@@ -595,7 +613,7 @@ async function buildProfileExportEnvelope(
   const allPersonas = await Promise.all(
     (allPersonaRows as any[]).map(async (p: any) => {
       let avatarBase64: string | null = null;
-      const avatarPath = p.avatarPath ? join(dataDir, p.avatarPath) : null;
+      const avatarPath = resolveProfileExportFilePath(dataDir, p.avatarPath);
       if (includeLegacyAvatarBase64 && avatarPath && existsSync(avatarPath)) {
         avatarBase64 = await readInlineBase64File(avatarPath, inlineJsonBudget);
       }
@@ -1192,6 +1210,7 @@ async function readProfileZipArchive(filePath: string): Promise<ProfileZipArchiv
         throw new ProfileImportRequestError("Profile archive encrypted ZIP entries are not supported.");
       }
       const method = centralDirectory.readUInt16LE(offset + 10);
+      const crc32 = centralDirectory.readUInt32LE(offset + 16);
       const compressedSize = readZip32Value(centralDirectory, offset + 20, "entry compressed size");
       const size = readZip32Value(centralDirectory, offset + 24, "entry size");
       const fileNameLength = centralDirectory.readUInt16LE(offset + 28);
@@ -1223,7 +1242,7 @@ async function readProfileZipArchive(filePath: string): Promise<ProfileZipArchiv
       const entry: ProfileZipEntry = {
         entryName: normalizedName,
         isDirectory: normalizedName.endsWith("/"),
-        header: { method, compressedSize, size, dataOffset },
+        header: { method, crc32, compressedSize, size, dataOffset },
       };
       entries.push(entry);
       if (normalizedName && !entriesByName.has(normalizedName)) entriesByName.set(normalizedName, entry);
@@ -1314,6 +1333,9 @@ async function readProfileArchiveEntryBuffer(zip: ProfileZipArchive, entry: Prof
   }
   if (data.length !== expectedSize) {
     throw new ProfileImportRequestError(`Profile archive entry ${entry.entryName} does not match its manifest size.`);
+  }
+  if (crc32Buffer(data) !== entry.header.crc32) {
+    throw new ProfileImportRequestError(`Profile archive entry ${entry.entryName} failed CRC check.`);
   }
   return data;
 }
@@ -1651,9 +1673,11 @@ export async function backupRoutes(app: FastifyInstance) {
     try {
       importInput = await readProfileImportRequest(req);
     } catch (err) {
+      if (err instanceof ProfileImportRequestError) {
+        return sendProfileImportRequestError(reply, err);
+      }
       const message = err instanceof Error ? err.message : "Profile import file could not be read.";
-      const statusCode = err instanceof ProfileImportArchiveTooLargeError ? 413 : 400;
-      return reply.status(statusCode).send({ error: "Invalid profile export", message });
+      return reply.status(400).send({ error: "Invalid profile export", message });
     }
 
     try {
@@ -2064,11 +2088,22 @@ export async function backupRoutes(app: FastifyInstance) {
       } catch (err) {
         if (wantsProgressStream) {
           const message = getBackupErrorMessage(err, "Profile import failed. Check the server logs for details.");
-          const logError = err instanceof Error ? err : new Error(message);
-          logger.error(logError, "[backup] Profile import failed");
-          sendEvent({ type: "error", data: { error: "Profile import failed", message } });
+          if (!(err instanceof ProfileImportRequestError)) {
+            const logError = err instanceof Error ? err : new Error(message);
+            logger.error(logError, "[backup] Profile import failed");
+          }
+          sendEvent({
+            type: "error",
+            data: {
+              error: err instanceof ProfileImportRequestError ? "Invalid profile export" : "Profile import failed",
+              message,
+            },
+          });
           reply.raw.end();
           return;
+        }
+        if (err instanceof ProfileImportRequestError) {
+          return sendProfileImportRequestError(reply, err);
         }
         return sendBackupRouteError(reply, err, "Profile import");
       }

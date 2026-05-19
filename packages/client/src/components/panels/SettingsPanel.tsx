@@ -3188,6 +3188,7 @@ function ImportSettings() {
             error: "Not a valid profile export file.",
           });
           toast.error("Not a valid profile export file.");
+          e.target.value = "";
           return;
         }
         body = text;
@@ -3213,6 +3214,7 @@ function ImportSettings() {
         const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
         throw new Error(data.message ?? data.error ?? res.statusText ?? "Unknown error");
       }
+      let importCompleted = false;
       for await (const event of readProfileImportStream(res)) {
         if (event.type === "started") {
           setProfileImportProgress((current) => ({
@@ -3242,6 +3244,7 @@ function ImportSettings() {
         }
         if (event.type === "done") {
           if (event.data?.success === false) throw new Error(event.data.error ?? event.data.message ?? "Unknown error");
+          importCompleted = true;
           qc.invalidateQueries();
           const imported = event.data?.imported;
           const warnings = normalizeProfileImportWarnings(event.data?.warnings);
@@ -3266,6 +3269,9 @@ function ImportSettings() {
             toast.success(summary ? `Imported: ${summary}` : "Profile imported.");
           }
         }
+      }
+      if (!importCompleted) {
+        throw new Error("Profile import stream closed before completion.");
       }
     } catch (err) {
       const message =
