@@ -37,6 +37,7 @@ import { usePageActivity } from "../../hooks/use-page-activity";
 import { api, ApiError } from "../../lib/api-client";
 import { filterLanguageGenerationConnections } from "../../lib/connection-filters";
 import { getChatDisplayName, getConnectedChatDisplayName, parseChatMetadata } from "../../lib/chat-display";
+import { resolveCurrentGameSessionChatId } from "../../lib/game-session-resolution";
 import { parseCharacterDisplayData } from "../../lib/character-display";
 import { showConfirmDialog } from "../../lib/app-dialogs";
 import { chatBackgroundMetadataToUrl, chatBackgroundUrlToMetadata } from "../../lib/backgrounds";
@@ -231,6 +232,16 @@ export function ChatArea() {
     if (!activeChatId || !(chatError instanceof ApiError) || chatError.status !== 404) return;
     setActiveChatId(null);
   }, [activeChatId, chatError, setActiveChatId]);
+
+  const currentGameSessionChatId = useMemo(
+    () => resolveCurrentGameSessionChatId(chat, allChats),
+    [allChats, chat],
+  );
+
+  useEffect(() => {
+    if (!currentGameSessionChatId || currentGameSessionChatId === activeChatId) return;
+    setActiveChatId(currentGameSessionChatId);
+  }, [activeChatId, currentGameSessionChatId, setActiveChatId]);
 
   useEffect(() => {
     const handleReviewRequest = (event: Event) => {

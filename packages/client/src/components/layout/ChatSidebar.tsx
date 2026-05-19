@@ -49,6 +49,7 @@ import type { Chat, ChatFolder, ChatMode } from "@marinara-engine/shared";
 import { Modal } from "../ui/Modal";
 import { Reorder, useDragControls } from "framer-motion";
 import { parseChatMetadata } from "../../lib/chat-display";
+import { getCurrentGameGroupRepresentative } from "../../lib/game-session-resolution";
 
 type ChatSortOption = "newest" | "oldest" | "name-asc" | "name-desc";
 
@@ -293,7 +294,10 @@ export function ChatSidebar() {
       if (chat.groupId) {
         if (seenGroups.has(chat.groupId)) continue;
         seenGroups.add(chat.groupId);
-        result.push({ chat, branchCount: totalGroupSizes.get(chat.groupId) ?? 1 });
+        result.push({
+          chat: getCurrentGameGroupRepresentative(chat, chats ?? filtered),
+          branchCount: totalGroupSizes.get(chat.groupId) ?? 1,
+        });
       } else {
         result.push({ chat, branchCount: 1 });
       }
