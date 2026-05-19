@@ -291,6 +291,8 @@ interface UIState {
   characterLibraryOpen: boolean;
   /** True when any open detail editor has unsaved changes */
   editorDirty: boolean;
+  /** Mobile-only return target for detail editors opened from a right panel */
+  detailReturnRightPanel: Panel | null;
 
   // ── Settings (persisted) ──
   fontSize: FontSize;
@@ -627,6 +629,21 @@ interface UIState {
   setUserActivity: (activity: string) => void;
 }
 
+function getMobileDetailReturnState(state: UIState) {
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+  return {
+    detailReturnRightPanel: isMobile && state.rightPanelOpen ? state.rightPanel : null,
+    ...(isMobile && { rightPanelOpen: false }),
+  };
+}
+
+function restoreMobileDetailReturnPanel(panel: Panel | null) {
+  return {
+    detailReturnRightPanel: null,
+    ...(panel && { rightPanelOpen: true, rightPanel: panel }),
+  };
+}
+
 /**
  * Returns the subset of UI state that is synced to the server so it persists
  * across devices and browsers. Excludes legacy migration flags, auto-computed
@@ -769,6 +786,7 @@ export const useUIStore = create<UIState>()(
       gameAssetsBrowserOpen: false,
       characterLibraryOpen: false,
       editorDirty: false,
+      detailReturnRightPanel: null,
 
       // Settings defaults
       fontSize: 17 as FontSize,
@@ -933,7 +951,7 @@ export const useUIStore = create<UIState>()(
       setChatBackground: (url) => set({ chatBackground: url }),
       setChatBackgroundBlur: (v) => set({ chatBackgroundBlur: Math.max(0, Math.min(24, Math.round(v))) }),
       openCharacterDetail: (id) =>
-        set({
+        set((s) => ({
           characterDetailId: id,
           lorebookDetailId: null,
           presetDetailId: null,
@@ -941,11 +959,16 @@ export const useUIStore = create<UIState>()(
           agentDetailId: null,
           personaDetailId: null,
           regexDetailId: null,
-          ...(window.innerWidth < 768 && { rightPanelOpen: false }),
-        }),
-      closeCharacterDetail: () => set({ characterDetailId: null, editorDirty: false }),
+          ...getMobileDetailReturnState(s),
+        })),
+      closeCharacterDetail: () =>
+        set((s) => ({
+          characterDetailId: null,
+          editorDirty: false,
+          ...restoreMobileDetailReturnPanel(s.detailReturnRightPanel),
+        })),
       openLorebookDetail: (id) =>
-        set({
+        set((s) => ({
           lorebookDetailId: id,
           characterLibraryOpen: false,
           characterDetailId: null,
@@ -954,11 +977,16 @@ export const useUIStore = create<UIState>()(
           agentDetailId: null,
           personaDetailId: null,
           regexDetailId: null,
-          ...(window.innerWidth < 768 && { rightPanelOpen: false }),
-        }),
-      closeLorebookDetail: () => set({ lorebookDetailId: null, editorDirty: false }),
+          ...getMobileDetailReturnState(s),
+        })),
+      closeLorebookDetail: () =>
+        set((s) => ({
+          lorebookDetailId: null,
+          editorDirty: false,
+          ...restoreMobileDetailReturnPanel(s.detailReturnRightPanel),
+        })),
       openPresetDetail: (id) =>
-        set({
+        set((s) => ({
           presetDetailId: id,
           characterLibraryOpen: false,
           characterDetailId: null,
@@ -967,11 +995,16 @@ export const useUIStore = create<UIState>()(
           agentDetailId: null,
           personaDetailId: null,
           regexDetailId: null,
-          ...(window.innerWidth < 768 && { rightPanelOpen: false }),
-        }),
-      closePresetDetail: () => set({ presetDetailId: null, editorDirty: false }),
+          ...getMobileDetailReturnState(s),
+        })),
+      closePresetDetail: () =>
+        set((s) => ({
+          presetDetailId: null,
+          editorDirty: false,
+          ...restoreMobileDetailReturnPanel(s.detailReturnRightPanel),
+        })),
       openConnectionDetail: (id) =>
-        set({
+        set((s) => ({
           connectionDetailId: id,
           characterLibraryOpen: false,
           characterDetailId: null,
@@ -980,11 +1013,16 @@ export const useUIStore = create<UIState>()(
           agentDetailId: null,
           personaDetailId: null,
           regexDetailId: null,
-          ...(window.innerWidth < 768 && { rightPanelOpen: false }),
-        }),
-      closeConnectionDetail: () => set({ connectionDetailId: null, editorDirty: false }),
+          ...getMobileDetailReturnState(s),
+        })),
+      closeConnectionDetail: () =>
+        set((s) => ({
+          connectionDetailId: null,
+          editorDirty: false,
+          ...restoreMobileDetailReturnPanel(s.detailReturnRightPanel),
+        })),
       openAgentDetail: (agentType) =>
-        set({
+        set((s) => ({
           agentDetailId: agentType,
           characterLibraryOpen: false,
           characterDetailId: null,
@@ -994,11 +1032,16 @@ export const useUIStore = create<UIState>()(
           toolDetailId: null,
           personaDetailId: null,
           regexDetailId: null,
-          ...(window.innerWidth < 768 && { rightPanelOpen: false }),
-        }),
-      closeAgentDetail: () => set({ agentDetailId: null, editorDirty: false }),
+          ...getMobileDetailReturnState(s),
+        })),
+      closeAgentDetail: () =>
+        set((s) => ({
+          agentDetailId: null,
+          editorDirty: false,
+          ...restoreMobileDetailReturnPanel(s.detailReturnRightPanel),
+        })),
       openToolDetail: (id) =>
-        set({
+        set((s) => ({
           toolDetailId: id,
           agentDetailId: null,
           characterLibraryOpen: false,
@@ -1008,11 +1051,16 @@ export const useUIStore = create<UIState>()(
           connectionDetailId: null,
           personaDetailId: null,
           regexDetailId: null,
-          ...(window.innerWidth < 768 && { rightPanelOpen: false }),
-        }),
-      closeToolDetail: () => set({ toolDetailId: null, editorDirty: false }),
+          ...getMobileDetailReturnState(s),
+        })),
+      closeToolDetail: () =>
+        set((s) => ({
+          toolDetailId: null,
+          editorDirty: false,
+          ...restoreMobileDetailReturnPanel(s.detailReturnRightPanel),
+        })),
       openPersonaDetail: (id) =>
-        set({
+        set((s) => ({
           personaDetailId: id,
           characterLibraryOpen: false,
           characterDetailId: null,
@@ -1022,11 +1070,16 @@ export const useUIStore = create<UIState>()(
           agentDetailId: null,
           toolDetailId: null,
           regexDetailId: null,
-          ...(window.innerWidth < 768 && { rightPanelOpen: false }),
-        }),
-      closePersonaDetail: () => set({ personaDetailId: null, editorDirty: false }),
+          ...getMobileDetailReturnState(s),
+        })),
+      closePersonaDetail: () =>
+        set((s) => ({
+          personaDetailId: null,
+          editorDirty: false,
+          ...restoreMobileDetailReturnPanel(s.detailReturnRightPanel),
+        })),
       openRegexDetail: (id) =>
-        set({
+        set((s) => ({
           regexDetailId: id,
           personaDetailId: null,
           characterLibraryOpen: false,
@@ -1036,9 +1089,14 @@ export const useUIStore = create<UIState>()(
           connectionDetailId: null,
           agentDetailId: null,
           toolDetailId: null,
-          ...(window.innerWidth < 768 && { rightPanelOpen: false }),
-        }),
-      closeRegexDetail: () => set({ regexDetailId: null, editorDirty: false }),
+          ...getMobileDetailReturnState(s),
+        })),
+      closeRegexDetail: () =>
+        set((s) => ({
+          regexDetailId: null,
+          editorDirty: false,
+          ...restoreMobileDetailReturnPanel(s.detailReturnRightPanel),
+        })),
       openCharacterLibrary: () =>
         set({
           characterLibraryOpen: true,
@@ -1052,6 +1110,7 @@ export const useUIStore = create<UIState>()(
           regexDetailId: null,
           botBrowserOpen: false,
           editorDirty: false,
+          detailReturnRightPanel: null,
           rightPanelOpen: false,
         }),
       closeCharacterLibrary: () => set({ characterLibraryOpen: false }),
@@ -1060,6 +1119,7 @@ export const useUIStore = create<UIState>()(
           botBrowserOpen: true,
           gameAssetsBrowserOpen: false,
           characterLibraryOpen: false,
+          detailReturnRightPanel: null,
           regexDetailId: null,
           personaDetailId: null,
           characterDetailId: null,
@@ -1076,6 +1136,7 @@ export const useUIStore = create<UIState>()(
           gameAssetsBrowserOpen: true,
           botBrowserOpen: false,
           characterLibraryOpen: false,
+          detailReturnRightPanel: null,
           regexDetailId: null,
           personaDetailId: null,
           characterDetailId: null,
@@ -1118,6 +1179,7 @@ export const useUIStore = create<UIState>()(
           botBrowserOpen: false,
           gameAssetsBrowserOpen: false,
           editorDirty: false,
+          detailReturnRightPanel: null,
         }),
       setEditorDirty: (dirty) => set({ editorDirty: dirty }),
 
