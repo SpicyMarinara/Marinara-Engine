@@ -17,6 +17,7 @@ export type WandSelectionMode = "connected" | "local";
 
 export interface WandCleanupOptions {
   mode: WandSelectionMode;
+  neighborMode?: NeighborMode;
   radius: number;
   edgeGuard: number;
   expand: number;
@@ -72,6 +73,11 @@ interface EdgeBand {
   edgeDistance: Uint8Array;
   edgeNormalX: Int8Array;
   edgeNormalY: Int8Array;
+}
+
+interface BrushStampSourceOptions {
+  blurSource?: Uint8ClampedArray | null;
+  cleanSource?: Uint8ClampedArray | null;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -323,6 +329,7 @@ function expandSelection(
   width: number,
   totalPixels: number,
   steps: number,
+  mode: NeighborMode,
   canSelect: (index: number, toleranceBoost: number) => boolean,
 ): Uint8Array {
   const expandSteps = Math.min(4, Math.max(0, Math.trunc(steps)));
@@ -337,7 +344,7 @@ function expandSelection(
     for (let index = 0; index < totalPixels; index += 1) {
       if (!current[index]) continue;
 
-      visitNeighbors(index, width, totalPixels, "all", (neighbor) => {
+      visitNeighbors(index, width, totalPixels, mode, (neighbor) => {
         if (current[neighbor] || !canSelect(neighbor, toleranceBoost)) return;
         next[neighbor] = 1;
       });
@@ -1034,6 +1041,7 @@ export function removeWandSelection(
   const totalPixels = width * height;
   const sourceData = new Uint8ClampedArray(data);
   const edgeGuardAmount = clampUnit(options.edgeGuard / 100);
+  const neighborMode = options.neighborMode ?? "cardinal";
   const localRadius = Math.max(2, Math.round(options.radius));
   const localRadiusSquared = localRadius * localRadius;
   const startLocalX = startX;
@@ -1117,7 +1125,7 @@ export function removeWandSelection(
     pushPixel(startIndex);
 
     while (stackLength > 0) {
-      visitNeighbors(stack[--stackLength], width, totalPixels, "all", pushPixel);
+      visitNeighbors(stack[--stackLength], width, totalPixels, neighborMode, pushPixel);
     }
   } else if (options.mode === "local") {
     const minX = Math.max(0, startLocalX - localRadius);
@@ -1146,7 +1154,7 @@ export function removeWandSelection(
     return { removed: 0, target: [target[0], target[1], target[2], targetAlpha] };
   }
 
-  const expandedSelection = expandSelection(selected, width, totalPixels, options.expand, canSelect);
+  const expandedSelection = expandSelection(selected, width, totalPixels, options.expand, neighborMode, canSelect);
   const removed = clearSelection(imageData, expandedSelection);
   softenKeptCutEdge(imageData, expandedSelection, sourceData, target, tolerance, options.softness, options.feather);
   addSelectedSoftHalo(imageData, expandedSelection, sourceData, target, tolerance, options.feather, options.softness);
@@ -1431,12 +1439,13 @@ export function applyBrushStamp(
   centerX: number,
   centerY: number,
   options: BrushStrokeOptions,
+  sources: BrushStampSourceOptions = {},
 ): number {
   const { data, width, height } = imageData;
   const { mode, radius } = options;
   const restoreSource = originalImage?.data ?? null;
-  const blurSource = mode === "blur" ? new Uint8ClampedArray(data) : null;
-  const cleanSource = mode === "clean" ? new Uint8ClampedArray(data) : null;
+  const blurSource = mode === "blur" ? (sources.blurSource ?? new Uint8ClampedArray(data)) : null;
+  const cleanSource = mode === "clean" ? (sources.cleanSource ?? new Uint8ClampedArray(data)) : null;
   const cleanOptions = options.mode === "clean" ? options.clean : null;
   const paintOptions = options.mode === "paint" ? options.paint : null;
   const cleanTarget = cleanOptions?.target ?? null;
@@ -1616,8 +1625,14 @@ export function applyBrushLine(
   to: CanvasPoint,
   options: BrushStrokeOptions,
 ): number {
+  if (from.x === to.x && from.y === to.y) return 0;
+
   const distance = Math.hypot(to.x - from.x, to.y - from.y);
   const steps = Math.max(1, Math.ceil(distance / Math.max(1, options.radius * 0.45)));
+  const sources: BrushStampSourceOptions = {
+    blurSource: options.mode === "blur" ? new Uint8ClampedArray(imageData.data) : null,
+    cleanSource: options.mode === "clean" ? new Uint8ClampedArray(imageData.data) : null,
+  };
   let changed = 0;
 
   for (let step = 1; step <= steps; step += 1) {
@@ -1628,6 +1643,7 @@ export function applyBrushLine(
       from.x + (to.x - from.x) * amount,
       from.y + (to.y - from.y) * amount,
       options,
+      sources,
     );
   }
 

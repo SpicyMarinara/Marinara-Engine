@@ -223,6 +223,17 @@ function rgbaToHex(color: Rgba): string {
   return `#${colorComponentToHex(color[0])}${colorComponentToHex(color[1])}${colorComponentToHex(color[2])}`;
 }
 
+function imageDataEquals(left: ImageData | null, right: ImageData | null): boolean {
+  if (!left || !right || left.width !== right.width || left.height !== right.height) return false;
+  if (left.data.length !== right.data.length) return false;
+
+  for (let index = 0; index < left.data.length; index += 1) {
+    if (left.data[index] !== right.data[index]) return false;
+  }
+
+  return true;
+}
+
 function hexToRgba(hex: string): Rgba {
   const normalized = /^#[0-9a-f]{6}$/i.test(hex) ? hex : DEFAULT_BRUSH_COLOR;
   return [
@@ -530,6 +541,7 @@ export function SpriteWandCleanupEditor({
       const selectionTolerance = wandStrong ? Math.min(224, Math.round(tolerance * 1.55)) : tolerance;
       const result: WandResult = removeWandSelection(next, point.x, point.y, selectionTolerance, {
         mode: "connected",
+        neighborMode: wandStrong ? "all" : "cardinal",
         radius: 0,
         edgeGuard: wandStrong ? STRONG_WAND_EDGE_GUARD : WAND_EDGE_GUARD,
         expand: wandStrong ? STRONG_WAND_EXPAND : WAND_EXPAND,
@@ -561,9 +573,9 @@ export function SpriteWandCleanupEditor({
   );
 
   const commitBrushGesture = useCallback(
-    (canvas: HTMLCanvasElement | null) => {
+    (canvas: HTMLCanvasElement | null, pointerId: number) => {
       const gesture = brushGestureRef.current;
-      if (!gesture) return;
+      if (!gesture || gesture.pointerId !== pointerId) return;
 
       brushGestureRef.current = null;
       if (canvas?.hasPointerCapture(gesture.pointerId)) {
@@ -584,9 +596,9 @@ export function SpriteWandCleanupEditor({
     [pushHistory],
   );
 
-  const commitPanGesture = useCallback((canvas: HTMLCanvasElement | null) => {
+  const commitPanGesture = useCallback((canvas: HTMLCanvasElement | null, pointerId: number) => {
     const gesture = panGestureRef.current;
-    if (!gesture) return;
+    if (!gesture || gesture.pointerId !== pointerId) return;
 
     panGestureRef.current = null;
     if (canvas?.hasPointerCapture(gesture.pointerId)) {
@@ -726,13 +738,13 @@ export function SpriteWandCleanupEditor({
   );
 
   const handleCanvasPointerUp = useCallback((event: PointerEvent<HTMLCanvasElement>) => {
-    commitBrushGesture(event.currentTarget);
-    commitPanGesture(event.currentTarget);
+    commitBrushGesture(event.currentTarget, event.pointerId);
+    commitPanGesture(event.currentTarget, event.pointerId);
   }, [commitBrushGesture, commitPanGesture]);
 
   const handleCanvasPointerCancel = useCallback((event: PointerEvent<HTMLCanvasElement>) => {
-    commitBrushGesture(event.currentTarget);
-    commitPanGesture(event.currentTarget);
+    commitBrushGesture(event.currentTarget, event.pointerId);
+    commitPanGesture(event.currentTarget, event.pointerId);
   }, [commitBrushGesture, commitPanGesture]);
 
   const handleUndo = useCallback(() => {
@@ -742,7 +754,7 @@ export function SpriteWandCleanupEditor({
 
       restoreImageData(previous);
       const nextHistory = prev.slice(0, -1);
-      setHasChanges(nextHistory.length > 0);
+      setHasChanges(!imageDataEquals(previous, originalImageRef.current));
       setStatus("Undo applied");
       setError(null);
       return nextHistory;
