@@ -63,6 +63,7 @@ interface BrushGesture {
   lastPoint: CanvasPoint;
   changedPixels: number;
   options: BrushStrokeOptions;
+  interrupted: boolean;
 }
 
 interface PanGesture {
@@ -613,6 +614,7 @@ export function SpriteWandCleanupEditor({
       event.preventDefault();
       const canvas = canvasRef.current;
       if (!canvas) return;
+      if (brushGestureRef.current || panGestureRef.current) return;
 
       if (tool === "pan") {
         const stage = stageRef.current;
@@ -684,6 +686,7 @@ export function SpriteWandCleanupEditor({
         lastPoint: point,
         changedPixels,
         options: brushOptions,
+        interrupted: false,
       };
       canvas.setPointerCapture(event.pointerId);
     },
@@ -719,10 +722,31 @@ export function SpriteWandCleanupEditor({
         return;
       }
 
-      const point = updateHoverPoint(event);
       const brushGesture = brushGestureRef.current;
       const current = currentImageRef.current;
-      if (!point || !brushGesture || brushGesture.pointerId !== event.pointerId || !current) return;
+      if (brushGesture && brushGesture.pointerId !== event.pointerId) return;
+
+      const point = updateHoverPoint(event);
+      if (!brushGesture || !current) return;
+
+      if (!point) {
+        brushGesture.interrupted = true;
+        return;
+      }
+
+      if (brushGesture.interrupted) {
+        brushGesture.changedPixels += applyBrushStamp(
+          current,
+          originalImageRef.current,
+          point.x,
+          point.y,
+          brushGesture.options,
+        );
+        brushGesture.lastPoint = point;
+        brushGesture.interrupted = false;
+        putCurrentImage();
+        return;
+      }
 
       brushGesture.changedPixels += applyBrushLine(
         current,
@@ -876,7 +900,7 @@ export function SpriteWandCleanupEditor({
 
   return (
     <Modal open onClose={onClose} title={`Clean ${label}`} width="max-w-6xl">
-      <div className="flex h-[calc(100dvh-7rem)] min-h-0 flex-col gap-3 overflow-hidden sm:h-[min(44rem,calc(90dvh-6rem))]">
+      <div className="flex h-[calc(100dvh-7rem)] min-h-0 flex-col gap-3 overflow-x-hidden overflow-y-auto sm:h-[min(44rem,calc(90dvh-6rem))]">
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {cleanupToolOptions.map(({ tool: optionTool, label: optionLabel, title, Icon }) => (
             <button
@@ -885,6 +909,7 @@ export function SpriteWandCleanupEditor({
               onClick={() => handleSelectTool(optionTool)}
               disabled={loading || applying}
               className={toolButtonClass(tool === optionTool)}
+              aria-pressed={tool === optionTool}
               title={title}
             >
               <Icon size="0.875rem" />
@@ -1162,6 +1187,7 @@ export function SpriteWandCleanupEditor({
                     ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
                     : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
                 ].join(" ")}
+                aria-pressed={previewBackground === option.key}
               >
                 {option.label}
               </button>
