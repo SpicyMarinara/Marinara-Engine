@@ -24,6 +24,7 @@ import {
 } from "@marinara-engine/shared";
 import { isImageLocalUrlsEnabled } from "../../config/runtime-config.js";
 import { generateRunPodComfyUI } from "./runpod-comfyui.service.js";
+import { logger } from "../../lib/logger.js";
 import { normalizeLoopbackUrl, safeFetch, validateOutboundUrl } from "../../utils/security.js";
 
 const GALLERY_DIR = join(DATA_DIR, "gallery");
@@ -221,6 +222,7 @@ function imageFetch(url: string | URL, init?: RequestInit, options: { allowLocal
       flagName: "IMAGE_LOCAL_URLS_ENABLED",
     },
     maxResponseBytes: MAX_IMAGE_RESPONSE_BYTES,
+    decodeCompressedResponse: true,
   });
 }
 
@@ -1461,15 +1463,57 @@ async function generateOpenRouter(baseUrl: string, apiKey: string, request: Imag
     throw new Error(`OpenRouter image generation failed (${resp.status}): ${sanitizeErrorText(errText)}`);
   }
 
-  const data = (await resp.json()) as { choices?: Array<{ message?: unknown }> };
-  const message = data.choices?.[0]?.message;
+  // Some OpenRouter image models (e.g. raw provider passthrough) return the
+  // image bytes directly instead of a chat-completions JSON envelope. Sniff
+  // the content-type and the first bytes before deciding how to parse.
+  const contentType = resp.headers.get("content-type") ?? "";
+  const buffer = Buffer.from(await resp.arrayBuffer());
+  const isImageContentType = contentType.startsWith("image/");
+  const looksLikeImageBytes =
+    buffer.length >= 4 &&
+    ((buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) || // PNG
+      (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) || // JPEG
+      (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) || // GIF
+      (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46)); // RIFF/WEBP
+
+  if (isImageContentType || looksLikeImageBytes) {
+    const base64 = buffer.toString("base64");
+    let mimeType = detectImageMimeType(base64);
+    if (!mimeType && contentType.startsWith("image/")) mimeType = contentType.split(";")[0]!.trim();
+    if (!mimeType) mimeType = "image/png";
+    return { base64, mimeType, ext: imageExtensionFromMimeType(mimeType) };
+  }
+
+  let data: { choices?: Array<{ message?: unknown; finish_reason?: string }>; error?: unknown };
+  try {
+    data = JSON.parse(buffer.toString("utf8")) as typeof data;
+  } catch {
+    throw new Error(
+      `OpenRouter returned unparseable response (content-type: ${contentType || "unknown"}, first 80 bytes hex: ${buffer.subarray(0, 80).toString("hex")})`,
+    );
+  }
+  if (data.error) {
+    throw new Error(`OpenRouter returned an error: ${JSON.stringify(data.error).slice(0, 400)}`);
+  }
+  const choice = data.choices?.[0];
+  const message = choice?.message;
   const imageUrl = extractImageUrlFromMessage(message);
   if (!imageUrl) {
+    logger.warn(
+      "[image-gen] OpenRouter response had no extractable image. model=%s finish_reason=%s shape=%s",
+      request.model ?? "(default)",
+      choice?.finish_reason ?? "(none)",
+      JSON.stringify(message ?? data).slice(0, 800),
+    );
     const content =
       message && typeof message === "object" && typeof (message as Record<string, unknown>).content === "string"
         ? ((message as Record<string, string>).content ?? "")
         : "";
-    throw new Error(`No image data in OpenRouter response: ${content.slice(0, 200)}`);
+    const messageKeys =
+      message && typeof message === "object" ? Object.keys(message as Record<string, unknown>).join(",") : "(no message)";
+    throw new Error(
+      `No image data in OpenRouter response (finish_reason=${choice?.finish_reason ?? "none"}, message keys=[${messageKeys}], content="${content.slice(0, 200)}")`,
+    );
   }
 
   return downloadImageUrl(imageUrl, request.allowLocalUrls);
