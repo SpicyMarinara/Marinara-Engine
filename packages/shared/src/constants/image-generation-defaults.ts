@@ -48,19 +48,37 @@ export const DEFAULT_NOVELAI_DEFAULTS: NovelAiDefaults = {
 
 export const SD_WEBUI_SAMPLER_OPTIONS = [
   { value: "", label: "Automatic / backend default" },
+  // Common to A1111/Forge and Draw Things
   { value: "Euler a", label: "Euler a" },
-  { value: "Euler", label: "Euler" },
-  { value: "DPM++ 2M", label: "DPM++ 2M" },
   { value: "DPM++ 2M Karras", label: "DPM++ 2M Karras" },
-  { value: "DPM++ SDE", label: "DPM++ SDE" },
   { value: "DPM++ SDE Karras", label: "DPM++ SDE Karras" },
-  { value: "DPM++ 2M SDE", label: "DPM++ 2M SDE" },
   { value: "UniPC", label: "UniPC" },
   { value: "DDIM", label: "DDIM" },
+  // A1111/Forge only
+  { value: "Euler", label: "Euler" },
+  { value: "DPM++ 2M", label: "DPM++ 2M" },
+  { value: "DPM++ SDE", label: "DPM++ SDE" },
+  { value: "DPM++ 2M SDE", label: "DPM++ 2M SDE" },
   { value: "LMS", label: "LMS" },
   { value: "Heun", label: "Heun" },
   { value: "DPM2", label: "DPM2" },
   { value: "DPM2 a", label: "DPM2 a" },
+  // Draw Things-specific samplers (AYS / Substep / Trailing / LCM / TCD / PLMS)
+  { value: "PLMS", label: "PLMS (Draw Things)" },
+  { value: "LCM", label: "LCM (Draw Things)" },
+  { value: "TCD", label: "TCD (Draw Things)" },
+  { value: "TCD Trailing", label: "TCD Trailing (Draw Things)" },
+  { value: "Euler A Substep", label: "Euler A Substep (Draw Things)" },
+  { value: "DPM++ SDE Substep", label: "DPM++ SDE Substep (Draw Things)" },
+  { value: "Euler A Trailing", label: "Euler A Trailing (Draw Things)" },
+  { value: "DPM++ SDE Trailing", label: "DPM++ SDE Trailing (Draw Things)" },
+  { value: "DPM++ 2M Trailing", label: "DPM++ 2M Trailing (Draw Things)" },
+  { value: "DDIM Trailing", label: "DDIM Trailing (Draw Things)" },
+  { value: "UniPC Trailing", label: "UniPC Trailing (Draw Things)" },
+  { value: "Euler A AYS", label: "Euler A AYS (Draw Things)" },
+  { value: "DPM++ 2M AYS", label: "DPM++ 2M AYS (Draw Things)" },
+  { value: "DPM++ SDE AYS", label: "DPM++ SDE AYS (Draw Things)" },
+  { value: "UniPC AYS", label: "UniPC AYS (Draw Things)" },
 ] as const;
 
 export const SD_WEBUI_SCHEDULER_OPTIONS = [

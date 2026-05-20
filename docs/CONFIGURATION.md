@@ -219,7 +219,7 @@ Destructive or high-risk features require `ADMIN_SECRET` in addition to the glob
 
 ### Local URL Opt-Ins
 
-Outbound provider, image, TTS, DeepLX, and webhook requests reject private/LAN/metadata destinations by default to prevent SSRF. Provider calls allow loopback endpoints (`127.0.0.1`, `::1`, `localhost`) so local OpenAI-compatible servers keep working on single-machine installs. Explicit ComfyUI and AUTOMATIC1111 image connections may use loopback or LAN/private-network hosts because those backends are normally self-hosted. Enable only the feature-specific switch you need for other non-loopback self-hosted services, such as `PROVIDER_LOCAL_URLS_ENABLED=true` for a LAN OpenAI-compatible endpoint or `IMAGE_LOCAL_URLS_ENABLED=true` for a custom image proxy on another private-network host.
+Outbound provider, image, TTS, DeepLX, and webhook requests reject private/LAN/metadata destinations by default to prevent SSRF. Provider calls allow loopback endpoints (`127.0.0.1`, `::1`, `localhost`) so local OpenAI-compatible servers keep working on single-machine installs. Explicit ComfyUI, AUTOMATIC1111, and Draw Things image connections may use loopback or LAN/private-network hosts because those backends are normally self-hosted. Enable only the feature-specific switch you need for other non-loopback self-hosted services, such as `PROVIDER_LOCAL_URLS_ENABLED=true` for a LAN OpenAI-compatible endpoint or `IMAGE_LOCAL_URLS_ENABLED=true` for a custom image proxy on another private-network host.
 
 Security headers and API rate limits are enabled by default. Chat HTML is sanitized after rendering transforms; SVG uploads/proxies are not accepted for avatar/background/image upload paths.
 

@@ -106,7 +106,7 @@ See [Professor Mari](PROFESSOR_MARI.md) for the full capabilities and safety not
 Marinara Engine supports a wide range of LLM and image generation providers:
 
 - **LLM:** OpenAI, Anthropic, Anthropic via Claude Pro / Max subscription (through the local Claude Agent SDK), Google Gemini, Google Vertex AI, OpenRouter, NanoGPT, Mistral, Cohere, Pollinations, Together AI, NovelAI, and any custom OpenAI-compatible endpoint (Ollama, LM Studio, KoboldCpp, etc.)
-- **Image generation:** Stability AI, ComfyUI, AUTOMATIC1111 / SD Web UI, and providers that support image output through their chat API
+- **Image generation:** Stability AI, ComfyUI, AUTOMATIC1111 / SD Web UI, Draw Things (Apple Silicon Macs — runs locally on Metal + Apple Neural Engine), and providers that support image output through their chat API
 
 You can configure multiple connections at once and assign different providers per chat. API keys are encrypted at rest with AES-256.
 
