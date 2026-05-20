@@ -226,6 +226,19 @@ export function getLogPreset() {
   return normalizeEnvValue(process.env.LOG_PRESET)?.toLowerCase() ?? "default";
 }
 
+/**
+ * Kill switch for the `claude_subscription` provider's JSONL-resume code path.
+ * Default `true`; set `CLAUDE_SUBSCRIPTION_USE_RESUME=false` (or `0`/`off`/`no`)
+ * to revert to the legacy transcript-fold path. The provider also auto-falls
+ * back to transcript-fold on EACCES/EPERM/ENOENT when writing the temp session
+ * file (covers service-user / sandboxed deployments).
+ */
+export function isClaudeSubscriptionResumeEnabled() {
+  const raw = normalizeEnvValue(process.env.CLAUDE_SUBSCRIPTION_USE_RESUME);
+  if (raw === null) return true;
+  return !isDisabledFlag(raw);
+}
+
 export function isPromptConnectionLogPreset() {
   const preset = getLogPreset().replace(/_/g, "-");
   return preset === "prompt-connections";

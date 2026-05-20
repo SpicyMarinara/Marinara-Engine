@@ -123,6 +123,11 @@ RUN mkdir -p /app/data && \
 ENV MARINARA_LITE=true
 ENV DATA_DIR=/app/data
 ENV FILE_STORAGE_DIR=/app/data/storage
+# Pin the Claude Agent SDK + synthetic-session writer to a path under the
+# already-chowned data volume. Avoids the post-setuid HOME=/root trap and
+# makes the future "mount your host ~/.claude here" workflow a single
+# -v flag for the user.
+ENV CLAUDE_CONFIG_DIR=/app/data/claude-config
 ENV PORT=7860
 ENV HOST=0.0.0.0
 ENV NODE_ENV=production

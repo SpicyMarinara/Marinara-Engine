@@ -8,12 +8,12 @@
     "dev": "tsx watch --ignore ./data --ignore ./node_modules --ignore ../../node_modules src/index.ts",
     "build": "tsc && node ./scripts/write-build-meta.mjs && node -e \"const fs=require('fs');fs.cpSync('src/db/default-preset.json','dist/db/default-preset.json');fs.cpSync('src/assets','dist/assets',{recursive:true});\"",
     "start": "node dist/index.js",
-    "test": "node -e \"console.log('No server tests configured.')\"",
+    "test": "node ./scripts/run-tests.mjs",
     "clean": "node -e \"const fs=require('fs');['dist','tsconfig.tsbuildinfo'].forEach(p=>{try{fs.rmSync(p,{recursive:true,force:true})}catch{}})\"",
     "lint": "tsc -b ../shared && tsc --noEmit"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.126",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.141",
     "@fastify/cors": "^11.2.0",
     "@fastify/multipart": "^9.4.0",
     "@fastify/static": "^9.1.3",

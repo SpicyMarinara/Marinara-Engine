@@ -48,3 +48,7 @@ release-artifacts/
 # Installer artifacts are published on GitHub Releases, not tracked in source
 installer/*.exe
 win/installer/*.exe
+
+# Local docker compose overrides (per-machine dev config)
+docker-compose.override.yml
+docker-compose.override.yaml

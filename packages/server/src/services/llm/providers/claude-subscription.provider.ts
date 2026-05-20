@@ -22,6 +22,17 @@
 //
 import { BaseLLMProvider, type ChatMessage, type ChatOptions, type LLMUsage } from "../base-provider.js";
 import { logger } from "../../../lib/logger.js";
+import { isClaudeSubscriptionResumeEnabled } from "../../../config/runtime-config.js";
+import {
+  currentToSdkUserMessage,
+  SDK_VERSION,
+  splitHistoryForResume,
+  type SdkUserMessageForPrompt,
+} from "./claude-subscription/jsonl-entries.js";
+import {
+  cleanupSessionFile,
+  constructSessionFile,
+} from "./claude-subscription/synthetic-session.js";
 
 /**
  * Lazy import wrapper. The SDK is heavy and pulls in optional native pieces;
@@ -49,12 +60,105 @@ export function __setSdkForTesting(mod: Pick<SdkModule, "query"> | null): void {
   cachedSdk = mod ? (Promise.resolve(mod as SdkModule) as Promise<SdkModule>) : null;
 }
 
+// ──────────────────────────────────────────────
+// Resume-path mode tracking (module-scoped, not per-instance)
+// ──────────────────────────────────────────────
+//
+// `useResume` is decided lazily per request because (a) env-var changes pick
+// up automatically on next request, and (b) a temp-write failure (EACCES /
+// EPERM / ENOENT on the user's `~/.claude/projects/`) demotes the provider
+// to the fold path for a cool-down window without losing the next request.
+//
+// Provider instances are typically constructed per connection / per request,
+// so caching this on `this` would amount to no caching at all on the success
+// path and a noisy warn on each instance on the failure path. Module scope
+// gives one warn per cooldown across all instances.
+
+const RESUME_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
+let resumeDisabledUntil = 0;
+let resumeDisabledReason: string | null = null;
+
+// Errno codes that mean "we couldn't write the session file because of the
+// filesystem, not because of a bug" — the right response is to demote to the
+// fold path and try again later. EACCES / EPERM / EROFS cover the common
+// sandboxed-deployment cases (read-only homedir, wrong user, etc.). ENOENT
+// is here as defense-in-depth: `constructSessionFile` calls mkdir-recursive
+// first, but a race (someone deletes the directory between mkdir and
+// writeFile) or a malformed CLAUDE_CONFIG_DIR pointing past a missing
+// ancestor would still surface as ENOENT and should demote, not crash.
+function isWriteFailure(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const code = (err as { code?: string }).code;
+  return code === "EACCES" || code === "EPERM" || code === "ENOENT" || code === "EROFS";
+}
+
+function markResumeUnavailable(reason: string, err: unknown): void {
+  resumeDisabledUntil = Date.now() + RESUME_FAILURE_COOLDOWN_MS;
+  resumeDisabledReason = reason;
+  logger.warn(
+    err,
+    "[claude-subscription] resume path unavailable (%s); falling back to transcript fold for ~5min",
+    reason,
+  );
+}
+
+/**
+ * Wrap a single SDK-shaped user message in an AsyncIterable suitable for the
+ * SDK's `prompt: AsyncIterable<SDKUserMessage>` form. We yield once and
+ * return — the SDK consumes one message and proceeds to generation.
+ *
+ * The `unknown` cast on the yielded value is because `SdkUserMessageForPrompt`
+ * is declared locally (in `jsonl-entries.ts`, kept SDK-free); structurally it
+ * matches the SDK's `SDKUserMessage` shape for the fields we set. The cast
+ * happens at the `query()` call site where the SDK type narrows it.
+ */
+async function* singleMessageIterable(msg: SdkUserMessageForPrompt): AsyncIterable<unknown> {
+  yield msg;
+}
+
+function shouldUseResume(): boolean {
+  if (!isClaudeSubscriptionResumeEnabled()) return false;
+  if (process.platform === "win32") return false;
+  // `resumeDisabledUntil === 0` means we've never tripped a cooldown — fall
+  // through to the happy path. A non-zero value means a prior failure put
+  // us in cooldown; either we're still inside the window (return false) or
+  // we've come out the other side and should reset before continuing.
+  if (resumeDisabledUntil > 0) {
+    if (resumeDisabledUntil > Date.now()) return false;
+    logger.info(
+      "[claude-subscription] resume cooldown expired (last reason: %s); re-attempting resume path",
+      resumeDisabledReason ?? "unknown",
+    );
+    resumeDisabledUntil = 0;
+    resumeDisabledReason = null;
+  }
+  return true;
+}
+
+/**
+ * Extract system-role messages into a single concatenated string for the
+ * SDK's `systemPrompt` option, used by both the fold path and the resume
+ * path. System messages never ride in the JSONL.
+ */
+function extractSystemPrompt(messages: ChatMessage[]): string | undefined {
+  const blocks: string[] = [];
+  for (const m of messages) {
+    if (m.role !== "system") continue;
+    const text = m.content?.trim();
+    if (text) blocks.push(text);
+  }
+  return blocks.length > 0 ? blocks.join("\n\n") : undefined;
+}
+
 /**
  * Render the chat history into the single-string `prompt` form the Agent SDK
  * accepts. We extract system messages so they can be passed through the
  * dedicated `systemPrompt` option (preserving system/user separation), then
  * fold the rest of the conversation into a labelled transcript so the model
  * sees prior turns even though the SDK is one-shot per call.
+ *
+ * Used by the fold path (legacy / fallback). The resume path uses
+ * `splitHistoryForResume` + synthetic JSONL session instead.
  */
 function renderTranscript(messages: ChatMessage[]): { systemPrompt: string | undefined; prompt: string } {
   const systemBlocks: string[] = [];
@@ -79,6 +183,108 @@ function renderTranscript(messages: ChatMessage[]): { systemPrompt: string | und
   return {
     systemPrompt: systemBlocks.length ? systemBlocks.join("\n\n") : undefined,
     prompt: turns.join("\n\n"),
+  };
+}
+
+/**
+ * The set of values the SDK call needs from the path-selection step. Pulled
+ * out so `chat()` reads as a straight line — pick a path, build options,
+ * call the SDK — instead of carrying five `let` declarations and a
+ * definite-assignment assertion across a 30-line branch.
+ *
+ * `sessionPath` is the cleanup handle for the `finally` block: non-null only
+ * when the resume path actually wrote a JSONL (history > 0). The
+ * empty-history resume sub-path uses the AsyncIterable prompt directly with
+ * no file to clean up.
+ */
+interface PromptSelection {
+  promptArg: string | AsyncIterable<unknown>;
+  systemPrompt: string | undefined;
+  sessionPath: string | null;
+  resumeSessionId: string | null;
+  resumeCwd: string | null;
+}
+
+/**
+ * Pick the resume path or the fold path for this request, and produce
+ * everything the SDK call needs. Resolved per-call so env-var changes and
+ * cool-down expiries take effect on the next request without restart.
+ */
+async function selectPromptPath(messages: ChatMessage[], model: string): Promise<PromptSelection> {
+  if (shouldUseResume()) {
+    try {
+      return await buildResumeSelection(messages, model);
+    } catch (err) {
+      if (isWriteFailure(err)) {
+        markResumeUnavailable("session-file write failed", err);
+      } else {
+        // Non-FS errors (SDK regressions, programming mistakes, unexpected
+        // failures from `splitHistoryForResume` or its helpers) propagate
+        // intentionally. Silently demoting on every error would mask bugs
+        // that need to surface as failed requests so they get noticed.
+        throw err;
+      }
+    }
+  }
+  return buildFoldSelection(messages);
+}
+
+async function buildResumeSelection(messages: ChatMessage[], model: string): Promise<PromptSelection> {
+  const split = splitHistoryForResume(messages);
+  const systemPrompt = extractSystemPrompt(messages);
+
+  if (split.history.length === 0) {
+    // Writing an empty JSONL would make the SDK throw "No conversation found
+    // with session ID: ..." — its session loader treats `messages.length ===
+    // 0` as a missing session, not as a valid zero-turn resume. So when the
+    // caller's history has nothing to resume from (single-turn requests,
+    // connection pings, system-only context), skip the file write entirely
+    // and send the current turn straight through the AsyncIterable prompt.
+    // Nothing to clean up afterward.
+    logger.debug(
+      "[claude-subscription] resume path: shape=%s history=empty (direct prompt, no resume)",
+      split.shape,
+    );
+    return {
+      promptArg: singleMessageIterable(currentToSdkUserMessage(split.current)),
+      systemPrompt,
+      sessionPath: null,
+      resumeSessionId: null,
+      resumeCwd: null,
+    };
+  }
+
+  const cwd = process.cwd();
+  const { sessionId, path } = await constructSessionFile(split.history, {
+    model,
+    cwd,
+    sdkVersion: SDK_VERSION,
+  });
+  logger.debug(
+    "[claude-subscription] resume path: shape=%s sessionId=%s path=%s historyLen=%d",
+    split.shape,
+    sessionId,
+    path,
+    split.history.length,
+  );
+  return {
+    promptArg: singleMessageIterable(currentToSdkUserMessage(split.current)),
+    systemPrompt,
+    sessionPath: path,
+    resumeSessionId: sessionId,
+    resumeCwd: cwd,
+  };
+}
+
+function buildFoldSelection(messages: ChatMessage[]): PromptSelection {
+  // Fold path (legacy / fallback). Unchanged from the pre-resume implementation.
+  const folded = renderTranscript(messages);
+  return {
+    promptArg: folded.prompt,
+    systemPrompt: folded.systemPrompt,
+    sessionPath: null,
+    resumeSessionId: null,
+    resumeCwd: null,
   };
 }
 
@@ -112,7 +318,10 @@ export class ClaudeSubscriptionProvider extends BaseLLMProvider {
     const contextFit = this.fitMessagesToContext(messages, { ...options, maxTokens: configuredMaxTokens });
     this.logContextTrim(contextFit, options.model);
 
-    const { systemPrompt, prompt } = renderTranscript(contextFit.messages);
+    const { promptArg, systemPrompt, sessionPath, resumeSessionId, resumeCwd } = await selectPromptPath(
+      contextFit.messages,
+      options.model,
+    );
 
     const { query } = await loadSdk();
 
@@ -132,37 +341,53 @@ export class ClaudeSubscriptionProvider extends BaseLLMProvider {
     const modelLower = options.model.toLowerCase();
     const isAdaptiveOnly = /claude-opus-4-(?:[7-9]|\d{2,})/.test(modelLower);
 
-    // The SDK strips the model's version awareness if we pass a plain string
-    // `systemPrompt`. Without the Claude Code preset every model — Opus, Sonnet,
-    // Haiku — falsely answers "Sonnet" when asked which it is, because it has
-    // no framing for its own identity and falls back to the most-mentioned
-    // variant in its training data. Wrapping the caller's system content as
-    // the `append` of the `claude_code` preset preserves identity *and* the
-    // user's framing (character card / preset). This matches the `claude` CLI
-    // default and is what the SillyTavern subscription bridge uses too.
-    const presetSystemPrompt: NonNullable<Parameters<SdkModule["query"]>[0]["options"]>["systemPrompt"] = systemPrompt
-      ? { type: "preset", preset: "claude_code", append: systemPrompt }
-      : { type: "preset", preset: "claude_code" };
+    // Outbound-context strip strategy: this provider is a text-chat surface
+    // (roleplay / character DM), not an agent runner. The SDK's default
+    // posture leaks several things the user never asked for into every
+    // request, so we override each one explicitly:
+    //
+    //   • Use a plain-string `systemPrompt` (the caller's content as-is)
+    //     instead of wrapping it under the `claude_code` preset. The preset
+    //     injects ~thousands of tokens of Claude-Code-agent framing
+    //     ("You are Claude Code, Anthropic's CLI...") which is wrong for
+    //     a character-chat. Side effect: when asked "which model are you?"
+    //     the model may fall back to its training-data prior (typically
+    //     "Sonnet") instead of self-identifying accurately — acceptable for
+    //     this provider's use case since the user-supplied persona prompt
+    //     dominates identity.
+    //   • `settingSources: []` — prevents the SDK from auto-loading
+    //     `~/.claude/settings.json` + the project's `CLAUDE.md` + any
+    //     workspace `.claude/settings.json` into the request context.
+    //   • `skills: []` — prevents auto-load of skill metadata (~3000 tokens
+    //     of installed-skill descriptions, hooks, etc.).
+    //   • `allowDangerouslySkipPermissions: true` — explicit; matches the
+    //     `permissionMode: "bypassPermissions"` intent and skips additional
+    //     permission resolution framing.
+    //   • `maxTurns: 1` — single assistant turn per call; we drive any
+    //     multi-turn agent loop ourselves at the route layer.
+    //
+    // Wire-level artifacts the SDK still injects (`<system-reminder>`
+    // userEmail/currentDate, metadata account/device UUIDs, the SDK
+    // preamble system block) need a loopback passthrough to strip; that's
+    // tracked as future work.
 
     const sdkOptions: Parameters<SdkModule["query"]>[0]["options"] = {
       abortController,
       model: options.model,
-      systemPrompt: presetSystemPrompt,
       includePartialMessages: options.stream ?? true,
-      // Disable agent tooling — Marinara has its own tool/agent pipeline and
-      // we only want plain text completions out of this provider. With tools
-      // empty, no agentic loop runs, so we leave maxTurns unset; setting it
-      // to 1 caused the SDK to bail with `error_max_turns` because thinking
-      // and other internal steps consume turn budget alongside the assistant
-      // response.
       tools: [],
+      skills: [],
+      maxTurns: 1,
       permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
+      settingSources: [],
       // Always pass `settings.fastMode` explicitly so the SDK can't fall back
       // on a persisted CLI value that would silently downgrade the model. The
       // value comes from the connection-level toggle — default `false` so
       // unconfigured connections keep the requested model.
       settings: { fastMode: this.fastMode },
     };
+    if (systemPrompt !== undefined) sdkOptions.systemPrompt = systemPrompt;
 
     if (options.enableThinking) {
       sdkOptions.thinking = { type: "adaptive" };
@@ -182,6 +407,16 @@ export class ClaudeSubscriptionProvider extends BaseLLMProvider {
 
     this.applyCustomParameters(sdkOptions as Record<string, unknown>, options);
 
+    // Resume + cwd are RESERVED keys: they're load-bearing for the resume
+    // path's contract (the SDK must read JSONL from a path derived from cwd
+    // and resume the session by ID). A connection's customParameters with a
+    // stray `resume` or `cwd` would otherwise silently break the wiring.
+    // Write them AFTER applyCustomParameters so they always win.
+    if (resumeSessionId && resumeCwd) {
+      (sdkOptions as Record<string, unknown>)["resume"] = resumeSessionId;
+      (sdkOptions as Record<string, unknown>)["cwd"] = resumeCwd;
+    }
+
     let inputTokens = 0;
     let outputTokens = 0;
     let cachedTokens = 0;
@@ -192,7 +427,14 @@ export class ClaudeSubscriptionProvider extends BaseLLMProvider {
     let finalUsedModels: string[] = [];
 
     try {
-      const queryHandle = query({ prompt, options: sdkOptions });
+      // Cast on `prompt` is needed because we type `promptArg` locally as
+      // `string | AsyncIterable<unknown>` (the AsyncIterable element type is
+      // declared in jsonl-entries.ts to keep that module SDK-free). The SDK's
+      // own type narrows it correctly at runtime.
+      const queryHandle = query({
+        prompt: promptArg as Parameters<SdkModule["query"]>[0]["prompt"],
+        options: sdkOptions,
+      });
 
       for await (const message of queryHandle) {
         if (message.type === "stream_event") {
@@ -242,16 +484,18 @@ export class ClaudeSubscriptionProvider extends BaseLLMProvider {
             const billedDifferent = usedModels.length > 0 && !usedModels.includes(options.model);
             if (billedDifferent) {
               logger.warn(
-                "[claude-subscription] Requested %s but SDK billed against %s (fast_mode_state=%s) — check `claude` CLI fast mode / rate-limit cooldown",
+                "[claude-subscription] Requested %s but SDK billed against %s (fast_mode_state=%s, session=%s) — check `claude` CLI fast mode / rate-limit cooldown",
                 options.model,
                 usedModels.join(", "),
                 fastModeState ?? "unknown",
+                sessionPath ?? "fold-path",
               );
             } else if (fastModeState && fastModeState !== "off") {
               logger.warn(
-                "[claude-subscription] fast_mode_state=%s for %s — output may come from a smaller model than requested",
+                "[claude-subscription] fast_mode_state=%s for %s (session=%s) — output may come from a smaller model than requested",
                 fastModeState,
                 options.model,
+                sessionPath ?? "fold-path",
               );
             }
             const finalResult = typeof message.result === "string" ? message.result : "";
@@ -266,11 +510,24 @@ export class ClaudeSubscriptionProvider extends BaseLLMProvider {
         }
       }
     } catch (err) {
-      logger.error(err, "Claude Agent SDK query failed for model %s", options.model);
+      logger.error(
+        err,
+        "Claude Agent SDK query failed for model %s (session=%s)",
+        options.model,
+        sessionPath ?? "fold-path",
+      );
       const friendly = err instanceof Error ? err.message : String(err);
       throw new Error(`Claude (Subscription) request failed: ${friendly}`);
     } finally {
       if (options.signal) options.signal.removeEventListener("abort", onUpstreamAbort);
+      // Cleanup is best-effort — `cleanupSessionFile` swallows ENOENT and
+      // logs anything else. The boot-time orphan sweep is the canonical GC
+      // for cases where this `finally` doesn't run (process crash).
+      if (sessionPath) {
+        void cleanupSessionFile(sessionPath).catch(() => {
+          // already logged inside cleanupSessionFile
+        });
+      }
     }
 
     if (!emittedText) {

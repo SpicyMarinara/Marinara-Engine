@@ -81,6 +81,11 @@ RUN mkdir -p /app/data && \
 # Point the server at /app/data regardless of working directory
 ENV DATA_DIR=/app/data
 ENV FILE_STORAGE_DIR=/app/data/storage
+# Pin the Claude Agent SDK + synthetic-session writer to a path under the
+# already-chowned data volume. Avoids the post-setuid HOME=/root trap and
+# makes the future "mount your host ~/.claude here" workflow a single
+# -v flag for the user.
+ENV CLAUDE_CONFIG_DIR=/app/data/claude-config
 
 # File-native storage + user uploads live in /app/data at runtime.
 # Mount a volume here for persistence.
