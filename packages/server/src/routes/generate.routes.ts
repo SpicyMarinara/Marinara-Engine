@@ -2923,8 +2923,8 @@ export async function generateRoutes(app: FastifyInstance) {
           if (typeof params.frequencyPenalty === "number") frequencyPenalty = params.frequencyPenalty;
           if (typeof params.presencePenalty === "number") presencePenalty = params.presencePenalty;
           if (typeof params.showThoughts === "boolean") showThoughts = params.showThoughts;
-          if (params.reasoningEffort !== undefined) reasoningEffort = params.reasoningEffort;
-          if (params.verbosity !== undefined) verbosity = params.verbosity;
+          if (params.reasoningEffort != null) reasoningEffort = params.reasoningEffort;
+          if (params.verbosity != null) verbosity = params.verbosity;
           if (typeof params.assistantPrefill === "string") assistantPrefill = params.assistantPrefill;
           customParameters = mergeCustomParameters(customParameters, params.customParameters);
 
